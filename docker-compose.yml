@@ -1,0 +1,17 @@
+version: '3.8'
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: badminton-db
+    environment:
+      POSTGRES_USER: badminton
+      POSTGRES_PASSWORD: badminton
+      POSTGRES_DB: badminton
+    ports:
+      - '5434:5432'
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+
+volumes:
+  pgdata:

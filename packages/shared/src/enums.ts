@@ -1,0 +1,84 @@
+export enum UserRole {
+  FACILITY_ADMIN = 'FACILITY_ADMIN',
+  CLUB_LEADER = 'CLUB_LEADER',
+  PLAYER = 'PLAYER',
+}
+
+export enum CourtStatus {
+  EMPTY = 'EMPTY',
+  HELD = 'HELD',
+  IN_GAME = 'IN_GAME',
+  MAINTENANCE = 'MAINTENANCE',
+}
+
+export enum HoldStatus {
+  QUEUED = 'QUEUED',
+  PENDING_ACCEPT = 'PENDING_ACCEPT',
+  ACTIVE = 'ACTIVE',
+  RELEASED = 'RELEASED',
+  EXPIRED = 'EXPIRED',
+  SWAPPED = 'SWAPPED',
+  SKIPPED = 'SKIPPED',
+}
+
+export enum GameStatus {
+  WAITING = 'WAITING',
+  CALLING = 'CALLING',
+  CONFIRMED = 'CONFIRMED',
+  IN_PROGRESS = 'IN_PROGRESS',
+  COMPLETED = 'COMPLETED',
+  CANCELLED = 'CANCELLED',
+}
+
+export enum CallStatus {
+  PENDING = 'PENDING',
+  ACCEPTED = 'ACCEPTED',
+  DECLINED = 'DECLINED',
+  NO_SHOW = 'NO_SHOW',
+  REPLACED = 'REPLACED',
+}
+
+export enum HoldCreationMethod {
+  ADMIN_ONLY = 'ADMIN_ONLY',
+  CLUB_LEADER = 'CLUB_LEADER',
+  ANY_CHECKED_IN = 'ANY_CHECKED_IN',
+}
+
+export enum HoldType {
+  INDIVIDUAL = 'INDIVIDUAL',
+  CLUB = 'CLUB',
+}
+
+export enum QueueStatus {
+  WAITING = 'WAITING',
+  PENDING_ACCEPT = 'PENDING_ACCEPT',
+  ACCEPTED = 'ACCEPTED',
+  SKIPPED = 'SKIPPED',
+  CANCELLED = 'CANCELLED',
+  EXPIRED = 'EXPIRED',
+}
+
+export enum AutoMatchStatus {
+  WAITING = 'WAITING',
+  MATCHED = 'MATCHED',
+  CANCELLED = 'CANCELLED',
+  EXPIRED = 'EXPIRED',
+}
+
+export enum SkillLevel {
+  BEGINNER = 'BEGINNER',
+  INTERMEDIATE = 'INTERMEDIATE',
+  ADVANCED = 'ADVANCED',
+  PRO = 'PRO',
+}
+
+export enum GameType {
+  SINGLES = 'SINGLES',
+  DOUBLES = 'DOUBLES',
+  MIXED_DOUBLES = 'MIXED_DOUBLES',
+}
+
+export enum SessionStatus {
+  OPEN = 'OPEN',
+  CLOSED = 'CLOSED',
+}

@@ -1,0 +1,23 @@
+node_modules/
+dist/
+.env
+.env.local
+*.log
+.DS_Store
+coverage/
+
+# Prisma
+packages/server/prisma/*.db
+
+# Expo
+packages/mobile/.expo/
+packages/mobile/android/
+packages/mobile/ios/
+packages/mobile/web-build/
+
+# IDE
+.vscode/
+.idea/
+
+# Claude
+.claude/

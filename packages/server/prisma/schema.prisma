@@ -1,0 +1,378 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum UserRole {
+  FACILITY_ADMIN
+  CLUB_LEADER
+  PLAYER
+}
+
+enum CourtStatus {
+  EMPTY
+  HELD
+  IN_GAME
+  MAINTENANCE
+}
+
+enum HoldStatus {
+  QUEUED
+  PENDING_ACCEPT
+  ACTIVE
+  RELEASED
+  EXPIRED
+  SWAPPED
+  SKIPPED
+}
+
+enum GameStatus {
+  WAITING
+  CALLING
+  CONFIRMED
+  IN_PROGRESS
+  COMPLETED
+  CANCELLED
+}
+
+enum CallStatus {
+  PENDING
+  ACCEPTED
+  DECLINED
+  NO_SHOW
+  REPLACED
+}
+
+enum HoldCreationMethod {
+  ADMIN_ONLY
+  CLUB_LEADER
+  ANY_CHECKED_IN
+}
+
+enum SkillLevel {
+  BEGINNER
+  INTERMEDIATE
+  ADVANCED
+  PRO
+}
+
+enum GameType {
+  SINGLES
+  DOUBLES
+  MIXED_DOUBLES
+}
+
+enum HoldType {
+  INDIVIDUAL
+  CLUB
+}
+
+enum QueueStatus {
+  WAITING
+  PENDING_ACCEPT
+  ACCEPTED
+  SKIPPED
+  CANCELLED
+  EXPIRED
+}
+
+enum AutoMatchStatus {
+  WAITING
+  MATCHED
+  CANCELLED
+  EXPIRED
+}
+
+enum SessionStatus {
+  OPEN
+  CLOSED
+}
+
+model User {
+  id             String   @id @default(uuid())
+  phone          String   @unique
+  password       String
+  name           String
+  role           UserRole @default(PLAYER)
+  expoPushToken  String?
+  refreshToken   String?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  facilityAdmins   FacilityAdmin[]
+  checkIns         CheckIn[]
+  clubMembers      ClubMember[]
+  gamePlayers      GamePlayer[]
+  createdHolds     CourtHold[]       @relation("HoldCreator")
+  notifications    Notification[]
+  profile          PlayerProfile?
+  queueEntries     QueueEntry[]
+  autoMatchEntries AutoMatchEntry[]
+  noShowRecords    NoShowRecord[]
+  openedSessions   FacilitySession[] @relation("SessionOpener")
+}
+
+model PlayerProfile {
+  id                 String     @id @default(uuid())
+  userId             String     @unique
+  skillLevel         SkillLevel @default(INTERMEDIATE)
+  preferredGameTypes GameType[] @default([DOUBLES])
+  gender             String?
+  birthYear          Int?
+  createdAt          DateTime   @default(now())
+  updatedAt          DateTime   @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model Facility {
+  id         String   @id @default(uuid())
+  name       String
+  address    String
+  qrCodeData String   @unique @default(uuid())
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  courts           Court[]
+  admins           FacilityAdmin[]
+  checkIns         CheckIn[]
+  policy           FacilityPolicy?
+  autoMatchEntries AutoMatchEntry[]
+  noShowRecords    NoShowRecord[]
+  sessions         FacilitySession[]
+}
+
+model FacilityPolicy {
+  id                        String             @id @default(uuid())
+  facilityId                String             @unique
+  slotsPerCourt             Int                @default(3)
+  holdCreationMethod        HoldCreationMethod @default(CLUB_LEADER)
+  callTimeoutSeconds        Int                @default(120)
+  noShowPenaltyMinutes      Int                @default(30)
+  maxNoShowsBeforeCancel    Int                @default(2)
+  queueAcceptTimeoutSeconds Int                @default(120)
+  maxQueueSize              Int                @default(5)
+  createdAt                 DateTime           @default(now())
+  updatedAt                 DateTime           @updatedAt
+
+  facility Facility @relation(fields: [facilityId], references: [id], onDelete: Cascade)
+}
+
+model Court {
+  id         String      @id @default(uuid())
+  name       String
+  facilityId String
+  status     CourtStatus @default(EMPTY)
+  createdAt  DateTime    @default(now())
+  updatedAt  DateTime    @updatedAt
+
+  facility     Facility     @relation(fields: [facilityId], references: [id], onDelete: Cascade)
+  holds        CourtHold[]
+  queueEntries QueueEntry[]
+
+  @@unique([facilityId, name])
+}
+
+model FacilityAdmin {
+  id         String @id @default(uuid())
+  userId     String
+  facilityId String
+
+  user     User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  facility Facility @relation(fields: [facilityId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, facilityId])
+}
+
+model CheckIn {
+  id           String    @id @default(uuid())
+  userId       String
+  facilityId   String
+  checkedInAt  DateTime  @default(now())
+  checkedOutAt DateTime?
+
+  user     User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  facility Facility @relation(fields: [facilityId], references: [id], onDelete: Cascade)
+
+  @@index([userId, facilityId])
+}
+
+model Club {
+  id         String   @id @default(uuid())
+  name       String
+  inviteCode String   @unique
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  members      ClubMember[]
+  holds        CourtHold[]
+  queueEntries QueueEntry[]
+}
+
+model ClubMember {
+  id       String  @id @default(uuid())
+  userId   String
+  clubId   String
+  isLeader Boolean @default(false)
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  club Club @relation(fields: [clubId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, clubId])
+}
+
+model CourtHold {
+  id              String     @id @default(uuid())
+  courtId         String
+  clubId          String?
+  userId          String?
+  holdType        HoldType   @default(CLUB)
+  createdById     String
+  status          HoldStatus @default(ACTIVE)
+  queuePosition   Int        @default(0)
+  queuedAt        DateTime?
+  acceptDeadline  DateTime?
+  createdAt       DateTime   @default(now())
+  releasedAt      DateTime?
+
+  court     Court  @relation(fields: [courtId], references: [id], onDelete: Cascade)
+  club      Club?  @relation(fields: [clubId], references: [id], onDelete: Cascade)
+  createdBy User   @relation("HoldCreator", fields: [createdById], references: [id])
+  games     Game[]
+
+  @@index([courtId, status])
+  @@index([courtId, queuePosition])
+}
+
+model QueueEntry {
+  id             String      @id @default(uuid())
+  courtId        String
+  userId         String
+  clubId         String?
+  queueType      HoldType    @default(INDIVIDUAL)
+  position       Int
+  status         QueueStatus @default(WAITING)
+  queuedAt       DateTime    @default(now())
+  acceptDeadline DateTime?
+  processedAt    DateTime?
+
+  court Court  @relation(fields: [courtId], references: [id], onDelete: Cascade)
+  user  User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  club  Club?  @relation(fields: [clubId], references: [id], onDelete: SetNull)
+
+  @@index([courtId, position])
+  @@index([courtId, status])
+  @@index([userId])
+}
+
+model Game {
+  id        String     @id @default(uuid())
+  holdId    String
+  order     Int
+  status    GameStatus @default(WAITING)
+  createdAt DateTime   @default(now())
+  updatedAt DateTime   @updatedAt
+
+  hold         CourtHold    @relation(fields: [holdId], references: [id], onDelete: Cascade)
+  players      GamePlayer[]
+  noShowRecords NoShowRecord[]
+
+  @@index([holdId, order])
+}
+
+model GamePlayer {
+  id         String     @id @default(uuid())
+  gameId     String
+  userId     String
+  callStatus CallStatus @default(PENDING)
+
+  game Game @relation(fields: [gameId], references: [id], onDelete: Cascade)
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([gameId, userId])
+}
+
+model AutoMatchEntry {
+  id         String          @id @default(uuid())
+  userId     String
+  facilityId String
+  gameType   GameType        @default(DOUBLES)
+  status     AutoMatchStatus @default(WAITING)
+  joinedAt   DateTime        @default(now())
+  matchedAt  DateTime?
+
+  user     User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  facility Facility @relation(fields: [facilityId], references: [id], onDelete: Cascade)
+
+  @@index([facilityId, status, gameType])
+  @@unique([userId, facilityId])
+}
+
+model NoShowRecord {
+  id            String    @id @default(uuid())
+  userId        String
+  gameId        String
+  facilityId    String
+  occurredAt    DateTime  @default(now())
+  penaltyEndsAt DateTime?
+
+  user     User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  game     Game     @relation(fields: [gameId], references: [id], onDelete: Cascade)
+  facility Facility @relation(fields: [facilityId], references: [id], onDelete: Cascade)
+
+  @@index([userId, facilityId])
+  @@index([userId, penaltyEndsAt])
+}
+
+model FacilitySession {
+  id         String        @id @default(uuid())
+  facilityId String
+  openedById String
+  status     SessionStatus @default(OPEN)
+  openedAt   DateTime      @default(now())
+  closedAt   DateTime?
+  note       String?
+
+  facility Facility @relation(fields: [facilityId], references: [id], onDelete: Cascade)
+  openedBy User     @relation("SessionOpener", fields: [openedById], references: [id])
+
+  @@index([facilityId, status])
+}
+
+model ScheduledJob {
+  id        String   @id @default(uuid())
+  type      String
+  targetId  String
+  executeAt DateTime
+  executed  Boolean  @default(false)
+  createdAt DateTime @default(now())
+
+  @@index([executed, executeAt])
+}
+
+model SwapRequest {
+  id               String   @id @default(uuid())
+  requestingHoldId String
+  targetHoldId     String
+  status           String   @default("PENDING")
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+}
+
+model Notification {
+  id        String   @id @default(uuid())
+  userId    String
+  title     String
+  body      String
+  data      Json?
+  read      Boolean  @default(false)
+  createdAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, read])
+}
