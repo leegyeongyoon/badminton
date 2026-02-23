@@ -5,14 +5,16 @@ import {
   FlatList,
   TouchableOpacity,
   StyleSheet,
-  Alert,
   TextInput,
   Modal,
+  Share,
+  RefreshControl,
 } from 'react-native';
 import { router } from 'expo-router';
 import { useClubStore } from '../../store/clubStore';
 import { Colors } from '../../constants/colors';
 import { Strings } from '../../constants/strings';
+import { showAlert } from '../../utils/alert';
 
 export default function ClubsScreen() {
   const { clubs, fetchClubs, createClub, joinClub, isLoading } = useClubStore();
@@ -33,7 +35,7 @@ export default function ClubsScreen() {
       setShowCreateModal(false);
       fetchClubs();
     } catch (err: any) {
-      Alert.alert('오류', err.response?.data?.error || '모임 생성에 실패했습니다');
+      showAlert(Strings.common.error, err.response?.data?.error || '모임 생성에 실패했습니다');
     }
   };
 
@@ -45,25 +47,56 @@ export default function ClubsScreen() {
       setShowJoinModal(false);
       fetchClubs();
     } catch (err: any) {
-      Alert.alert('오류', err.response?.data?.error || '모임 가입에 실패했습니다');
+      showAlert(Strings.common.error, err.response?.data?.error || '모임 가입에 실패했습니다');
     }
+  };
+
+  const handleShareInvite = async (code: string, name: string) => {
+    try {
+      await Share.share({
+        message: `${Strings.app.name} - ${name} 모임에 참여하세요! 초대코드: ${code}`,
+      });
+    } catch { /* silent */ }
   };
 
   const renderClub = ({ item }: { item: any }) => (
     <TouchableOpacity
       style={styles.clubCard}
       onPress={() => router.push(`/club/${item.id}`)}
+      activeOpacity={0.7}
     >
-      <View style={styles.clubInfo}>
-        <Text style={styles.clubName}>{item.name}</Text>
-        <Text style={styles.clubMeta}>
-          {Strings.club.members} {item.memberCount}명
-          {item.isLeader && ' · 리더'}
-        </Text>
+      <View style={styles.clubCardLeft}>
+        <View style={styles.clubAvatar}>
+          <Text style={styles.clubAvatarText}>{item.name[0]}</Text>
+        </View>
+        <View style={styles.clubInfo}>
+          <Text style={styles.clubName}>{item.name}</Text>
+          <View style={styles.clubMetaRow}>
+            <Text style={styles.clubMeta}>
+              {Strings.club.members} {item.memberCount}명
+            </Text>
+            {item.isLeader && (
+              <View style={styles.leaderBadge}>
+                <Text style={styles.leaderBadgeText}>대표</Text>
+              </View>
+            )}
+          </View>
+        </View>
       </View>
-      <View style={styles.inviteCodeBox}>
-        <Text style={styles.inviteCodeLabel}>{Strings.club.inviteCode}</Text>
-        <Text style={styles.inviteCode}>{item.inviteCode}</Text>
+      <View style={styles.clubRight}>
+        <TouchableOpacity
+          style={styles.shareButton}
+          onPress={(e) => {
+            e.stopPropagation();
+            handleShareInvite(item.inviteCode, item.name);
+          }}
+        >
+          <Text style={styles.shareIcon}>📤</Text>
+        </TouchableOpacity>
+        <View style={styles.inviteCodeBox}>
+          <Text style={styles.inviteCodeLabel}>{Strings.club.inviteCode}</Text>
+          <Text style={styles.inviteCode}>{item.inviteCode}</Text>
+        </View>
       </View>
     </TouchableOpacity>
   );
@@ -75,6 +108,7 @@ export default function ClubsScreen() {
           style={styles.actionButton}
           onPress={() => setShowCreateModal(true)}
         >
+          <Text style={styles.actionButtonIcon}>+</Text>
           <Text style={styles.actionButtonText}>{Strings.club.create}</Text>
         </TouchableOpacity>
         <TouchableOpacity
@@ -91,9 +125,16 @@ export default function ClubsScreen() {
         data={clubs}
         renderItem={renderClub}
         keyExtractor={(item) => item.id}
-        contentContainerStyle={styles.list}
+        contentContainerStyle={[styles.list, clubs.length === 0 && { flexGrow: 1 }]}
+        refreshControl={
+          <RefreshControl refreshing={isLoading} onRefresh={fetchClubs} />
+        }
         ListEmptyComponent={
-          <Text style={styles.emptyText}>{Strings.club.noClubs}</Text>
+          <View style={styles.emptyContainer}>
+            <Text style={styles.emptyIcon}>👥</Text>
+            <Text style={styles.emptyText}>{Strings.club.noClubs}</Text>
+            <Text style={styles.emptySubText}>모임을 만들거나 초대코드로 가입하세요</Text>
+          </View>
         }
       />
 
@@ -102,17 +143,27 @@ export default function ClubsScreen() {
         <View style={styles.modalOverlay}>
           <View style={styles.modalContent}>
             <Text style={styles.modalTitle}>{Strings.club.create}</Text>
+            <Text style={styles.modalDesc}>모임 이름을 입력하세요</Text>
             <TextInput
               style={styles.modalInput}
               placeholder="모임 이름"
+              placeholderTextColor={Colors.textLight}
               value={clubName}
               onChangeText={setClubName}
+              autoFocus
             />
             <View style={styles.modalActions}>
-              <TouchableOpacity onPress={() => setShowCreateModal(false)}>
+              <TouchableOpacity
+                style={styles.modalCancelBtn}
+                onPress={() => { setShowCreateModal(false); setClubName(''); }}
+              >
                 <Text style={styles.cancelText}>{Strings.common.cancel}</Text>
               </TouchableOpacity>
-              <TouchableOpacity style={styles.confirmButton} onPress={handleCreate}>
+              <TouchableOpacity
+                style={[styles.confirmButton, !clubName.trim() && { opacity: 0.5 }]}
+                onPress={handleCreate}
+                disabled={!clubName.trim()}
+              >
                 <Text style={styles.confirmText}>{Strings.common.confirm}</Text>
               </TouchableOpacity>
             </View>
@@ -125,19 +176,29 @@ export default function ClubsScreen() {
         <View style={styles.modalOverlay}>
           <View style={styles.modalContent}>
             <Text style={styles.modalTitle}>{Strings.club.join}</Text>
+            <Text style={styles.modalDesc}>리더에게 받은 초대코드 8자리를 입력하세요</Text>
             <TextInput
-              style={styles.modalInput}
-              placeholder="초대코드 8자리"
+              style={[styles.modalInput, styles.codeInput]}
+              placeholder="ABCD1234"
+              placeholderTextColor={Colors.textLight}
               value={inviteCode}
               onChangeText={setInviteCode}
               autoCapitalize="characters"
               maxLength={8}
+              autoFocus
             />
             <View style={styles.modalActions}>
-              <TouchableOpacity onPress={() => setShowJoinModal(false)}>
+              <TouchableOpacity
+                style={styles.modalCancelBtn}
+                onPress={() => { setShowJoinModal(false); setInviteCode(''); }}
+              >
                 <Text style={styles.cancelText}>{Strings.common.cancel}</Text>
               </TouchableOpacity>
-              <TouchableOpacity style={styles.confirmButton} onPress={handleJoin}>
+              <TouchableOpacity
+                style={[styles.confirmButton, !inviteCode.trim() && { opacity: 0.5 }]}
+                onPress={handleJoin}
+                disabled={!inviteCode.trim()}
+              >
                 <Text style={styles.confirmText}>{Strings.common.confirm}</Text>
               </TouchableOpacity>
             </View>
@@ -164,11 +225,19 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     paddingVertical: 12,
     alignItems: 'center',
+    flexDirection: 'row',
+    justifyContent: 'center',
+    gap: 4,
   },
   actionButtonSecondary: {
     backgroundColor: Colors.surface,
     borderWidth: 1,
     borderColor: Colors.primary,
+  },
+  actionButtonIcon: {
+    color: '#fff',
+    fontWeight: '700',
+    fontSize: 16,
   },
   actionButtonText: {
     color: '#fff',
@@ -180,12 +249,14 @@ const styles = StyleSheet.create({
   },
   list: {
     paddingHorizontal: 16,
+    paddingBottom: 16,
   },
+  // Club card
   clubCard: {
     backgroundColor: Colors.surface,
-    borderRadius: 12,
+    borderRadius: 14,
     padding: 16,
-    marginBottom: 12,
+    marginBottom: 10,
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
@@ -194,6 +265,25 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.05,
     shadowRadius: 4,
     elevation: 2,
+  },
+  clubCardLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    flex: 1,
+  },
+  clubAvatar: {
+    width: 44,
+    height: 44,
+    borderRadius: 12,
+    backgroundColor: Colors.primaryLight,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  clubAvatarText: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: Colors.primary,
   },
   clubInfo: {
     flex: 1,
@@ -204,33 +294,75 @@ const styles = StyleSheet.create({
     color: Colors.text,
     marginBottom: 4,
   },
+  clubMetaRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
   clubMeta: {
     fontSize: 13,
     color: Colors.textSecondary,
+  },
+  leaderBadge: {
+    backgroundColor: Colors.warning + '20',
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 4,
+  },
+  leaderBadgeText: {
+    fontSize: 10,
+    fontWeight: '700',
+    color: Colors.warning,
+  },
+  clubRight: {
+    alignItems: 'flex-end',
+    gap: 6,
+  },
+  shareButton: {
+    padding: 4,
+  },
+  shareIcon: {
+    fontSize: 16,
   },
   inviteCodeBox: {
     alignItems: 'center',
     backgroundColor: Colors.divider,
     borderRadius: 8,
-    paddingHorizontal: 12,
-    paddingVertical: 6,
+    paddingHorizontal: 10,
+    paddingVertical: 4,
   },
   inviteCodeLabel: {
-    fontSize: 10,
+    fontSize: 9,
     color: Colors.textLight,
   },
   inviteCode: {
-    fontSize: 14,
+    fontSize: 13,
     fontWeight: '700',
     color: Colors.text,
     letterSpacing: 1,
   },
+  // Empty state
+  emptyContainer: {
+    alignItems: 'center',
+    paddingVertical: 60,
+  },
+  emptyIcon: {
+    fontSize: 48,
+    marginBottom: 12,
+  },
   emptyText: {
     textAlign: 'center',
     color: Colors.textSecondary,
-    marginTop: 40,
     fontSize: 16,
+    fontWeight: '600',
   },
+  emptySubText: {
+    textAlign: 'center',
+    color: Colors.textLight,
+    fontSize: 14,
+    marginTop: 4,
+  },
+  // Modal
   modalOverlay: {
     flex: 1,
     backgroundColor: 'rgba(0,0,0,0.4)',
@@ -239,14 +371,19 @@ const styles = StyleSheet.create({
   },
   modalContent: {
     backgroundColor: Colors.surface,
-    borderRadius: 16,
+    borderRadius: 20,
     padding: 24,
-    width: '80%',
+    width: '85%',
   },
   modalTitle: {
-    fontSize: 18,
-    fontWeight: '700',
+    fontSize: 20,
+    fontWeight: '800',
     color: Colors.text,
+    marginBottom: 4,
+  },
+  modalDesc: {
+    fontSize: 14,
+    color: Colors.textSecondary,
     marginBottom: 16,
   },
   modalInput: {
@@ -254,25 +391,38 @@ const styles = StyleSheet.create({
     borderColor: Colors.border,
     borderRadius: 12,
     paddingHorizontal: 16,
-    paddingVertical: 12,
+    paddingVertical: 14,
     fontSize: 16,
+    color: Colors.text,
     marginBottom: 16,
+    backgroundColor: Colors.background,
+  },
+  codeInput: {
+    fontSize: 20,
+    fontWeight: '700',
+    letterSpacing: 3,
+    textAlign: 'center',
   },
   modalActions: {
     flexDirection: 'row',
     justifyContent: 'flex-end',
-    gap: 16,
+    gap: 12,
     alignItems: 'center',
+  },
+  modalCancelBtn: {
+    paddingHorizontal: 16,
+    paddingVertical: 10,
   },
   cancelText: {
     color: Colors.textSecondary,
     fontSize: 16,
+    fontWeight: '500',
   },
   confirmButton: {
     backgroundColor: Colors.primary,
     borderRadius: 10,
-    paddingHorizontal: 20,
-    paddingVertical: 10,
+    paddingHorizontal: 24,
+    paddingVertical: 12,
   },
   confirmText: {
     color: '#fff',

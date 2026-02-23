@@ -1,11 +1,23 @@
 import { prisma } from '../../utils/prisma';
 import { NotFoundError, BadRequestError } from '../../utils/errors';
-import { CourtStatus } from '@badminton/shared';
-import type { CreateCourtInput } from '@badminton/shared';
+import { CourtStatus, CourtGameType } from '@badminton/shared';
+import type { CreateCourtInput, UpdateCourtInput } from '@badminton/shared';
+
+export function getPlayersRequired(gameType: CourtGameType): number {
+  switch (gameType) {
+    case CourtGameType.DOUBLES:
+      return 4;
+    case CourtGameType.LESSON:
+      return 2; // minimum for lesson
+    default:
+      return 4;
+  }
+}
 
 export async function createCourt(facilityId: string, input: CreateCourtInput) {
+  const gameType = input.gameType || CourtGameType.DOUBLES;
   return prisma.court.create({
-    data: { name: input.name, facilityId },
+    data: { name: input.name, facilityId, gameType },
   });
 }
 
@@ -14,12 +26,23 @@ export async function listCourts(facilityId: string) {
     where: { facilityId },
     orderBy: { name: 'asc' },
     include: {
-      holds: {
-        where: { status: 'ACTIVE' },
-        take: 1,
-        include: { club: true, createdBy: true },
+      turns: {
+        where: { status: { in: ['WAITING', 'PLAYING'] } },
+        orderBy: { position: 'asc' },
+        include: {
+          players: { include: { user: true } },
+        },
       },
     },
+  });
+}
+
+export async function updateCourt(courtId: string, input: UpdateCourtInput) {
+  const court = await prisma.court.findUnique({ where: { id: courtId } });
+  if (!court) throw new NotFoundError('코트');
+  return prisma.court.update({
+    where: { id: courtId },
+    data: { ...(input.gameType && { gameType: input.gameType }) },
   });
 }
 

@@ -27,8 +27,8 @@ export async function getProfile(userId: string): Promise<PlayerProfileResponse>
 
   return {
     userId: profile.userId,
-    skillLevel: profile.skillLevel,
-    preferredGameTypes: profile.preferredGameTypes,
+    skillLevel: profile.skillLevel as any,
+    preferredGameTypes: profile.preferredGameTypes as any,
     gender: profile.gender,
     birthYear: profile.birthYear,
     gamesPlayed,
@@ -67,8 +67,8 @@ export async function updateProfile(
 
   return {
     userId: profile.userId,
-    skillLevel: profile.skillLevel,
-    preferredGameTypes: profile.preferredGameTypes,
+    skillLevel: profile.skillLevel as any,
+    preferredGameTypes: profile.preferredGameTypes as any,
     gender: profile.gender,
     birthYear: profile.birthYear,
     gamesPlayed,
@@ -88,6 +88,16 @@ export async function getStats(userId: string): Promise<PlayerStatsResponse> {
     },
   });
 
+  // Today's games
+  const startOfDay = new Date();
+  startOfDay.setHours(0, 0, 0, 0);
+  const gamesPlayedToday = await prisma.gamePlayer.count({
+    where: {
+      userId,
+      game: { createdAt: { gte: startOfDay } },
+    },
+  });
+
   const noShowCount = await prisma.noShowRecord.count({
     where: { userId },
   });
@@ -104,6 +114,7 @@ export async function getStats(userId: string): Promise<PlayerStatsResponse> {
   return {
     gamesPlayed,
     gamesCompleted,
+    gamesPlayedToday,
     noShowCount,
     activePenalty: activePenalty
       ? {
@@ -133,11 +144,7 @@ export async function getHistory(
     include: {
       game: {
         include: {
-          hold: {
-            include: {
-              court: true,
-            },
-          },
+          court: true,
           players: {
             include: { user: true },
           },
@@ -148,10 +155,23 @@ export async function getHistory(
 
   return gamePlayers.map((gp) => ({
     gameId: gp.game.id,
-    courtName: gp.game.hold.court.name,
-    status: gp.game.status,
+    courtName: gp.game.court.name,
+    status: gp.game.status as any,
     players: gp.game.players.map((p) => p.user.name),
     playedAt: gp.game.createdAt.toISOString(),
+  }));
+}
+
+export async function getAdminFacilities(userId: string) {
+  const adminRecords = await prisma.facilityAdmin.findMany({
+    where: { userId },
+    include: { facility: { include: { courts: true } } },
+  });
+  return adminRecords.map((a) => ({
+    id: a.facility.id,
+    name: a.facility.name,
+    address: a.facility.address,
+    courtCount: a.facility.courts.length,
   }));
 }
 

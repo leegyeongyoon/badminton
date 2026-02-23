@@ -4,13 +4,11 @@ import {
   Text,
   TouchableOpacity,
   StyleSheet,
-  Alert,
   ScrollView,
   RefreshControl,
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { useAuthStore } from '../../store/authStore';
-import { useCheckinStore } from '../../store/checkinStore';
 import { profileApi } from '../../services/profile';
 import { Colors } from '../../constants/colors';
 import { Strings } from '../../constants/strings';
@@ -18,15 +16,15 @@ import { showAlert } from '../../utils/alert';
 
 const roleLabels: Record<string, string> = {
   FACILITY_ADMIN: '시설 관리자',
-  CLUB_LEADER: '모임 리더',
-  PLAYER: '선수',
+  CLUB_LEADER: '모임 대표',
+  PLAYER: '일반 회원',
 };
 
 const SKILL_LEVELS = [
-  { key: 'BEGINNER', label: '초급' },
-  { key: 'INTERMEDIATE', label: '중급' },
-  { key: 'ADVANCED', label: '상급' },
-  { key: 'PRO', label: '프로' },
+  { key: 'BEGINNER', label: Strings.player.skillLevel.BEGINNER, color: Colors.skillBeginner, icon: '🔰' },
+  { key: 'INTERMEDIATE', label: Strings.player.skillLevel.INTERMEDIATE, color: Colors.skillIntermediate, icon: '⭐' },
+  { key: 'ADVANCED', label: Strings.player.skillLevel.ADVANCED, color: Colors.skillAdvanced, icon: '🏅' },
+  { key: 'PRO', label: '프로', color: Colors.skillExpert, icon: '🏆' },
 ];
 
 const GAME_TYPES = [
@@ -37,8 +35,7 @@ const GAME_TYPES = [
 
 export default function ProfileScreen() {
   const router = useRouter();
-  const { user, logout } = useAuthStore();
-  const { status } = useCheckinStore();
+  const { user } = useAuthStore();
 
   const [skillLevel, setSkillLevel] = useState<string>('');
   const [preferredGameTypes, setPreferredGameTypes] = useState<string[]>([]);
@@ -60,7 +57,7 @@ export default function ProfileScreen() {
       setStats(statsRes.data);
       setPenalties(penaltiesRes.data || []);
     } catch {
-      // Silent fail on load
+      showAlert('오류', '프로필 정보를 불러오지 못했습니다');
     } finally {
       setIsLoading(false);
     }
@@ -100,22 +97,6 @@ export default function ProfileScreen() {
     }
   };
 
-  const handleLogout = () => {
-    Alert.alert(Strings.auth.logout, '정말 로그아웃 하시겠습니까?', [
-      { text: Strings.common.cancel, style: 'cancel' },
-      { text: Strings.auth.logout, style: 'destructive', onPress: logout },
-    ]);
-  };
-
-  const handleOpenDisplay = () => {
-    const facilityId = status?.facilityId;
-    if (!facilityId) {
-      showAlert('알림', '체크인 후 TV 디스플레이 모드를 사용할 수 있습니다');
-      return;
-    }
-    router.push(`/display/${facilityId}`);
-  };
-
   const formatRemainingTime = (expiresAt: string): string => {
     const remaining = new Date(expiresAt).getTime() - Date.now();
     if (remaining <= 0) return '만료됨';
@@ -129,6 +110,8 @@ export default function ProfileScreen() {
     (p: any) => p.status === 'ACTIVE' && new Date(p.expiresAt).getTime() > Date.now(),
   );
 
+  const currentSkill = SKILL_LEVELS.find((s) => s.key === skillLevel);
+
   return (
     <ScrollView
       style={styles.container}
@@ -137,26 +120,83 @@ export default function ProfileScreen() {
         <RefreshControl refreshing={isLoading} onRefresh={loadProfileData} />
       }
     >
-      {/* Profile card */}
+      {/* Profile card with skill badge */}
       <View style={styles.profileCard}>
-        <View style={styles.avatar}>
-          <Text style={styles.avatarText}>{user?.name?.[0] || '?'}</Text>
+        <View style={styles.avatarContainer}>
+          <View style={styles.avatar}>
+            <Text style={styles.avatarText}>{user?.name?.[0] || '?'}</Text>
+          </View>
+          {currentSkill && (
+            <View style={[styles.skillBadgeOverlay, { backgroundColor: currentSkill.color }]}>
+              <Text style={styles.skillBadgeIcon}>{currentSkill.icon}</Text>
+            </View>
+          )}
         </View>
         <Text style={styles.name}>{user?.name}</Text>
         <Text style={styles.phone}>{user?.phone}</Text>
-        <View style={styles.roleBadge}>
-          <Text style={styles.roleText}>
-            {roleLabels[user?.role || ''] || user?.role}
-          </Text>
+        <View style={styles.badgeRow}>
+          <View style={styles.roleBadge}>
+            <Text style={styles.roleText}>
+              {roleLabels[user?.role || ''] || user?.role}
+            </Text>
+          </View>
+          {currentSkill && (
+            <View style={[styles.skillLevelBadge, { backgroundColor: currentSkill.color + '20', borderColor: currentSkill.color }]}>
+              <Text style={[styles.skillLevelText, { color: currentSkill.color }]}>
+                {currentSkill.icon} {currentSkill.label}
+              </Text>
+            </View>
+          )}
         </View>
       </View>
 
-      {status && (
-        <View style={styles.infoCard}>
-          <Text style={styles.infoLabel}>현재 체크인</Text>
-          <Text style={styles.infoValue}>{status.facilityName}</Text>
+      {/* Penalty banner */}
+      {activePenalty && (
+        <View style={styles.penaltyCard}>
+          <View style={styles.penaltyHeader}>
+            <Text style={styles.penaltyHeaderIcon}>⚠️</Text>
+            <Text style={styles.penaltyHeaderTitle}>패널티 적용 중</Text>
+          </View>
+          <View style={styles.penaltyBody}>
+            <Text style={styles.penaltyReason}>{activePenalty.reason || '노쇼'}</Text>
+            <Text style={styles.penaltyTime}>
+              {formatRemainingTime(activePenalty.expiresAt)}
+            </Text>
+          </View>
         </View>
       )}
+
+      {/* Game stats dashboard */}
+      <View style={styles.section}>
+        <Text style={styles.sectionTitle}>게임 통계</Text>
+        <View style={styles.statsGrid}>
+          <View style={styles.statCard}>
+            <Text style={styles.statValue}>{stats?.gamesPlayedToday ?? 0}</Text>
+            <Text style={styles.statLabel}>오늘 게임</Text>
+          </View>
+          <View style={styles.statCard}>
+            <Text style={styles.statValue}>{stats?.gamesPlayed ?? 0}</Text>
+            <Text style={styles.statLabel}>총 게임</Text>
+          </View>
+          <View style={styles.statCard}>
+            <Text style={[styles.statValue, (stats?.noShowCount ?? 0) > 0 && styles.statValueDanger]}>
+              {stats?.noShowCount ?? 0}
+            </Text>
+            <Text style={styles.statLabel}>노쇼</Text>
+          </View>
+        </View>
+        {stats?.winRate !== undefined && (
+          <View style={styles.winRateCard}>
+            <Text style={styles.winRateLabel}>승률</Text>
+            <View style={styles.winRateBarContainer}>
+              <View style={styles.winRateBar}>
+                <View style={[styles.winRateFill, { width: `${stats.winRate}%` }]} />
+              </View>
+              <Text style={styles.winRateValue}>{stats.winRate}%</Text>
+            </View>
+          </View>
+        )}
+      </View>
 
       {/* Player settings section */}
       <View style={styles.section}>
@@ -171,10 +211,11 @@ export default function ProfileScreen() {
                 key={level.key}
                 style={[
                   styles.skillButton,
-                  skillLevel === level.key && styles.skillButtonActive,
+                  skillLevel === level.key && { backgroundColor: level.color, borderColor: level.color },
                 ]}
                 onPress={() => handleSkillLevelChange(level.key)}
               >
+                <Text style={styles.skillIcon}>{level.icon}</Text>
                 <Text
                   style={[
                     styles.skillButtonText,
@@ -226,51 +267,21 @@ export default function ProfileScreen() {
         </View>
       </View>
 
-      {/* Game stats section */}
+      {/* Account section */}
       <View style={styles.section}>
-        <Text style={styles.sectionTitle}>게임 통계</Text>
-        <View style={styles.statsCard}>
-          <View style={styles.statsRow}>
-            <View style={styles.statItem}>
-              <Text style={styles.statValue}>{stats?.gamesPlayed ?? 0}</Text>
-              <Text style={styles.statLabel}>총 게임 수</Text>
-            </View>
-            <View style={styles.statDivider} />
-            <View style={styles.statItem}>
-              <Text style={[styles.statValue, (stats?.noShowCount ?? 0) > 0 && styles.statValueDanger]}>
-                {stats?.noShowCount ?? 0}
-              </Text>
-              <Text style={styles.statLabel}>노쇼 횟수</Text>
-            </View>
+        <Text style={styles.sectionTitle}>계정</Text>
+        <TouchableOpacity
+          style={styles.settingCard}
+          onPress={() => router.push('/change-password')}
+          activeOpacity={0.7}
+        >
+          <View style={styles.settingRow}>
+            <Text style={styles.settingRowLabel}>비밀번호 변경</Text>
+            <Text style={styles.settingArrow}>›</Text>
           </View>
-          {activePenalty && (
-            <View style={styles.penaltyBanner}>
-              <Text style={styles.penaltyIcon}>⚠️</Text>
-              <View style={styles.penaltyInfo}>
-                <Text style={styles.penaltyTitle}>패널티 적용 중</Text>
-                <Text style={styles.penaltyTime}>
-                  {formatRemainingTime(activePenalty.expiresAt)}
-                </Text>
-              </View>
-            </View>
-          )}
-        </View>
+        </TouchableOpacity>
       </View>
 
-      {/* TV Display mode button */}
-      <TouchableOpacity style={styles.displayButton} onPress={handleOpenDisplay}>
-        <Text style={styles.displayIcon}>📺</Text>
-        <View style={styles.displayInfo}>
-          <Text style={styles.displayText}>TV 디스플레이 모드</Text>
-          <Text style={styles.displayDesc}>대형 화면에 코트 현황을 표시합니다</Text>
-        </View>
-        <Text style={styles.displayArrow}>›</Text>
-      </TouchableOpacity>
-
-      {/* Logout button */}
-      <TouchableOpacity style={styles.logoutButton} onPress={handleLogout}>
-        <Text style={styles.logoutText}>{Strings.auth.logout}</Text>
-      </TouchableOpacity>
     </ScrollView>
   );
 }
@@ -296,6 +307,10 @@ const styles = StyleSheet.create({
     shadowRadius: 4,
     elevation: 2,
   },
+  avatarContainer: {
+    position: 'relative',
+    marginBottom: 12,
+  },
   avatar: {
     width: 72,
     height: 72,
@@ -303,12 +318,26 @@ const styles = StyleSheet.create({
     backgroundColor: Colors.primaryLight,
     justifyContent: 'center',
     alignItems: 'center',
-    marginBottom: 12,
   },
   avatarText: {
     fontSize: 28,
     fontWeight: '700',
     color: Colors.primary,
+  },
+  skillBadgeOverlay: {
+    position: 'absolute',
+    bottom: -2,
+    right: -2,
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+    justifyContent: 'center',
+    alignItems: 'center',
+    borderWidth: 2,
+    borderColor: Colors.surface,
+  },
+  skillBadgeIcon: {
+    fontSize: 12,
   },
   name: {
     fontSize: 20,
@@ -319,7 +348,11 @@ const styles = StyleSheet.create({
   phone: {
     fontSize: 15,
     color: Colors.textSecondary,
-    marginBottom: 8,
+    marginBottom: 10,
+  },
+  badgeRow: {
+    flexDirection: 'row',
+    gap: 8,
   },
   roleBadge: {
     backgroundColor: Colors.primaryLight,
@@ -332,21 +365,58 @@ const styles = StyleSheet.create({
     color: Colors.primary,
     fontWeight: '600',
   },
-  infoCard: {
-    backgroundColor: Colors.surface,
-    borderRadius: 12,
-    padding: 16,
-    marginBottom: 16,
+  skillLevelBadge: {
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 8,
+    borderWidth: 1,
   },
-  infoLabel: {
-    fontSize: 13,
-    color: Colors.textSecondary,
-    marginBottom: 4,
-  },
-  infoValue: {
-    fontSize: 16,
+  skillLevelText: {
+    fontSize: 12,
     fontWeight: '600',
-    color: Colors.text,
+  },
+  // Penalty card
+  penaltyCard: {
+    backgroundColor: '#FEF2F2',
+    borderRadius: 12,
+    overflow: 'hidden',
+    marginBottom: 16,
+    borderWidth: 1,
+    borderColor: '#FECACA',
+  },
+  penaltyHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: '#FECACA',
+  },
+  penaltyHeaderIcon: {
+    fontSize: 18,
+  },
+  penaltyHeaderTitle: {
+    fontSize: 15,
+    fontWeight: '700',
+    color: Colors.danger,
+  },
+  penaltyBody: {
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  penaltyReason: {
+    fontSize: 14,
+    color: Colors.danger,
+    fontWeight: '500',
+  },
+  penaltyTime: {
+    fontSize: 14,
+    color: Colors.danger,
+    fontWeight: '700',
   },
   section: {
     marginBottom: 16,
@@ -357,6 +427,74 @@ const styles = StyleSheet.create({
     color: Colors.text,
     marginBottom: 12,
   },
+  // Stats grid
+  statsGrid: {
+    flexDirection: 'row',
+    gap: 10,
+    marginBottom: 10,
+  },
+  statCard: {
+    flex: 1,
+    backgroundColor: Colors.surface,
+    borderRadius: 12,
+    padding: 16,
+    alignItems: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.03,
+    shadowRadius: 2,
+    elevation: 1,
+  },
+  statValue: {
+    fontSize: 24,
+    fontWeight: '800',
+    color: Colors.text,
+    marginBottom: 4,
+  },
+  statValueDanger: {
+    color: Colors.danger,
+  },
+  statLabel: {
+    fontSize: 12,
+    color: Colors.textSecondary,
+  },
+  // Win rate
+  winRateCard: {
+    backgroundColor: Colors.surface,
+    borderRadius: 12,
+    padding: 16,
+  },
+  winRateLabel: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: Colors.textSecondary,
+    marginBottom: 8,
+  },
+  winRateBarContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+  },
+  winRateBar: {
+    flex: 1,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: Colors.divider,
+    overflow: 'hidden',
+  },
+  winRateFill: {
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: Colors.primary,
+  },
+  winRateValue: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: Colors.primary,
+    minWidth: 40,
+    textAlign: 'right',
+  },
+  // Settings
   settingCard: {
     backgroundColor: Colors.surface,
     borderRadius: 12,
@@ -368,6 +506,20 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     color: Colors.textSecondary,
     marginBottom: 12,
+  },
+  settingRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  settingRowLabel: {
+    fontSize: 15,
+    fontWeight: '500',
+    color: Colors.text,
+  },
+  settingArrow: {
+    fontSize: 22,
+    color: Colors.textLight,
   },
   skillButtonRow: {
     flexDirection: 'row',
@@ -381,13 +533,13 @@ const styles = StyleSheet.create({
     borderColor: Colors.border,
     alignItems: 'center',
     backgroundColor: Colors.background,
+    gap: 2,
   },
-  skillButtonActive: {
-    backgroundColor: Colors.primary,
-    borderColor: Colors.primary,
+  skillIcon: {
+    fontSize: 16,
   },
   skillButtonText: {
-    fontSize: 13,
+    fontSize: 11,
     fontWeight: '600',
     color: Colors.textSecondary,
   },
@@ -429,103 +581,6 @@ const styles = StyleSheet.create({
   },
   gameTypeToggleTextActive: {
     color: Colors.text,
-    fontWeight: '600',
-  },
-  statsCard: {
-    backgroundColor: Colors.surface,
-    borderRadius: 12,
-    overflow: 'hidden',
-  },
-  statsRow: {
-    flexDirection: 'row',
-    padding: 20,
-  },
-  statItem: {
-    flex: 1,
-    alignItems: 'center',
-  },
-  statDivider: {
-    width: 1,
-    backgroundColor: Colors.divider,
-  },
-  statValue: {
-    fontSize: 28,
-    fontWeight: '800',
-    color: Colors.text,
-    marginBottom: 4,
-  },
-  statValueDanger: {
-    color: Colors.danger,
-  },
-  statLabel: {
-    fontSize: 13,
-    color: Colors.textSecondary,
-  },
-  penaltyBanner: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: '#FEF2F2',
-    padding: 14,
-    gap: 10,
-    borderTopWidth: 1,
-    borderTopColor: '#FECACA',
-  },
-  penaltyIcon: {
-    fontSize: 20,
-  },
-  penaltyInfo: {
-    flex: 1,
-  },
-  penaltyTitle: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: Colors.danger,
-  },
-  penaltyTime: {
-    fontSize: 13,
-    color: Colors.danger,
-    marginTop: 2,
-  },
-  displayButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: Colors.surface,
-    borderRadius: 12,
-    padding: 16,
-    marginBottom: 16,
-    gap: 12,
-  },
-  displayIcon: {
-    fontSize: 24,
-  },
-  displayInfo: {
-    flex: 1,
-  },
-  displayText: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: Colors.text,
-  },
-  displayDesc: {
-    fontSize: 12,
-    color: Colors.textSecondary,
-    marginTop: 2,
-  },
-  displayArrow: {
-    fontSize: 24,
-    color: Colors.textLight,
-  },
-  logoutButton: {
-    backgroundColor: Colors.surface,
-    borderRadius: 12,
-    padding: 16,
-    alignItems: 'center',
-    borderWidth: 1,
-    borderColor: Colors.danger,
-  },
-  logoutText: {
-    color: Colors.danger,
-    fontSize: 16,
     fontWeight: '600',
   },
 });

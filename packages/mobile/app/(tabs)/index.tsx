@@ -1,187 +1,164 @@
-import { useEffect, useCallback } from 'react';
-import {
-  View,
-  Text,
-  FlatList,
-  StyleSheet,
-  TouchableOpacity,
-  RefreshControl,
-} from 'react-native';
+import { useState, useCallback } from 'react';
+import { View, TouchableOpacity, Text, StyleSheet } from 'react-native';
 import { useRouter } from 'expo-router';
 import { useFacilityStore } from '../../store/facilityStore';
 import { useCheckinStore } from '../../store/checkinStore';
-import { useClubStore } from '../../store/clubStore';
-import { useSocketEvent, useFacilityRoom } from '../../hooks/useSocket';
+import { useAuthStore } from '../../store/authStore';
+import { useBoardData } from '../../hooks/useBoardData';
+import { BannerStack } from '../../components/board/BannerStack';
+import { MyStatusSection } from '../../components/board/MyStatusSection';
+import { CapacityBar } from '../../components/shared/CapacityBar';
+import { RecruitmentSection } from '../../components/board/RecruitmentSection';
+import { CourtGrid } from '../../components/board/CourtGrid';
+import { CourtBottomSheet } from '../../components/court/CourtBottomSheet';
 import { Colors } from '../../constants/colors';
 import { Strings } from '../../constants/strings';
-
-const courtStatusColors: Record<string, string> = {
-  EMPTY: Colors.courtEmpty,
-  HELD: Colors.courtHeld,
-  IN_GAME: Colors.courtInGame,
-  MAINTENANCE: Colors.courtMaintenance,
-};
+import { showConfirm } from '../../utils/alert';
+import { recruitmentApi } from '../../services/recruitment';
 
 export default function BoardScreen() {
   const router = useRouter();
-  const { boardData, fetchBoard, facilities, fetchFacilities, isLoading } = useFacilityStore();
+  const { boardData, selectedFacility, isLoading } = useFacilityStore();
   const { status: checkinStatus } = useCheckinStore();
-  const { clubs } = useClubStore();
+  const { user } = useAuthStore();
 
-  const facilityId = checkinStatus?.facilityId || facilities[0]?.id;
+  const facilityId = selectedFacility?.id;
+  const isCheckedIn = !!checkinStatus;
 
-  useFacilityRoom(facilityId);
+  const {
+    capacity,
+    recruitments,
+    rotation,
+    activeClubSession,
+    isAdmin,
+    refreshBoard,
+    loadRecruitments,
+  } = useBoardData(facilityId);
 
-  useEffect(() => {
-    fetchFacilities();
+  // Bottom sheet state for 2-tap court registration
+  const [selectedCourtId, setSelectedCourtId] = useState<string | null>(null);
+  const [sheetVisible, setSheetVisible] = useState(false);
+
+  const handleCourtPress = useCallback((courtId: string) => {
+    setSelectedCourtId(courtId);
+    setSheetVisible(true);
   }, []);
 
-  useEffect(() => {
-    if (facilityId) {
-      fetchBoard(facilityId);
-    }
-  }, [facilityId]);
+  const handleSheetClose = useCallback(() => {
+    setSheetVisible(false);
+    setSelectedCourtId(null);
+  }, []);
 
-  const refreshBoard = useCallback(() => {
-    if (facilityId) fetchBoard(facilityId);
-  }, [facilityId]);
+  const handleTurnRegistered = useCallback(() => {
+    refreshBoard();
+  }, [refreshBoard]);
 
-  // Real-time updates
-  useSocketEvent('court:statusChanged', refreshBoard);
-  useSocketEvent('hold:created', refreshBoard);
-  useSocketEvent('hold:released', refreshBoard);
-  useSocketEvent('game:started', refreshBoard);
-  useSocketEvent('game:completed', refreshBoard);
-  useSocketEvent('queue:joined', refreshBoard);
-  useSocketEvent('queue:left', refreshBoard);
-  useSocketEvent('queue:promoted', refreshBoard);
-  useSocketEvent('queue:skipped', refreshBoard);
-
-  const onRefresh = () => {
-    if (facilityId) fetchBoard(facilityId);
-  };
-
-  // Determine if a court is held by one of my clubs
-  const myClubIds = clubs.map((c: any) => c.id);
-
-  const getCourtAction = (item: any) => {
-    if (item.court.status === 'EMPTY') {
-      return {
-        label: Strings.hold.grabSlots,
-        onPress: () => router.push(`/court/${item.court.id}`),
-        color: Colors.secondary,
-      };
-    }
-    if (item.court.status === 'MAINTENANCE') {
-      return null;
-    }
-    // Court is HELD or IN_GAME
-    // Check if it's my club's hold using holdClubId
-    if (item.holdClubId && myClubIds.includes(item.holdClubId)) {
-      return {
-        label: '운영 화면',
-        onPress: () => router.push(`/court/${item.court.id}`),
-        color: Colors.primary,
-      };
-    }
-    // Another club's hold - offer queue join
-    return {
-      label: Strings.queue.join,
-      onPress: () => router.push(`/court/${item.court.id}/queue`),
-      color: Colors.warning,
-    };
-  };
-
-  const renderCourtCard = ({ item }: { item: any }) => {
-    const action = getCourtAction(item);
-
-    return (
-      <View style={styles.courtCard}>
-        <View style={styles.courtHeader}>
-          <Text style={styles.courtName}>{item.court.name}</Text>
-          <View style={[styles.statusBadge, { backgroundColor: courtStatusColors[item.court.status] }]}>
-            <Text style={styles.statusText}>
-              {Strings.court.status[item.court.status as keyof typeof Strings.court.status]}
-            </Text>
-          </View>
-        </View>
-
-        {item.holdClubName && (
-          <Text style={styles.clubName}>{item.holdClubName}</Text>
-        )}
-
-        {/* Slot indicator */}
-        {item.court.status !== 'EMPTY' && item.court.status !== 'MAINTENANCE' && (
-          <View style={styles.slotRow}>
-            <Text style={styles.slotText}>
-              {Strings.queue.slotStatus} {item.slotsUsed}/{item.slotsTotal}
-            </Text>
-            {item.queueCount > 0 && (
-              <View style={styles.queueBadge}>
-                <Text style={styles.queueBadgeText}>
-                  {Strings.queue.queueBadge}:{item.queueCount}
-                </Text>
-              </View>
-            )}
-          </View>
-        )}
-
-        {item.currentGame && (
-          <View style={styles.gameSection}>
-            <Text style={styles.gameSectionTitle}>
-              {Strings.game.status[item.currentGame.status as keyof typeof Strings.game.status]}
-            </Text>
-            <View style={styles.playerList}>
-              {item.currentGame.players.map((p: any) => (
-                <Text key={p.id} style={styles.playerName}>{p.userName}</Text>
-              ))}
-            </View>
-          </View>
-        )}
-
-        {item.upcomingGames.length > 0 && (
-          <View style={styles.upcomingSection}>
-            <Text style={styles.upcomingTitle}>대기 {item.upcomingGames.length}게임</Text>
-          </View>
-        )}
-
-        {action && (
-          <TouchableOpacity
-            style={[styles.actionButton, { backgroundColor: action.color }]}
-            onPress={action.onPress}
-          >
-            <Text style={styles.actionButtonText}>{action.label}</Text>
-          </TouchableOpacity>
-        )}
-      </View>
+  const handleJoinRecruitment = useCallback((recruitmentId: string) => {
+    showConfirm(
+      Strings.recruitment.join,
+      '이 모집에 참여하시겠습니까?',
+      async () => {
+        try {
+          await recruitmentApi.join(recruitmentId);
+          loadRecruitments();
+        } catch { /* silent */ }
+      },
+      Strings.common.confirm,
     );
-  };
+  }, [loadRecruitments]);
 
-  if (!facilityId) {
-    return (
-      <View style={styles.emptyContainer}>
-        <Text style={styles.emptyText}>체크인 후 현황판을 확인하세요</Text>
-      </View>
+  const handleLeaveRecruitment = useCallback((recruitmentId: string) => {
+    showConfirm(
+      Strings.recruitment.leave,
+      '모집에서 탈퇴하시겠습니까?',
+      async () => {
+        try {
+          await recruitmentApi.leave(recruitmentId);
+          loadRecruitments();
+        } catch { /* silent */ }
+      },
+      Strings.recruitment.leave,
     );
-  }
+  }, [loadRecruitments]);
+
+  const onRefresh = useCallback(() => {
+    refreshBoard();
+  }, [refreshBoard]);
+
+  const renderListHeader = () => (
+    <View>
+      {/* Banners: checkin / club session / rotation */}
+      <BannerStack
+        isCheckedIn={isCheckedIn}
+        checkinFacilityName={checkinStatus?.facilityName}
+        activeClubSession={activeClubSession}
+        rotation={rotation}
+        onCheckinPress={() => router.push('/(tabs)/checkin')}
+        onClubSessionPress={activeClubSession ? () => router.push(`/club/${activeClubSession.clubId}/session`) : undefined}
+        onRotationPress={() => router.push('/admin/rotation')}
+      />
+
+      {/* My status: game in progress / waiting / idle */}
+      <MyStatusSection onCheckinPress={() => router.push('/(tabs)/checkin')} isAdmin={isAdmin} />
+
+      {/* Capacity bar */}
+      {capacity && <CapacityBar capacity={capacity} />}
+
+      {/* Recruitment section (collapsible) */}
+      {recruitments.length > 0 && (
+        <RecruitmentSection
+          recruitments={recruitments}
+          userId={user?.id}
+          isCheckedIn={isCheckedIn}
+          onJoin={handleJoinRecruitment}
+          onLeave={handleLeaveRecruitment}
+          onRegister={(id) => router.push(`/court/${id}`)}
+          onCreatePress={() => router.push('/recruitment/create')}
+        />
+      )}
+    </View>
+  );
 
   return (
     <View style={styles.container}>
-      {checkinStatus && (
-        <View style={styles.checkinBanner}>
-          <Text style={styles.checkinText}>📍 {checkinStatus.facilityName}</Text>
-        </View>
-      )}
-      <FlatList
+      <CourtGrid
         data={boardData}
-        renderItem={renderCourtCard}
-        keyExtractor={(item) => item.court.id}
-        numColumns={2}
-        contentContainerStyle={styles.list}
-        columnWrapperStyle={styles.row}
-        refreshControl={
-          <RefreshControl refreshing={isLoading} onRefresh={onRefresh} />
-        }
+        isLoading={isLoading}
+        onRefresh={onRefresh}
+        isCheckedIn={isCheckedIn}
+        currentUserId={user?.id}
+        onCourtPress={handleCourtPress}
+        ListHeaderComponent={renderListHeader()}
+      />
+
+      {/* Floating recruitment button */}
+      {isCheckedIn && recruitments.length === 0 && (
+        <TouchableOpacity
+          style={styles.fab}
+          onPress={() => router.push('/recruitment/create')}
+        >
+          <Text style={styles.fabText}>+ {Strings.recruitment.create}</Text>
+        </TouchableOpacity>
+      )}
+
+      {/* Admin FAB */}
+      {isAdmin && (
+        <TouchableOpacity
+          style={styles.adminFab}
+          onPress={() => router.push('/admin')}
+          activeOpacity={0.8}
+        >
+          <Text style={styles.adminFabText}>{Strings.admin.title}</Text>
+        </TouchableOpacity>
+      )}
+
+      {/* Court bottom sheet - 2-tap registration flow */}
+      <CourtBottomSheet
+        visible={sheetVisible}
+        onClose={handleSheetClose}
+        courtId={selectedCourtId}
+        facilityId={facilityId}
+        onTurnRegistered={handleTurnRegistered}
       />
     </View>
   );
@@ -192,131 +169,42 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: Colors.background,
   },
-  emptyContainer: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-    backgroundColor: Colors.background,
+  fab: {
+    position: 'absolute',
+    bottom: 24,
+    right: 20,
+    backgroundColor: Colors.secondary,
+    borderRadius: 28,
+    paddingHorizontal: 20,
+    paddingVertical: 14,
+    shadowColor: Colors.secondary,
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
+    elevation: 6,
   },
-  emptyText: {
-    fontSize: 16,
-    color: Colors.textSecondary,
-  },
-  checkinBanner: {
-    backgroundColor: Colors.primaryLight,
-    paddingHorizontal: 16,
-    paddingVertical: 10,
-  },
-  checkinText: {
-    color: Colors.primary,
-    fontWeight: '600',
+  fabText: {
+    color: '#fff',
     fontSize: 14,
-  },
-  list: {
-    padding: 8,
-  },
-  row: {
-    justifyContent: 'space-between',
-  },
-  courtCard: {
-    flex: 1,
-    backgroundColor: Colors.surface,
-    borderRadius: 12,
-    padding: 14,
-    margin: 4,
-    maxWidth: '48%',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.05,
-    shadowRadius: 4,
-    elevation: 2,
-  },
-  courtHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 8,
-  },
-  courtName: {
-    fontSize: 16,
-    fontWeight: '700',
-    color: Colors.text,
-  },
-  statusBadge: {
-    paddingHorizontal: 8,
-    paddingVertical: 3,
-    borderRadius: 8,
-  },
-  statusText: {
-    fontSize: 11,
-    color: '#fff',
-    fontWeight: '600',
-  },
-  clubName: {
-    fontSize: 13,
-    color: Colors.textSecondary,
-    marginBottom: 6,
-  },
-  slotRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-    marginBottom: 6,
-  },
-  slotText: {
-    fontSize: 12,
-    color: Colors.textLight,
-    fontWeight: '500',
-  },
-  queueBadge: {
-    backgroundColor: Colors.warning,
-    paddingHorizontal: 6,
-    paddingVertical: 2,
-    borderRadius: 6,
-  },
-  queueBadgeText: {
-    fontSize: 10,
-    color: '#fff',
     fontWeight: '700',
   },
-  gameSection: {
-    marginTop: 4,
-    paddingTop: 8,
-    borderTopWidth: 1,
-    borderTopColor: Colors.divider,
+  adminFab: {
+    position: 'absolute',
+    bottom: 24,
+    left: 20,
+    backgroundColor: Colors.primary,
+    borderRadius: 22,
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    shadowColor: Colors.primary,
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
+    elevation: 6,
   },
-  gameSectionTitle: {
-    fontSize: 12,
-    fontWeight: '600',
-    color: Colors.primary,
-    marginBottom: 4,
-  },
-  playerList: {
-    gap: 2,
-  },
-  playerName: {
-    fontSize: 13,
-    color: Colors.text,
-  },
-  upcomingSection: {
-    marginTop: 6,
-    paddingTop: 6,
-    borderTopWidth: 1,
-    borderTopColor: Colors.divider,
-  },
-  upcomingTitle: {
-    fontSize: 12,
-    color: Colors.textLight,
-  },
-  actionButton: {
-    marginTop: 8,
-    borderRadius: 8,
-    paddingVertical: 8,
-    alignItems: 'center',
-  },
-  actionButtonText: {
+  adminFabText: {
     color: '#fff',
-    fontSize: 12,
-    fontWeight: '600',
+    fontSize: 13,
+    fontWeight: '700',
   },
 });

@@ -1,6 +1,8 @@
 import { create } from 'zustand';
 import { getItem, setItem, deleteItem } from '../services/storage';
 import { authApi } from '../services/auth';
+import { onAuthExpired } from '../services/api';
+import { disconnectSocket } from '../hooks/useSocket';
 
 interface User {
   id: string;
@@ -39,8 +41,15 @@ export const useAuthStore = create<AuthState>((set) => ({
   },
 
   logout: async () => {
+    disconnectSocket();
+    try {
+      await authApi.logout();
+    } catch {
+      // Server logout may fail if token expired - that's OK
+    }
     await deleteItem('accessToken');
     await deleteItem('refreshToken');
+    await deleteItem('selectedFacility');
     set({ user: null, isAuthenticated: false });
   },
 
@@ -60,3 +69,9 @@ export const useAuthStore = create<AuthState>((set) => ({
     }
   },
 }));
+
+// Auto-logout when refresh token fails
+onAuthExpired(() => {
+  disconnectSocket();
+  useAuthStore.setState({ user: null, isAuthenticated: false });
+});

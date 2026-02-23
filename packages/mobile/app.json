@@ -16,7 +16,8 @@
     "ios": {
       "supportsTablet": true,
       "infoPlist": {
-        "NSCameraUsageDescription": "QR코드 체크인을 위해 카메라 접근이 필요합니다"
+        "NSCameraUsageDescription": "QR코드 체크인을 위해 카메라 접근이 필요합니다",
+        "NSLocationWhenInUseUsageDescription": "주변 체육관을 찾기 위해 위치 정보가 필요합니다"
       }
     },
     "android": {
@@ -25,7 +26,11 @@
         "backgroundColor": "#ffffff"
       },
       "edgeToEdgeEnabled": true,
-      "permissions": ["android.permission.CAMERA"]
+      "permissions": [
+        "android.permission.CAMERA",
+        "android.permission.ACCESS_FINE_LOCATION",
+        "android.permission.ACCESS_COARSE_LOCATION"
+      ]
     },
     "web": {
       "favicon": "./assets/favicon.png"
@@ -43,6 +48,12 @@
         "expo-notifications",
         {
           "sounds": []
+        }
+      ],
+      [
+        "expo-location",
+        {
+          "locationWhenInUsePermission": "주변 체육관을 찾기 위해 위치 정보가 필요합니다"
         }
       ]
     ]

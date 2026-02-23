@@ -21,7 +21,7 @@ async function main() {
     data: { phone: '01000000003', password, name: '리더B', role: 'CLUB_LEADER' },
   });
 
-  // Create players (12 total for 3 games of 4)
+  // Create players (12 total for 3 turns of 4)
   const players = [];
   for (let i = 1; i <= 12; i++) {
     const phoneNum = `010000001${i.toString().padStart(2, '0')}`;
@@ -78,6 +78,8 @@ async function main() {
     data: {
       name: '서울 배드민턴센터',
       address: '서울시 강남구 역삼동 123-45',
+      latitude: 37.5013,
+      longitude: 127.0396,
       admins: { create: { userId: admin.id } },
       policy: { create: {} },
     },
@@ -99,7 +101,7 @@ async function main() {
       inviteCode: 'CLUBAA01',
       members: {
         create: [
-          { userId: leader1.id, isLeader: true },
+          { userId: leader1.id, role: 'LEADER' },
           { userId: players[0].id },
           { userId: players[1].id },
           { userId: players[2].id },
@@ -117,7 +119,7 @@ async function main() {
       inviteCode: 'CLUBBB02',
       members: {
         create: [
-          { userId: leader2.id, isLeader: true },
+          { userId: leader2.id, role: 'LEADER' },
           { userId: players[6].id },
           { userId: players[7].id },
           { userId: players[8].id },
@@ -150,29 +152,14 @@ async function main() {
     },
   });
 
-  // Pre-set court 1 with clubA hold + game 1
-  const hold = await prisma.courtHold.create({
+  // Court 1: Turn 1 (PLAYING) with game in progress
+  const turn1 = await prisma.courtTurn.create({
     data: {
       courtId: courts[0].id,
-      clubId: clubA.id,
+      position: 1,
+      status: 'PLAYING',
       createdById: leader1.id,
-      status: 'ACTIVE',
-      queuePosition: 0,
-      holdType: 'CLUB',
-    },
-  });
-
-  await prisma.court.update({
-    where: { id: courts[0].id },
-    data: { status: 'HELD' },
-  });
-
-  // Create game 1 with first 4 club A members (leader + players 1-3)
-  await prisma.game.create({
-    data: {
-      holdId: hold.id,
-      order: 1,
-      status: 'WAITING',
+      startedAt: new Date(),
       players: {
         create: [
           { userId: leader1.id },
@@ -184,17 +171,44 @@ async function main() {
     },
   });
 
-  // Pre-populate automatch pool with 3 players waiting for doubles
-  for (let i = 6; i <= 8; i++) {
-    await prisma.autoMatchEntry.create({
-      data: {
-        userId: players[i].id,
-        facilityId: facility.id,
-        gameType: 'DOUBLES',
-        status: 'WAITING',
+  await prisma.game.create({
+    data: {
+      turnId: turn1.id,
+      courtId: courts[0].id,
+      status: 'IN_PROGRESS',
+      players: {
+        create: [
+          { userId: leader1.id },
+          { userId: players[0].id },
+          { userId: players[1].id },
+          { userId: players[2].id },
+        ],
       },
-    });
-  }
+    },
+  });
+
+  await prisma.court.update({
+    where: { id: courts[0].id },
+    data: { status: 'IN_USE' },
+  });
+
+  // Court 1: Turn 2 (WAITING)
+  await prisma.courtTurn.create({
+    data: {
+      courtId: courts[0].id,
+      position: 2,
+      status: 'WAITING',
+      createdById: players[3].id,
+      players: {
+        create: [
+          { userId: players[3].id },
+          { userId: players[4].id },
+          { userId: players[5].id },
+          { userId: leader2.id },
+        ],
+      },
+    },
+  });
 
   console.log('Seed complete!');
   console.log(`Facility: ${facility.name} (${facility.id})`);
@@ -204,9 +218,8 @@ async function main() {
   console.log(`Players: 01000001001 ~ 01000001012 / password123`);
   console.log(`Club A invite: CLUBAA01`);
   console.log(`Club B invite: CLUBBB02`);
-  console.log(`Court 1 (${courts[0].id}): HELD by Club A with 1 game`);
+  console.log(`Court 1 (${courts[0].id}): IN_USE with Turn 1 (PLAYING) + Turn 2 (WAITING)`);
   console.log(`Courts 2-4: EMPTY`);
-  console.log(`AutoMatch pool: 3 players (선수7-9) waiting for DOUBLES`);
   console.log(`Session: OPEN`);
 }
 

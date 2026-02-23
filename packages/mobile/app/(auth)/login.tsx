@@ -8,7 +8,7 @@ import {
   KeyboardAvoidingView,
   Platform,
 } from 'react-native';
-import { Link, useRouter } from 'expo-router';
+import { Link } from 'expo-router';
 import { useAuthStore } from '../../store/authStore';
 import { Colors } from '../../constants/colors';
 import { Strings } from '../../constants/strings';
@@ -19,14 +19,16 @@ export default function LoginScreen() {
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
   const { login } = useAuthStore();
-  const router = useRouter();
 
   const handleLogin = async () => {
-    if (!phone || !password) return;
+    if (!phone.trim() || !password.trim()) {
+      showAlert('알림', '전화번호와 비밀번호를 입력해주세요');
+      return;
+    }
     setLoading(true);
     try {
       await login(phone, password);
-      router.replace('/(tabs)');
+      // Navigation handled by root layout gating
     } catch (err: any) {
       const msg = err.response?.data?.error || err?.message || '로그인에 실패했습니다';
       showAlert('오류', msg);

@@ -11,7 +11,7 @@ const router = Router();
 // POST /facilities/:id/sessions/open - admin only, open a session
 router.post('/facilities/:id/sessions/open', authenticate, validate(openSessionSchema), async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const facilityId = req.params.id;
+    const facilityId = req.params.id as string;
     const userId = req.user!.userId;
 
     // Check if user is facility admin
@@ -28,7 +28,7 @@ router.post('/facilities/:id/sessions/open', authenticate, validate(openSessionS
 // POST /sessions/:id/close - admin only, close a session
 router.post('/sessions/:id/close', authenticate, async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const sessionId = req.params.id;
+    const sessionId = req.params.id as string;
     const userId = req.user!.userId;
 
     // Load session to check facility admin permission
@@ -52,7 +52,7 @@ router.post('/sessions/:id/close', authenticate, async (req: Request, res: Respo
 // GET /facilities/:id/sessions/current - get current open session
 router.get('/facilities/:id/sessions/current', async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const session = await sessionService.getCurrentSession(req.params.id);
+    const session = await sessionService.getCurrentSession(req.params.id as string);
     res.json(session);
   } catch (err) { next(err); }
 });

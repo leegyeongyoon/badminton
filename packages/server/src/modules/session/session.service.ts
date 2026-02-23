@@ -37,7 +37,7 @@ export async function openSession(
     facilityId: session.facilityId,
     openedById: session.openedById,
     openedByName: session.openedBy.name,
-    status: session.status,
+    status: session.status as any,
     openedAt: session.openedAt.toISOString(),
     closedAt: null,
     note: session.note,
@@ -64,46 +64,33 @@ export async function closeSession(
     include: { openedBy: true },
   });
 
-  // Release all active holds
-  const activeHolds = await prisma.courtHold.findMany({
+  // Cancel all active turns (WAITING and PLAYING)
+  const activeTurns = await prisma.courtTurn.findMany({
     where: {
       court: { facilityId },
-      status: 'ACTIVE',
+      status: { in: ['WAITING', 'PLAYING'] },
     },
   });
-  for (const hold of activeHolds) {
-    // Cancel waiting games under this hold
-    await prisma.game.updateMany({
-      where: { holdId: hold.id, status: { in: ['WAITING', 'CALLING', 'CONFIRMED'] } },
+  for (const turn of activeTurns) {
+    await prisma.courtTurn.update({
+      where: { id: turn.id },
       data: { status: 'CANCELLED' },
     });
-    await prisma.courtHold.update({
-      where: { id: hold.id },
-      data: { status: 'RELEASED', releasedAt: new Date() },
-    });
   }
 
-  // Cancel all queued holds
-  const queuedHolds = await prisma.courtHold.findMany({
+  // Cancel active games
+  await prisma.game.updateMany({
     where: {
       court: { facilityId },
-      status: { in: ['QUEUED', 'PENDING_ACCEPT'] },
+      status: 'IN_PROGRESS',
     },
+    data: { status: 'CANCELLED' },
   });
-  for (const hold of queuedHolds) {
-    await prisma.courtHold.update({
-      where: { id: hold.id },
-      data: { status: 'EXPIRED', releasedAt: new Date() },
-    });
-  }
 
-  // Cancel all waiting queue entries
-  await prisma.queueEntry.updateMany({
-    where: {
-      court: { facilityId },
-      status: { in: ['WAITING', 'PENDING_ACCEPT'] },
-    },
-    data: { status: 'CANCELLED', processedAt: new Date() },
+  // End all active club sessions for this facility
+  await prisma.clubSession.updateMany({
+    where: { facilityId, status: 'ACTIVE' },
+    data: { status: 'ENDED', endedAt: new Date() },
   });
 
   // Set all courts back to EMPTY
@@ -122,7 +109,7 @@ export async function closeSession(
     facilityId: closedSession.facilityId,
     openedById: closedSession.openedById,
     openedByName: closedSession.openedBy.name,
-    status: closedSession.status,
+    status: closedSession.status as any,
     openedAt: closedSession.openedAt.toISOString(),
     closedAt: closedSession.closedAt?.toISOString() ?? null,
     note: closedSession.note,
@@ -143,7 +130,7 @@ export async function getCurrentSession(facilityId: string): Promise<FacilitySes
     facilityId: session.facilityId,
     openedById: session.openedById,
     openedByName: session.openedBy.name,
-    status: session.status,
+    status: session.status as any,
     openedAt: session.openedAt.toISOString(),
     closedAt: session.closedAt?.toISOString() ?? null,
     note: session.note,

@@ -8,7 +8,7 @@ import {
   KeyboardAvoidingView,
   Platform,
 } from 'react-native';
-import { Link, useRouter } from 'expo-router';
+import { Link } from 'expo-router';
 import { useAuthStore } from '../../store/authStore';
 import { Colors } from '../../constants/colors';
 import { Strings } from '../../constants/strings';
@@ -20,14 +20,24 @@ export default function RegisterScreen() {
   const [name, setName] = useState('');
   const [loading, setLoading] = useState(false);
   const { register } = useAuthStore();
-  const router = useRouter();
 
   const handleRegister = async () => {
-    if (!phone || !password || !name) return;
+    if (!name.trim()) {
+      showAlert('알림', '이름을 입력해주세요');
+      return;
+    }
+    if (!/^01[0-9]{8,9}$/.test(phone)) {
+      showAlert('알림', '올바른 전화번호를 입력해주세요 (예: 01012345678)');
+      return;
+    }
+    if (password.length < 6) {
+      showAlert('알림', '비밀번호는 6자 이상이어야 합니다');
+      return;
+    }
     setLoading(true);
     try {
       await register(phone, password, name);
-      router.replace('/(tabs)');
+      // Navigation handled by root layout gating
     } catch (err: any) {
       showAlert('오류', err.response?.data?.error || '회원가입에 실패했습니다');
     } finally {
@@ -57,14 +67,18 @@ export default function RegisterScreen() {
           onChangeText={setPhone}
           keyboardType="phone-pad"
           autoCapitalize="none"
+          maxLength={11}
         />
         <TextInput
           style={styles.input}
-          placeholder={Strings.auth.passwordPlaceholder}
+          placeholder="비밀번호 (6자 이상)"
           value={password}
           onChangeText={setPassword}
           secureTextEntry
         />
+        {password.length > 0 && password.length < 6 && (
+          <Text style={styles.hintText}>비밀번호는 6자 이상이어야 합니다</Text>
+        )}
 
         <TouchableOpacity
           style={[styles.button, loading && styles.buttonDisabled]}
@@ -142,5 +156,12 @@ const styles = StyleSheet.create({
   linkText: {
     color: Colors.primary,
     fontSize: 14,
+  },
+  hintText: {
+    fontSize: 12,
+    color: Colors.danger,
+    marginTop: -8,
+    marginBottom: 8,
+    paddingHorizontal: 4,
   },
 });

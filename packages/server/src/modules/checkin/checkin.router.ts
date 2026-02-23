@@ -27,4 +27,28 @@ router.get('/status', authenticate, async (req: Request, res: Response, next: Ne
   } catch (err) { next(err); }
 });
 
+// GET /checkin/facility/:facilityId/users - get checked in users at a facility
+router.get('/facility/:facilityId/users', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const result = await checkinService.getCheckedInUsers(req.params.facilityId as string);
+    res.json(result);
+  } catch (err) { next(err); }
+});
+
+// POST /checkin/rest - toggle rest mode
+router.post('/rest', authenticate, async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const result = await checkinService.setResting(req.user!.userId);
+    res.json(result);
+  } catch (err) { next(err); }
+});
+
+// POST /checkin/available - return from rest
+router.post('/available', authenticate, async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const result = await checkinService.setAvailable(req.user!.userId);
+    res.json(result);
+  } catch (err) { next(err); }
+});
+
 export default router;

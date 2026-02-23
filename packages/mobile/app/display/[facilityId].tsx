@@ -16,15 +16,13 @@ const REFRESH_INTERVAL = 10000;
 
 const courtStatusColors: Record<string, string> = {
   EMPTY: Colors.courtEmpty,
-  HELD: Colors.courtHeld,
-  IN_GAME: Colors.courtInGame,
+  IN_USE: Colors.courtInGame,
   MAINTENANCE: Colors.courtMaintenance,
 };
 
 const courtStatusLabels: Record<string, string> = {
   EMPTY: '비어있음',
-  HELD: '홀드',
-  IN_GAME: '게임 중',
+  IN_USE: '사용 중',
   MAINTENANCE: '점검 중',
 };
 
@@ -33,10 +31,18 @@ const NUM_COLUMNS = 3;
 const CARD_MARGIN = 8;
 const CARD_WIDTH = (screenWidth - (NUM_COLUMNS + 1) * CARD_MARGIN * 2) / NUM_COLUMNS;
 
+interface Capacity {
+  totalCheckedIn: number;
+  availableCount: number;
+  inTurnCount: number;
+  restingCount: number;
+}
+
 export default function DisplayScreen() {
   const { facilityId } = useLocalSearchParams<{ facilityId: string }>();
   const [displayData, setDisplayData] = useState<any>(null);
   const [facilityName, setFacilityName] = useState('');
+  const [capacity, setCapacity] = useState<Capacity | null>(null);
   const [currentTime, setCurrentTime] = useState(new Date());
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const clockRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -56,11 +62,23 @@ export default function DisplayScreen() {
     }
   }, [facilityId]);
 
+  const loadCapacity = useCallback(async () => {
+    if (!facilityId) return;
+    try {
+      const { data } = await api.get(`/facilities/${facilityId}/capacity`);
+      setCapacity(data);
+    } catch { /* silent */ }
+  }, [facilityId]);
+
   useEffect(() => {
     loadDisplay();
+    loadCapacity();
 
     // Auto-refresh every 10 seconds
-    intervalRef.current = setInterval(loadDisplay, REFRESH_INTERVAL);
+    intervalRef.current = setInterval(() => {
+      loadDisplay();
+      loadCapacity();
+    }, REFRESH_INTERVAL);
 
     // Update clock every second
     clockRef.current = setInterval(() => {
@@ -71,37 +89,33 @@ export default function DisplayScreen() {
       if (intervalRef.current) clearInterval(intervalRef.current);
       if (clockRef.current) clearInterval(clockRef.current);
     };
-  }, [loadDisplay]);
+  }, [loadDisplay, loadCapacity]);
 
   // Socket real-time updates
-  const refreshHandler = useCallback(() => loadDisplay(), [loadDisplay]);
+  const refreshHandler = useCallback(() => {
+    loadDisplay();
+    loadCapacity();
+  }, [loadDisplay, loadCapacity]);
   useSocketEvent('court:statusChanged', refreshHandler);
-  useSocketEvent('hold:created', refreshHandler);
-  useSocketEvent('hold:released', refreshHandler);
-  useSocketEvent('game:started', refreshHandler);
-  useSocketEvent('game:completed', refreshHandler);
-  useSocketEvent('queue:joined', refreshHandler);
-  useSocketEvent('queue:left', refreshHandler);
-  useSocketEvent('queue:promoted', refreshHandler);
-
-  const getHolderName = (item: any): string => {
-    if (item.holdType === 'INDIVIDUAL') {
-      return item.holderUserName || '개인';
-    }
-    return item.holdClubName || item.holderName || '';
-  };
+  useSocketEvent('turn:created', refreshHandler);
+  useSocketEvent('turn:promoted', refreshHandler);
+  useSocketEvent('turn:started', refreshHandler);
+  useSocketEvent('turn:completed', refreshHandler);
+  useSocketEvent('turn:cancelled', refreshHandler);
+  useSocketEvent('players:updated', loadCapacity);
 
   const renderCourtCard = ({ item }: { item: any }) => {
-    const statusColor = courtStatusColors[item.court?.status || item.status] || Colors.courtMaintenance;
-    const statusLabel = courtStatusLabels[item.court?.status || item.status] || '알 수 없음';
-    const courtName = item.court?.name || item.name || '코트';
-    const status = item.court?.status || item.status;
+    const statusColor = courtStatusColors[item.status] || Colors.courtMaintenance;
+    const statusLabel = courtStatusLabels[item.status] || '알 수 없음';
+
+    // Find playing turn for timer
+    const playingTurn = item.turnPreviews?.find((t: any) => t.status === 'PLAYING');
 
     return (
       <View style={[styles.courtCard, { borderLeftColor: statusColor }]}>
         {/* Court name */}
         <Text style={styles.courtName} numberOfLines={1}>
-          {courtName}
+          {item.courtName}
         </Text>
 
         {/* Status badge */}
@@ -109,43 +123,31 @@ export default function DisplayScreen() {
           <Text style={styles.statusText}>{statusLabel}</Text>
         </View>
 
-        {/* Holder name */}
-        {(item.holdClubName || item.holderName || item.holderUserName) && (
-          <View style={styles.holderRow}>
-            <Text style={styles.holderIcon}>
-              {item.holdType === 'INDIVIDUAL' ? '👤' : '👥'}
+        {/* Turn previews */}
+        {item.turnPreviews?.map((turn: any, idx: number) => (
+          <View key={idx} style={styles.turnPreview}>
+            <Text style={styles.turnPosition}>
+              {turn.position}순번 {turn.status === 'PLAYING' ? '(게임 중)' : '(대기)'}
             </Text>
-            <Text style={styles.holderName} numberOfLines={1}>
-              {getHolderName(item)}
-            </Text>
+            <View style={styles.playersSection}>
+              {turn.players.map((name: string, pIdx: number) => (
+                <Text key={pIdx} style={styles.playerName} numberOfLines={1}>
+                  {name}
+                </Text>
+              ))}
+            </View>
           </View>
+        ))}
+
+        {/* Timer for playing turn */}
+        {item.timeLimitAt && (
+          <DisplayTimer timeLimitAt={item.timeLimitAt} />
         )}
 
-        {/* Current players (if in game) */}
-        {status === 'IN_GAME' && item.currentGame?.players && (
-          <View style={styles.playersSection}>
-            {item.currentGame.players.map((p: any, idx: number) => (
-              <Text key={p.id || idx} style={styles.playerName} numberOfLines={1}>
-                {p.userName || p.name}
-              </Text>
-            ))}
-          </View>
-        )}
-
-        {/* Queue count */}
-        {(item.queueCount > 0 || item.totalInQueue > 0) && (
-          <View style={styles.queueSection}>
-            <Text style={styles.queueIcon}>⏳</Text>
-            <Text style={styles.queueCountText}>
-              대기 {item.queueCount || item.totalInQueue}팀
-            </Text>
-          </View>
-        )}
-
-        {/* Slots info */}
-        {status !== 'EMPTY' && status !== 'MAINTENANCE' && (
-          <Text style={styles.slotInfo}>
-            슬롯 {item.slotsUsed ?? 0}/{item.slotsTotal ?? 3}
+        {/* Turns count */}
+        {item.status !== 'MAINTENANCE' && (
+          <Text style={styles.turnsInfo}>
+            {item.turnsCount}/{item.maxTurns} 순번
           </Text>
         )}
       </View>
@@ -177,21 +179,40 @@ export default function DisplayScreen() {
           </View>
         </View>
 
-        {/* Legend bar */}
+        {/* Capacity + Legend bar */}
         <View style={styles.legendBar}>
-          {Object.entries(courtStatusLabels).map(([key, label]) => (
-            <View key={key} style={styles.legendItem}>
-              <View style={[styles.legendDot, { backgroundColor: courtStatusColors[key] }]} />
-              <Text style={styles.legendText}>{label}</Text>
+          {capacity && (
+            <View style={styles.capacityDisplay}>
+              <View style={styles.capacityItem}>
+                <View style={[styles.capacityDot, { backgroundColor: Colors.playerAvailable }]} />
+                <Text style={styles.capacityText}>대기 {capacity.availableCount}</Text>
+              </View>
+              <View style={styles.capacityItem}>
+                <View style={[styles.capacityDot, { backgroundColor: Colors.playerInTurn }]} />
+                <Text style={styles.capacityText}>게임중 {capacity.inTurnCount}</Text>
+              </View>
+              <View style={styles.capacityItem}>
+                <View style={[styles.capacityDot, { backgroundColor: Colors.playerResting }]} />
+                <Text style={styles.capacityText}>휴식 {capacity.restingCount}</Text>
+              </View>
+              <Text style={styles.capacityTotal}>총 {capacity.totalCheckedIn}명</Text>
             </View>
-          ))}
+          )}
+          <View style={styles.legendSection}>
+            {Object.entries(courtStatusLabels).map(([key, label]) => (
+              <View key={key} style={styles.legendItem}>
+                <View style={[styles.legendDot, { backgroundColor: courtStatusColors[key] }]} />
+                <Text style={styles.legendText}>{label}</Text>
+              </View>
+            ))}
+          </View>
         </View>
 
         {/* Court grid */}
         <FlatList
           data={courts}
           renderItem={renderCourtCard}
-          keyExtractor={(item, idx) => item.court?.id || item.id || String(idx)}
+          keyExtractor={(item, idx) => item.courtName || String(idx)}
           numColumns={NUM_COLUMNS}
           contentContainerStyle={styles.grid}
           columnWrapperStyle={styles.gridRow}
@@ -205,6 +226,55 @@ export default function DisplayScreen() {
     </>
   );
 }
+
+function DisplayTimer({ timeLimitAt }: { timeLimitAt: string }) {
+  const [remaining, setRemaining] = useState('');
+  const [color, setColor] = useState(Colors.timerSafe);
+
+  useEffect(() => {
+    const update = () => {
+      const diff = new Date(timeLimitAt).getTime() - Date.now();
+      if (diff <= 0) {
+        setRemaining('시간 초과');
+        setColor(Colors.timerDanger);
+        return;
+      }
+      const minutes = Math.floor(diff / 60000);
+      const seconds = Math.floor((diff % 60000) / 1000);
+      setRemaining(`${minutes}:${seconds.toString().padStart(2, '0')}`);
+
+      if (minutes < 2) setColor(Colors.timerDanger);
+      else if (minutes < 5) setColor(Colors.timerWarning);
+      else setColor(Colors.timerSafe);
+    };
+
+    update();
+    const id = setInterval(update, 1000);
+    return () => clearInterval(id);
+  }, [timeLimitAt]);
+
+  return (
+    <View style={[displayTimerStyles.container, { borderColor: color }]}>
+      <Text style={[displayTimerStyles.text, { color }]}>{remaining}</Text>
+    </View>
+  );
+}
+
+const displayTimerStyles = StyleSheet.create({
+  container: {
+    marginTop: 6,
+    paddingVertical: 4,
+    paddingHorizontal: 8,
+    borderWidth: 1,
+    borderRadius: 6,
+    alignSelf: 'flex-start',
+  },
+  text: {
+    fontSize: 16,
+    fontWeight: '800',
+    fontVariant: ['tabular-nums'],
+  },
+});
 
 const styles = StyleSheet.create({
   container: {
@@ -238,13 +308,42 @@ const styles = StyleSheet.create({
     fontVariant: ['tabular-nums'],
   },
   legendBar: {
-    flexDirection: 'row',
     paddingHorizontal: 20,
     paddingVertical: 10,
     backgroundColor: '#1E293B',
-    gap: 20,
     borderBottomWidth: 1,
     borderBottomColor: '#334155',
+  },
+  capacityDisplay: {
+    flexDirection: 'row',
+    gap: 16,
+    marginBottom: 8,
+    alignItems: 'center',
+  },
+  capacityItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+  },
+  capacityDot: {
+    width: 10,
+    height: 10,
+    borderRadius: 5,
+  },
+  capacityText: {
+    fontSize: 14,
+    color: '#E2E8F0',
+    fontWeight: '600',
+  },
+  capacityTotal: {
+    fontSize: 14,
+    color: '#94A3B8',
+    marginLeft: 'auto',
+    fontWeight: '600',
+  },
+  legendSection: {
+    flexDirection: 'row',
+    gap: 20,
   },
   legendItem: {
     flexDirection: 'row',
@@ -295,26 +394,22 @@ const styles = StyleSheet.create({
     color: '#fff',
     fontWeight: '700',
   },
-  holderRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
+  turnPreview: {
     marginBottom: 8,
+    paddingTop: 8,
+    borderTopWidth: 1,
+    borderTopColor: '#334155',
   },
-  holderIcon: {
-    fontSize: 16,
-  },
-  holderName: {
-    fontSize: 16,
-    color: '#CBD5E1',
+  turnPosition: {
+    fontSize: 13,
+    color: '#94A3B8',
     fontWeight: '600',
-    flex: 1,
+    marginBottom: 4,
   },
   playersSection: {
     backgroundColor: '#334155',
     borderRadius: 8,
     padding: 10,
-    marginBottom: 8,
     gap: 4,
   },
   playerName: {
@@ -322,24 +417,11 @@ const styles = StyleSheet.create({
     color: '#E2E8F0',
     fontWeight: '500',
   },
-  queueSection: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    marginBottom: 6,
-  },
-  queueIcon: {
-    fontSize: 14,
-  },
-  queueCountText: {
-    fontSize: 14,
-    color: Colors.warning,
-    fontWeight: '600',
-  },
-  slotInfo: {
+  turnsInfo: {
     fontSize: 13,
     color: '#64748B',
     fontWeight: '500',
+    marginTop: 4,
   },
   emptyContainer: {
     flex: 1,

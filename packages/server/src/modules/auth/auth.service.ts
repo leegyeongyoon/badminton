@@ -1,7 +1,7 @@
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import { prisma } from '../../utils/prisma';
-import { AppError, ConflictError, UnauthorizedError } from '../../utils/errors';
+import { AppError, ConflictError, UnauthorizedError, BadRequestError } from '../../utils/errors';
 import { AuthPayload } from '../../middleware/auth';
 import type { RegisterInput, LoginInput } from '@badminton/shared';
 
@@ -11,8 +11,8 @@ const JWT_EXPIRES_IN = process.env.JWT_EXPIRES_IN || '15m';
 const JWT_REFRESH_EXPIRES_IN = process.env.JWT_REFRESH_EXPIRES_IN || '7d';
 
 function generateTokens(payload: AuthPayload) {
-  const accessToken = jwt.sign(payload, JWT_SECRET, { expiresIn: JWT_EXPIRES_IN });
-  const refreshToken = jwt.sign(payload, JWT_REFRESH_SECRET, { expiresIn: JWT_REFRESH_EXPIRES_IN });
+  const accessToken = jwt.sign(payload, JWT_SECRET, { expiresIn: JWT_EXPIRES_IN as jwt.SignOptions['expiresIn'] });
+  const refreshToken = jwt.sign(payload, JWT_REFRESH_SECRET, { expiresIn: JWT_REFRESH_EXPIRES_IN as jwt.SignOptions['expiresIn'] });
   return { accessToken, refreshToken };
 }
 
@@ -92,6 +92,33 @@ export async function refresh(refreshToken: string) {
     if (err instanceof AppError) throw err;
     throw new UnauthorizedError('유효하지 않은 리프레시 토큰입니다');
   }
+}
+
+export async function logout(userId: string) {
+  await prisma.user.update({
+    where: { id: userId },
+    data: { refreshToken: null },
+  });
+}
+
+export async function changePassword(userId: string, currentPassword: string, newPassword: string) {
+  const user = await prisma.user.findUnique({ where: { id: userId } });
+  if (!user) throw new UnauthorizedError();
+
+  const valid = await bcrypt.compare(currentPassword, user.password);
+  if (!valid) {
+    throw new BadRequestError('현재 비밀번호가 올바르지 않습니다');
+  }
+
+  if (newPassword.length < 6) {
+    throw new BadRequestError('새 비밀번호는 6자 이상이어야 합니다');
+  }
+
+  const hashedPassword = await bcrypt.hash(newPassword, 10);
+  await prisma.user.update({
+    where: { id: userId },
+    data: { password: hashedPassword, refreshToken: null },
+  });
 }
 
 export async function updatePushToken(userId: string, token: string) {

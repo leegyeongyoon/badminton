@@ -1,5 +1,5 @@
 import { Router, Request, Response, NextFunction } from 'express';
-import { createClubSchema, joinClubSchema } from '@badminton/shared';
+import { createClubSchema, joinClubSchema, updateMemberRoleSchema } from '@badminton/shared';
 import { authenticate } from '../../middleware/auth';
 import { validate } from '../../middleware/validate';
 import * as clubService from './club.service';
@@ -29,8 +29,22 @@ router.post('/join', authenticate, validate(joinClubSchema), async (req: Request
 
 router.get('/:id/members', authenticate, async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const members = await clubService.getMembers(req.params.id);
+    const facilityId = req.query.facilityId as string | undefined;
+    const members = await clubService.getMembers(req.params.id as string, facilityId);
     res.json(members);
+  } catch (err) { next(err); }
+});
+
+// PATCH /api/v1/clubs/:id/members/:userId/role
+router.patch('/:id/members/:userId/role', authenticate, validate(updateMemberRoleSchema), async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const result = await clubService.updateMemberRole(
+      req.params.id as string,
+      req.params.userId as string,
+      req.body.role,
+      req.user!.userId,
+    );
+    res.json(result);
   } catch (err) { next(err); }
 });
 

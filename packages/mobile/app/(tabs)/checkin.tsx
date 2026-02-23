@@ -1,8 +1,9 @@
 import { useState, useEffect } from 'react';
-import { View, Text, TextInput, TouchableOpacity, StyleSheet, Alert, Platform } from 'react-native';
+import { View, Text, TextInput, TouchableOpacity, StyleSheet, Platform, Modal } from 'react-native';
 import { useCheckinStore } from '../../store/checkinStore';
 import { Colors } from '../../constants/colors';
 import { Strings } from '../../constants/strings';
+import { showAlert } from '../../utils/alert';
 
 // expo-camera is not available on web, so we conditionally import
 let CameraView: any = null;
@@ -38,7 +39,7 @@ function WebCheckIn({ onCheckIn }: { onCheckIn: (qrData: string) => void }) {
   );
 }
 
-function NativeCamera({ onScanned, scanning }: { onScanned: (data: string) => void; scanning: boolean }) {
+function NativeCamera({ onScanned, scanning, onManualCode }: { onScanned: (data: string) => void; scanning: boolean; onManualCode: () => void }) {
   const [permission, requestPermission] = useCameraPermissions!();
 
   if (!permission) return <View style={styles.container} />;
@@ -50,6 +51,9 @@ function NativeCamera({ onScanned, scanning }: { onScanned: (data: string) => vo
           <Text style={styles.permissionText}>카메라 접근 권한이 필요합니다</Text>
           <TouchableOpacity style={styles.permissionButton} onPress={requestPermission}>
             <Text style={styles.permissionButtonText}>권한 요청</Text>
+          </TouchableOpacity>
+          <TouchableOpacity onPress={onManualCode}>
+            <Text style={styles.manualCodeLink}>코드로 체크인</Text>
           </TouchableOpacity>
         </View>
       </View>
@@ -69,13 +73,18 @@ function NativeCamera({ onScanned, scanning }: { onScanned: (data: string) => vo
         </View>
       </View>
       <Text style={styles.instruction}>QR코드를 스캔하여 체크인하세요</Text>
+      <TouchableOpacity onPress={onManualCode}>
+        <Text style={styles.manualCodeLink}>코드로 체크인</Text>
+      </TouchableOpacity>
     </View>
   );
 }
 
 export default function CheckInScreen() {
   const [scanning, setScanning] = useState(false);
-  const { status, checkIn, checkOut, fetchStatus } = useCheckinStore();
+  const [showManualInput, setShowManualInput] = useState(false);
+  const [manualCode, setManualCode] = useState('');
+  const { status, isLoading, checkIn, checkOut, fetchStatus } = useCheckinStore();
 
   useEffect(() => {
     fetchStatus();
@@ -86,9 +95,24 @@ export default function CheckInScreen() {
     setScanning(true);
     try {
       await checkIn(data);
-      Alert.alert('체크인 완료', '체크인되었습니다!');
+      showAlert('체크인 완료', '체크인되었습니다!');
     } catch (err: any) {
-      Alert.alert('오류', err.response?.data?.error || '체크인에 실패했습니다');
+      showAlert('오류', err.response?.data?.error || '체크인에 실패했습니다');
+    } finally {
+      setScanning(false);
+    }
+  };
+
+  const handleManualCheckIn = async () => {
+    if (!manualCode.trim()) return;
+    setScanning(true);
+    try {
+      await checkIn(manualCode.trim());
+      setShowManualInput(false);
+      setManualCode('');
+      showAlert('체크인 완료', '체크인되었습니다');
+    } catch (err: any) {
+      showAlert('체크인 실패', err.response?.data?.message || '체크인에 실패했습니다');
     } finally {
       setScanning(false);
     }
@@ -97,11 +121,46 @@ export default function CheckInScreen() {
   const handleCheckout = async () => {
     try {
       await checkOut();
-      Alert.alert('체크아웃', '체크아웃되었습니다');
+      showAlert('체크아웃', '체크아웃되었습니다');
     } catch (err: any) {
-      Alert.alert('오류', err.response?.data?.error || '체크아웃에 실패했습니다');
+      showAlert('오류', err.response?.data?.error || '체크아웃에 실패했습니다');
     }
   };
+
+  const manualInputModal = (
+    <Modal visible={showManualInput} transparent animationType="fade">
+      <View style={styles.modalOverlay}>
+        <View style={styles.modalContent}>
+          <Text style={styles.modalTitle}>코드로 체크인</Text>
+          <Text style={styles.modalDesc}>시설에 표시된 체크인 코드를 입력하세요</Text>
+          <TextInput
+            style={styles.codeInput}
+            value={manualCode}
+            onChangeText={setManualCode}
+            placeholder="시설 코드를 입력하세요"
+            placeholderTextColor={Colors.textLight}
+            autoCapitalize="none"
+            autoCorrect={false}
+          />
+          <View style={styles.modalButtons}>
+            <TouchableOpacity
+              style={styles.cancelButton}
+              onPress={() => { setShowManualInput(false); setManualCode(''); }}
+            >
+              <Text style={styles.cancelButtonText}>취소</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[styles.submitButton, !manualCode.trim() && styles.submitButtonDisabled]}
+              onPress={handleManualCheckIn}
+              disabled={!manualCode.trim()}
+            >
+              <Text style={styles.submitButtonText}>체크인</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </View>
+    </Modal>
+  );
 
   if (status) {
     return (
@@ -129,7 +188,12 @@ export default function CheckInScreen() {
     );
   }
 
-  return <NativeCamera onScanned={handleCheckIn} scanning={scanning} />;
+  return (
+    <>
+      <NativeCamera onScanned={handleCheckIn} scanning={scanning} onManualCode={() => setShowManualInput(true)} />
+      {manualInputModal}
+    </>
+  );
 }
 
 const styles = StyleSheet.create({
@@ -285,5 +349,75 @@ const styles = StyleSheet.create({
   },
   buttonDisabled: {
     opacity: 0.5,
+  },
+  manualCodeLink: {
+    color: Colors.primary,
+    textDecorationLine: 'underline' as const,
+    textAlign: 'center' as const,
+    marginTop: 16,
+    fontSize: 15,
+  },
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.5)',
+    justifyContent: 'center' as const,
+    padding: 24,
+  },
+  modalContent: {
+    backgroundColor: Colors.surface,
+    borderRadius: 16,
+    padding: 24,
+  },
+  modalTitle: {
+    fontSize: 18,
+    fontWeight: '700' as const,
+    color: Colors.text,
+    marginBottom: 8,
+  },
+  modalDesc: {
+    fontSize: 14,
+    color: Colors.textSecondary,
+    marginBottom: 20,
+  },
+  codeInput: {
+    borderWidth: 1,
+    borderColor: Colors.border,
+    borderRadius: 12,
+    padding: 14,
+    fontSize: 16,
+    color: Colors.text,
+  },
+  modalButtons: {
+    flexDirection: 'row' as const,
+    gap: 12,
+    marginTop: 20,
+  },
+  cancelButton: {
+    flex: 1,
+    padding: 14,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: Colors.border,
+    alignItems: 'center' as const,
+  },
+  cancelButtonText: {
+    fontSize: 16,
+    fontWeight: '600' as const,
+    color: Colors.text,
+  },
+  submitButton: {
+    flex: 1,
+    padding: 14,
+    borderRadius: 12,
+    backgroundColor: Colors.primary,
+    alignItems: 'center' as const,
+  },
+  submitButtonDisabled: {
+    opacity: 0.5,
+  },
+  submitButtonText: {
+    fontSize: 16,
+    fontWeight: '600' as const,
+    color: '#fff',
   },
 });

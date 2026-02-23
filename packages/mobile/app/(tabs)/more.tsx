@@ -1,10 +1,13 @@
+import { useEffect, useState } from 'react';
 import { View, Text, TouchableOpacity, StyleSheet, ScrollView } from 'react-native';
 import { useRouter } from 'expo-router';
 import { useCheckinStore } from '../../store/checkinStore';
 import { useAuthStore } from '../../store/authStore';
+import { useFacilityStore } from '../../store/facilityStore';
 import { Colors } from '../../constants/colors';
 import { Strings } from '../../constants/strings';
-import { showAlert } from '../../utils/alert';
+import { showConfirm } from '../../utils/alert';
+import api from '../../services/api';
 
 interface MenuItem {
   icon: string;
@@ -12,26 +15,58 @@ interface MenuItem {
   description: string;
   onPress: () => void;
   badge?: string;
+  show?: boolean;
 }
 
 export default function MoreScreen() {
   const router = useRouter();
   const { status: checkinStatus } = useCheckinStore();
-  const { user } = useAuthStore();
+  const { user, logout } = useAuthStore();
+  const { selectedFacility, clearSelectedFacility } = useFacilityStore();
+  const [unreadCount, setUnreadCount] = useState(0);
+  const [isAdmin, setIsAdmin] = useState(false);
 
   const facilityId = checkinStatus?.facilityId;
 
+  useEffect(() => {
+    loadUnreadCount();
+    checkAdminStatus();
+  }, [facilityId]);
+
+  const loadUnreadCount = async () => {
+    try {
+      const { data } = await api.get('/notifications', { params: { unreadOnly: true } });
+      setUnreadCount(Array.isArray(data) ? data.filter((n: any) => !n.read).length : 0);
+    } catch { /* silent */ }
+  };
+
+  const checkAdminStatus = async () => {
+    if (!user) return;
+    if (user.role === 'FACILITY_ADMIN') {
+      setIsAdmin(true);
+      return;
+    }
+    // Also check if user is admin for current facility
+    if (facilityId) {
+      try {
+        const { data } = await api.get(`/users/me/admin-facilities`);
+        setIsAdmin(Array.isArray(data) && data.some((f: any) => f.id === facilityId));
+      } catch {
+        setIsAdmin(user.role === 'FACILITY_ADMIN');
+      }
+    }
+  };
+
   const handleCheckin = () => {
-    router.push('/(tabs)/profile');
+    router.push('/(tabs)/checkin');
   };
 
   const handleNotifications = () => {
-    showAlert('알림', '알림 기능은 준비 중입니다');
+    router.push('/notifications');
   };
 
   const handleTvDisplay = () => {
     if (!facilityId) {
-      showAlert('알림', '체크인 후 TV 디스플레이 모드를 사용할 수 있습니다');
       return;
     }
     router.push(`/display/${facilityId}`);
@@ -41,7 +76,36 @@ export default function MoreScreen() {
     router.push('/(tabs)/profile');
   };
 
+  const handleAdmin = () => {
+    router.push('/admin');
+  };
+
+  const handleChangeFacility = async () => {
+    await clearSelectedFacility();
+    // Root layout gating will redirect to facility-select
+  };
+
+  const handleLogout = () => {
+    showConfirm(
+      Strings.auth.logout,
+      '로그아웃하시겠습니까?',
+      async () => {
+        await logout();
+        // Root layout gating will redirect to auth
+      },
+      Strings.auth.logout,
+    );
+  };
+
   const menuItems: MenuItem[] = [
+    {
+      icon: '🏟️',
+      label: Strings.facility.change,
+      description: selectedFacility
+        ? `${selectedFacility.name} (${Strings.facility.changeDescription})`
+        : Strings.facility.changeDescription,
+      onPress: handleChangeFacility,
+    },
     {
       icon: '📷',
       label: '체크인',
@@ -54,8 +118,9 @@ export default function MoreScreen() {
     {
       icon: '🔔',
       label: '알림',
-      description: '게임 호출 및 매칭 알림',
+      description: '순번 및 게임 알림',
       onPress: handleNotifications,
+      badge: unreadCount > 0 ? `${unreadCount}` : undefined,
     },
     {
       icon: '👤',
@@ -68,8 +133,11 @@ export default function MoreScreen() {
       label: 'TV 디스플레이 모드',
       description: '대형 화면용 코트 현황 표시',
       onPress: handleTvDisplay,
+      show: !!facilityId,
     },
   ];
+
+  const visibleMenuItems = menuItems.filter((item) => item.show !== false);
 
   return (
     <ScrollView style={styles.container} contentContainerStyle={styles.content}>
@@ -84,19 +152,35 @@ export default function MoreScreen() {
         </View>
         {checkinStatus && (
           <View style={styles.checkinStatusBadge}>
-            <Text style={styles.checkinStatusText}>📍 체크인</Text>
+            <Text style={styles.checkinStatusText}>체크인</Text>
           </View>
         )}
       </View>
 
+      {/* Admin section - prominent card */}
+      {isAdmin && (
+        <TouchableOpacity style={styles.adminCard} onPress={handleAdmin} activeOpacity={0.8}>
+          <View style={styles.adminCardInner}>
+            <View style={styles.adminIconContainer}>
+              <Text style={styles.adminIcon}>⚙️</Text>
+            </View>
+            <View style={styles.adminCardInfo}>
+              <Text style={styles.adminCardLabel}>{Strings.admin.adminMenu}</Text>
+              <Text style={styles.adminCardDesc}>운영, 게임 편성, 코트 관리</Text>
+            </View>
+            <Text style={styles.menuArrow}>›</Text>
+          </View>
+        </TouchableOpacity>
+      )}
+
       {/* Menu items */}
       <View style={styles.menuSection}>
-        {menuItems.map((item, idx) => (
+        {visibleMenuItems.map((item, idx) => (
           <TouchableOpacity
             key={idx}
             style={[
               styles.menuItem,
-              idx < menuItems.length - 1 && styles.menuItemBorder,
+              idx < visibleMenuItems.length - 1 && styles.menuItemBorder,
             ]}
             onPress={item.onPress}
           >
@@ -114,6 +198,11 @@ export default function MoreScreen() {
           </TouchableOpacity>
         ))}
       </View>
+
+      {/* Logout */}
+      <TouchableOpacity style={styles.logoutButton} onPress={handleLogout} activeOpacity={0.7}>
+        <Text style={styles.logoutButtonText}>{Strings.auth.logout}</Text>
+      </TouchableOpacity>
 
       {/* App info */}
       <View style={styles.appInfoSection}>
@@ -222,20 +311,77 @@ const styles = StyleSheet.create({
     marginTop: 2,
   },
   menuBadge: {
-    backgroundColor: Colors.secondary,
+    backgroundColor: Colors.danger,
     paddingHorizontal: 8,
     paddingVertical: 3,
-    borderRadius: 6,
+    borderRadius: 10,
+    minWidth: 22,
+    alignItems: 'center',
   },
   menuBadgeText: {
     fontSize: 11,
     color: '#fff',
-    fontWeight: '600',
+    fontWeight: '700',
   },
   menuArrow: {
     fontSize: 22,
     color: Colors.textLight,
     marginLeft: 4,
+  },
+  // Admin card
+  adminCard: {
+    backgroundColor: Colors.primary,
+    borderRadius: 16,
+    padding: 16,
+    marginBottom: 16,
+    shadowColor: Colors.primary,
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.25,
+    shadowRadius: 8,
+    elevation: 6,
+  },
+  adminCardInner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+  },
+  adminIconContainer: {
+    width: 40,
+    height: 40,
+    borderRadius: 12,
+    backgroundColor: 'rgba(255,255,255,0.2)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  adminIcon: {
+    fontSize: 20,
+  },
+  adminCardInfo: {
+    flex: 1,
+  },
+  adminCardLabel: {
+    fontSize: 17,
+    fontWeight: '700',
+    color: '#fff',
+  },
+  adminCardDesc: {
+    fontSize: 13,
+    color: 'rgba(255,255,255,0.8)',
+    marginTop: 2,
+  },
+  logoutButton: {
+    backgroundColor: Colors.surface,
+    borderRadius: 12,
+    padding: 16,
+    alignItems: 'center',
+    marginBottom: 16,
+    borderWidth: 1,
+    borderColor: Colors.dangerLight,
+  },
+  logoutButtonText: {
+    fontSize: 15,
+    fontWeight: '600',
+    color: Colors.danger,
   },
   appInfoSection: {
     alignItems: 'center',

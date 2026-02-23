@@ -38,7 +38,7 @@ router.get('/', authenticate, async (req: Request, res: Response, next: NextFunc
 router.patch('/:id/read', authenticate, async (req: Request, res: Response, next: NextFunction) => {
   try {
     const userId = req.user!.userId;
-    const notificationId = req.params.id;
+    const notificationId = req.params.id as string;
 
     const notification = await prisma.notification.findUnique({
       where: { id: notificationId },

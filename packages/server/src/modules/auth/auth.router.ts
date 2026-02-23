@@ -1,5 +1,5 @@
 import { Router, Request, Response, NextFunction } from 'express';
-import { registerSchema, loginSchema, pushTokenSchema } from '@badminton/shared';
+import { registerSchema, loginSchema, pushTokenSchema, changePasswordSchema } from '@badminton/shared';
 import { validate } from '../../middleware/validate';
 import { authenticate } from '../../middleware/auth';
 import * as authService from './auth.service';
@@ -39,6 +39,20 @@ router.get('/me', authenticate, async (req: Request, res: Response, next: NextFu
   try {
     const user = await authService.getMe(req.user!.userId);
     res.json(user);
+  } catch (err) { next(err); }
+});
+
+router.post('/logout', authenticate, async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    await authService.logout(req.user!.userId);
+    res.json({ success: true });
+  } catch (err) { next(err); }
+});
+
+router.post('/change-password', authenticate, validate(changePasswordSchema), async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    await authService.changePassword(req.user!.userId, req.body.currentPassword, req.body.newPassword);
+    res.json({ success: true });
   } catch (err) { next(err); }
 });
 

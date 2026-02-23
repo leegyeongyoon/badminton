@@ -6,14 +6,17 @@ interface Club {
   name: string;
   inviteCode: string;
   memberCount: number;
+  role?: string;
   isLeader?: boolean;
 }
 
 interface ClubMember {
   userId: string;
   name: string;
-  isLeader: boolean;
+  role: string;
   isCheckedIn: boolean;
+  facilityId: string | null;
+  playerStatus: string | null;
 }
 
 interface ClubState {
@@ -35,7 +38,12 @@ export const useClubStore = create<ClubState>((set) => ({
     set({ isLoading: true });
     try {
       const { data } = await clubApi.list();
-      set({ clubs: data, isLoading: false });
+      // Map role to isLeader for backward compatibility
+      const mapped = data.map((c: any) => ({
+        ...c,
+        isLeader: c.role === 'LEADER',
+      }));
+      set({ clubs: mapped, isLoading: false });
     } catch {
       set({ isLoading: false });
     }

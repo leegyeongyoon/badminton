@@ -6,63 +6,27 @@ export enum UserRole {
 
 export enum CourtStatus {
   EMPTY = 'EMPTY',
-  HELD = 'HELD',
-  IN_GAME = 'IN_GAME',
+  IN_USE = 'IN_USE',
   MAINTENANCE = 'MAINTENANCE',
 }
 
-export enum HoldStatus {
-  QUEUED = 'QUEUED',
-  PENDING_ACCEPT = 'PENDING_ACCEPT',
-  ACTIVE = 'ACTIVE',
-  RELEASED = 'RELEASED',
-  EXPIRED = 'EXPIRED',
-  SWAPPED = 'SWAPPED',
-  SKIPPED = 'SKIPPED',
-}
-
 export enum GameStatus {
-  WAITING = 'WAITING',
-  CALLING = 'CALLING',
-  CONFIRMED = 'CONFIRMED',
   IN_PROGRESS = 'IN_PROGRESS',
   COMPLETED = 'COMPLETED',
   CANCELLED = 'CANCELLED',
 }
 
-export enum CallStatus {
+export enum TurnStatus {
+  WAITING = 'WAITING',
+  PLAYING = 'PLAYING',
+  COMPLETED = 'COMPLETED',
+  CANCELLED = 'CANCELLED',
+}
+
+export enum FacilityRequestStatus {
   PENDING = 'PENDING',
-  ACCEPTED = 'ACCEPTED',
-  DECLINED = 'DECLINED',
-  NO_SHOW = 'NO_SHOW',
-  REPLACED = 'REPLACED',
-}
-
-export enum HoldCreationMethod {
-  ADMIN_ONLY = 'ADMIN_ONLY',
-  CLUB_LEADER = 'CLUB_LEADER',
-  ANY_CHECKED_IN = 'ANY_CHECKED_IN',
-}
-
-export enum HoldType {
-  INDIVIDUAL = 'INDIVIDUAL',
-  CLUB = 'CLUB',
-}
-
-export enum QueueStatus {
-  WAITING = 'WAITING',
-  PENDING_ACCEPT = 'PENDING_ACCEPT',
-  ACCEPTED = 'ACCEPTED',
-  SKIPPED = 'SKIPPED',
-  CANCELLED = 'CANCELLED',
-  EXPIRED = 'EXPIRED',
-}
-
-export enum AutoMatchStatus {
-  WAITING = 'WAITING',
-  MATCHED = 'MATCHED',
-  CANCELLED = 'CANCELLED',
-  EXPIRED = 'EXPIRED',
+  APPROVED = 'APPROVED',
+  REJECTED = 'REJECTED',
 }
 
 export enum SkillLevel {
@@ -78,7 +42,44 @@ export enum GameType {
   MIXED_DOUBLES = 'MIXED_DOUBLES',
 }
 
+export enum CourtGameType {
+  DOUBLES = 'DOUBLES',
+  LESSON = 'LESSON',
+}
+
+export enum RecruitmentStatus {
+  RECRUITING = 'RECRUITING',
+  FULL = 'FULL',
+  REGISTERED = 'REGISTERED',
+  CANCELLED = 'CANCELLED',
+  EXPIRED = 'EXPIRED',
+}
+
+export enum PlayerStatus {
+  AVAILABLE = 'AVAILABLE',
+  IN_TURN = 'IN_TURN',
+  RESTING = 'RESTING',
+}
+
 export enum SessionStatus {
   OPEN = 'OPEN',
   CLOSED = 'CLOSED',
+}
+
+export enum RotationStatus {
+  DRAFT = 'DRAFT',
+  ACTIVE = 'ACTIVE',
+  COMPLETED = 'COMPLETED',
+  CANCELLED = 'CANCELLED',
+}
+
+export enum ClubMemberRole {
+  LEADER = 'LEADER',
+  STAFF = 'STAFF',
+  MEMBER = 'MEMBER',
+}
+
+export enum ClubSessionStatus {
+  ACTIVE = 'ACTIVE',
+  ENDED = 'ENDED',
 }

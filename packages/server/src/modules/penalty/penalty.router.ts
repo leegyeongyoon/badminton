@@ -9,7 +9,7 @@ const router = Router();
 // GET /facilities/:id/penalties - admin only, list all NoShowRecords for facility
 router.get('/facilities/:id/penalties', authenticate, async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const facilityId = req.params.id;
+    const facilityId = req.params.id as string;
     const userId = req.user!.userId;
 
     // Check if user is facility admin

@@ -15,42 +15,27 @@ enum UserRole {
 
 enum CourtStatus {
   EMPTY
-  HELD
-  IN_GAME
+  IN_USE
   MAINTENANCE
 }
 
-enum HoldStatus {
-  QUEUED
-  PENDING_ACCEPT
-  ACTIVE
-  RELEASED
-  EXPIRED
-  SWAPPED
-  SKIPPED
-}
-
 enum GameStatus {
-  WAITING
-  CALLING
-  CONFIRMED
   IN_PROGRESS
   COMPLETED
   CANCELLED
 }
 
-enum CallStatus {
-  PENDING
-  ACCEPTED
-  DECLINED
-  NO_SHOW
-  REPLACED
+enum TurnStatus {
+  WAITING
+  PLAYING
+  COMPLETED
+  CANCELLED
 }
 
-enum HoldCreationMethod {
-  ADMIN_ONLY
-  CLUB_LEADER
-  ANY_CHECKED_IN
+enum FacilityRequestStatus {
+  PENDING
+  APPROVED
+  REJECTED
 }
 
 enum SkillLevel {
@@ -66,30 +51,40 @@ enum GameType {
   MIXED_DOUBLES
 }
 
-enum HoldType {
-  INDIVIDUAL
-  CLUB
+enum CourtGameType {
+  DOUBLES
+  LESSON
 }
 
-enum QueueStatus {
-  WAITING
-  PENDING_ACCEPT
-  ACCEPTED
-  SKIPPED
+enum RecruitmentStatus {
+  RECRUITING
+  FULL
+  REGISTERED
   CANCELLED
   EXPIRED
 }
 
-enum AutoMatchStatus {
-  WAITING
-  MATCHED
+enum RotationStatus {
+  DRAFT
+  ACTIVE
+  COMPLETED
   CANCELLED
-  EXPIRED
 }
 
 enum SessionStatus {
   OPEN
   CLOSED
+}
+
+enum ClubMemberRole {
+  LEADER
+  STAFF
+  MEMBER
+}
+
+enum ClubSessionStatus {
+  ACTIVE
+  ENDED
 }
 
 model User {
@@ -103,17 +98,23 @@ model User {
   createdAt      DateTime @default(now())
   updatedAt      DateTime @updatedAt
 
-  facilityAdmins   FacilityAdmin[]
-  checkIns         CheckIn[]
-  clubMembers      ClubMember[]
-  gamePlayers      GamePlayer[]
-  createdHolds     CourtHold[]       @relation("HoldCreator")
-  notifications    Notification[]
-  profile          PlayerProfile?
-  queueEntries     QueueEntry[]
-  autoMatchEntries AutoMatchEntry[]
-  noShowRecords    NoShowRecord[]
-  openedSessions   FacilitySession[] @relation("SessionOpener")
+  facilityAdmins       FacilityAdmin[]
+  checkIns             CheckIn[]
+  clubMembers          ClubMember[]
+  gamePlayers          GamePlayer[]
+  notifications        Notification[]
+  profile              PlayerProfile?
+  noShowRecords        NoShowRecord[]
+  openedSessions       FacilitySession[]    @relation("SessionOpener")
+  createdTurns         CourtTurn[]          @relation("TurnCreator")
+  turnPlayers          TurnPlayer[]
+  facilityRequests     FacilityRequest[]    @relation("RequestCreator")
+  reviewedRequests     FacilityRequest[]    @relation("RequestReviewer")
+  createdRecruitments  GroupRecruitment[]   @relation("RecruitmentCreator")
+  recruitmentMembers   RecruitmentMember[]
+  createdRotations     RotationSchedule[]   @relation("RotationCreator")
+  rotationPlayers      RotationPlayer[]
+  startedClubSessions  ClubSession[]        @relation("ClubSessionStarter")
 }
 
 model PlayerProfile {
@@ -133,46 +134,54 @@ model Facility {
   id         String   @id @default(uuid())
   name       String
   address    String
+  latitude   Float?
+  longitude  Float?
   qrCodeData String   @unique @default(uuid())
   createdAt  DateTime @default(now())
   updatedAt  DateTime @updatedAt
 
-  courts           Court[]
-  admins           FacilityAdmin[]
-  checkIns         CheckIn[]
-  policy           FacilityPolicy?
-  autoMatchEntries AutoMatchEntry[]
-  noShowRecords    NoShowRecord[]
-  sessions         FacilitySession[]
+  courts        Court[]
+  admins        FacilityAdmin[]
+  checkIns      CheckIn[]
+  policy        FacilityPolicy?
+  noShowRecords NoShowRecord[]
+  sessions      FacilitySession[]
+  recruitments  GroupRecruitment[]
+  rotations     RotationSchedule[]
+  homeClubs     Club[]
+  clubSessions  ClubSession[]
 }
 
 model FacilityPolicy {
-  id                        String             @id @default(uuid())
-  facilityId                String             @unique
-  slotsPerCourt             Int                @default(3)
-  holdCreationMethod        HoldCreationMethod @default(CLUB_LEADER)
-  callTimeoutSeconds        Int                @default(120)
-  noShowPenaltyMinutes      Int                @default(30)
-  maxNoShowsBeforeCancel    Int                @default(2)
-  queueAcceptTimeoutSeconds Int                @default(120)
-  maxQueueSize              Int                @default(5)
-  createdAt                 DateTime           @default(now())
-  updatedAt                 DateTime           @updatedAt
+  id                   String   @id @default(uuid())
+  facilityId           String   @unique
+  maxTurnsPerCourt     Int      @default(3)
+  playersPerTurn       Int      @default(4)
+  allowRequeue         Boolean  @default(true)
+  noShowPenaltyMinutes Int      @default(30)
+  turnNotifyEnabled    Boolean  @default(true)
+  gameDurationMinutes  Int?
+  gameWarningMinutes   Int?     @default(2)
+  createdAt            DateTime @default(now())
+  updatedAt            DateTime @updatedAt
 
   facility Facility @relation(fields: [facilityId], references: [id], onDelete: Cascade)
 }
 
 model Court {
-  id         String      @id @default(uuid())
+  id         String        @id @default(uuid())
   name       String
   facilityId String
-  status     CourtStatus @default(EMPTY)
-  createdAt  DateTime    @default(now())
-  updatedAt  DateTime    @updatedAt
+  status     CourtStatus   @default(EMPTY)
+  gameType   CourtGameType @default(DOUBLES)
+  createdAt  DateTime      @default(now())
+  updatedAt  DateTime      @updatedAt
 
-  facility     Facility     @relation(fields: [facilityId], references: [id], onDelete: Cascade)
-  holds        CourtHold[]
-  queueEntries QueueEntry[]
+  facility      Facility          @relation(fields: [facilityId], references: [id], onDelete: Cascade)
+  turns         CourtTurn[]
+  games         Game[]
+  recruitments  GroupRecruitment[] @relation("TargetCourt")
+  rotationSlots RotationSlot[]
 
   @@unique([facilityId, name])
 }
@@ -194,6 +203,7 @@ model CheckIn {
   facilityId   String
   checkedInAt  DateTime  @default(now())
   checkedOutAt DateTime?
+  restingAt    DateTime?
 
   user     User     @relation(fields: [userId], references: [id], onDelete: Cascade)
   facility Facility @relation(fields: [facilityId], references: [id], onDelete: Cascade)
@@ -202,22 +212,23 @@ model CheckIn {
 }
 
 model Club {
-  id         String   @id @default(uuid())
-  name       String
-  inviteCode String   @unique
-  createdAt  DateTime @default(now())
-  updatedAt  DateTime @updatedAt
+  id             String   @id @default(uuid())
+  name           String
+  inviteCode     String   @unique
+  homeFacilityId String?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
 
+  homeFacility Facility?     @relation(fields: [homeFacilityId], references: [id])
   members      ClubMember[]
-  holds        CourtHold[]
-  queueEntries QueueEntry[]
+  sessions     ClubSession[]
 }
 
 model ClubMember {
-  id       String  @id @default(uuid())
-  userId   String
-  clubId   String
-  isLeader Boolean @default(false)
+  id     String         @id @default(uuid())
+  userId String
+  clubId String
+  role   ClubMemberRole @default(MEMBER)
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
   club Club @relation(fields: [clubId], references: [id], onDelete: Cascade)
@@ -225,91 +236,69 @@ model ClubMember {
   @@unique([userId, clubId])
 }
 
-model CourtHold {
-  id              String     @id @default(uuid())
+// --- Turn (순번/고깔) system ---
+
+model CourtTurn {
+  id              String        @id @default(uuid())
   courtId         String
-  clubId          String?
-  userId          String?
-  holdType        HoldType   @default(CLUB)
+  position        Int           // 1~maxTurnsPerCourt
+  status          TurnStatus    @default(WAITING)
+  gameType        CourtGameType @default(DOUBLES)
   createdById     String
-  status          HoldStatus @default(ACTIVE)
-  queuePosition   Int        @default(0)
-  queuedAt        DateTime?
-  acceptDeadline  DateTime?
-  createdAt       DateTime   @default(now())
-  releasedAt      DateTime?
+  clubSessionId   String?
+  createdAt       DateTime      @default(now())
+  startedAt       DateTime?
+  completedAt     DateTime?
+  timeLimitAt     DateTime?
 
-  court     Court  @relation(fields: [courtId], references: [id], onDelete: Cascade)
-  club      Club?  @relation(fields: [clubId], references: [id], onDelete: Cascade)
-  createdBy User   @relation("HoldCreator", fields: [createdById], references: [id])
-  games     Game[]
-
-  @@index([courtId, status])
-  @@index([courtId, queuePosition])
-}
-
-model QueueEntry {
-  id             String      @id @default(uuid())
-  courtId        String
-  userId         String
-  clubId         String?
-  queueType      HoldType    @default(INDIVIDUAL)
-  position       Int
-  status         QueueStatus @default(WAITING)
-  queuedAt       DateTime    @default(now())
-  acceptDeadline DateTime?
-  processedAt    DateTime?
-
-  court Court  @relation(fields: [courtId], references: [id], onDelete: Cascade)
-  user  User   @relation(fields: [userId], references: [id], onDelete: Cascade)
-  club  Club?  @relation(fields: [clubId], references: [id], onDelete: SetNull)
+  court              Court             @relation(fields: [courtId], references: [id], onDelete: Cascade)
+  createdBy          User              @relation("TurnCreator", fields: [createdById], references: [id])
+  clubSession        ClubSession?      @relation(fields: [clubSessionId], references: [id])
+  players            TurnPlayer[]
+  game               Game?
+  fromRecruitment    GroupRecruitment? @relation("RegisteredTurn")
 
   @@index([courtId, position])
   @@index([courtId, status])
-  @@index([userId])
+  @@index([clubSessionId])
+}
+
+model TurnPlayer {
+  id     String @id @default(uuid())
+  turnId String
+  userId String
+
+  turn CourtTurn @relation(fields: [turnId], references: [id], onDelete: Cascade)
+  user User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([turnId, userId])
 }
 
 model Game {
   id        String     @id @default(uuid())
-  holdId    String
-  order     Int
-  status    GameStatus @default(WAITING)
+  turnId    String     @unique
+  courtId   String
+  status    GameStatus @default(IN_PROGRESS)
   createdAt DateTime   @default(now())
   updatedAt DateTime   @updatedAt
 
-  hold         CourtHold    @relation(fields: [holdId], references: [id], onDelete: Cascade)
-  players      GamePlayer[]
+  turn          CourtTurn    @relation(fields: [turnId], references: [id], onDelete: Cascade)
+  court         Court        @relation(fields: [courtId], references: [id], onDelete: Cascade)
+  players       GamePlayer[]
   noShowRecords NoShowRecord[]
 
-  @@index([holdId, order])
+  @@index([courtId])
 }
 
 model GamePlayer {
-  id         String     @id @default(uuid())
-  gameId     String
-  userId     String
-  callStatus CallStatus @default(PENDING)
+  id     String @id @default(uuid())
+  gameId String
+  userId String
 
   game Game @relation(fields: [gameId], references: [id], onDelete: Cascade)
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@unique([gameId, userId])
-}
-
-model AutoMatchEntry {
-  id         String          @id @default(uuid())
-  userId     String
-  facilityId String
-  gameType   GameType        @default(DOUBLES)
-  status     AutoMatchStatus @default(WAITING)
-  joinedAt   DateTime        @default(now())
-  matchedAt  DateTime?
-
-  user     User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  facility Facility @relation(fields: [facilityId], references: [id], onDelete: Cascade)
-
-  @@index([facilityId, status, gameType])
-  @@unique([userId, facilityId])
 }
 
 model NoShowRecord {
@@ -328,6 +317,25 @@ model NoShowRecord {
   @@index([userId, penaltyEndsAt])
 }
 
+// --- Facility Request ---
+
+model FacilityRequest {
+  id           String                @id @default(uuid())
+  userId       String
+  name         String
+  address      String
+  status       FacilityRequestStatus @default(PENDING)
+  reviewNote   String?
+  reviewedById String?
+  createdAt    DateTime              @default(now())
+  reviewedAt   DateTime?
+
+  user       User  @relation("RequestCreator", fields: [userId], references: [id], onDelete: Cascade)
+  reviewedBy User? @relation("RequestReviewer", fields: [reviewedById], references: [id])
+
+  @@index([status])
+}
+
 model FacilitySession {
   id         String        @id @default(uuid())
   facilityId String
@@ -337,8 +345,10 @@ model FacilitySession {
   closedAt   DateTime?
   note       String?
 
-  facility Facility @relation(fields: [facilityId], references: [id], onDelete: Cascade)
-  openedBy User     @relation("SessionOpener", fields: [openedById], references: [id])
+  facility     Facility           @relation(fields: [facilityId], references: [id], onDelete: Cascade)
+  openedBy     User               @relation("SessionOpener", fields: [openedById], references: [id])
+  rotations    RotationSchedule[]
+  clubSessions ClubSession[]
 
   @@index([facilityId, status])
 }
@@ -354,15 +364,6 @@ model ScheduledJob {
   @@index([executed, executeAt])
 }
 
-model SwapRequest {
-  id               String   @id @default(uuid())
-  requestingHoldId String
-  targetHoldId     String
-  status           String   @default("PENDING")
-  createdAt        DateTime @default(now())
-  updatedAt        DateTime @updatedAt
-}
-
 model Notification {
   id        String   @id @default(uuid())
   userId    String
@@ -375,4 +376,124 @@ model Notification {
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([userId, read])
+}
+
+// --- Group Recruitment (조 모집) ---
+
+model GroupRecruitment {
+  id               String            @id @default(uuid())
+  facilityId       String
+  createdById      String
+  gameType         CourtGameType     @default(DOUBLES)
+  playersRequired  Int               @default(4)
+  targetCourtId    String?
+  status           RecruitmentStatus @default(RECRUITING)
+  message          String?
+  createdAt        DateTime          @default(now())
+  expiresAt        DateTime
+  registeredTurnId String?           @unique
+
+  facility       Facility           @relation(fields: [facilityId], references: [id], onDelete: Cascade)
+  createdBy      User               @relation("RecruitmentCreator", fields: [createdById], references: [id])
+  targetCourt    Court?             @relation("TargetCourt", fields: [targetCourtId], references: [id])
+  registeredTurn CourtTurn?         @relation("RegisteredTurn", fields: [registeredTurnId], references: [id])
+  members        RecruitmentMember[]
+
+  @@index([facilityId, status])
+}
+
+model RecruitmentMember {
+  id            String   @id @default(uuid())
+  recruitmentId String
+  userId        String
+  joinedAt      DateTime @default(now())
+
+  recruitment GroupRecruitment @relation(fields: [recruitmentId], references: [id], onDelete: Cascade)
+  user        User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([recruitmentId, userId])
+}
+
+// --- Rotation (로테이션/게임 편성) ---
+
+model RotationSchedule {
+  id              String          @id @default(uuid())
+  facilityId      String
+  sessionId       String
+  createdById     String
+  clubSessionId   String?
+  status          RotationStatus  @default(DRAFT)
+  totalRounds     Int
+  currentRound    Int             @default(0)
+  playerCount     Int
+  courtCount      Int
+  createdAt       DateTime        @default(now())
+  startedAt       DateTime?
+  completedAt     DateTime?
+
+  facility      Facility        @relation(fields: [facilityId], references: [id], onDelete: Cascade)
+  session       FacilitySession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  createdBy     User            @relation("RotationCreator", fields: [createdById], references: [id])
+  clubSession   ClubSession?    @relation(fields: [clubSessionId], references: [id])
+  slots         RotationSlot[]
+  players       RotationPlayer[]
+
+  @@index([facilityId, status])
+  @@index([clubSessionId])
+}
+
+model RotationSlot {
+  id            String   @id @default(uuid())
+  scheduleId    String
+  round         Int
+  courtIndex    Int
+  courtId       String
+  playerIds     String[]
+  turnId        String?
+  materialized  Boolean  @default(false)
+  completed     Boolean  @default(false)
+
+  schedule      RotationSchedule @relation(fields: [scheduleId], references: [id], onDelete: Cascade)
+  court         Court            @relation(fields: [courtId], references: [id], onDelete: Cascade)
+
+  @@unique([scheduleId, round, courtIndex])
+  @@index([scheduleId, round])
+}
+
+model RotationPlayer {
+  id            String @id @default(uuid())
+  scheduleId    String
+  userId        String
+  gamesAssigned Int    @default(0)
+  gamesPlayed   Int    @default(0)
+  sittingOut    Int    @default(0)
+
+  schedule      RotationSchedule @relation(fields: [scheduleId], references: [id], onDelete: Cascade)
+  user          User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([scheduleId, userId])
+}
+
+// --- Club Session (모임 세션) ---
+
+model ClubSession {
+  id                String            @id @default(uuid())
+  clubId            String
+  facilityId        String
+  facilitySessionId String
+  startedById       String
+  status            ClubSessionStatus @default(ACTIVE)
+  courtIds          String[]
+  startedAt         DateTime          @default(now())
+  endedAt           DateTime?
+
+  club              Club              @relation(fields: [clubId], references: [id], onDelete: Cascade)
+  facility          Facility          @relation(fields: [facilityId], references: [id], onDelete: Cascade)
+  facilitySession   FacilitySession   @relation(fields: [facilitySessionId], references: [id], onDelete: Cascade)
+  startedBy         User              @relation("ClubSessionStarter", fields: [startedById], references: [id])
+  turns             CourtTurn[]
+  rotations         RotationSchedule[]
+
+  @@index([clubId, status])
+  @@index([facilityId, status])
 }

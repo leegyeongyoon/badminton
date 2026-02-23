@@ -2,62 +2,16 @@ import { Router, Request, Response, NextFunction } from 'express';
 import { updateProfileSchema } from '@badminton/shared';
 import { authenticate } from '../../middleware/auth';
 import { validate } from '../../middleware/validate';
-import { prisma } from '../../utils/prisma';
 import * as userService from './user.service';
+import * as turnService from '../turn/turn.service';
 
 const router = Router();
 
-// GET /users/me/games/current - get my current active game
-router.get('/me/games/current', authenticate, async (req: Request, res: Response, next: NextFunction) => {
+// GET /users/me/turns/current - get my active turns
+router.get('/me/turns/current', authenticate, async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const userId = req.user!.userId;
-
-    const activeGamePlayer = await prisma.gamePlayer.findFirst({
-      where: {
-        userId,
-        game: {
-          status: { in: ['WAITING', 'CALLING', 'CONFIRMED', 'IN_PROGRESS'] },
-          hold: {
-            status: 'ACTIVE',
-          },
-        },
-      },
-      include: {
-        game: {
-          include: {
-            players: { include: { user: true } },
-            hold: {
-              include: {
-                court: true,
-              },
-            },
-          },
-        },
-      },
-      orderBy: {
-        game: { order: 'asc' },
-      },
-    });
-
-    if (!activeGamePlayer) {
-      res.json(null);
-      return;
-    }
-
-    const game = activeGamePlayer.game;
-    res.json({
-      gameId: game.id,
-      courtName: game.hold.court.name,
-      order: game.order,
-      status: game.status,
-      teammates: game.players.map((p) => ({
-        id: p.id,
-        userId: p.userId,
-        userName: p.user.name,
-        callStatus: p.callStatus,
-      })),
-      myCallStatus: activeGamePlayer.callStatus,
-    });
+    const turns = await turnService.getMyTurns(req.user!.userId);
+    res.json(turns);
   } catch (err) { next(err); }
 });
 
@@ -100,6 +54,14 @@ router.get('/me/penalties', authenticate, async (req: Request, res: Response, ne
   try {
     const penalties = await userService.getPenalties(req.user!.userId);
     res.json(penalties);
+  } catch (err) { next(err); }
+});
+
+// GET /users/me/admin-facilities - get facilities where user is admin
+router.get('/me/admin-facilities', authenticate, async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const facilities = await userService.getAdminFacilities(req.user!.userId);
+    res.json(facilities);
   } catch (err) { next(err); }
 });
 
