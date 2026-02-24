@@ -99,7 +99,7 @@ export default function BoardScreen() {
       />
 
       {/* My status: game in progress / waiting / idle */}
-      <MyStatusSection onCheckinPress={() => router.push('/(tabs)/checkin')} isAdmin={isAdmin} />
+      <MyStatusSection onCheckinPress={() => router.push('/(tabs)/checkin')} />
 
       {/* Capacity bar */}
       {capacity && <CapacityBar capacity={capacity} />}

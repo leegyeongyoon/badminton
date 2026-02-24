@@ -18,6 +18,7 @@ import { useClubStore } from '../../store/clubStore';
 import { Colors } from '../../constants/colors';
 import { Strings } from '../../constants/strings';
 import { showAlert, showConfirm } from '../../utils/alert';
+import { showSuccess } from '../../utils/feedback';
 import api from '../../services/api';
 import { checkinApi } from '../../services/checkin';
 import { profileApi } from '../../services/profile';
@@ -70,7 +71,7 @@ export default function SettingsScreen() {
       try {
         await checkinApi.checkOut();
         await fetchStatus();
-        showAlert('완료', '체크아웃 되었습니다');
+        showSuccess('체크아웃 되었습니다');
       } catch (err: any) {
         showAlert('오류', err.response?.data?.error || '체크아웃에 실패했습니다');
       }

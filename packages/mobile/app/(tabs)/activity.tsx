@@ -23,6 +23,7 @@ import { PlayerAvatarRow } from '../../components/shared/PlayerAvatarRow';
 import { Colors } from '../../constants/colors';
 import { Strings } from '../../constants/strings';
 import { showAlert, showConfirm } from '../../utils/alert';
+import { showSuccess } from '../../utils/feedback';
 import api from '../../services/api';
 
 interface GameHistoryItem {
@@ -53,7 +54,6 @@ export default function ActivityScreen() {
   const [todayGames, setTodayGames] = useState<GameHistoryItem[]>([]);
   const [myRecruitments, setMyRecruitments] = useState<RecruitmentItem[]>([]);
   const [activeSession, setActiveSession] = useState<any>(null);
-  const [isAdmin, setIsAdmin] = useState(false);
   const [history, setHistory] = useState<any[]>([]);
   const [historyPage, setHistoryPage] = useState(1);
   const [hasMoreHistory, setHasMoreHistory] = useState(true);
@@ -68,17 +68,7 @@ export default function ActivityScreen() {
     loadTodayHistory();
     loadMyRecruitments();
     loadActiveClubSession();
-    checkAdminStatus();
   }, []);
-
-  const checkAdminStatus = async () => {
-    try {
-      const { data } = await api.get('/users/me/admin-facilities');
-      setIsAdmin(Array.isArray(data) && data.length > 0);
-    } catch {
-      setIsAdmin(false);
-    }
-  };
 
   const loadTodayHistory = async () => {
     try {
@@ -157,7 +147,7 @@ export default function ActivityScreen() {
     try {
       await courtApi.extendTurn(turnId, 15);
       fetchMyTurns();
-      showAlert('알림', '시간이 15분 연장되었습니다');
+      showSuccess('시간이 15분 연장되었습니다');
     } catch (err: any) {
       showAlert('오류', err.response?.data?.error || '시간 연장에 실패했습니다');
     }
@@ -168,7 +158,7 @@ export default function ActivityScreen() {
       try {
         await courtApi.requeueTurn(gameId);
         fetchMyTurns();
-        showAlert('알림', '다시 대기열에 등록되었습니다');
+        showSuccess('다시 대기열에 등록되었습니다');
       } catch (err: any) {
         showAlert('오류', err.response?.data?.message || '다시 줄서기에 실패했습니다');
       }
@@ -284,14 +274,12 @@ export default function ActivityScreen() {
               ))}
             </View>
             <View style={styles.playingActions}>
-              {isAdmin && (
-                <TouchableOpacity
-                  style={styles.extendButton}
-                  onPress={() => handleExtendTurn(turn.turnId)}
-                >
-                  <Text style={styles.extendButtonText}>+15분 연장</Text>
-                </TouchableOpacity>
-              )}
+              <TouchableOpacity
+                style={styles.extendButton}
+                onPress={() => handleExtendTurn(turn.turnId)}
+              >
+                <Text style={styles.extendButtonText}>+15분 연장</Text>
+              </TouchableOpacity>
               <TouchableOpacity
                 style={[styles.completeButton, { flex: 1 }]}
                 onPress={() => handleCompleteTurn(turn.turnId)}

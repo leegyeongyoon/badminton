@@ -2,6 +2,9 @@ import { useEffect, useState, useCallback } from 'react';
 import { Tabs } from 'expo-router';
 import { Text, View, StyleSheet } from 'react-native';
 import { useFacilityStore } from '../../store/facilityStore';
+import { useAuthStore } from '../../store/authStore';
+import { useSocketToast } from '../../hooks/useSocketToast';
+import { useUserRoom } from '../../hooks/useSocket';
 import { Colors } from '../../constants/colors';
 import { Strings } from '../../constants/strings';
 import api from '../../services/api';
@@ -37,8 +40,13 @@ const badgeStyles = StyleSheet.create({
 
 export default function TabsLayout() {
   const { selectedFacility } = useFacilityStore();
+  const { user } = useAuthStore();
   const facilityName = selectedFacility?.name || '';
   const [unreadCount, setUnreadCount] = useState(0);
+
+  // Socket toast notifications for real-time events
+  useUserRoom(user?.id);
+  useSocketToast();
 
   const loadUnreadCount = useCallback(async () => {
     try {

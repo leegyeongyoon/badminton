@@ -15,10 +15,9 @@ import { showSuccess } from '../../utils/feedback';
 
 interface MyStatusSectionProps {
   onCheckinPress: () => void;
-  isAdmin?: boolean;
 }
 
-export function MyStatusSection({ onCheckinPress, isAdmin }: MyStatusSectionProps) {
+export function MyStatusSection({ onCheckinPress }: MyStatusSectionProps) {
   const { myTurns, fetchMyTurns } = useTurnStore();
   const { status: checkinStatus } = useCheckinStore();
   const { user } = useAuthStore();
@@ -141,19 +140,17 @@ export function MyStatusSection({ onCheckinPress, isAdmin }: MyStatusSectionProp
         </View>
 
         <View style={styles.playingActions}>
-          {isAdmin && (
-            <TouchableOpacity
-              style={styles.extendButton}
-              onPress={() => handleExtendTurn(turn.turnId)}
-              disabled={extendLoading}
-            >
-              {extendLoading ? (
-                <ActivityIndicator size="small" color={Colors.primary} />
-              ) : (
-                <Text style={styles.extendButtonText}>+15분</Text>
-              )}
-            </TouchableOpacity>
-          )}
+          <TouchableOpacity
+            style={styles.extendButton}
+            onPress={() => handleExtendTurn(turn.turnId)}
+            disabled={extendLoading}
+          >
+            {extendLoading ? (
+              <ActivityIndicator size="small" color={Colors.primary} />
+            ) : (
+              <Text style={styles.extendButtonText}>+15분</Text>
+            )}
+          </TouchableOpacity>
           <TouchableOpacity
             style={[styles.completeButton, { flex: 1 }]}
             onPress={() => handleCompleteTurn(turn.turnId)}

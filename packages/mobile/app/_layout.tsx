@@ -5,6 +5,7 @@ import { StatusBar } from 'expo-status-bar';
 import { useAuthStore } from '../store/authStore';
 import { useCheckinStore } from '../store/checkinStore';
 import { useFacilityStore } from '../store/facilityStore';
+import { ToastContainer } from '../components/shared/Toast';
 import { Colors } from '../constants/colors';
 
 export default function RootLayout() {
@@ -77,6 +78,7 @@ export default function RootLayout() {
         <Stack.Screen name="recruitment/create" />
         <Stack.Screen name="change-password" />
       </Stack>
+      <ToastContainer />
     </>
   );
 }
