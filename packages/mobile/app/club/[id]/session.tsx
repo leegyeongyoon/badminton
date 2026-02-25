@@ -7,7 +7,6 @@ import {
   ScrollView,
   RefreshControl,
   Modal,
-  FlatList,
 } from 'react-native';
 import { useLocalSearchParams, useRouter, Stack } from 'expo-router';
 import { clubSessionApi } from '../../../services/clubSession';
@@ -87,8 +86,6 @@ export default function ClubSessionScreen() {
   const [boardData, setBoardData] = useState<CourtData[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
-  const [showBulkModal, setShowBulkModal] = useState(false);
-  const [bulkAssignments, setBulkAssignments] = useState<Record<string, string[]>>({});
   const [showCourtModal, setShowCourtModal] = useState(false);
   const [allCourts, setAllCourts] = useState<FacilityCourt[]>([]);
   const [selectedCourtIds, setSelectedCourtIds] = useState<string[]>([]);
@@ -153,37 +150,6 @@ export default function ClubSessionScreen() {
     );
   };
 
-  const handleBulkRegister = async () => {
-    if (!session) return;
-    const turns = Object.entries(bulkAssignments)
-      .filter(([, playerIds]) => playerIds.length > 0)
-      .map(([courtId, playerIds]) => ({ courtId, playerIds }));
-
-    if (turns.length === 0) {
-      showAlert('알림', '최소 1개 코트에 참가자를 배정하세요');
-      return;
-    }
-
-    try {
-      await clubSessionApi.bulkRegisterTurns(session.id, turns);
-      setShowBulkModal(false);
-      setBulkAssignments({});
-      loadData();
-    } catch (err: any) {
-      showAlert(Strings.common.error, err?.response?.data?.error || '턴 등록에 실패했습니다');
-    }
-  };
-
-  const toggleBulkPlayer = (courtId: string, userId: string) => {
-    setBulkAssignments((prev) => {
-      const current = prev[courtId] || [];
-      if (current.includes(userId)) {
-        return { ...prev, [courtId]: current.filter((id) => id !== userId) };
-      }
-      if (current.length >= 4) return prev;
-      return { ...prev, [courtId]: [...current, userId] };
-    });
-  };
 
   // Court management
   const openCourtModal = () => {
@@ -208,22 +174,6 @@ export default function ClubSessionScreen() {
     }
   };
 
-  // Auto-recommend balanced groups
-  const handleAutoAssign = () => {
-    const available = checkedInMembers.filter((m) => m.playerStatus === 'AVAILABLE');
-    const courts = sessionCourts.map((c) => c.court.id);
-    const assignments: Record<string, string[]> = {};
-    let idx = 0;
-    for (const courtId of courts) {
-      const group: string[] = [];
-      while (group.length < 4 && idx < available.length) {
-        group.push(available[idx].userId);
-        idx++;
-      }
-      assignments[courtId] = group;
-    }
-    setBulkAssignments(assignments);
-  };
 
   // Rotation
   const handleAdvanceRotation = () => {
@@ -245,7 +195,7 @@ export default function ClubSessionScreen() {
 
   const checkedInMembers = members.filter((m) => m.isCheckedIn);
   const sessionCourts = boardData.filter(
-    (c) => session?.courtIds.includes(c.court.id),
+    (c) => session?.courtIds?.includes(c.court.id),
   );
 
   // Group members by status
@@ -397,8 +347,9 @@ export default function ClubSessionScreen() {
             관리 코트 ({sessionCourts.length})
           </Text>
           {sessionCourts.map((c) => {
-            const playingTurn = c.turns.find((t: any) => t.status === 'PLAYING');
-            const waitingCount = c.turns.filter((t: any) => t.status === 'WAITING').length;
+            const turns = c.turns || [];
+            const playingTurn = turns.find((t: any) => t.status === 'PLAYING');
+            const waitingCount = turns.filter((t: any) => t.status === 'WAITING').length;
 
             return (
               <TouchableOpacity
@@ -409,7 +360,7 @@ export default function ClubSessionScreen() {
                 <View style={styles.courtCardHeader}>
                   <Text style={styles.courtCardName}>{c.court.name}</Text>
                   <Text style={styles.courtCardTurns}>
-                    {c.turns.length}/{c.maxTurns}
+                    {turns.length}/{c.maxTurns}
                   </Text>
                 </View>
                 {playingTurn ? (
@@ -430,7 +381,7 @@ export default function ClubSessionScreen() {
         {/* Rotation integration */}
         {rotation && (
           <View style={styles.section}>
-            <Text style={styles.sectionTitle}>게임 편성</Text>
+            <Text style={styles.sectionTitle}>자동 편성 (로테이션)</Text>
             <View style={styles.rotationCard}>
               <View style={styles.rotationHeader}>
                 <View style={styles.rotationProgressRow}>
@@ -453,7 +404,7 @@ export default function ClubSessionScreen() {
                 </View>
               </View>
               <Text style={styles.rotationParticipants}>
-                참가자 {rotation.participants.length}명
+                참가자 {rotation.participants?.length || 0}명
               </Text>
               <View style={styles.rotationActions}>
                 {rotation.status === 'ACTIVE' && rotation.currentRound < rotation.totalRounds && (
@@ -475,122 +426,30 @@ export default function ClubSessionScreen() {
         {/* Action buttons */}
         <View style={styles.actions}>
           <TouchableOpacity
-            style={[styles.actionBtn, { backgroundColor: Colors.primary }]}
-            onPress={() => {
-              setBulkAssignments({});
-              setShowBulkModal(true);
-            }}
+            style={[styles.actionBtn, styles.primaryActionBtn]}
+            onPress={() => router.push(`/game-board?clubSessionId=${session.id}&clubName=${encodeURIComponent(session.clubName)}`)}
           >
-            <Text style={styles.actionBtnText}>턴 일괄 등록</Text>
+            <Text style={styles.primaryActionBtnText}>모임판에서 게임 짜기</Text>
+            <Text style={styles.primaryActionBtnSub}>코트별로 멤버를 배정하고 등록하세요</Text>
           </TouchableOpacity>
 
-          <TouchableOpacity
-            style={[styles.actionBtn, { backgroundColor: '#7C3AED' }]}
-            onPress={() => router.push(`/admin/rotation?clubSessionId=${session.id}`)}
-          >
-            <Text style={styles.actionBtnText}>로테이션 시작</Text>
-          </TouchableOpacity>
+          <View style={styles.secondaryActions}>
+            <TouchableOpacity
+              style={[styles.secondaryBtn, { backgroundColor: '#EDE9FE' }]}
+              onPress={() => router.push(`/admin/rotation?clubSessionId=${session.id}`)}
+            >
+              <Text style={[styles.secondaryBtnText, { color: '#7C3AED' }]}>자동 편성</Text>
+            </TouchableOpacity>
 
-          <TouchableOpacity
-            style={[styles.actionBtn, { backgroundColor: Colors.danger }]}
-            onPress={handleEndSession}
-          >
-            <Text style={styles.actionBtnText}>모임 종료</Text>
-          </TouchableOpacity>
-        </View>
-      </ScrollView>
-
-      {/* Bulk register modal */}
-      <Modal visible={showBulkModal} transparent animationType="slide">
-        <View style={styles.modalOverlay}>
-          <View style={styles.modalContent}>
-            <View style={styles.modalHeader}>
-              <Text style={styles.modalTitle}>턴 일괄 등록</Text>
-              <TouchableOpacity onPress={() => setShowBulkModal(false)}>
-                <Text style={styles.modalClose}>✕</Text>
-              </TouchableOpacity>
-            </View>
-
-            <View style={styles.bulkCapacityInfo}>
-              <Text style={styles.bulkCapacityText}>
-                코트당 4명 (복식) | 가용 멤버 {checkedInMembers.filter((m) => m.playerStatus === 'AVAILABLE').length}명 | 코트 {sessionCourts.length}개
-              </Text>
-              <TouchableOpacity style={styles.autoAssignBtn} onPress={handleAutoAssign}>
-                <Text style={styles.autoAssignBtnText}>추천 배정</Text>
-              </TouchableOpacity>
-            </View>
-
-            <ScrollView style={styles.modalScroll}>
-              {sessionCourts.map((c) => {
-                const assigned = bulkAssignments[c.court.id] || [];
-                return (
-                  <View key={c.court.id} style={styles.bulkCourtSection}>
-                    <View style={styles.bulkCourtHeader}>
-                      <Text style={styles.bulkCourtName}>
-                        {c.court.name}
-                      </Text>
-                      <Text style={[
-                        styles.bulkCourtCount,
-                        assigned.length === 4 && { color: Colors.playerAvailable },
-                      ]}>
-                        {assigned.length}/4
-                      </Text>
-                    </View>
-                    <View style={styles.bulkSlots}>
-                      {[0, 1, 2, 3].map((slot) => {
-                        const playerId = assigned[slot];
-                        const player = playerId ? checkedInMembers.find((m) => m.userId === playerId) : null;
-                        return (
-                          <View key={slot} style={[styles.bulkSlot, player && styles.bulkSlotFilled]}>
-                            {player ? (
-                              <TouchableOpacity
-                                style={styles.bulkSlotContent}
-                                onPress={() => toggleBulkPlayer(c.court.id, player.userId)}
-                              >
-                                <Text style={styles.bulkSlotName}>{player.name}</Text>
-                                <Text style={styles.bulkSlotRemove}>✕</Text>
-                              </TouchableOpacity>
-                            ) : (
-                              <Text style={styles.bulkSlotEmpty}>빈 슬롯</Text>
-                            )}
-                          </View>
-                        );
-                      })}
-                    </View>
-                    {checkedInMembers
-                      .filter((m) => m.playerStatus === 'AVAILABLE' && !assigned.includes(m.userId))
-                      .filter((m) => !Object.entries(bulkAssignments).some(
-                        ([cId, pIds]) => cId !== c.court.id && pIds.includes(m.userId),
-                      ))
-                      .length > 0 && assigned.length < 4 && (
-                      <View style={styles.bulkAvailableList}>
-                        {checkedInMembers
-                          .filter((m) => m.playerStatus === 'AVAILABLE' && !assigned.includes(m.userId))
-                          .filter((m) => !Object.entries(bulkAssignments).some(
-                            ([cId, pIds]) => cId !== c.court.id && pIds.includes(m.userId),
-                          ))
-                          .map((m) => (
-                            <TouchableOpacity
-                              key={m.userId}
-                              style={styles.bulkAvailableChip}
-                              onPress={() => toggleBulkPlayer(c.court.id, m.userId)}
-                            >
-                              <Text style={styles.bulkAvailableChipText}>+ {m.name}</Text>
-                            </TouchableOpacity>
-                          ))}
-                      </View>
-                    )}
-                  </View>
-                );
-              })}
-            </ScrollView>
-
-            <TouchableOpacity style={styles.bulkConfirmBtn} onPress={handleBulkRegister}>
-              <Text style={styles.bulkConfirmText}>일괄 등록</Text>
+            <TouchableOpacity
+              style={[styles.secondaryBtn, { backgroundColor: Colors.dangerLight || '#FEE2E2' }]}
+              onPress={handleEndSession}
+            >
+              <Text style={[styles.secondaryBtnText, { color: Colors.danger }]}>모임 종료</Text>
             </TouchableOpacity>
           </View>
         </View>
-      </Modal>
+      </ScrollView>
 
       {/* Court management modal */}
       <Modal visible={showCourtModal} transparent animationType="slide">
@@ -840,6 +699,36 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '700',
   },
+  primaryActionBtn: {
+    backgroundColor: Colors.primary,
+    borderRadius: 16,
+    paddingVertical: 18,
+    gap: 4,
+  },
+  primaryActionBtnText: {
+    color: '#fff',
+    fontSize: 18,
+    fontWeight: '800',
+  },
+  primaryActionBtnSub: {
+    color: 'rgba(255,255,255,0.7)',
+    fontSize: 12,
+    fontWeight: '500',
+  },
+  secondaryActions: {
+    flexDirection: 'row',
+    gap: 10,
+  },
+  secondaryBtn: {
+    flex: 1,
+    borderRadius: 12,
+    paddingVertical: 12,
+    alignItems: 'center',
+  },
+  secondaryBtnText: {
+    fontSize: 14,
+    fontWeight: '600',
+  },
   // Modal
   modalOverlay: {
     flex: 1,
@@ -873,30 +762,6 @@ const styles = StyleSheet.create({
     maxHeight: 400,
   },
   // Bulk register
-  bulkCourtSection: {
-    marginBottom: 16,
-  },
-  bulkCourtName: {
-    fontSize: 15,
-    fontWeight: '700',
-    color: '#7C3AED',
-    marginBottom: 8,
-  },
-  bulkPlayerRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingVertical: 8,
-    paddingHorizontal: 8,
-    borderRadius: 8,
-    marginBottom: 2,
-    gap: 10,
-  },
-  bulkPlayerRowActive: {
-    backgroundColor: Colors.primaryLight,
-  },
-  bulkPlayerRowDisabled: {
-    opacity: 0.4,
-  },
   bulkCheckbox: {
     width: 20,
     height: 20,
@@ -914,11 +779,6 @@ const styles = StyleSheet.create({
     color: '#fff',
     fontSize: 12,
     fontWeight: '700',
-  },
-  bulkPlayerName: {
-    fontSize: 14,
-    color: Colors.text,
-    fontWeight: '500',
   },
   bulkConfirmBtn: {
     backgroundColor: Colors.primary,
@@ -1048,104 +908,6 @@ const styles = StyleSheet.create({
     color: '#7C3AED',
     fontSize: 14,
     fontWeight: '600',
-  },
-  // Bulk improvements
-  bulkCapacityInfo: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    backgroundColor: Colors.primaryLight,
-    borderRadius: 8,
-    padding: 10,
-    marginBottom: 12,
-  },
-  bulkCapacityText: {
-    fontSize: 12,
-    color: Colors.primary,
-    fontWeight: '500',
-    flex: 1,
-  },
-  autoAssignBtn: {
-    backgroundColor: Colors.primary,
-    borderRadius: 6,
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    marginLeft: 8,
-  },
-  autoAssignBtnText: {
-    color: '#fff',
-    fontSize: 12,
-    fontWeight: '700',
-  },
-  bulkCourtHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 8,
-  },
-  bulkCourtCount: {
-    fontSize: 14,
-    fontWeight: '700',
-    color: Colors.textLight,
-  },
-  bulkSlots: {
-    flexDirection: 'row',
-    gap: 6,
-    marginBottom: 8,
-  },
-  bulkSlot: {
-    flex: 1,
-    backgroundColor: Colors.divider,
-    borderRadius: 8,
-    paddingVertical: 8,
-    paddingHorizontal: 4,
-    alignItems: 'center',
-    borderWidth: 1,
-    borderColor: Colors.border,
-    borderStyle: 'dashed',
-  },
-  bulkSlotFilled: {
-    backgroundColor: Colors.primaryLight,
-    borderColor: Colors.primary,
-    borderStyle: 'solid',
-  },
-  bulkSlotContent: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-  },
-  bulkSlotName: {
-    fontSize: 12,
-    fontWeight: '600',
-    color: Colors.primary,
-  },
-  bulkSlotRemove: {
-    fontSize: 10,
-    color: Colors.danger,
-    fontWeight: '700',
-  },
-  bulkSlotEmpty: {
-    fontSize: 11,
-    color: Colors.textLight,
-  },
-  bulkAvailableList: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 6,
-    paddingTop: 4,
-  },
-  bulkAvailableChip: {
-    backgroundColor: Colors.surface,
-    borderWidth: 1,
-    borderColor: Colors.border,
-    borderRadius: 6,
-    paddingHorizontal: 10,
-    paddingVertical: 5,
-  },
-  bulkAvailableChipText: {
-    fontSize: 12,
-    color: Colors.textSecondary,
-    fontWeight: '500',
   },
   // Court toggle
   courtToggleRow: {

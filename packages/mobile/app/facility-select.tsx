@@ -14,6 +14,7 @@ import * as Location from 'expo-location';
 import { useFacilityStore } from '../store/facilityStore';
 import KakaoMap from '../components/KakaoMap';
 import { Colors } from '../constants/colors';
+import { createShadow } from '../constants/theme';
 import { Strings } from '../constants/strings';
 
 type ViewMode = 'list' | 'map';
@@ -305,11 +306,7 @@ const styles = StyleSheet.create({
   },
   toggleButtonActive: {
     backgroundColor: Colors.surface,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.1,
-    shadowRadius: 2,
-    elevation: 2,
+    ...createShadow(1, 2, 0.1, 2),
   },
   toggleText: {
     fontSize: 14,
@@ -342,11 +339,7 @@ const styles = StyleSheet.create({
     borderRadius: 14,
     padding: 16,
     marginBottom: 10,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.06,
-    shadowRadius: 4,
-    elevation: 2,
+    ...createShadow(1, 4, 0.06, 2),
   },
   facilityCardContent: {
     flexDirection: 'row',

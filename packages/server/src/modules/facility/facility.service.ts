@@ -375,6 +375,87 @@ export async function getTodayStats(facilityId: string) {
   return { totalGames, avgWaitMinutes, peakPlayers };
 }
 
+export async function getWeeklyTrends(facilityId: string): Promise<{ day: string; count: number }[]> {
+  const facility = await prisma.facility.findUnique({
+    where: { id: facilityId },
+    include: { courts: { select: { id: true } } },
+  });
+  if (!facility) throw new NotFoundError('시설');
+
+  const courtIds = facility.courts.map((c) => c.id);
+  const now = new Date();
+  const results: { day: string; count: number }[] = [];
+
+  for (let i = 6; i >= 0; i--) {
+    const date = new Date(now);
+    date.setDate(date.getDate() - i);
+    const startOfDay = new Date(date);
+    startOfDay.setHours(0, 0, 0, 0);
+    const endOfDay = new Date(date);
+    endOfDay.setHours(23, 59, 59, 999);
+
+    const count = await prisma.game.count({
+      where: {
+        courtId: { in: courtIds },
+        status: 'COMPLETED',
+        createdAt: { gte: startOfDay, lte: endOfDay },
+      },
+    });
+
+    const dayLabel = ['일', '월', '화', '수', '목', '금', '토'][date.getDay()];
+    results.push({ day: dayLabel, count });
+  }
+
+  return results;
+}
+
+export async function getPeakHours(facilityId: string): Promise<{
+  hours: string[];
+  days: string[];
+  data: number[][];
+}> {
+  const facility = await prisma.facility.findUnique({
+    where: { id: facilityId },
+    include: { courts: { select: { id: true } } },
+  });
+  if (!facility) throw new NotFoundError('시설');
+
+  const courtIds = facility.courts.map((c) => c.id);
+
+  // Get all completed games from the last 4 weeks
+  const fourWeeksAgo = new Date();
+  fourWeeksAgo.setDate(fourWeeksAgo.getDate() - 28);
+
+  const games = await prisma.game.findMany({
+    where: {
+      courtId: { in: courtIds },
+      status: 'COMPLETED',
+      createdAt: { gte: fourWeeksAgo },
+    },
+    select: { createdAt: true },
+  });
+
+  const hours = ['06', '07', '08', '09', '10', '11', '12', '13', '14', '15', '16', '17', '18', '19', '20', '21', '22'];
+  const days = ['월', '화', '수', '목', '금', '토', '일'];
+
+  // Initialize grid: hours.length rows x days.length cols
+  const data: number[][] = hours.map(() => days.map(() => 0));
+
+  for (const game of games) {
+    const d = game.createdAt;
+    const hour = d.getHours().toString().padStart(2, '0');
+    const dayOfWeek = d.getDay(); // 0=Sun, 1=Mon...
+    const dayIndex = dayOfWeek === 0 ? 6 : dayOfWeek - 1; // Mon=0, Sun=6
+    const hourIndex = hours.indexOf(hour);
+
+    if (hourIndex >= 0 && dayIndex >= 0 && dayIndex < 7) {
+      data[hourIndex][dayIndex]++;
+    }
+  }
+
+  return { hours, days, data };
+}
+
 function mapFacilityRequest(req: any): FacilityRequestResponse {
   return {
     id: req.id,

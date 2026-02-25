@@ -1,17 +1,19 @@
-import { useRef, useEffect } from 'react';
+import { useRef, useEffect, useCallback } from 'react';
 import {
   View,
   Text,
   TouchableOpacity,
   StyleSheet,
-  Animated,
-  PanResponder,
-  Dimensions,
   Modal,
+  Animated,
+  Pressable,
+  ScrollView,
+  Dimensions,
+  KeyboardAvoidingView,
+  Platform,
 } from 'react-native';
-import { Colors } from '../../constants/colors';
-
-const SCREEN_HEIGHT = Dimensions.get('window').height;
+import { useTheme } from '../../hooks/useTheme';
+import { palette, spacing, radius } from '../../constants/theme';
 
 interface BottomSheetProps {
   visible: boolean;
@@ -22,68 +24,105 @@ interface BottomSheetProps {
 }
 
 export function BottomSheet({ visible, onClose, title, maxHeight = 85, children }: BottomSheetProps) {
-  const translateY = useRef(new Animated.Value(SCREEN_HEIGHT)).current;
+  const { colors } = useTheme();
+  const slideAnim = useRef(new Animated.Value(0)).current;
+  const backdropAnim = useRef(new Animated.Value(0)).current;
+  const screenHeight = Dimensions.get('window').height;
+  const sheetHeight = (screenHeight * maxHeight) / 100;
 
   useEffect(() => {
     if (visible) {
-      Animated.spring(translateY, {
-        toValue: 0,
-        useNativeDriver: true,
-        damping: 25,
-        stiffness: 200,
-      }).start();
+      Animated.parallel([
+        Animated.timing(backdropAnim, {
+          toValue: 1,
+          duration: 250,
+          useNativeDriver: false,
+        }),
+        Animated.spring(slideAnim, {
+          toValue: 1,
+          damping: 20,
+          stiffness: 200,
+          useNativeDriver: false,
+        }),
+      ]).start();
     } else {
-      Animated.timing(translateY, {
-        toValue: SCREEN_HEIGHT,
-        duration: 250,
-        useNativeDriver: true,
-      }).start();
+      Animated.parallel([
+        Animated.timing(backdropAnim, {
+          toValue: 0,
+          duration: 200,
+          useNativeDriver: false,
+        }),
+        Animated.timing(slideAnim, {
+          toValue: 0,
+          duration: 200,
+          useNativeDriver: false,
+        }),
+      ]).start();
     }
   }, [visible]);
 
-  const panResponder = useRef(
-    PanResponder.create({
-      onStartShouldSetPanResponder: () => false,
-      onMoveShouldSetPanResponder: (_, g) => g.dy > 10,
-      onPanResponderMove: (_, g) => {
-        if (g.dy > 0) translateY.setValue(g.dy);
-      },
-      onPanResponderRelease: (_, g) => {
-        if (g.dy > 100 || g.vy > 0.5) {
-          onClose();
-        } else {
-          Animated.spring(translateY, {
-            toValue: 0,
-            useNativeDriver: true,
-          }).start();
-        }
-      },
-    })
-  ).current;
+  const handleBackdropPress = useCallback(() => {
+    onClose();
+  }, [onClose]);
 
-  if (!visible) return null;
+  const translateY = slideAnim.interpolate({
+    inputRange: [0, 1],
+    outputRange: [sheetHeight, 0],
+  });
 
   return (
-    <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
+    <Modal
+      visible={visible}
+      transparent
+      animationType="none"
+      onRequestClose={onClose}
+    >
       <View style={styles.overlay}>
-        <TouchableOpacity style={styles.backdrop} onPress={onClose} activeOpacity={1} />
+        {/* Backdrop */}
+        <Pressable style={StyleSheet.absoluteFill} onPress={handleBackdropPress}>
+          <Animated.View
+            style={[
+              StyleSheet.absoluteFill,
+              styles.backdrop,
+              { opacity: backdropAnim.interpolate({ inputRange: [0, 1], outputRange: [0, 0.4] }) },
+            ]}
+          />
+        </Pressable>
+
+        {/* Sheet */}
         <Animated.View
           style={[
             styles.sheet,
-            { maxHeight: `${maxHeight}%`, transform: [{ translateY }] },
+            {
+              maxHeight: sheetHeight,
+              backgroundColor: colors.surface,
+              transform: [{ translateY }],
+            },
           ]}
-          {...panResponder.panHandlers}
         >
-          <View style={styles.handle} />
+          {/* Handle indicator */}
+          <View style={styles.handleContainer}>
+            <View style={[styles.handleIndicator, { backgroundColor: colors.border }]} />
+          </View>
+
+          {/* Header */}
           {title && (
             <View style={styles.header}>
-              <Text style={styles.title}>{title}</Text>
+              <Text style={[styles.title, { color: colors.text }]}>{title}</Text>
               <TouchableOpacity onPress={onClose}>
-                <Text style={styles.closeBtn}>✕</Text>
+                <Text style={[styles.closeBtn, { color: colors.textLight }]}>✕</Text>
               </TouchableOpacity>
             </View>
           )}
-          {children}
+
+          {/* Content */}
+          <ScrollView
+            contentContainerStyle={styles.scrollContent}
+            showsVerticalScrollIndicator={false}
+            keyboardShouldPersistTaps="handled"
+          >
+            {children}
+          </ScrollView>
         </Animated.View>
       </View>
     </Modal>
@@ -93,41 +132,43 @@ export function BottomSheet({ visible, onClose, title, maxHeight = 85, children 
 const styles = StyleSheet.create({
   overlay: {
     flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.4)',
     justifyContent: 'flex-end',
   },
   backdrop: {
-    flex: 1,
+    backgroundColor: '#000',
   },
   sheet: {
-    backgroundColor: Colors.surface,
-    borderTopLeftRadius: 20,
-    borderTopRightRadius: 20,
-    padding: 20,
-    paddingTop: 12,
+    borderTopLeftRadius: radius.banner,
+    borderTopRightRadius: radius.banner,
+    overflow: 'hidden',
   },
-  handle: {
+  handleContainer: {
+    alignItems: 'center',
+    paddingTop: spacing.sm,
+    paddingBottom: spacing.xs,
+  },
+  handleIndicator: {
     width: 36,
     height: 4,
     borderRadius: 2,
-    backgroundColor: Colors.border,
-    alignSelf: 'center',
-    marginBottom: 12,
+  },
+  scrollContent: {
+    paddingHorizontal: spacing.xl,
+    paddingBottom: spacing.xl,
   },
   header: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: 12,
+    paddingHorizontal: spacing.xl,
+    paddingBottom: spacing.md,
   },
   title: {
     fontSize: 18,
     fontWeight: '700',
-    color: Colors.text,
   },
   closeBtn: {
     fontSize: 20,
-    color: Colors.textLight,
-    padding: 4,
+    padding: spacing.xs,
   },
 });

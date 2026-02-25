@@ -175,6 +175,103 @@ export async function getAdminFacilities(userId: string) {
   }));
 }
 
+export async function getWeeklyStats(userId: string): Promise<{ day: string; count: number }[]> {
+  const now = new Date();
+  const results: { day: string; count: number }[] = [];
+
+  for (let i = 6; i >= 0; i--) {
+    const date = new Date(now);
+    date.setDate(date.getDate() - i);
+    const startOfDay = new Date(date);
+    startOfDay.setHours(0, 0, 0, 0);
+    const endOfDay = new Date(date);
+    endOfDay.setHours(23, 59, 59, 999);
+
+    const count = await prisma.gamePlayer.count({
+      where: {
+        userId,
+        game: { createdAt: { gte: startOfDay, lte: endOfDay } },
+      },
+    });
+
+    const dayLabel = ['일', '월', '화', '수', '목', '금', '토'][date.getDay()];
+    results.push({ day: dayLabel, count });
+  }
+
+  return results;
+}
+
+export async function getGameTypeDistribution(
+  userId: string,
+): Promise<{ label: string; value: number; color: string }[]> {
+  const gamePlayers = await prisma.gamePlayer.findMany({
+    where: { userId },
+    include: {
+      game: {
+        include: { turn: { select: { gameType: true } } },
+      },
+    },
+  });
+
+  const typeMap: Record<string, number> = {};
+  for (const gp of gamePlayers) {
+    const gt = gp.game.turn?.gameType ?? 'SINGLES';
+    typeMap[gt] = (typeMap[gt] || 0) + 1;
+  }
+
+  const colorMap: Record<string, string> = {
+    SINGLES: '#4A90D9',
+    DOUBLES: '#50C878',
+    MIXED_DOUBLES: '#FF6B6B',
+  };
+
+  const labelMap: Record<string, string> = {
+    SINGLES: '단식',
+    DOUBLES: '복식',
+    MIXED_DOUBLES: '혼합복식',
+  };
+
+  return Object.entries(typeMap).map(([type, value]) => ({
+    label: labelMap[type] || type,
+    value,
+    color: colorMap[type] || '#999999',
+  }));
+}
+
+export async function getTotalStats(
+  userId: string,
+): Promise<{ totalGames: number; consecutiveDays: number }> {
+  const totalGames = await prisma.gamePlayer.count({ where: { userId } });
+
+  // Calculate consecutive days ending today
+  const now = new Date();
+  let consecutiveDays = 0;
+
+  for (let i = 0; i < 365; i++) {
+    const date = new Date(now);
+    date.setDate(date.getDate() - i);
+    const startOfDay = new Date(date);
+    startOfDay.setHours(0, 0, 0, 0);
+    const endOfDay = new Date(date);
+    endOfDay.setHours(23, 59, 59, 999);
+
+    const count = await prisma.gamePlayer.count({
+      where: {
+        userId,
+        game: { createdAt: { gte: startOfDay, lte: endOfDay } },
+      },
+    });
+
+    if (count > 0) {
+      consecutiveDays++;
+    } else {
+      break;
+    }
+  }
+
+  return { totalGames, consecutiveDays };
+}
+
 export async function getPenalties(userId: string): Promise<NoShowRecordResponse[]> {
   const records = await prisma.noShowRecord.findMany({
     where: { userId },

@@ -1,7 +1,8 @@
 import { useState, useEffect } from 'react';
 import { View, Text, TextInput, TouchableOpacity, StyleSheet, Platform, Modal } from 'react-native';
 import { useCheckinStore } from '../../store/checkinStore';
-import { Colors } from '../../constants/colors';
+import { useTheme } from '../../hooks/useTheme';
+import { palette, typography, spacing, radius, opacity } from '../../constants/theme';
 import { Strings } from '../../constants/strings';
 import { showAlert } from '../../utils/alert';
 
@@ -15,21 +16,23 @@ if (Platform.OS !== 'web') {
 }
 
 function WebCheckIn({ onCheckIn }: { onCheckIn: (qrData: string) => void }) {
+  const { colors, shadows } = useTheme();
   const [qrInput, setQrInput] = useState('');
   return (
-    <View style={styles.webCheckinCard}>
-      <Text style={styles.webCheckinTitle}>시설 코드 입력</Text>
-      <Text style={styles.webCheckinDesc}>
+    <View style={[styles.webCheckinCard, { backgroundColor: colors.surface }, shadows.md]}>
+      <Text style={[styles.webCheckinTitle, { color: colors.text }]}>시설 코드 입력</Text>
+      <Text style={[styles.webCheckinDesc, { color: colors.textSecondary }]}>
         웹에서는 QR 스캔 대신 시설 코드를 직접 입력하세요
       </Text>
       <TextInput
-        style={styles.webInput}
+        style={[styles.webInput, { backgroundColor: colors.background, borderColor: colors.border, color: colors.text }]}
         placeholder="시설 QR 코드 값"
+        placeholderTextColor={colors.textLight}
         value={qrInput}
         onChangeText={setQrInput}
       />
       <TouchableOpacity
-        style={[styles.webCheckinButton, !qrInput && styles.buttonDisabled]}
+        style={[styles.webCheckinButton, { backgroundColor: colors.primary }, !qrInput && styles.buttonDisabled]}
         onPress={() => qrInput && onCheckIn(qrInput)}
         disabled={!qrInput}
       >
@@ -40,20 +43,21 @@ function WebCheckIn({ onCheckIn }: { onCheckIn: (qrData: string) => void }) {
 }
 
 function NativeCamera({ onScanned, scanning, onManualCode }: { onScanned: (data: string) => void; scanning: boolean; onManualCode: () => void }) {
+  const { colors } = useTheme();
   const [permission, requestPermission] = useCameraPermissions!();
 
-  if (!permission) return <View style={styles.container} />;
+  if (!permission) return <View style={[styles.container, { backgroundColor: colors.background }]} />;
 
   if (!permission.granted) {
     return (
-      <View style={styles.container}>
-        <View style={styles.permissionCard}>
-          <Text style={styles.permissionText}>카메라 접근 권한이 필요합니다</Text>
-          <TouchableOpacity style={styles.permissionButton} onPress={requestPermission}>
+      <View style={[styles.container, { backgroundColor: colors.background }]}>
+        <View style={[styles.permissionCard, { backgroundColor: colors.surface }]}>
+          <Text style={[styles.permissionText, { color: colors.text }]}>카메라 접근 권한이 필요합니다</Text>
+          <TouchableOpacity style={[styles.permissionButton, { backgroundColor: colors.primary }]} onPress={requestPermission}>
             <Text style={styles.permissionButtonText}>권한 요청</Text>
           </TouchableOpacity>
           <TouchableOpacity onPress={onManualCode}>
-            <Text style={styles.manualCodeLink}>코드로 체크인</Text>
+            <Text style={[styles.manualCodeLink, { color: colors.primary }]}>코드로 체크인</Text>
           </TouchableOpacity>
         </View>
       </View>
@@ -61,7 +65,7 @@ function NativeCamera({ onScanned, scanning, onManualCode }: { onScanned: (data:
   }
 
   return (
-    <View style={styles.container}>
+    <View style={[styles.container, { backgroundColor: colors.background }]}>
       <View style={styles.cameraContainer}>
         <CameraView
           style={styles.camera}
@@ -69,18 +73,19 @@ function NativeCamera({ onScanned, scanning, onManualCode }: { onScanned: (data:
           onBarcodeScanned={scanning ? undefined : ({ data }: { data: string }) => onScanned(data)}
         />
         <View style={styles.overlay}>
-          <View style={styles.scanFrame} />
+          <View style={[styles.scanFrame, { borderColor: colors.primary }]} />
         </View>
       </View>
-      <Text style={styles.instruction}>QR코드를 스캔하여 체크인하세요</Text>
+      <Text style={[styles.instruction, { color: colors.textSecondary }]}>QR코드를 스캔하여 체크인하세요</Text>
       <TouchableOpacity onPress={onManualCode}>
-        <Text style={styles.manualCodeLink}>코드로 체크인</Text>
+        <Text style={[styles.manualCodeLink, { color: colors.primary }]}>코드로 체크인</Text>
       </TouchableOpacity>
     </View>
   );
 }
 
 export default function CheckInScreen() {
+  const { colors, shadows } = useTheme();
   const [scanning, setScanning] = useState(false);
   const [showManualInput, setShowManualInput] = useState(false);
   const [manualCode, setManualCode] = useState('');
@@ -130,27 +135,27 @@ export default function CheckInScreen() {
   const manualInputModal = (
     <Modal visible={showManualInput} transparent animationType="fade">
       <View style={styles.modalOverlay}>
-        <View style={styles.modalContent}>
-          <Text style={styles.modalTitle}>코드로 체크인</Text>
-          <Text style={styles.modalDesc}>시설에 표시된 체크인 코드를 입력하세요</Text>
+        <View style={[styles.modalContent, { backgroundColor: colors.surface }]}>
+          <Text style={[styles.modalTitle, { color: colors.text }]}>코드로 체크인</Text>
+          <Text style={[styles.modalDesc, { color: colors.textSecondary }]}>시설에 표시된 체크인 코드를 입력하세요</Text>
           <TextInput
-            style={styles.codeInput}
+            style={[styles.codeInput, { borderColor: colors.border, color: colors.text }]}
             value={manualCode}
             onChangeText={setManualCode}
             placeholder="시설 코드를 입력하세요"
-            placeholderTextColor={Colors.textLight}
+            placeholderTextColor={colors.textLight}
             autoCapitalize="none"
             autoCorrect={false}
           />
           <View style={styles.modalButtons}>
             <TouchableOpacity
-              style={styles.cancelButton}
+              style={[styles.cancelButton, { borderColor: colors.border }]}
               onPress={() => { setShowManualInput(false); setManualCode(''); }}
             >
-              <Text style={styles.cancelButtonText}>취소</Text>
+              <Text style={[styles.cancelButtonText, { color: colors.text }]}>취소</Text>
             </TouchableOpacity>
             <TouchableOpacity
-              style={[styles.submitButton, !manualCode.trim() && styles.submitButtonDisabled]}
+              style={[styles.submitButton, { backgroundColor: colors.primary }, !manualCode.trim() && styles.submitButtonDisabled]}
               onPress={handleManualCheckIn}
               disabled={!manualCode.trim()}
             >
@@ -164,15 +169,15 @@ export default function CheckInScreen() {
 
   if (status) {
     return (
-      <View style={styles.container}>
-        <View style={styles.checkedInCard}>
-          <Text style={styles.checkedInIcon}>✅</Text>
-          <Text style={styles.checkedInTitle}>{Strings.checkin.checkedIn}</Text>
-          <Text style={styles.facilityName}>{status.facilityName}</Text>
-          <Text style={styles.checkedInTime}>
+      <View style={[styles.container, { backgroundColor: colors.background }]}>
+        <View style={[styles.checkedInCard, { backgroundColor: colors.surface }, shadows.md]}>
+          <Text style={styles.checkedInIcon}>&#10003;</Text>
+          <Text style={[styles.checkedInTitle, { color: colors.text }]}>{Strings.checkin.checkedIn}</Text>
+          <Text style={[styles.facilityName, { color: colors.primary }]}>{status.facilityName}</Text>
+          <Text style={[styles.checkedInTime, { color: colors.textSecondary }]}>
             {new Date(status.checkedInAt).toLocaleTimeString('ko-KR')} 부터
           </Text>
-          <TouchableOpacity style={styles.checkoutButton} onPress={handleCheckout}>
+          <TouchableOpacity style={[styles.checkoutButton, { backgroundColor: colors.danger }]} onPress={handleCheckout}>
             <Text style={styles.checkoutText}>{Strings.checkin.checkout}</Text>
           </TouchableOpacity>
         </View>
@@ -182,7 +187,7 @@ export default function CheckInScreen() {
 
   if (Platform.OS === 'web') {
     return (
-      <View style={styles.container}>
+      <View style={[styles.container, { backgroundColor: colors.background }]}>
         <WebCheckIn onCheckIn={handleCheckIn} />
       </View>
     );
@@ -199,14 +204,13 @@ export default function CheckInScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: Colors.background,
     justifyContent: 'center',
     alignItems: 'center',
   },
   cameraContainer: {
     width: 300,
     height: 300,
-    borderRadius: 20,
+    borderRadius: radius.banner,
     overflow: 'hidden',
   },
   camera: {
@@ -221,203 +225,159 @@ const styles = StyleSheet.create({
     width: 200,
     height: 200,
     borderWidth: 2,
-    borderColor: Colors.primary,
-    borderRadius: 12,
+    borderRadius: radius.xl,
   },
   instruction: {
-    marginTop: 20,
-    fontSize: 16,
-    color: Colors.textSecondary,
+    marginTop: spacing.xl,
+    ...typography.body1,
   },
   checkedInCard: {
-    backgroundColor: Colors.surface,
-    borderRadius: 16,
-    padding: 32,
+    borderRadius: radius.card,
+    padding: spacing.xxxl,
     alignItems: 'center',
-    marginHorizontal: 24,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.08,
-    shadowRadius: 8,
-    elevation: 3,
+    marginHorizontal: spacing.xxl,
   },
   checkedInIcon: {
     fontSize: 48,
-    marginBottom: 12,
+    marginBottom: spacing.md,
   },
   checkedInTitle: {
-    fontSize: 20,
-    fontWeight: '700',
-    color: Colors.text,
-    marginBottom: 8,
+    ...typography.h3,
+    marginBottom: spacing.sm,
   },
   facilityName: {
     fontSize: 18,
-    color: Colors.primary,
     fontWeight: '600',
-    marginBottom: 4,
+    marginBottom: spacing.xs,
   },
   checkedInTime: {
-    fontSize: 14,
-    color: Colors.textSecondary,
-    marginBottom: 24,
+    ...typography.body2,
+    marginBottom: spacing.xxl,
   },
   checkoutButton: {
-    backgroundColor: Colors.danger,
-    borderRadius: 12,
-    paddingHorizontal: 32,
-    paddingVertical: 14,
+    borderRadius: radius.xl,
+    paddingHorizontal: spacing.xxxl,
+    paddingVertical: spacing.mlg,
   },
   checkoutText: {
-    color: '#fff',
-    fontSize: 16,
-    fontWeight: '600',
+    color: palette.white,
+    ...typography.button,
   },
   permissionCard: {
-    backgroundColor: Colors.surface,
-    borderRadius: 16,
-    padding: 32,
+    borderRadius: radius.card,
+    padding: spacing.xxxl,
     alignItems: 'center',
-    marginHorizontal: 24,
+    marginHorizontal: spacing.xxl,
   },
   permissionText: {
-    fontSize: 16,
-    color: Colors.text,
-    marginBottom: 16,
+    ...typography.body1,
+    marginBottom: spacing.lg,
   },
   permissionButton: {
-    backgroundColor: Colors.primary,
-    borderRadius: 12,
-    paddingHorizontal: 24,
-    paddingVertical: 12,
+    borderRadius: radius.xl,
+    paddingHorizontal: spacing.xxl,
+    paddingVertical: spacing.md,
   },
   permissionButtonText: {
-    color: '#fff',
-    fontSize: 16,
-    fontWeight: '600',
+    color: palette.white,
+    ...typography.button,
   },
   webCheckinCard: {
-    backgroundColor: Colors.surface,
-    borderRadius: 16,
-    padding: 32,
+    borderRadius: radius.card,
+    padding: spacing.xxxl,
     alignItems: 'center',
-    marginHorizontal: 24,
+    marginHorizontal: spacing.xxl,
     maxWidth: 400,
     width: '100%',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.08,
-    shadowRadius: 8,
-    elevation: 3,
   },
   webCheckinTitle: {
-    fontSize: 20,
-    fontWeight: '700',
-    color: Colors.text,
-    marginBottom: 8,
+    ...typography.h3,
+    marginBottom: spacing.sm,
   },
   webCheckinDesc: {
-    fontSize: 14,
-    color: Colors.textSecondary,
+    ...typography.body2,
     textAlign: 'center',
-    marginBottom: 20,
+    marginBottom: spacing.xl,
   },
   webInput: {
     width: '100%',
-    backgroundColor: Colors.background,
     borderWidth: 1,
-    borderColor: Colors.border,
-    borderRadius: 12,
-    paddingHorizontal: 16,
-    paddingVertical: 14,
-    fontSize: 16,
-    marginBottom: 16,
-    color: Colors.text,
+    borderRadius: radius.xl,
+    paddingHorizontal: spacing.lg,
+    paddingVertical: spacing.mlg,
+    ...typography.body1,
+    marginBottom: spacing.lg,
   },
   webCheckinButton: {
-    backgroundColor: Colors.primary,
-    borderRadius: 12,
-    paddingHorizontal: 32,
-    paddingVertical: 14,
+    borderRadius: radius.xl,
+    paddingHorizontal: spacing.xxxl,
+    paddingVertical: spacing.mlg,
     width: '100%',
     alignItems: 'center',
   },
   webCheckinButtonText: {
-    color: '#fff',
-    fontSize: 16,
-    fontWeight: '600',
+    color: palette.white,
+    ...typography.button,
   },
   buttonDisabled: {
-    opacity: 0.5,
+    opacity: opacity.disabled,
   },
   manualCodeLink: {
-    color: Colors.primary,
     textDecorationLine: 'underline' as const,
     textAlign: 'center' as const,
-    marginTop: 16,
-    fontSize: 15,
+    marginTop: spacing.lg,
+    ...typography.button,
   },
   modalOverlay: {
     flex: 1,
     backgroundColor: 'rgba(0,0,0,0.5)',
     justifyContent: 'center' as const,
-    padding: 24,
+    padding: spacing.xxl,
   },
   modalContent: {
-    backgroundColor: Colors.surface,
-    borderRadius: 16,
-    padding: 24,
+    borderRadius: radius.card,
+    padding: spacing.xxl,
   },
   modalTitle: {
-    fontSize: 18,
-    fontWeight: '700' as const,
-    color: Colors.text,
-    marginBottom: 8,
+    ...typography.h3,
+    marginBottom: spacing.sm,
   },
   modalDesc: {
-    fontSize: 14,
-    color: Colors.textSecondary,
-    marginBottom: 20,
+    ...typography.body2,
+    marginBottom: spacing.xl,
   },
   codeInput: {
     borderWidth: 1,
-    borderColor: Colors.border,
-    borderRadius: 12,
-    padding: 14,
-    fontSize: 16,
-    color: Colors.text,
+    borderRadius: radius.xl,
+    padding: spacing.mlg,
+    ...typography.body1,
   },
   modalButtons: {
     flexDirection: 'row' as const,
-    gap: 12,
-    marginTop: 20,
+    gap: spacing.md,
+    marginTop: spacing.xl,
   },
   cancelButton: {
     flex: 1,
-    padding: 14,
-    borderRadius: 12,
+    padding: spacing.mlg,
+    borderRadius: radius.xl,
     borderWidth: 1,
-    borderColor: Colors.border,
     alignItems: 'center' as const,
   },
   cancelButtonText: {
-    fontSize: 16,
-    fontWeight: '600' as const,
-    color: Colors.text,
+    ...typography.button,
   },
   submitButton: {
     flex: 1,
-    padding: 14,
-    borderRadius: 12,
-    backgroundColor: Colors.primary,
+    padding: spacing.mlg,
+    borderRadius: radius.xl,
     alignItems: 'center' as const,
   },
   submitButtonDisabled: {
-    opacity: 0.5,
+    opacity: opacity.disabled,
   },
   submitButtonText: {
-    fontSize: 16,
-    fontWeight: '600' as const,
-    color: '#fff',
+    color: palette.white,
+    ...typography.button,
   },
 });

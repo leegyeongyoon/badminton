@@ -16,6 +16,7 @@ import notificationRouter from './modules/notification/notification.router';
 import recruitmentRouter from './modules/recruitment/recruitment.router';
 import rotationRouter from './modules/rotation/rotation.router';
 import clubSessionRouter from './modules/clubSession/clubSession.router';
+import gameBoardRouter from './modules/gameBoard/gameBoard.router';
 
 const app = express();
 
@@ -45,6 +46,8 @@ app.use('/api/v1/facilities', rotationRouter);         // /facilities/:facilityI
 app.use('/api/v1/rotation', rotationRouter);           // /rotation/:scheduleId/*
 app.use('/api/v1/clubs', clubSessionRouter);           // /clubs/:clubId/sessions
 app.use('/api/v1/club-sessions', clubSessionRouter);   // /club-sessions/:id/*
+app.use('/api/v1/club-sessions', gameBoardRouter);     // /club-sessions/:id/game-board
+app.use('/api/v1/game-boards', gameBoardRouter);       // /game-boards/:id/entries/*
 
 app.use(errorHandler);
 

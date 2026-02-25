@@ -175,7 +175,7 @@ export async function getAvailablePlayers(facilityId: string): Promise<Available
     return {
       userId: c.userId,
       userName: c.user.name,
-      skillLevel: (c.user.profile?.skillLevel || 'INTERMEDIATE') as SkillLevel,
+      skillLevel: (c.user.profile?.skillLevel || 'D') as SkillLevel,
       preferredGameTypes: (c.user.profile?.preferredGameTypes || ['DOUBLES']) as any[],
       gender: c.user.profile?.gender || null,
       checkedInAt: c.checkedInAt.toISOString(),

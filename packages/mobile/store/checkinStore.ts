@@ -12,14 +12,20 @@ interface CheckInStatus {
 interface CheckInState {
   status: CheckInStatus | null;
   isLoading: boolean;
+  isResting: boolean;
+  restingSince: string | null;
   checkIn: (qrData: string) => Promise<void>;
   checkOut: () => Promise<void>;
   fetchStatus: () => Promise<void>;
+  toggleRest: () => Promise<void>;
+  setRestState: (resting: boolean) => void;
 }
 
-export const useCheckinStore = create<CheckInState>((set) => ({
+export const useCheckinStore = create<CheckInState>((set, get) => ({
   status: null,
   isLoading: false,
+  isResting: false,
+  restingSince: null,
 
   checkIn: async (qrData) => {
     const { data } = await checkinApi.checkIn(qrData);
@@ -28,7 +34,7 @@ export const useCheckinStore = create<CheckInState>((set) => ({
 
   checkOut: async () => {
     await checkinApi.checkOut();
-    set({ status: null });
+    set({ status: null, isResting: false, restingSince: null });
   },
 
   fetchStatus: async () => {
@@ -39,5 +45,23 @@ export const useCheckinStore = create<CheckInState>((set) => ({
     } catch {
       set({ isLoading: false });
     }
+  },
+
+  toggleRest: async () => {
+    const { isResting } = get();
+    if (isResting) {
+      await checkinApi.setAvailable();
+      set({ isResting: false, restingSince: null });
+    } else {
+      await checkinApi.setResting();
+      set({ isResting: true, restingSince: new Date().toISOString() });
+    }
+  },
+
+  setRestState: (resting: boolean) => {
+    set({
+      isResting: resting,
+      restingSince: resting ? (get().restingSince ?? new Date().toISOString()) : null,
+    });
   },
 }));

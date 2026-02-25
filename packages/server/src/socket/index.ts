@@ -8,6 +8,12 @@ let io: Server<ClientToServerEvents, ServerToClientEvents>;
 export function initSocketIO(httpServer: HttpServer) {
   io = new Server(httpServer, {
     cors: { origin: '*' },
+    pingInterval: 25000,
+    pingTimeout: 20000,
+    connectionStateRecovery: {
+      maxDisconnectionDuration: 2 * 60 * 1000,
+      skipMiddlewares: true,
+    },
   });
 
   io.on('connection', (socket) => {
@@ -42,6 +48,10 @@ export function initSocketIO(httpServer: HttpServer) {
 
     socket.on('disconnect', () => {
       logger.debug(`Socket disconnected: ${socket.id}`);
+    });
+
+    socket.on('error', (err) => {
+      logger.warn(`Socket ${socket.id} error: ${err.message}`);
     });
   });
 

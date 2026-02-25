@@ -30,10 +30,21 @@ export enum FacilityRequestStatus {
 }
 
 export enum SkillLevel {
-  BEGINNER = 'BEGINNER',
-  INTERMEDIATE = 'INTERMEDIATE',
-  ADVANCED = 'ADVANCED',
-  PRO = 'PRO',
+  S = 'S',
+  A = 'A',
+  B = 'B',
+  C = 'C',
+  D = 'D',
+  E = 'E',
+  F = 'F',
+}
+
+export enum GameBoardEntryStatus {
+  QUEUED = 'QUEUED',
+  MATERIALIZED = 'MATERIALIZED',
+  PLAYING = 'PLAYING',
+  COMPLETED = 'COMPLETED',
+  CANCELLED = 'CANCELLED',
 }
 
 export enum GameType {

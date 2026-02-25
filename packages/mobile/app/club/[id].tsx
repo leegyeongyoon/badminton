@@ -124,14 +124,14 @@ export default function ClubDetailScreen() {
     if (!clubId || !checkedInFacilityId) return;
     setIsStarting(true);
     try {
-      await clubSessionApi.start(clubId, {
+      const { data: newSession } = await clubSessionApi.start(clubId, {
         facilityId: checkedInFacilityId,
         courtIds: selectedCourtIds.length > 0 ? selectedCourtIds : undefined,
       });
       setShowStartModal(false);
-      await loadActiveSession();
-      // Navigate to session dashboard
-      router.push(`/club/${clubId}/session`);
+      setActiveSession(newSession);
+      // 모임 시작하면 바로 모임판으로
+      router.push(`/game-board?clubSessionId=${newSession.id}&clubName=${encodeURIComponent(club?.name || '')}`);
     } catch (err: any) {
       showAlert(Strings.common.error, err?.response?.data?.error || '모임 시작에 실패했습니다');
     } finally {
@@ -251,24 +251,44 @@ export default function ClubDetailScreen() {
 
           {/* Active session banner */}
           {activeSession && (
-            <TouchableOpacity
-              style={styles.sessionBanner}
-              onPress={() => router.push(`/club/${clubId}/session`)}
-              activeOpacity={0.7}
-            >
-              <View style={styles.sessionBannerLeft}>
-                <View style={styles.sessionDot} />
-                <View>
-                  <Text style={styles.sessionBannerTitle}>모임 진행중</Text>
-                  <Text style={styles.sessionBannerSub}>
-                    {activeSession.facilityName} - 코트 {activeSession.courtIds?.length || 0}개
-                  </Text>
+            <View style={styles.sessionBannerWrap}>
+              <TouchableOpacity
+                style={styles.sessionBanner}
+                onPress={() => router.push(`/club/${clubId}/session`)}
+                activeOpacity={0.7}
+              >
+                <View style={styles.sessionBannerLeft}>
+                  <View style={styles.sessionDot} />
+                  <View>
+                    <Text style={styles.sessionBannerTitle}>모임 진행중</Text>
+                    <Text style={styles.sessionBannerSub}>
+                      {activeSession.facilityName} - 코트 {activeSession.courtIds?.length || 0}개
+                    </Text>
+                  </View>
                 </View>
-              </View>
-              <View style={styles.sessionBannerBtn}>
-                <Text style={styles.sessionBannerBtnText}>모임 관리</Text>
-              </View>
-            </TouchableOpacity>
+                <View style={styles.sessionBannerBtn}>
+                  <Text style={styles.sessionBannerBtnText}>모임 관리</Text>
+                </View>
+              </TouchableOpacity>
+
+              {/* Quick actions */}
+              {isLeaderOrStaff && (
+                <View style={styles.quickActions}>
+                  <TouchableOpacity
+                    style={styles.quickActionBtn}
+                    onPress={() => router.push(`/game-board?clubSessionId=${activeSession.id}&clubName=${encodeURIComponent(activeSession.clubName)}`)}
+                  >
+                    <Text style={styles.quickActionText}>모임판</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={styles.quickActionBtn}
+                    onPress={() => router.push(`/club/${clubId}/session`)}
+                  >
+                    <Text style={styles.quickActionText}>턴 관리</Text>
+                  </TouchableOpacity>
+                </View>
+              )}
+            </View>
           )}
 
           {/* Leader actions */}
@@ -490,10 +510,13 @@ const styles = StyleSheet.create({
     letterSpacing: 1.5,
   },
   // Session banner
-  sessionBanner: {
-    backgroundColor: '#EDE9FE',
+  sessionBannerWrap: {
     margin: 16,
     marginBottom: 0,
+    gap: 8,
+  },
+  sessionBanner: {
+    backgroundColor: '#EDE9FE',
     borderRadius: 14,
     padding: 14,
     flexDirection: 'row',
@@ -501,6 +524,22 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     borderWidth: 1,
     borderColor: '#7C3AED30',
+  },
+  quickActions: {
+    flexDirection: 'row',
+    gap: 8,
+  },
+  quickActionBtn: {
+    flex: 1,
+    backgroundColor: '#7C3AED',
+    borderRadius: 10,
+    paddingVertical: 10,
+    alignItems: 'center',
+  },
+  quickActionText: {
+    color: '#fff',
+    fontSize: 14,
+    fontWeight: '600',
   },
   sessionBannerLeft: {
     flexDirection: 'row',

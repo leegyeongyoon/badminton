@@ -79,6 +79,22 @@ router.get('/:id/stats/today', authenticate, async (req: Request, res: Response,
   } catch (err) { next(err); }
 });
 
+// GET /facilities/:id/stats/weekly - weekly game trends
+router.get('/:id/stats/weekly', authenticate, async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const stats = await facilityService.getWeeklyTrends(req.params.id as string);
+    res.json(stats);
+  } catch (err) { next(err); }
+});
+
+// GET /facilities/:id/stats/peak-hours - peak hours heatmap
+router.get('/:id/stats/peak-hours', authenticate, async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const stats = await facilityService.getPeakHours(req.params.id as string);
+    res.json(stats);
+  } catch (err) { next(err); }
+});
+
 // Court endpoints nested under facility
 router.post('/:id/courts', authenticate, roleGuard('FACILITY_ADMIN'), async (req: Request, res: Response, next: NextFunction) => {
   try {

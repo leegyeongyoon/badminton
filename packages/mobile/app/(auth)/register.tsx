@@ -1,45 +1,53 @@
-import { useState } from 'react';
+import { useState, useMemo } from 'react';
 import {
   View,
   Text,
-  TextInput,
-  TouchableOpacity,
   StyleSheet,
   KeyboardAvoidingView,
   Platform,
 } from 'react-native';
 import { Link } from 'expo-router';
 import { useAuthStore } from '../../store/authStore';
-import { Colors } from '../../constants/colors';
+import { useTheme } from '../../hooks/useTheme';
+import { useFormValidation } from '../../hooks/useFormValidation';
+import {
+  compose,
+  required,
+  phone as phoneRule,
+  password as passwordRule,
+  minLength,
+} from '../../utils/validation';
+import { typography, spacing } from '../../constants/theme';
 import { Strings } from '../../constants/strings';
-import { showAlert } from '../../utils/alert';
+import { showError } from '../../utils/feedback';
+import { Input } from '../../components/ui/Input';
+import { Button } from '../../components/ui/Button';
 
 export default function RegisterScreen() {
-  const [phone, setPhone] = useState('');
-  const [password, setPassword] = useState('');
-  const [name, setName] = useState('');
   const [loading, setLoading] = useState(false);
   const { register } = useAuthStore();
+  const { colors } = useTheme();
+
+  const rules = useMemo(() => ({
+    name: compose(required, minLength(2)),
+    phone: compose(required, phoneRule),
+    password: compose(required, passwordRule),
+  }), []);
+
+  const form = useFormValidation(
+    { name: '', phone: '', password: '' },
+    rules,
+  );
 
   const handleRegister = async () => {
-    if (!name.trim()) {
-      showAlert('알림', '이름을 입력해주세요');
-      return;
-    }
-    if (!/^01[0-9]{8,9}$/.test(phone)) {
-      showAlert('알림', '올바른 전화번호를 입력해주세요 (예: 01012345678)');
-      return;
-    }
-    if (password.length < 6) {
-      showAlert('알림', '비밀번호는 6자 이상이어야 합니다');
-      return;
-    }
+    if (!form.validate()) return;
+
     setLoading(true);
     try {
-      await register(phone, password, name);
+      await register(form.values.phone, form.values.password, form.values.name);
       // Navigation handled by root layout gating
     } catch (err: any) {
-      showAlert('오류', err.response?.data?.error || '회원가입에 실패했습니다');
+      showError(err.response?.data?.error || '회원가입에 실패했습니다');
     } finally {
       setLoading(false);
     }
@@ -47,53 +55,60 @@ export default function RegisterScreen() {
 
   return (
     <KeyboardAvoidingView
-      style={styles.container}
+      style={[styles.container, { backgroundColor: colors.background }]}
       behavior={Platform.OS === 'ios' ? 'padding' : undefined}
     >
       <View style={styles.content}>
-        <Text style={styles.title}>{Strings.app.name}</Text>
-        <Text style={styles.subtitle}>{Strings.auth.register}</Text>
+        <Text style={[styles.title, { color: colors.primary }]}>{Strings.app.name}</Text>
+        <Text style={[styles.subtitle, { color: colors.textSecondary }]}>{Strings.auth.register}</Text>
 
-        <TextInput
-          style={styles.input}
-          placeholder={Strings.auth.namePlaceholder}
-          value={name}
-          onChangeText={setName}
-        />
-        <TextInput
-          style={styles.input}
-          placeholder={Strings.auth.phonePlaceholder}
-          value={phone}
-          onChangeText={setPhone}
-          keyboardType="phone-pad"
-          autoCapitalize="none"
-          maxLength={11}
-        />
-        <TextInput
-          style={styles.input}
-          placeholder="비밀번호 (6자 이상)"
-          value={password}
-          onChangeText={setPassword}
-          secureTextEntry
-        />
-        {password.length > 0 && password.length < 6 && (
-          <Text style={styles.hintText}>비밀번호는 6자 이상이어야 합니다</Text>
-        )}
+        <View style={styles.form}>
+          <Input
+            label={Strings.auth.name}
+            placeholder={Strings.auth.namePlaceholder}
+            value={form.values.name}
+            onChangeText={(v) => form.setValue('name', v)}
+            onBlur={() => form.setTouched('name')}
+            error={form.touched.name ? form.errors.name : undefined}
+            icon="person"
+          />
+          <Input
+            label={Strings.auth.phone}
+            placeholder={Strings.auth.phonePlaceholder}
+            value={form.values.phone}
+            onChangeText={(v) => form.setValue('phone', v)}
+            onBlur={() => form.setTouched('phone')}
+            error={form.touched.phone ? form.errors.phone : undefined}
+            icon="people"
+            keyboardType="phone-pad"
+            autoCapitalize="none"
+            maxLength={11}
+          />
+          <Input
+            label={Strings.auth.password}
+            placeholder={Strings.auth.passwordPlaceholder}
+            value={form.values.password}
+            onChangeText={(v) => form.setValue('password', v)}
+            onBlur={() => form.setTouched('password')}
+            error={form.touched.password ? form.errors.password : undefined}
+            icon="link"
+            secureTextEntry
+          />
+        </View>
 
-        <TouchableOpacity
-          style={[styles.button, loading && styles.buttonDisabled]}
+        <Button
+          title={loading ? Strings.common.loading : Strings.auth.registerButton}
           onPress={handleRegister}
+          loading={loading}
           disabled={loading}
-        >
-          <Text style={styles.buttonText}>
-            {loading ? Strings.common.loading : Strings.auth.registerButton}
-          </Text>
-        </TouchableOpacity>
+          fullWidth
+          style={styles.registerButton}
+        />
 
         <Link href="/(auth)/login" asChild>
-          <TouchableOpacity style={styles.linkButton}>
-            <Text style={styles.linkText}>{Strings.auth.goToLogin}</Text>
-          </TouchableOpacity>
+          <Text style={[styles.linkText, { color: colors.primary }]}>
+            {Strings.auth.goToLogin}
+          </Text>
         </Link>
       </View>
     </KeyboardAvoidingView>
@@ -103,65 +118,32 @@ export default function RegisterScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: Colors.background,
   },
   content: {
     flex: 1,
     justifyContent: 'center',
-    paddingHorizontal: 24,
+    paddingHorizontal: spacing.xxl,
   },
   title: {
-    fontSize: 28,
-    fontWeight: 'bold',
-    color: Colors.primary,
+    ...typography.h1,
     textAlign: 'center',
-    marginBottom: 8,
+    marginBottom: spacing.sm,
   },
   subtitle: {
-    fontSize: 18,
-    color: Colors.textSecondary,
+    ...typography.subtitle1,
     textAlign: 'center',
-    marginBottom: 32,
+    marginBottom: spacing.xxxl,
   },
-  input: {
-    backgroundColor: Colors.surface,
-    borderWidth: 1,
-    borderColor: Colors.border,
-    borderRadius: 12,
-    paddingHorizontal: 16,
-    paddingVertical: 14,
-    fontSize: 16,
-    marginBottom: 12,
-    color: Colors.text,
+  form: {
+    gap: spacing.lg,
+    marginBottom: spacing.xxl,
   },
-  button: {
-    backgroundColor: Colors.primary,
-    borderRadius: 12,
-    paddingVertical: 16,
-    alignItems: 'center',
-    marginTop: 8,
-  },
-  buttonDisabled: {
-    opacity: 0.6,
-  },
-  buttonText: {
-    color: '#fff',
-    fontSize: 16,
-    fontWeight: '600',
-  },
-  linkButton: {
-    marginTop: 16,
-    alignItems: 'center',
+  registerButton: {
+    marginTop: spacing.sm,
   },
   linkText: {
-    color: Colors.primary,
-    fontSize: 14,
-  },
-  hintText: {
-    fontSize: 12,
-    color: Colors.danger,
-    marginTop: -8,
-    marginBottom: 8,
-    paddingHorizontal: 4,
+    ...typography.body2,
+    textAlign: 'center',
+    marginTop: spacing.lg,
   },
 });

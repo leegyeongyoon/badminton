@@ -11,6 +11,7 @@ import { useRouter } from 'expo-router';
 import { useAuthStore } from '../../store/authStore';
 import { profileApi } from '../../services/profile';
 import { Colors } from '../../constants/colors';
+import { createShadow } from '../../constants/theme';
 import { Strings } from '../../constants/strings';
 import { showAlert } from '../../utils/alert';
 
@@ -301,11 +302,7 @@ const styles = StyleSheet.create({
     padding: 24,
     alignItems: 'center',
     marginBottom: 16,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.05,
-    shadowRadius: 4,
-    elevation: 2,
+    ...createShadow(1, 4, 0.05, 2),
   },
   avatarContainer: {
     position: 'relative',
@@ -439,11 +436,7 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     padding: 16,
     alignItems: 'center',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.03,
-    shadowRadius: 2,
-    elevation: 1,
+    ...createShadow(1, 2, 0.03, 1),
   },
   statValue: {
     fontSize: 24,

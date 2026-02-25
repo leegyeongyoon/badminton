@@ -2,7 +2,7 @@ import {
   UserRole, CourtStatus, GameStatus, TurnStatus,
   FacilityRequestStatus, SkillLevel, GameType, CourtGameType,
   SessionStatus, RecruitmentStatus, PlayerStatus, RotationStatus,
-  ClubMemberRole, ClubSessionStatus,
+  ClubMemberRole, ClubSessionStatus, GameBoardEntryStatus,
 } from './enums';
 
 export interface UserResponse {
@@ -367,6 +367,30 @@ export interface RotationScheduleResponse {
   completedAt: string | null;
 }
 
+// --- Game Board (모임판) ---
+
+export interface GameBoardResponse {
+  id: string;
+  clubSessionId: string;
+  facilityId: string;
+  createdById: string;
+  createdAt: string;
+  entries: GameBoardEntryResponse[];
+}
+
+export interface GameBoardEntryResponse {
+  id: string;
+  boardId: string;
+  courtId: string;
+  courtName: string;
+  position: number;
+  playerIds: string[];
+  playerNames: string[];
+  status: GameBoardEntryStatus;
+  turnId: string | null;
+  createdAt: string;
+}
+
 // Socket Events
 export interface ServerToClientEvents {
   'court:statusChanged': (data: { courtId: string; status: CourtStatus }) => void;
@@ -399,6 +423,10 @@ export interface ServerToClientEvents {
   'clubSession:started': (data: ClubSessionResponse) => void;
   'clubSession:courtsUpdated': (data: ClubSessionResponse) => void;
   'clubSession:ended': (data: { clubSessionId: string; clubId: string }) => void;
+  'gameBoard:entryAdded': (data: GameBoardEntryResponse) => void;
+  'gameBoard:entryUpdated': (data: GameBoardEntryResponse) => void;
+  'gameBoard:entryRemoved': (data: { entryId: string; boardId: string }) => void;
+  'gameBoard:entryPushed': (data: GameBoardEntryResponse) => void;
 }
 
 export interface ClientToServerEvents {

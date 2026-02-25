@@ -31,6 +31,30 @@ router.put('/me/profile', authenticate, validate(updateProfileSchema), async (re
   } catch (err) { next(err); }
 });
 
+// GET /users/me/stats/weekly - weekly game counts
+router.get('/me/stats/weekly', authenticate, async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const stats = await userService.getWeeklyStats(req.user!.userId);
+    res.json(stats);
+  } catch (err) { next(err); }
+});
+
+// GET /users/me/stats/game-types - game type distribution
+router.get('/me/stats/game-types', authenticate, async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const stats = await userService.getGameTypeDistribution(req.user!.userId);
+    res.json(stats);
+  } catch (err) { next(err); }
+});
+
+// GET /users/me/stats/total - total stats with consecutive days
+router.get('/me/stats/total', authenticate, async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const stats = await userService.getTotalStats(req.user!.userId);
+    res.json(stats);
+  } catch (err) { next(err); }
+});
+
 // GET /users/me/stats - get player stats
 router.get('/me/stats', authenticate, async (req: Request, res: Response, next: NextFunction) => {
   try {

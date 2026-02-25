@@ -1,6 +1,8 @@
 import { View, Text, TextInput, ScrollView, TouchableOpacity, StyleSheet } from 'react-native';
-import { Colors } from '../../constants/colors';
+import { useTheme } from '../../hooks/useTheme';
 import { Strings } from '../../constants/strings';
+import { palette, spacing, radius, opacity } from '../../constants/theme';
+import { alpha } from '../../utils/color';
 import { PlayerAvatar } from './PlayerAvatar';
 
 interface AvailablePlayer {
@@ -21,18 +23,18 @@ interface PlayerSelectorProps {
   onSearchChange: (text: string) => void;
 }
 
-const skillLevelColors: Record<string, string> = {
-  BEGINNER: Colors.skillBeginner,
-  INTERMEDIATE: Colors.skillIntermediate,
-  ADVANCED: Colors.skillAdvanced,
-  EXPERT: Colors.skillExpert,
-};
-
 const skillLevelLabels: Record<string, string> = {
   BEGINNER: Strings.player.skillLevel.BEGINNER,
   INTERMEDIATE: Strings.player.skillLevel.INTERMEDIATE,
   ADVANCED: Strings.player.skillLevel.ADVANCED,
   EXPERT: Strings.player.skillLevel.EXPERT,
+  S: Strings.player.skillLevel.S,
+  A: Strings.player.skillLevel.A,
+  B: Strings.player.skillLevel.B,
+  C: Strings.player.skillLevel.C,
+  D: Strings.player.skillLevel.D,
+  E: Strings.player.skillLevel.E,
+  F: Strings.player.skillLevel.F,
 };
 
 export function PlayerSelector({
@@ -43,6 +45,22 @@ export function PlayerSelector({
   searchValue,
   onSearchChange,
 }: PlayerSelectorProps) {
+  const { colors } = useTheme();
+
+  const skillLevelColors: Record<string, string> = {
+    BEGINNER: colors.skillBeginner,
+    INTERMEDIATE: colors.skillIntermediate,
+    ADVANCED: colors.skillAdvanced,
+    EXPERT: colors.skillExpert,
+    S: colors.skillS,
+    A: colors.skillA,
+    B: colors.skillB,
+    C: colors.skillC,
+    D: colors.skillD,
+    E: colors.skillE,
+    F: colors.skillF,
+  };
+
   const filterPlayers = (list: AvailablePlayer[]) => {
     if (!searchValue) return list;
     const q = searchValue.toLowerCase();
@@ -63,12 +81,13 @@ export function PlayerSelector({
               key={i}
               style={[
                 styles.selectedDot,
-                i < selectedIds.length && styles.selectedDotFilled,
+                { backgroundColor: colors.divider, borderColor: colors.border },
+                i < selectedIds.length && { backgroundColor: colors.primary, borderColor: colors.primary },
               ]}
             />
           ))}
         </View>
-        <Text style={styles.selectedCountText}>
+        <Text style={[styles.selectedCountText, { color: colors.textSecondary }]}>
           {selectedIds.length}/{playersRequired} 선택됨
         </Text>
       </View>
@@ -76,9 +95,9 @@ export function PlayerSelector({
       {/* Search bar */}
       <View style={styles.searchContainer}>
         <TextInput
-          style={styles.searchInput}
+          style={[styles.searchInput, { backgroundColor: colors.background, color: colors.text, borderColor: colors.border }]}
           placeholder={Strings.turn.searchPlayers}
-          placeholderTextColor={Colors.textLight}
+          placeholderTextColor={colors.textLight}
           value={searchValue}
           onChangeText={onSearchChange}
         />
@@ -88,8 +107,8 @@ export function PlayerSelector({
         {/* Available players (selectable) */}
         {availableList.length > 0 && (
           <View style={styles.statusGroupHeader}>
-            <View style={[styles.statusGroupDot, { backgroundColor: Colors.playerAvailable }]} />
-            <Text style={styles.statusGroupTitle}>
+            <View style={[styles.statusGroupDot, { backgroundColor: colors.playerAvailable }]} />
+            <Text style={[styles.statusGroupTitle, { color: colors.textSecondary }]}>
               {Strings.player.status.AVAILABLE} ({availableList.length})
             </Text>
           </View>
@@ -99,27 +118,27 @@ export function PlayerSelector({
           return (
             <TouchableOpacity
               key={u.userId}
-              style={[styles.playerRow, isSelected && styles.playerRowActive]}
+              style={[styles.playerRow, isSelected && { backgroundColor: colors.primaryLight }]}
               onPress={() => onToggle(u.userId)}
             >
-              <View style={[styles.checkbox, isSelected && styles.checkboxChecked]}>
+              <View style={[styles.checkbox, { borderColor: colors.border }, isSelected && { backgroundColor: colors.primary, borderColor: colors.primary }]}>
                 {isSelected && <Text style={styles.checkmark}>✓</Text>}
               </View>
               <PlayerAvatar name={u.userName} size={30} />
               <View style={styles.playerInfo}>
-                <Text style={[styles.playerName, isSelected && styles.playerNameActive]}>
+                <Text style={[styles.playerName, { color: colors.text }, isSelected && { fontWeight: '600', color: colors.primary }]}>
                   {u.userName}
                 </Text>
                 <View style={styles.playerMeta}>
                   {u.skillLevel && skillLevelLabels[u.skillLevel] && (
-                    <View style={[styles.skillBadge, { backgroundColor: (skillLevelColors[u.skillLevel] || Colors.textLight) + '20' }]}>
-                      <Text style={[styles.skillBadgeText, { color: skillLevelColors[u.skillLevel] || Colors.textLight }]}>
+                    <View style={[styles.skillBadge, { backgroundColor: alpha(skillLevelColors[u.skillLevel] || colors.textLight, 0.12) }]}>
+                      <Text style={[styles.skillBadgeText, { color: skillLevelColors[u.skillLevel] || colors.textLight }]}>
                         {skillLevelLabels[u.skillLevel]}
                       </Text>
                     </View>
                   )}
                   {u.gamesPlayedToday > 0 && (
-                    <Text style={styles.metaText}>{u.gamesPlayedToday}게임</Text>
+                    <Text style={[styles.metaText, { color: colors.textLight }]}>{u.gamesPlayedToday}게임</Text>
                   )}
                 </View>
               </View>
@@ -130,36 +149,36 @@ export function PlayerSelector({
         {/* In-turn players (disabled) */}
         {inTurnList.length > 0 && (
           <View style={styles.statusGroupHeader}>
-            <View style={[styles.statusGroupDot, { backgroundColor: Colors.playerInTurn }]} />
-            <Text style={styles.statusGroupTitle}>
+            <View style={[styles.statusGroupDot, { backgroundColor: colors.playerInTurn }]} />
+            <Text style={[styles.statusGroupTitle, { color: colors.textSecondary }]}>
               {Strings.player.status.IN_TURN} ({inTurnList.length})
             </Text>
           </View>
         )}
         {inTurnList.map((u) => (
           <View key={u.userId} style={[styles.playerRow, styles.disabledRow]}>
-            <View style={[styles.statusDot, { backgroundColor: Colors.playerInTurn }]} />
+            <View style={[styles.statusDot, { backgroundColor: colors.playerInTurn }]} />
             <PlayerAvatar name={u.userName} size={30} />
-            <Text style={styles.disabledName}>{u.userName}</Text>
-            <Text style={styles.disabledStatus}>순번중</Text>
+            <Text style={[styles.disabledName, { color: colors.textLight }]}>{u.userName}</Text>
+            <Text style={[styles.disabledStatus, { color: colors.textLight }]}>순번중</Text>
           </View>
         ))}
 
         {/* Resting players (disabled) */}
         {restingList.length > 0 && (
           <View style={styles.statusGroupHeader}>
-            <View style={[styles.statusGroupDot, { backgroundColor: Colors.playerResting }]} />
-            <Text style={styles.statusGroupTitle}>
+            <View style={[styles.statusGroupDot, { backgroundColor: colors.playerResting }]} />
+            <Text style={[styles.statusGroupTitle, { color: colors.textSecondary }]}>
               {Strings.player.status.RESTING} ({restingList.length})
             </Text>
           </View>
         )}
         {restingList.map((u) => (
           <View key={u.userId} style={[styles.playerRow, styles.disabledRow]}>
-            <View style={[styles.statusDot, { backgroundColor: Colors.playerResting }]} />
+            <View style={[styles.statusDot, { backgroundColor: colors.playerResting }]} />
             <PlayerAvatar name={u.userName} size={30} />
-            <Text style={styles.disabledName}>{u.userName}</Text>
-            <Text style={styles.disabledStatus}>휴식중</Text>
+            <Text style={[styles.disabledName, { color: colors.textLight }]}>{u.userName}</Text>
+            <Text style={[styles.disabledStatus, { color: colors.textLight }]}>휴식중</Text>
           </View>
         ))}
       </ScrollView>
@@ -175,43 +194,33 @@ const styles = StyleSheet.create({
   selectedCountRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 10,
-    marginBottom: 12,
+    gap: spacing.smd,
+    marginBottom: spacing.md,
   },
   selectedDots: {
     flexDirection: 'row',
-    gap: 6,
+    gap: spacing.sm,
   },
   selectedDot: {
     width: 10,
     height: 10,
     borderRadius: 5,
-    backgroundColor: Colors.divider,
     borderWidth: 1.5,
-    borderColor: Colors.border,
-  },
-  selectedDotFilled: {
-    backgroundColor: Colors.primary,
-    borderColor: Colors.primary,
   },
   selectedCountText: {
     fontSize: 13,
-    color: Colors.textSecondary,
     fontWeight: '500',
   },
   // Search
   searchContainer: {
-    marginBottom: 10,
+    marginBottom: spacing.smd,
   },
   searchInput: {
-    backgroundColor: Colors.background,
-    borderRadius: 10,
-    paddingHorizontal: 14,
-    paddingVertical: 10,
+    borderRadius: radius.lg,
+    paddingHorizontal: spacing.mlg,
+    paddingVertical: spacing.smd,
     fontSize: 14,
-    color: Colors.text,
     borderWidth: 1,
-    borderColor: Colors.border,
   },
   // Player list
   list: {
@@ -221,31 +230,27 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 6,
-    marginTop: 12,
-    marginBottom: 6,
-    paddingHorizontal: 4,
+    marginTop: spacing.md,
+    marginBottom: spacing.sm,
+    paddingHorizontal: spacing.xs,
   },
   statusGroupDot: {
     width: 8,
     height: 8,
-    borderRadius: 4,
+    borderRadius: radius.xs,
   },
   statusGroupTitle: {
     fontSize: 13,
     fontWeight: '600',
-    color: Colors.textSecondary,
   },
   playerRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingVertical: 8,
-    paddingHorizontal: 8,
-    borderRadius: 10,
+    paddingVertical: spacing.sm,
+    paddingHorizontal: spacing.sm,
+    borderRadius: radius.lg,
     marginBottom: 2,
-    gap: 10,
-  },
-  playerRowActive: {
-    backgroundColor: Colors.primaryLight,
+    gap: spacing.smd,
   },
   playerInfo: {
     flex: 1,
@@ -258,41 +263,29 @@ const styles = StyleSheet.create({
   },
   playerName: {
     fontSize: 15,
-    color: Colors.text,
     fontWeight: '500',
-  },
-  playerNameActive: {
-    fontWeight: '600',
-    color: Colors.primary,
   },
   metaText: {
     fontSize: 11,
-    color: Colors.textLight,
   },
   // Checkbox
   checkbox: {
     width: 22,
     height: 22,
-    borderRadius: 6,
+    borderRadius: radius.sm,
     borderWidth: 2,
-    borderColor: Colors.border,
     justifyContent: 'center',
     alignItems: 'center',
   },
-  checkboxChecked: {
-    backgroundColor: Colors.primary,
-    borderColor: Colors.primary,
-  },
   checkmark: {
-    color: '#fff',
-    fontSize: 14,
-    fontWeight: '700',
+    color: palette.white,
+    ...{ fontSize: 14, fontWeight: '700' as const },
   },
   // Skill badge
   skillBadge: {
     paddingHorizontal: 6,
     paddingVertical: 1,
-    borderRadius: 4,
+    borderRadius: radius.xs,
   },
   skillBadgeText: {
     fontSize: 10,
@@ -300,20 +293,18 @@ const styles = StyleSheet.create({
   },
   // Disabled rows
   disabledRow: {
-    opacity: 0.5,
+    opacity: opacity.disabled,
   },
   statusDot: {
     width: 8,
     height: 8,
-    borderRadius: 4,
+    borderRadius: radius.xs,
   },
   disabledName: {
     fontSize: 14,
-    color: Colors.textLight,
     flex: 1,
   },
   disabledStatus: {
     fontSize: 12,
-    color: Colors.textLight,
   },
 });

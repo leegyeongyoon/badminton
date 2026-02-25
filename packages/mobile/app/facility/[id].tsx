@@ -15,6 +15,7 @@ import { useFacilityStore } from '../../store/facilityStore';
 import { useSocketEvent, useFacilityRoom } from '../../hooks/useSocket';
 import FacilityMap from '../../components/FacilityMap';
 import { Colors } from '../../constants/colors';
+import { createShadow } from '../../constants/theme';
 import { Strings } from '../../constants/strings';
 
 interface FacilityDetail {
@@ -396,7 +397,7 @@ export default function FacilityDetailScreen() {
         ) : session ? (
           <TouchableOpacity
             style={[styles.mainButton, { backgroundColor: Colors.primary }]}
-            onPress={() => router.push('/(tabs)/checkin')}
+            onPress={() => router.push('/checkin-modal')}
           >
             <Text style={styles.mainButtonText}>QR 체크인</Text>
           </TouchableOpacity>
@@ -484,11 +485,7 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     padding: 14,
     gap: 10,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.04,
-    shadowRadius: 3,
-    elevation: 1,
+    ...createShadow(1, 3, 0.04, 1),
   },
   hoursRow: {
     flexDirection: 'row',
@@ -540,11 +537,7 @@ const styles = StyleSheet.create({
     borderRadius: 14,
     overflow: 'hidden',
     height: 180,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.06,
-    shadowRadius: 4,
-    elevation: 2,
+    ...createShadow(1, 4, 0.06, 2),
   },
   miniMap: {
     flex: 1,
@@ -570,11 +563,7 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     padding: 12,
     alignItems: 'center',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.05,
-    shadowRadius: 3,
-    elevation: 1,
+    ...createShadow(1, 3, 0.05, 1),
   },
   statValue: {
     fontSize: 22,
@@ -618,11 +607,7 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     padding: 14,
     marginBottom: 8,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.04,
-    shadowRadius: 3,
-    elevation: 1,
+    ...createShadow(1, 3, 0.04, 1),
   },
   courtMiniHeader: {
     flexDirection: 'row',
@@ -689,7 +674,7 @@ const styles = StyleSheet.create({
     fontSize: 11,
     color: Colors.textLight,
     fontWeight: '600',
-    fontVariant: ['tabular-nums'],
+    // fontVariant removed for web compat — tabular-nums via theme token on native
   },
   // Playing info
   courtMiniPlaying: {
@@ -732,11 +717,7 @@ const styles = StyleSheet.create({
     paddingBottom: 32,
     borderTopWidth: 1,
     borderTopColor: Colors.border,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: -2 },
-    shadowOpacity: 0.05,
-    shadowRadius: 4,
-    elevation: 4,
+    ...createShadow(-2, 4, 0.05, 4),
   },
   mainButton: {
     borderRadius: 14,

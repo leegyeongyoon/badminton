@@ -1,43 +1,67 @@
-import { useEffect, useState } from 'react';
-import { View, Text, TouchableOpacity, StyleSheet, ScrollView } from 'react-native';
+import { useEffect, useState, useCallback } from 'react';
+import { View, Text, TouchableOpacity, StyleSheet, ScrollView, Share } from 'react-native';
 import { useRouter } from 'expo-router';
 import { useCheckinStore } from '../../store/checkinStore';
 import { useAuthStore } from '../../store/authStore';
 import { useFacilityStore } from '../../store/facilityStore';
-import { Colors } from '../../constants/colors';
+import { useClubStore } from '../../store/clubStore';
+import { useTheme } from '../../hooks/useTheme';
 import { Strings } from '../../constants/strings';
-import { showConfirm } from '../../utils/alert';
+import { showAlert, showConfirm } from '../../utils/alert';
+import { showSuccess } from '../../utils/feedback';
+import { Icon } from '../../components/ui/Icon';
 import api from '../../services/api';
+import { checkinApi } from '../../services/checkin';
+import { profileApi } from '../../services/profile';
+import { typography, radius, spacing, opacity } from '../../constants/theme';
+import { alpha } from '../../utils/color';
 
-interface MenuItem {
-  icon: string;
-  label: string;
-  description: string;
-  onPress: () => void;
-  badge?: string;
-  show?: boolean;
-}
+import { UserProfileCard } from '../../components/settings/UserProfileCard';
+import { ClubsSection } from '../../components/settings/ClubsSection';
+import { ClubModal } from '../../components/settings/ClubModal';
 
 export default function MoreScreen() {
   const router = useRouter();
-  const { status: checkinStatus } = useCheckinStore();
+  const { colors, shadows } = useTheme();
+  const { status: checkinStatus, fetchStatus } = useCheckinStore();
   const { user, logout } = useAuthStore();
   const { selectedFacility, clearSelectedFacility } = useFacilityStore();
+  const { clubs, fetchClubs, createClub, joinClub } = useClubStore();
   const [unreadCount, setUnreadCount] = useState(0);
   const [isAdmin, setIsAdmin] = useState(false);
+  const [profileData, setProfileData] = useState<any>(null);
+  const [showCreateModal, setShowCreateModal] = useState(false);
+  const [showJoinModal, setShowJoinModal] = useState(false);
+  const [clubName, setClubName] = useState('');
+  const [inviteCode, setInviteCode] = useState('');
 
   const facilityId = checkinStatus?.facilityId;
 
   useEffect(() => {
-    loadUnreadCount();
-    checkAdminStatus();
+    Promise.all([
+      loadUnreadCount(),
+      checkAdminStatus(),
+      fetchClubs(),
+      loadProfile(),
+    ]);
   }, [facilityId]);
+
+  const loadProfile = async () => {
+    try {
+      const { data } = await profileApi.getProfile();
+      setProfileData(data);
+    } catch {
+      /* silent */
+    }
+  };
 
   const loadUnreadCount = async () => {
     try {
       const { data } = await api.get('/notifications', { params: { unreadOnly: true } });
       setUnreadCount(Array.isArray(data) ? data.filter((n: any) => !n.read).length : 0);
-    } catch { /* silent */ }
+    } catch {
+      /* silent */
+    }
   };
 
   const checkAdminStatus = async () => {
@@ -46,10 +70,9 @@ export default function MoreScreen() {
       setIsAdmin(true);
       return;
     }
-    // Also check if user is admin for current facility
     if (facilityId) {
       try {
-        const { data } = await api.get(`/users/me/admin-facilities`);
+        const { data } = await api.get('/users/me/admin-facilities');
         setIsAdmin(Array.isArray(data) && data.some((f: any) => f.id === facilityId));
       } catch {
         setIsAdmin(user.role === 'FACILITY_ADMIN');
@@ -57,344 +80,228 @@ export default function MoreScreen() {
     }
   };
 
-  const handleCheckin = () => {
-    router.push('/(tabs)/checkin');
-  };
-
-  const handleNotifications = () => {
-    router.push('/notifications');
-  };
-
-  const handleTvDisplay = () => {
-    if (!facilityId) {
-      return;
-    }
-    router.push(`/display/${facilityId}`);
-  };
-
-  const handleProfile = () => {
-    router.push('/(tabs)/profile');
-  };
-
-  const handleAdmin = () => {
-    router.push('/admin');
-  };
-
-  const handleChangeFacility = async () => {
-    await clearSelectedFacility();
-    // Root layout gating will redirect to facility-select
+  const handleCheckout = () => {
+    showConfirm('체크아웃', '체크아웃 하시겠습니까?', async () => {
+      try {
+        await checkinApi.checkOut();
+        await fetchStatus();
+        showSuccess('체크아웃 되었습니다');
+      } catch (err: any) {
+        showAlert('오류', err.response?.data?.error || '체크아웃에 실패했습니다');
+      }
+    });
   };
 
   const handleLogout = () => {
-    showConfirm(
-      Strings.auth.logout,
-      '로그아웃하시겠습니까?',
-      async () => {
-        await logout();
-        // Root layout gating will redirect to auth
-      },
-      Strings.auth.logout,
-    );
+    showConfirm(Strings.auth.logout, '로그아웃하시겠습니까?', async () => {
+      await logout();
+    }, Strings.auth.logout);
   };
 
-  const menuItems: MenuItem[] = [
-    {
-      icon: '🏟️',
-      label: Strings.facility.change,
-      description: selectedFacility
-        ? `${selectedFacility.name} (${Strings.facility.changeDescription})`
-        : Strings.facility.changeDescription,
-      onPress: handleChangeFacility,
-    },
-    {
-      icon: '📷',
-      label: '체크인',
-      description: checkinStatus
-        ? `${checkinStatus.facilityName}에 체크인 중`
-        : '시설에 체크인하세요',
-      onPress: handleCheckin,
-      badge: checkinStatus ? '체크인 중' : undefined,
-    },
-    {
-      icon: '🔔',
-      label: '알림',
-      description: '순번 및 게임 알림',
-      onPress: handleNotifications,
-      badge: unreadCount > 0 ? `${unreadCount}` : undefined,
-    },
-    {
-      icon: '👤',
-      label: '프로필',
-      description: '플레이어 설정 및 통계',
-      onPress: handleProfile,
-    },
-    {
-      icon: '📺',
-      label: 'TV 디스플레이 모드',
-      description: '대형 화면용 코트 현황 표시',
-      onPress: handleTvDisplay,
-      show: !!facilityId,
-    },
-  ];
+  const handleCreateClub = async () => {
+    if (!clubName.trim()) return;
+    try {
+      await createClub(clubName.trim());
+      setClubName('');
+      setShowCreateModal(false);
+      fetchClubs();
+    } catch (err: any) {
+      showAlert(Strings.common.error, err.response?.data?.error || '모임 생성에 실패했습니다');
+    }
+  };
 
-  const visibleMenuItems = menuItems.filter((item) => item.show !== false);
+  const handleJoinClub = async () => {
+    if (!inviteCode.trim()) return;
+    try {
+      await joinClub(inviteCode.trim());
+      setInviteCode('');
+      setShowJoinModal(false);
+      fetchClubs();
+    } catch (err: any) {
+      showAlert(Strings.common.error, err.response?.data?.error || '모임 가입에 실패했습니다');
+    }
+  };
+
+  const handleShareInvite = async (code: string, name: string) => {
+    try {
+      await Share.share({ message: `${Strings.app.name} - ${name} 모임에 참여하세요! 초대코드: ${code}` });
+    } catch {
+      /* silent */
+    }
+  };
 
   return (
-    <ScrollView style={styles.container} contentContainerStyle={styles.content}>
-      {/* User card */}
-      <View style={styles.userCard}>
-        <View style={styles.userAvatar}>
-          <Text style={styles.userAvatarText}>{user?.name?.[0] || '?'}</Text>
-        </View>
-        <View style={styles.userInfo}>
-          <Text style={styles.userName}>{user?.name}</Text>
-          <Text style={styles.userPhone}>{user?.phone}</Text>
-        </View>
-        {checkinStatus && (
-          <View style={styles.checkinStatusBadge}>
-            <Text style={styles.checkinStatusText}>체크인</Text>
+    <ScrollView
+      style={[styles.container, { backgroundColor: colors.background }]}
+      contentContainerStyle={styles.content}
+    >
+      {/* Profile card */}
+      <UserProfileCard
+        user={user}
+        profileData={profileData}
+        onEditProfile={() => router.push('/(tabs)/profile')}
+      />
+
+      {/* Clubs section - with game board entry */}
+      <ClubsSection
+        clubs={clubs}
+        onCreateClub={() => setShowCreateModal(true)}
+        onJoinClub={() => setShowJoinModal(true)}
+        onClubPress={(clubId) => router.push(`/club/${clubId}`)}
+        onShareInvite={handleShareInvite}
+      />
+
+      {/* Facility management */}
+      <View style={[styles.section, { backgroundColor: colors.surface }, shadows.sm]}>
+        <Text style={[styles.sectionTitle, { color: colors.text }]}>시설 관리</Text>
+        {selectedFacility && (
+          <View style={styles.facilityInfo}>
+            <Text style={[styles.facilityName, { color: colors.textSecondary }]}>
+              {selectedFacility.name}
+            </Text>
           </View>
+        )}
+        <TouchableOpacity style={styles.menuItem} onPress={clearSelectedFacility}>
+          <Icon name="court" size={18} color={colors.textSecondary} />
+          <Text style={[styles.menuItemText, { color: colors.text }]}>{Strings.facility.change}</Text>
+        </TouchableOpacity>
+        {checkinStatus && (
+          <TouchableOpacity style={styles.menuItem} onPress={handleCheckout}>
+            <Icon name="logout" size={18} color={colors.danger} />
+            <Text style={[styles.menuItemText, { color: colors.danger }]}>{Strings.checkin.checkout}</Text>
+          </TouchableOpacity>
         )}
       </View>
 
-      {/* Admin section - prominent card */}
-      {isAdmin && (
-        <TouchableOpacity style={styles.adminCard} onPress={handleAdmin} activeOpacity={0.8}>
-          <View style={styles.adminCardInner}>
-            <View style={styles.adminIconContainer}>
-              <Text style={styles.adminIcon}>⚙️</Text>
-            </View>
-            <View style={styles.adminCardInfo}>
-              <Text style={styles.adminCardLabel}>{Strings.admin.adminMenu}</Text>
-              <Text style={styles.adminCardDesc}>운영, 게임 편성, 코트 관리</Text>
-            </View>
-            <Text style={styles.menuArrow}>›</Text>
-          </View>
-        </TouchableOpacity>
-      )}
-
       {/* Menu items */}
-      <View style={styles.menuSection}>
-        {visibleMenuItems.map((item, idx) => (
-          <TouchableOpacity
-            key={idx}
-            style={[
-              styles.menuItem,
-              idx < visibleMenuItems.length - 1 && styles.menuItemBorder,
-            ]}
-            onPress={item.onPress}
-          >
-            <Text style={styles.menuIcon}>{item.icon}</Text>
-            <View style={styles.menuInfo}>
-              <Text style={styles.menuLabel}>{item.label}</Text>
-              <Text style={styles.menuDesc}>{item.description}</Text>
+      <View style={[styles.section, { backgroundColor: colors.surface }, shadows.sm]}>
+        <TouchableOpacity style={styles.menuItem} onPress={() => router.push('/notifications')}>
+          <Icon name="notification" size={18} color={colors.textSecondary} />
+          <Text style={[styles.menuItemText, { color: colors.text }]}>{Strings.notification.title}</Text>
+          {unreadCount > 0 && (
+            <View style={[styles.badge, { backgroundColor: colors.danger }]}>
+              <Text style={styles.badgeText}>{unreadCount}</Text>
             </View>
-            {item.badge && (
-              <View style={styles.menuBadge}>
-                <Text style={styles.menuBadgeText}>{item.badge}</Text>
-              </View>
-            )}
-            <Text style={styles.menuArrow}>›</Text>
+          )}
+        </TouchableOpacity>
+
+        {isAdmin && (
+          <TouchableOpacity style={styles.menuItem} onPress={() => router.push('/admin')}>
+            <Icon name="settings" size={18} color={colors.primary} />
+            <Text style={[styles.menuItemText, { color: colors.text }]}>{Strings.admin.dashboard}</Text>
           </TouchableOpacity>
-        ))}
+        )}
+      </View>
+
+      {/* App settings */}
+      <View style={[styles.section, { backgroundColor: colors.surface }, shadows.sm]}>
+        <Text style={[styles.sectionTitle, { color: colors.text }]}>앱 설정</Text>
+        <TouchableOpacity
+          style={styles.menuItem}
+          onPress={() => router.push('/(tabs)/settings')}
+        >
+          <Icon name="settings" size={18} color={colors.textSecondary} />
+          <Text style={[styles.menuItemText, { color: colors.text }]}>테마 및 설정</Text>
+        </TouchableOpacity>
       </View>
 
       {/* Logout */}
-      <TouchableOpacity style={styles.logoutButton} onPress={handleLogout} activeOpacity={0.7}>
-        <Text style={styles.logoutButtonText}>{Strings.auth.logout}</Text>
+      <TouchableOpacity
+        style={[styles.logoutButton, { backgroundColor: colors.dangerLight, borderColor: alpha(colors.danger, opacity.border) }]}
+        onPress={handleLogout}
+        activeOpacity={0.7}
+      >
+        <Icon name="logout" size={18} color={colors.danger} />
+        <Text style={[styles.logoutText, { color: colors.danger }]}>{Strings.auth.logout}</Text>
       </TouchableOpacity>
 
-      {/* App info */}
-      <View style={styles.appInfoSection}>
-        <Text style={styles.appInfoText}>{Strings.app.name}</Text>
-        <Text style={styles.versionText}>v1.0.0</Text>
+      <View style={styles.appInfo}>
+        <Text style={[styles.appInfoText, { color: colors.textLight }]}>{Strings.app.name}</Text>
+        <Text style={[styles.versionText, { color: colors.textLight }]}>v2.0.0</Text>
       </View>
+
+      <ClubModal
+        mode="create"
+        visible={showCreateModal}
+        value={clubName}
+        onChangeText={setClubName}
+        onConfirm={handleCreateClub}
+        onCancel={() => { setShowCreateModal(false); setClubName(''); }}
+      />
+      <ClubModal
+        mode="join"
+        visible={showJoinModal}
+        value={inviteCode}
+        onChangeText={setInviteCode}
+        onConfirm={handleJoinClub}
+        onCancel={() => { setShowJoinModal(false); setInviteCode(''); }}
+      />
     </ScrollView>
   );
 }
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: Colors.background,
+  container: { flex: 1 },
+  content: { padding: spacing.lg, paddingBottom: spacing.xxxxl, gap: spacing.lg },
+  section: {
+    borderRadius: radius.card,
+    padding: spacing.lg,
   },
-  content: {
-    padding: 16,
-    paddingBottom: 32,
+  sectionTitle: {
+    ...typography.subtitle2,
+    marginBottom: spacing.md,
   },
-  userCard: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: Colors.surface,
-    borderRadius: 16,
-    padding: 16,
-    marginBottom: 16,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.05,
-    shadowRadius: 4,
-    elevation: 2,
+  facilityInfo: {
+    marginBottom: spacing.sm,
   },
-  userAvatar: {
-    width: 48,
-    height: 48,
-    borderRadius: 24,
-    backgroundColor: Colors.primaryLight,
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginRight: 12,
-  },
-  userAvatarText: {
-    fontSize: 20,
-    fontWeight: '700',
-    color: Colors.primary,
-  },
-  userInfo: {
-    flex: 1,
-  },
-  userName: {
-    fontSize: 17,
-    fontWeight: '700',
-    color: Colors.text,
-  },
-  userPhone: {
-    fontSize: 14,
-    color: Colors.textSecondary,
-    marginTop: 2,
-  },
-  checkinStatusBadge: {
-    backgroundColor: Colors.primaryLight,
-    paddingHorizontal: 10,
-    paddingVertical: 4,
-    borderRadius: 8,
-  },
-  checkinStatusText: {
-    fontSize: 12,
-    color: Colors.primary,
-    fontWeight: '600',
-  },
-  menuSection: {
-    backgroundColor: Colors.surface,
-    borderRadius: 16,
-    overflow: 'hidden',
-    marginBottom: 16,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.05,
-    shadowRadius: 4,
-    elevation: 2,
+  facilityName: {
+    ...typography.caption,
   },
   menuItem: {
     flexDirection: 'row',
     alignItems: 'center',
-    padding: 16,
-    gap: 12,
+    gap: spacing.md,
+    paddingVertical: spacing.md,
   },
-  menuItemBorder: {
-    borderBottomWidth: 1,
-    borderBottomColor: Colors.divider,
-  },
-  menuIcon: {
-    fontSize: 24,
-  },
-  menuInfo: {
+  menuItemText: {
+    ...typography.body1,
     flex: 1,
   },
-  menuLabel: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: Colors.text,
-  },
-  menuDesc: {
-    fontSize: 13,
-    color: Colors.textSecondary,
-    marginTop: 2,
-  },
-  menuBadge: {
-    backgroundColor: Colors.danger,
-    paddingHorizontal: 8,
-    paddingVertical: 3,
+  badge: {
     borderRadius: 10,
-    minWidth: 22,
-    alignItems: 'center',
-  },
-  menuBadgeText: {
-    fontSize: 11,
-    color: '#fff',
-    fontWeight: '700',
-  },
-  menuArrow: {
-    fontSize: 22,
-    color: Colors.textLight,
-    marginLeft: 4,
-  },
-  // Admin card
-  adminCard: {
-    backgroundColor: Colors.primary,
-    borderRadius: 16,
-    padding: 16,
-    marginBottom: 16,
-    shadowColor: Colors.primary,
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.25,
-    shadowRadius: 8,
-    elevation: 6,
-  },
-  adminCardInner: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 12,
-  },
-  adminIconContainer: {
-    width: 40,
-    height: 40,
-    borderRadius: 12,
-    backgroundColor: 'rgba(255,255,255,0.2)',
+    minWidth: 20,
+    height: 20,
     justifyContent: 'center',
     alignItems: 'center',
+    paddingHorizontal: 6,
   },
-  adminIcon: {
-    fontSize: 20,
-  },
-  adminCardInfo: {
-    flex: 1,
-  },
-  adminCardLabel: {
-    fontSize: 17,
-    fontWeight: '700',
+  badgeText: {
     color: '#fff',
-  },
-  adminCardDesc: {
-    fontSize: 13,
-    color: 'rgba(255,255,255,0.8)',
-    marginTop: 2,
+    fontSize: 11,
+    fontWeight: '700',
   },
   logoutButton: {
-    backgroundColor: Colors.surface,
-    borderRadius: 12,
-    padding: 16,
+    borderRadius: radius.xxl,
+    padding: spacing.lg,
+    flexDirection: 'row',
     alignItems: 'center',
-    marginBottom: 16,
-    borderWidth: 1,
-    borderColor: Colors.dangerLight,
+    justifyContent: 'center',
+    gap: spacing.sm,
+    borderWidth: 1.5,
   },
-  logoutButtonText: {
-    fontSize: 15,
-    fontWeight: '600',
-    color: Colors.danger,
+  logoutText: {
+    ...typography.subtitle1,
   },
-  appInfoSection: {
+  appInfo: {
     alignItems: 'center',
-    paddingVertical: 16,
+    paddingVertical: spacing.xl,
   },
   appInfoText: {
-    fontSize: 14,
-    color: Colors.textLight,
-    fontWeight: '500',
+    ...typography.body2,
+    fontWeight: '600',
   },
   versionText: {
-    fontSize: 12,
-    color: Colors.textLight,
-    marginTop: 4,
+    ...typography.caption,
+    marginTop: spacing.xs,
   },
 });

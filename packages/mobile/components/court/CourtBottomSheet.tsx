@@ -1,15 +1,18 @@
-import { useState, useEffect, useCallback } from 'react';
-import { View, Text, TouchableOpacity, ScrollView, StyleSheet, ActivityIndicator } from 'react-native';
+import { useState, useEffect, useCallback, useMemo } from 'react';
+import { View, Text, TouchableOpacity, StyleSheet, ActivityIndicator } from 'react-native';
 import { BottomSheet } from '../shared/BottomSheet';
 import { PlayerSelector } from '../shared/PlayerSelector';
 import { PlayerAvatarRow } from '../shared/PlayerAvatarRow';
 import { CountdownTimer } from '../shared/CountdownTimer';
-import { Colors } from '../../constants/colors';
+import { ConeIcon } from '../ui/ConeIcon';
+import { useTheme } from '../../hooks/useTheme';
+import { useAuthStore } from '../../store/authStore';
 import { Strings } from '../../constants/strings';
 import { courtApi } from '../../services/court';
 import api from '../../services/api';
 import { showAlert } from '../../utils/alert';
 import { showSuccess } from '../../utils/feedback';
+import { palette, typography, radius, spacing } from '../../constants/theme';
 
 interface AvailablePlayer {
   userId: string;
@@ -63,11 +66,7 @@ interface CourtBottomSheetProps {
   onTurnRegistered?: () => void;
 }
 
-const courtStatusColors: Record<string, string> = {
-  EMPTY: Colors.courtEmpty,
-  IN_USE: Colors.courtInGame,
-  MAINTENANCE: Colors.courtMaintenance,
-};
+type Step = 1 | 2;
 
 export function CourtBottomSheet({
   visible,
@@ -76,22 +75,45 @@ export function CourtBottomSheet({
   facilityId,
   onTurnRegistered,
 }: CourtBottomSheetProps) {
+  const { colors } = useTheme();
+  const currentUser = useAuthStore((s) => s.user);
+  const [step, setStep] = useState<Step>(1);
   const [courtDetail, setCourtDetail] = useState<CourtDetail | null>(null);
   const [availablePlayers, setAvailablePlayers] = useState<AvailablePlayer[]>([]);
   const [selectedPlayers, setSelectedPlayers] = useState<string[]>([]);
   const [playerSearch, setPlayerSearch] = useState('');
   const [loading, setLoading] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+  const [loadError, setLoadError] = useState(false);
 
-  // Load court data + available players when sheet opens
+  const courtStatusColors: Record<string, string> = {
+    EMPTY: colors.courtEmpty,
+    IN_USE: colors.courtInGame,
+    MAINTENANCE: colors.courtMaintenance,
+  };
+
+  const court = courtDetail?.court;
+  const turns = courtDetail?.turns || [];
+  const maxTurns = courtDetail?.maxTurns || 3;
+  const playersRequired = court?.playersRequired || 4;
+  const playingTurn = turns.find((t) => t.status === 'PLAYING');
+  const waitingTurns = turns.filter((t) => t.status === 'WAITING');
+  const canRegister = turns.length < maxTurns && court?.status !== 'MAINTENANCE';
+
+  const selectedPlayerDetails = useMemo(() => {
+    return selectedPlayers
+      .map((id) => availablePlayers.find((p) => p.userId === id))
+      .filter(Boolean) as AvailablePlayer[];
+  }, [selectedPlayers, availablePlayers]);
+
   const loadData = useCallback(async () => {
     if (!courtId) return;
     setLoading(true);
+    setLoadError(false);
     try {
       const { data } = await courtApi.getTurns(courtId);
       setCourtDetail(data);
 
-      // Load available players from the facility
       const fId = facilityId || data?.court?.facilityId;
       if (fId) {
         try {
@@ -103,6 +125,7 @@ export function CourtBottomSheet({
       }
     } catch {
       setCourtDetail(null);
+      setLoadError(true);
     } finally {
       setLoading(false);
     }
@@ -110,20 +133,12 @@ export function CourtBottomSheet({
 
   useEffect(() => {
     if (visible && courtId) {
-      // Reset state on open
+      setStep(1);
       setSelectedPlayers([]);
       setPlayerSearch('');
       loadData();
     }
   }, [visible, courtId, loadData]);
-
-  const court = courtDetail?.court;
-  const turns = courtDetail?.turns || [];
-  const maxTurns = courtDetail?.maxTurns || 3;
-  const playersRequired = court?.playersRequired || 4;
-  const playingTurn = turns.find((t) => t.status === 'PLAYING');
-  const waitingTurns = turns.filter((t) => t.status === 'WAITING');
-  const canRegister = turns.length < maxTurns && court?.status !== 'MAINTENANCE';
 
   const handleTogglePlayer = useCallback((userId: string) => {
     setSelectedPlayers((prev) => {
@@ -135,6 +150,15 @@ export function CourtBottomSheet({
     });
   }, [playersRequired]);
 
+  const handleIncludeMe = useCallback(() => {
+    if (!currentUser) return;
+    setSelectedPlayers((prev) => {
+      if (prev.includes(currentUser.id)) return prev;
+      if (prev.length >= playersRequired) return prev;
+      return [...prev, currentUser.id];
+    });
+  }, [currentUser, playersRequired]);
+
   const handleSubmit = useCallback(async () => {
     if (!courtId || selectedPlayers.length !== playersRequired) return;
     setSubmitting(true);
@@ -142,101 +166,176 @@ export function CourtBottomSheet({
       await courtApi.registerTurn(courtId, selectedPlayers);
       setSelectedPlayers([]);
       setPlayerSearch('');
+      setStep(1);
       onTurnRegistered?.();
       onClose();
-      showSuccess('순번이 등록되었습니다');
+      showSuccess('고깔이 놓아졌습니다');
     } catch (err: any) {
-      showAlert('오류', err.response?.data?.error || '순번 등록에 실패했습니다');
+      showAlert('오류', err.response?.data?.error || '고깔 놓기에 실패했습니다');
     } finally {
       setSubmitting(false);
     }
   }, [courtId, selectedPlayers, playersRequired, onTurnRegistered, onClose]);
 
-  const renderCourtHeader = () => {
-    if (!court) return null;
-    const statusColor = courtStatusColors[court.status] || Colors.textLight;
+  const handleClose = useCallback(() => {
+    setStep(1);
+    onClose();
+  }, [onClose]);
+
+  // ── Step Indicator (2 dots) ──────────────────────────────
+  const renderStepIndicator = () => (
+    <View style={styles.stepIndicator}>
+      {[1, 2].map((s) => (
+        <View
+          key={s}
+          style={[
+            styles.stepDot,
+            { backgroundColor: s === step ? colors.primary : colors.border },
+          ]}
+        />
+      ))}
+    </View>
+  );
+
+  // ── Step 1: Court Overview + "고깔 놓기" button ──────────
+  const renderStep1 = () => {
+    const statusColor = courtStatusColors[court?.status || ''] || colors.textLight;
     const statusLabel =
-      Strings.court.status[court.status as keyof typeof Strings.court.status] || court.status;
+      Strings.court.status[court?.status as keyof typeof Strings.court.status] || court?.status;
 
     return (
-      <View style={styles.courtHeader}>
-        <View style={styles.courtHeaderLeft}>
-          <Text style={styles.courtName}>{court.name}</Text>
-          <View style={styles.courtMeta}>
-            {court.gameType === 'LESSON' && (
-              <View style={styles.lessonBadge}>
-                <Text style={styles.lessonBadgeText}>{Strings.court.gameType.LESSON}</Text>
-              </View>
-            )}
-            <Text style={styles.courtMetaText}>
+      <>
+        {/* Court header */}
+        <View style={[styles.courtHeader, { borderBottomColor: colors.divider }]}>
+          <View style={styles.courtHeaderLeft}>
+            <Text style={[styles.courtName, { color: colors.text }]}>{court?.name}</Text>
+            <Text style={[styles.courtMetaText, { color: colors.textSecondary }]}>
               {turns.length}/{maxTurns} {Strings.turn.indicator}
             </Text>
           </View>
-        </View>
-        <View style={[styles.statusBadge, { backgroundColor: statusColor }]}>
-          <Text style={styles.statusBadgeText}>{statusLabel}</Text>
-        </View>
-      </View>
-    );
-  };
-
-  const renderCurrentGame = () => {
-    if (!playingTurn) return null;
-    return (
-      <View style={styles.currentGameSection}>
-        <View style={styles.sectionHeader}>
-          <Text style={styles.sectionTitle}>{Strings.turn.nowPlaying}</Text>
-          <View style={styles.playingBadge}>
-            <View style={styles.playingDot} />
-            <Text style={styles.playingBadgeText}>{Strings.turn.status.PLAYING}</Text>
+          <View style={[styles.statusBadge, { backgroundColor: statusColor }]}>
+            <Text style={styles.statusBadgeText}>{statusLabel}</Text>
           </View>
         </View>
 
-        {playingTurn.timeLimitAt && (
-          <CountdownTimer timeLimitAt={playingTurn.timeLimitAt} mode="large" />
+        {/* Current game with cones */}
+        {playingTurn && (
+          <View style={[styles.currentGameSection, { backgroundColor: colors.background }]}>
+            <View style={styles.sectionHeader}>
+              <Text style={[styles.sectionTitle, { color: colors.text }]}>{Strings.turn.nowPlaying}</Text>
+              <View style={[styles.playingBadge, { backgroundColor: colors.dangerLight }]}>
+                <View style={[styles.playingDot, { backgroundColor: colors.danger }]} />
+                <Text style={[styles.playingBadgeText, { color: colors.danger }]}>LIVE</Text>
+              </View>
+            </View>
+            {playingTurn.timeLimitAt && (
+              <CountdownTimer timeLimitAt={playingTurn.timeLimitAt} mode="large" />
+            )}
+            <View style={styles.conePlayerRow}>
+              {playingTurn.players.map((p) => (
+                <View key={p.id} style={styles.conePlayerItem}>
+                  <ConeIcon size={18} filled color={colors.primary} />
+                  <Text style={[styles.conePlayerName, { color: colors.text }]}>{p.userName}</Text>
+                </View>
+              ))}
+            </View>
+          </View>
         )}
 
-        <View style={styles.playerChipsRow}>
-          {playingTurn.players.map((p) => (
-            <View key={p.id} style={styles.playerChip}>
-              <Text style={styles.playerChipText}>{p.userName}</Text>
-            </View>
-          ))}
-        </View>
-      </View>
-    );
-  };
+        {/* Waiting queue with cones */}
+        {waitingTurns.length > 0 && (
+          <View style={styles.waitingSection}>
+            <Text style={[styles.sectionTitle, { color: colors.text }]}>
+              {Strings.turn.waitingQueue} ({waitingTurns.length})
+            </Text>
+            {waitingTurns.map((turn, index) => (
+              <View key={turn.id} style={[styles.waitingItem, { backgroundColor: colors.background }]}>
+                <View style={[styles.waitingPosition, { backgroundColor: colors.primaryLight }]}>
+                  <Text style={[styles.waitingPositionText, { color: colors.primary }]}>{index + 1}</Text>
+                </View>
+                <View style={styles.waitingCones}>
+                  {turn.players.map((p) => (
+                    <View key={p.id} style={styles.conePlayerSmall}>
+                      <ConeIcon size={14} filled dimmed />
+                      <Text style={[styles.conePlayerSmallName, { color: colors.textSecondary }]}>
+                        {p.userName}
+                      </Text>
+                    </View>
+                  ))}
+                  {/* Empty slots */}
+                  {Array.from({ length: Math.max(0, playersRequired - turn.players.length) }).map((_, i) => (
+                    <View key={`empty-${i}`} style={styles.conePlayerSmall}>
+                      <ConeIcon size={14} filled={false} />
+                      <Text style={[styles.conePlayerSmallName, { color: colors.textLight }]}>__</Text>
+                    </View>
+                  ))}
+                </View>
+              </View>
+            ))}
+          </View>
+        )}
 
-  const renderWaitingQueue = () => {
-    if (waitingTurns.length === 0) return null;
-    return (
-      <View style={styles.waitingSection}>
-        <Text style={styles.sectionTitle}>
-          {Strings.turn.waitingQueue} ({waitingTurns.length})
-        </Text>
-        {waitingTurns.map((turn, index) => (
-          <View key={turn.id} style={styles.waitingItem}>
-            <View style={styles.waitingPosition}>
-              <Text style={styles.waitingPositionText}>{index + 1}</Text>
-            </View>
-            <View style={styles.waitingItemPlayers}>
-              <PlayerAvatarRow players={turn.players} avatarSize={22} />
-            </View>
-            <Text style={styles.waitingPlayerNames}>
-              {turn.players.map((p) => p.userName).join(', ')}
+        {/* Empty state */}
+        {turns.length === 0 && canRegister && (
+          <View style={styles.emptyHint}>
+            <ConeIcon size={32} filled={false} />
+            <Text style={[styles.emptyHintText, { color: colors.textSecondary }]}>
+              {Strings.turn.noTurn}
             </Text>
           </View>
-        ))}
-      </View>
+        )}
+
+        {/* Maintenance notice */}
+        {court?.status === 'MAINTENANCE' && (
+          <View style={[styles.maintenanceNotice, { backgroundColor: colors.divider }]}>
+            <Text style={[styles.maintenanceText, { color: colors.textSecondary }]}>
+              {Strings.court.status.MAINTENANCE} - 고깔을 놓을 수 없습니다
+            </Text>
+          </View>
+        )}
+
+        {/* Primary action: go to player selection */}
+        {canRegister && (
+          <TouchableOpacity
+            style={[styles.primaryButton, { backgroundColor: colors.primary }]}
+            onPress={() => setStep(2)}
+          >
+            <ConeIcon size={18} filled color={palette.white} />
+            <Text style={styles.primaryButtonText}>{Strings.turn.placeCone}</Text>
+          </TouchableOpacity>
+        )}
+      </>
     );
   };
 
-  const renderPlayerSelection = () => {
-    if (!canRegister) return null;
+  // ── Step 2: Player Selection + Confirm bar ───────────────
+  const renderStep2 = () => {
+    const isReady = selectedPlayers.length === playersRequired;
+    const isMeSelected = currentUser ? selectedPlayers.includes(currentUser.id) : false;
+
     return (
-      <View style={styles.selectionSection}>
-        <View style={styles.selectionDivider} />
-        <Text style={styles.selectionTitle}>{Strings.turn.selectPlayers}</Text>
+      <>
+        <TouchableOpacity style={styles.backButton} onPress={() => setStep(1)}>
+          <Text style={[styles.backButtonText, { color: colors.textSecondary }]}>{'<'} 이전</Text>
+        </TouchableOpacity>
+
+        <Text style={[styles.stepTitle, { color: colors.text }]}>{Strings.turn.selectPlayers}</Text>
+
+        {/* "나 포함" quick button */}
+        {currentUser && !isMeSelected && (
+          <TouchableOpacity
+            style={[styles.includeMeButton, { backgroundColor: colors.primaryLight, borderColor: colors.primary }]}
+            onPress={handleIncludeMe}
+          >
+            <Text style={[styles.includeMeText, { color: colors.primary }]}>+ 나 포함</Text>
+          </TouchableOpacity>
+        )}
+        {currentUser && isMeSelected && (
+          <View style={[styles.includeMeButton, { backgroundColor: colors.primaryLight, borderColor: colors.primary }]}>
+            <Text style={[styles.includeMeText, { color: colors.primary }]}>나 포함됨</Text>
+          </View>
+        )}
+
         <PlayerSelector
           players={availablePlayers}
           selectedIds={selectedPlayers}
@@ -245,292 +344,151 @@ export function CourtBottomSheet({
           searchValue={playerSearch}
           onSearchChange={setPlayerSearch}
         />
-      </View>
+
+        {/* Selected players summary */}
+        {selectedPlayerDetails.length > 0 && (
+          <View style={[styles.selectedSummary, { backgroundColor: colors.background, borderColor: colors.border }]}>
+            <View style={styles.selectedCones}>
+              {selectedPlayerDetails.map((p) => (
+                <View key={p.userId} style={styles.selectedConeItem}>
+                  <ConeIcon size={16} filled color={colors.primary} />
+                  <Text style={[styles.selectedConeName, { color: colors.text }]}>{p.userName}</Text>
+                </View>
+              ))}
+            </View>
+          </View>
+        )}
+
+        {/* Confirm button */}
+        <TouchableOpacity
+          style={[
+            styles.primaryButton,
+            { backgroundColor: colors.primary },
+            !isReady && styles.primaryButtonDisabled,
+          ]}
+          onPress={handleSubmit}
+          disabled={!isReady || submitting}
+        >
+          {submitting ? (
+            <ActivityIndicator size="small" color={palette.white} />
+          ) : (
+            <>
+              <ConeIcon size={16} filled color={palette.white} />
+              <Text style={styles.primaryButtonText}>
+                {Strings.turn.placeCone} ({selectedPlayers.length}/{playersRequired})
+              </Text>
+            </>
+          )}
+        </TouchableOpacity>
+      </>
     );
   };
 
-  const renderSubmitButton = () => {
-    if (!canRegister) return null;
-    const isReady = selectedPlayers.length === playersRequired;
-    return (
-      <TouchableOpacity
-        style={[styles.submitButton, !isReady && styles.submitButtonDisabled]}
-        onPress={handleSubmit}
-        disabled={!isReady || submitting}
-      >
-        {submitting ? (
-          <ActivityIndicator size="small" color="#fff" />
-        ) : (
-          <Text style={styles.submitButtonText}>
-            {Strings.turn.register} ({selectedPlayers.length}/{playersRequired})
-          </Text>
-        )}
-      </TouchableOpacity>
-    );
-  };
+  const sheetTitle = step === 1
+    ? (court?.name || Strings.turn.placeCone)
+    : Strings.turn.selectPlayers;
 
   return (
     <BottomSheet
       visible={visible}
-      onClose={onClose}
-      title={court?.name || Strings.turn.register}
+      onClose={handleClose}
+      title={sheetTitle}
       maxHeight={90}
     >
       {loading ? (
         <View style={styles.loadingContainer}>
-          <ActivityIndicator size="large" color={Colors.primary} />
-          <Text style={styles.loadingText}>{Strings.common.loading}</Text>
+          <ActivityIndicator size="large" color={colors.primary} />
+          <Text style={[styles.loadingText, { color: colors.textSecondary }]}>{Strings.common.loading}</Text>
+        </View>
+      ) : loadError ? (
+        <View style={styles.errorContainer}>
+          <Text style={[styles.errorText, { color: colors.textSecondary }]}>코트 정보를 불러올 수 없습니다</Text>
+          <TouchableOpacity style={[styles.retryButton, { backgroundColor: colors.primary }]} onPress={loadData}>
+            <Text style={styles.retryButtonText}>다시 시도</Text>
+          </TouchableOpacity>
         </View>
       ) : (
-        <ScrollView
-          style={styles.scrollContent}
-          showsVerticalScrollIndicator={false}
-          keyboardShouldPersistTaps="handled"
-        >
-          {renderCourtHeader()}
-          {renderCurrentGame()}
-          {renderWaitingQueue()}
-          {renderPlayerSelection()}
-
-          {/* Empty state when no turns and can't register */}
-          {turns.length === 0 && canRegister && (
-            <View style={styles.emptyHint}>
-              <Text style={styles.emptyHintText}>{Strings.turn.noTurn}</Text>
-            </View>
-          )}
-
-          {/* Maintenance notice */}
-          {court?.status === 'MAINTENANCE' && (
-            <View style={styles.maintenanceNotice}>
-              <Text style={styles.maintenanceText}>
-                {Strings.court.status.MAINTENANCE} - 순번 등록이 불가합니다
-              </Text>
-            </View>
-          )}
-
-          {renderSubmitButton()}
-
-          {/* Bottom padding for safe area */}
-          <View style={{ height: 20 }} />
-        </ScrollView>
+        <>
+          {renderStepIndicator()}
+          {step === 1 && renderStep1()}
+          {step === 2 && renderStep2()}
+          <View style={{ height: spacing.xl }} />
+        </>
       )}
     </BottomSheet>
   );
 }
 
 const styles = StyleSheet.create({
-  scrollContent: {
-    flex: 1,
+  stepIndicator: {
+    flexDirection: 'row', justifyContent: 'center', alignItems: 'center',
+    gap: spacing.sm, marginBottom: spacing.mlg,
   },
-  loadingContainer: {
-    paddingVertical: 48,
-    alignItems: 'center',
-    gap: 12,
-  },
-  loadingText: {
-    fontSize: 14,
-    color: Colors.textSecondary,
-  },
-
-  // Court header
+  stepDot: { width: 8, height: 8, borderRadius: 4 },
+  backButton: { alignSelf: 'flex-start', paddingVertical: spacing.xs, marginBottom: spacing.sm },
+  backButtonText: { fontSize: 14, fontWeight: '500' },
+  stepTitle: { ...typography.h3, marginBottom: spacing.lg },
+  loadingContainer: { paddingVertical: 48, alignItems: 'center', gap: spacing.md },
+  loadingText: { fontSize: 14 },
+  errorContainer: { paddingVertical: 48, alignItems: 'center', gap: spacing.md },
+  errorText: { fontSize: 14 },
+  retryButton: { borderRadius: radius.lg, paddingHorizontal: spacing.xl, paddingVertical: spacing.smd },
+  retryButtonText: { color: palette.white, fontSize: 14, fontWeight: '600' },
   courtHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    paddingBottom: 14,
-    borderBottomWidth: 1,
-    borderBottomColor: Colors.divider,
-    marginBottom: 14,
+    flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center',
+    paddingBottom: spacing.mlg, borderBottomWidth: 1, marginBottom: spacing.mlg,
   },
-  courtHeaderLeft: {
-    flex: 1,
-  },
-  courtName: {
-    fontSize: 18,
-    fontWeight: '700',
-    color: Colors.text,
-  },
-  courtMeta: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-    marginTop: 4,
-  },
-  lessonBadge: {
-    backgroundColor: Colors.warningLight,
-    paddingHorizontal: 6,
-    paddingVertical: 2,
-    borderRadius: 4,
-  },
-  lessonBadgeText: {
-    fontSize: 11,
-    fontWeight: '600',
-    color: Colors.warning,
-  },
-  courtMetaText: {
-    fontSize: 13,
-    color: Colors.textSecondary,
-    fontWeight: '500',
-  },
-  statusBadge: {
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 10,
-  },
-  statusBadgeText: {
-    color: '#fff',
-    fontSize: 13,
-    fontWeight: '600',
-  },
-
-  // Section header
+  courtHeaderLeft: { flex: 1 },
+  courtName: { fontSize: 18, fontWeight: '700' },
+  courtMetaText: { fontSize: 13, fontWeight: '500', marginTop: spacing.xs },
+  statusBadge: { paddingHorizontal: spacing.md, paddingVertical: spacing.sm, borderRadius: radius.lg },
+  statusBadgeText: { color: palette.white, fontSize: 13, fontWeight: '600' },
   sectionHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 10,
+    flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center',
+    marginBottom: spacing.smd,
   },
-  sectionTitle: {
-    fontSize: 15,
-    fontWeight: '700',
-    color: Colors.text,
-    marginBottom: 8,
-  },
-
-  // Current game
-  currentGameSection: {
-    backgroundColor: Colors.background,
-    borderRadius: 14,
-    padding: 14,
-    marginBottom: 14,
-  },
+  sectionTitle: { ...typography.button, marginBottom: spacing.sm },
+  currentGameSection: { borderRadius: radius.xxl, padding: spacing.mlg, marginBottom: spacing.mlg },
   playingBadge: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-    backgroundColor: Colors.dangerLight,
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-    borderRadius: 6,
+    flexDirection: 'row', alignItems: 'center', gap: spacing.xs,
+    paddingHorizontal: spacing.sm, paddingVertical: spacing.xs, borderRadius: radius.sm,
   },
-  playingDot: {
-    width: 6,
-    height: 6,
-    borderRadius: 3,
-    backgroundColor: Colors.danger,
-  },
-  playingBadgeText: {
-    fontSize: 11,
-    fontWeight: '600',
-    color: Colors.danger,
-  },
-  playerChipsRow: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 6,
-  },
-  playerChip: {
-    backgroundColor: Colors.surface,
-    borderRadius: 8,
-    paddingHorizontal: 10,
-    paddingVertical: 6,
-    borderWidth: 1,
-    borderColor: Colors.border,
-  },
-  playerChipText: {
-    fontSize: 13,
-    fontWeight: '500',
-    color: Colors.text,
-  },
-
-  // Waiting queue
-  waitingSection: {
-    marginBottom: 14,
-  },
+  playingDot: { width: 6, height: 6, borderRadius: 3 },
+  playingBadgeText: { ...typography.overline },
+  conePlayerRow: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.md, marginTop: spacing.sm },
+  conePlayerItem: { flexDirection: 'row', alignItems: 'center', gap: spacing.xs },
+  conePlayerName: { fontSize: 13, fontWeight: '500' },
+  waitingSection: { marginBottom: spacing.mlg },
   waitingItem: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 10,
-    backgroundColor: Colors.background,
-    borderRadius: 10,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-    marginBottom: 6,
+    flexDirection: 'row', alignItems: 'center', gap: spacing.smd,
+    borderRadius: radius.lg, paddingHorizontal: spacing.md, paddingVertical: spacing.smd, marginBottom: spacing.sm,
   },
   waitingPosition: {
-    width: 24,
-    height: 24,
-    borderRadius: 12,
-    backgroundColor: Colors.primaryLight,
-    justifyContent: 'center',
-    alignItems: 'center',
+    width: 24, height: 24, borderRadius: radius.xl, justifyContent: 'center', alignItems: 'center',
   },
-  waitingPositionText: {
-    fontSize: 12,
-    fontWeight: '700',
-    color: Colors.primary,
+  waitingPositionText: { ...typography.caption, fontSize: 12, fontWeight: '700' },
+  waitingCones: { flex: 1, flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm },
+  conePlayerSmall: { flexDirection: 'row', alignItems: 'center', gap: 2 },
+  conePlayerSmallName: { fontSize: 11 },
+  emptyHint: { alignItems: 'center', paddingVertical: spacing.xl, gap: spacing.md },
+  emptyHintText: { fontSize: 14 },
+  maintenanceNotice: { borderRadius: radius.lg, padding: spacing.lg, alignItems: 'center', marginTop: spacing.sm },
+  maintenanceText: { fontSize: 14, fontWeight: '500' },
+  includeMeButton: {
+    alignSelf: 'flex-start', borderWidth: 1.5, borderRadius: radius.pill,
+    paddingHorizontal: spacing.lg, paddingVertical: spacing.sm, marginBottom: spacing.lg,
   },
-  waitingItemPlayers: {
-    marginRight: 4,
+  includeMeText: { ...typography.buttonSm },
+  selectedSummary: {
+    borderRadius: radius.card, borderWidth: 1, padding: spacing.md, marginTop: spacing.md,
   },
-  waitingPlayerNames: {
-    fontSize: 13,
-    color: Colors.textSecondary,
-    flex: 1,
+  selectedCones: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.md },
+  selectedConeItem: { flexDirection: 'row', alignItems: 'center', gap: spacing.xs },
+  selectedConeName: { fontSize: 13, fontWeight: '500' },
+  primaryButton: {
+    borderRadius: radius.xxl, paddingVertical: spacing.mlg, alignItems: 'center',
+    marginTop: spacing.lg, flexDirection: 'row', justifyContent: 'center', gap: spacing.sm,
   },
-
-  // Player selection
-  selectionSection: {
-    flex: 1,
-  },
-  selectionDivider: {
-    height: 1,
-    backgroundColor: Colors.divider,
-    marginBottom: 14,
-  },
-  selectionTitle: {
-    fontSize: 15,
-    fontWeight: '700',
-    color: Colors.text,
-    marginBottom: 10,
-  },
-
-  // Submit button
-  submitButton: {
-    backgroundColor: Colors.primary,
-    borderRadius: 14,
-    paddingVertical: 14,
-    alignItems: 'center',
-    marginTop: 16,
-  },
-  submitButtonDisabled: {
-    opacity: 0.4,
-  },
-  submitButtonText: {
-    color: '#fff',
-    fontSize: 16,
-    fontWeight: '700',
-  },
-
-  // Empty/maintenance states
-  emptyHint: {
-    alignItems: 'center',
-    paddingVertical: 20,
-  },
-  emptyHintText: {
-    fontSize: 14,
-    color: Colors.textSecondary,
-  },
-  maintenanceNotice: {
-    backgroundColor: Colors.divider,
-    borderRadius: 10,
-    padding: 16,
-    alignItems: 'center',
-    marginTop: 8,
-  },
-  maintenanceText: {
-    fontSize: 14,
-    color: Colors.textSecondary,
-    fontWeight: '500',
-  },
+  primaryButtonDisabled: { opacity: 0.4 },
+  primaryButtonText: { ...typography.subtitle1, color: palette.white },
 });

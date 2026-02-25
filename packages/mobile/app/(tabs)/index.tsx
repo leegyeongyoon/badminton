@@ -1,23 +1,21 @@
 import { useState, useCallback } from 'react';
-import { View, TouchableOpacity, Text, StyleSheet } from 'react-native';
+import { View, Text, TouchableOpacity, StyleSheet } from 'react-native';
 import { useRouter } from 'expo-router';
 import { useFacilityStore } from '../../store/facilityStore';
 import { useCheckinStore } from '../../store/checkinStore';
 import { useAuthStore } from '../../store/authStore';
 import { useBoardData } from '../../hooks/useBoardData';
-import { BannerStack } from '../../components/board/BannerStack';
-import { MyStatusSection } from '../../components/board/MyStatusSection';
-import { CapacityBar } from '../../components/shared/CapacityBar';
-import { RecruitmentSection } from '../../components/board/RecruitmentSection';
 import { CourtGrid } from '../../components/board/CourtGrid';
 import { CourtBottomSheet } from '../../components/court/CourtBottomSheet';
-import { Colors } from '../../constants/colors';
+import { BoardSkeleton } from '../../components/board/BoardSkeleton';
+import { useTheme } from '../../hooks/useTheme';
 import { Strings } from '../../constants/strings';
-import { showConfirm } from '../../utils/alert';
-import { recruitmentApi } from '../../services/recruitment';
+import { Icon } from '../../components/ui/Icon';
+import { spacing, radius, typography, palette } from '../../constants/theme';
 
-export default function BoardScreen() {
+export default function CourtsScreen() {
   const router = useRouter();
+  const { colors, shadows } = useTheme();
   const { boardData, selectedFacility, isLoading } = useFacilityStore();
   const { status: checkinStatus } = useCheckinStore();
   const { user } = useAuthStore();
@@ -25,17 +23,8 @@ export default function BoardScreen() {
   const facilityId = selectedFacility?.id;
   const isCheckedIn = !!checkinStatus;
 
-  const {
-    capacity,
-    recruitments,
-    rotation,
-    activeClubSession,
-    isAdmin,
-    refreshBoard,
-    loadRecruitments,
-  } = useBoardData(facilityId);
+  const { isAdmin, refreshBoard } = useBoardData(facilityId);
 
-  // Bottom sheet state for 2-tap court registration
   const [selectedCourtId, setSelectedCourtId] = useState<string | null>(null);
   const [sheetVisible, setSheetVisible] = useState(false);
 
@@ -53,74 +42,40 @@ export default function BoardScreen() {
     refreshBoard();
   }, [refreshBoard]);
 
-  const handleJoinRecruitment = useCallback((recruitmentId: string) => {
-    showConfirm(
-      Strings.recruitment.join,
-      '이 모집에 참여하시겠습니까?',
-      async () => {
-        try {
-          await recruitmentApi.join(recruitmentId);
-          loadRecruitments();
-        } catch { /* silent */ }
-      },
-      Strings.common.confirm,
-    );
-  }, [loadRecruitments]);
-
-  const handleLeaveRecruitment = useCallback((recruitmentId: string) => {
-    showConfirm(
-      Strings.recruitment.leave,
-      '모집에서 탈퇴하시겠습니까?',
-      async () => {
-        try {
-          await recruitmentApi.leave(recruitmentId);
-          loadRecruitments();
-        } catch { /* silent */ }
-      },
-      Strings.recruitment.leave,
-    );
-  }, [loadRecruitments]);
-
   const onRefresh = useCallback(() => {
     refreshBoard();
   }, [refreshBoard]);
 
   const renderListHeader = () => (
-    <View>
-      {/* Banners: checkin / club session / rotation */}
-      <BannerStack
-        isCheckedIn={isCheckedIn}
-        checkinFacilityName={checkinStatus?.facilityName}
-        activeClubSession={activeClubSession}
-        rotation={rotation}
-        onCheckinPress={() => router.push('/(tabs)/checkin')}
-        onClubSessionPress={activeClubSession ? () => router.push(`/club/${activeClubSession.clubId}/session`) : undefined}
-        onRotationPress={() => router.push('/admin/rotation')}
-      />
-
-      {/* My status: game in progress / waiting / idle */}
-      <MyStatusSection onCheckinPress={() => router.push('/(tabs)/checkin')} />
-
-      {/* Capacity bar */}
-      {capacity && <CapacityBar capacity={capacity} />}
-
-      {/* Recruitment section (collapsible) */}
-      {recruitments.length > 0 && (
-        <RecruitmentSection
-          recruitments={recruitments}
-          userId={user?.id}
-          isCheckedIn={isCheckedIn}
-          onJoin={handleJoinRecruitment}
-          onLeave={handleLeaveRecruitment}
-          onRegister={(id) => router.push(`/court/${id}`)}
-          onCreatePress={() => router.push('/recruitment/create')}
-        />
+    <View style={styles.listHeader}>
+      {/* Checkin prompt - only if not checked in */}
+      {!isCheckedIn && (
+        <TouchableOpacity
+          style={[styles.checkinBanner, { backgroundColor: colors.warningLight }]}
+          onPress={() => router.push('/checkin-modal')}
+          activeOpacity={0.7}
+        >
+          <Icon name="qr" size={16} color={colors.warning} />
+          <Text style={[styles.checkinBannerText, { color: colors.warning }]}>
+            {Strings.checkin.banner}
+          </Text>
+        </TouchableOpacity>
       )}
     </View>
   );
 
+  const showSkeleton = isLoading && (!boardData || boardData.length === 0);
+
+  if (showSkeleton) {
+    return (
+      <View style={[styles.container, { backgroundColor: colors.background }]}>
+        <BoardSkeleton />
+      </View>
+    );
+  }
+
   return (
-    <View style={styles.container}>
+    <View style={[styles.container, { backgroundColor: colors.background }]}>
       <CourtGrid
         data={boardData}
         isLoading={isLoading}
@@ -131,28 +86,17 @@ export default function BoardScreen() {
         ListHeaderComponent={renderListHeader()}
       />
 
-      {/* Floating recruitment button */}
-      {isCheckedIn && recruitments.length === 0 && (
-        <TouchableOpacity
-          style={styles.fab}
-          onPress={() => router.push('/recruitment/create')}
-        >
-          <Text style={styles.fabText}>+ {Strings.recruitment.create}</Text>
-        </TouchableOpacity>
-      )}
-
-      {/* Admin FAB */}
+      {/* Admin icon button - top right area */}
       {isAdmin && (
         <TouchableOpacity
-          style={styles.adminFab}
+          style={[styles.adminButton, { backgroundColor: colors.surface, borderColor: colors.border }, shadows.sm]}
           onPress={() => router.push('/admin')}
-          activeOpacity={0.8}
+          activeOpacity={0.7}
         >
-          <Text style={styles.adminFabText}>{Strings.admin.title}</Text>
+          <Icon name="settings" size={18} color={colors.primary} />
         </TouchableOpacity>
       )}
 
-      {/* Court bottom sheet - 2-tap registration flow */}
       <CourtBottomSheet
         visible={sheetVisible}
         onClose={handleSheetClose}
@@ -167,44 +111,30 @@ export default function BoardScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: Colors.background,
   },
-  fab: {
+  listHeader: {
+    paddingBottom: spacing.sm,
+  },
+  checkinBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+    paddingHorizontal: spacing.lg,
+    paddingVertical: spacing.smd,
+    borderRadius: radius.lg,
+  },
+  checkinBannerText: {
+    ...typography.buttonSm,
+  },
+  adminButton: {
     position: 'absolute',
-    bottom: 24,
-    right: 20,
-    backgroundColor: Colors.secondary,
-    borderRadius: 28,
-    paddingHorizontal: 20,
-    paddingVertical: 14,
-    shadowColor: Colors.secondary,
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.3,
-    shadowRadius: 8,
-    elevation: 6,
-  },
-  fabText: {
-    color: '#fff',
-    fontSize: 14,
-    fontWeight: '700',
-  },
-  adminFab: {
-    position: 'absolute',
-    bottom: 24,
-    left: 20,
-    backgroundColor: Colors.primary,
-    borderRadius: 22,
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-    shadowColor: Colors.primary,
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.3,
-    shadowRadius: 8,
-    elevation: 6,
-  },
-  adminFabText: {
-    color: '#fff',
-    fontSize: 13,
-    fontWeight: '700',
+    top: spacing.sm,
+    right: spacing.lg,
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    justifyContent: 'center',
+    alignItems: 'center',
+    borderWidth: 1,
   },
 });

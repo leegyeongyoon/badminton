@@ -10,6 +10,7 @@ import {
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { Colors } from '../constants/colors';
+import { createShadow } from '../constants/theme';
 import { Strings } from '../constants/strings';
 import api from '../services/api';
 
@@ -264,11 +265,7 @@ const styles = StyleSheet.create({
     padding: 14,
     marginBottom: 8,
     position: 'relative',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.04,
-    shadowRadius: 3,
-    elevation: 1,
+    ...createShadow(1, 3, 0.04, 1),
   },
   notifUnread: {
     backgroundColor: '#F0F7FF',

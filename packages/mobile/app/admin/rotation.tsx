@@ -51,14 +51,17 @@ interface RotationSchedule {
   players: { userId: string; userName: string; gamesAssigned: number; gamesPlayed: number; sittingOut: number }[];
 }
 
-type SkillFilter = 'ALL' | 'BEGINNER' | 'INTERMEDIATE' | 'ADVANCED' | 'EXPERT';
+type SkillFilter = 'ALL' | 'S' | 'A' | 'B' | 'C' | 'D' | 'E' | 'F';
 
 const SKILL_FILTERS: { key: SkillFilter; label: string }[] = [
   { key: 'ALL', label: Strings.admin.filterAll },
-  { key: 'BEGINNER', label: Strings.player.skillLevel.BEGINNER },
-  { key: 'INTERMEDIATE', label: Strings.player.skillLevel.INTERMEDIATE },
-  { key: 'ADVANCED', label: Strings.player.skillLevel.ADVANCED },
-  { key: 'EXPERT', label: Strings.player.skillLevel.EXPERT },
+  { key: 'S', label: Strings.player.skillLevel.S },
+  { key: 'A', label: Strings.player.skillLevel.A },
+  { key: 'B', label: Strings.player.skillLevel.B },
+  { key: 'C', label: Strings.player.skillLevel.C },
+  { key: 'D', label: Strings.player.skillLevel.D },
+  { key: 'E', label: Strings.player.skillLevel.E },
+  { key: 'F', label: Strings.player.skillLevel.F },
 ];
 
 export default function RotationScreen() {
@@ -507,8 +510,8 @@ export default function RotationScreen() {
         <View style={styles.actions}>
           {schedule.status === 'DRAFT' && (
             <>
-              <TouchableOpacity style={[styles.actionBtn, { backgroundColor: Colors.primary }]} onPress={handleStart}>
-                <Text style={styles.actionBtnText}>{Strings.rotation.start}</Text>
+              <TouchableOpacity style={[styles.startBtn, { backgroundColor: Colors.primary }]} onPress={handleStart}>
+                <Text style={styles.startBtnText}>{Strings.rotation.start}</Text>
               </TouchableOpacity>
               <TouchableOpacity style={[styles.actionBtn, { backgroundColor: Colors.warning }]} onPress={handleRegenerate}>
                 <Text style={styles.actionBtnText}>{Strings.rotation.regenerate}</Text>
@@ -654,6 +657,9 @@ export default function RotationScreen() {
           {loading ? Strings.common.loading : Strings.rotation.generate}
         </Text>
       </TouchableOpacity>
+      <Text style={styles.generateHelpText}>
+        선택한 선수와 코트로 최적의 게임 편성을 자동 생성합니다
+      </Text>
     </ScrollView>
   );
 }
@@ -815,6 +821,13 @@ const styles = StyleSheet.create({
     color: '#fff',
     fontSize: 17,
     fontWeight: '700',
+  },
+  generateHelpText: {
+    fontSize: 12,
+    color: Colors.textSecondary,
+    textAlign: 'center',
+    marginTop: 8,
+    marginBottom: 8,
   },
   // Schedule view
   scheduleMeta: {
@@ -1061,5 +1074,16 @@ const styles = StyleSheet.create({
     color: '#fff',
     fontSize: 15,
     fontWeight: '700',
+  },
+  startBtn: {
+    flex: 1,
+    paddingVertical: 18,
+    borderRadius: 12,
+    alignItems: 'center',
+  },
+  startBtnText: {
+    color: '#fff',
+    fontSize: 17,
+    fontWeight: '800',
   },
 });

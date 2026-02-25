@@ -272,7 +272,7 @@ const displayTimerStyles = StyleSheet.create({
   text: {
     fontSize: 16,
     fontWeight: '800',
-    fontVariant: ['tabular-nums'],
+    // fontVariant removed for web compat
   },
 });
 
@@ -305,7 +305,7 @@ const styles = StyleSheet.create({
     fontSize: 20,
     fontWeight: '600',
     color: '#94A3B8',
-    fontVariant: ['tabular-nums'],
+    // fontVariant removed for web compat
   },
   legendBar: {
     paddingHorizontal: 20,

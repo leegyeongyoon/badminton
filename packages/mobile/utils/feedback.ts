@@ -1,5 +1,21 @@
-type ToastType = 'success' | 'error' | 'info';
-type Listener = (message: string, type: ToastType) => void;
+import type { IconName } from '../components/ui/Icon';
+
+type ToastType = 'success' | 'error' | 'info' | 'warning';
+
+export interface ToastAction {
+  label: string;
+  onPress: () => void;
+}
+
+export interface ToastPayload {
+  message: string;
+  type: ToastType;
+  action?: ToastAction;
+  duration?: number;
+  icon?: IconName;
+}
+
+type Listener = (payload: ToastPayload) => void;
 
 class ToastEmitter {
   private listeners: Listener[] = [];
@@ -11,21 +27,31 @@ class ToastEmitter {
     };
   }
 
-  emit(message: string, type: ToastType) {
-    this.listeners.forEach((fn) => fn(message, type));
+  emit(payload: ToastPayload) {
+    this.listeners.forEach((fn) => fn(payload));
   }
 }
 
 export const toastEmitter = new ToastEmitter();
 
-export function showSuccess(message: string) {
-  toastEmitter.emit(message, 'success');
+interface ToastOptions {
+  action?: ToastAction;
+  duration?: number;
+  icon?: IconName;
 }
 
-export function showError(message: string) {
-  toastEmitter.emit(message, 'error');
+export function showSuccess(message: string, options?: ToastOptions) {
+  toastEmitter.emit({ message, type: 'success', ...options });
 }
 
-export function showInfo(message: string) {
-  toastEmitter.emit(message, 'info');
+export function showError(message: string, options?: ToastOptions) {
+  toastEmitter.emit({ message, type: 'error', ...options });
+}
+
+export function showInfo(message: string, options?: ToastOptions) {
+  toastEmitter.emit({ message, type: 'info', ...options });
+}
+
+export function showWarning(message: string, options?: ToastOptions) {
+  toastEmitter.emit({ message, type: 'warning', ...options });
 }

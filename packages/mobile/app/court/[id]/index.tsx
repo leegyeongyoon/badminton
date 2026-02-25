@@ -13,6 +13,7 @@ import { courtApi } from '../../../services/court';
 import { useCheckinStore } from '../../../store/checkinStore';
 import { useCourtRoom, useSocketEvent } from '../../../hooks/useSocket';
 import { Colors } from '../../../constants/colors';
+import { createShadow } from '../../../constants/theme';
 import { Strings } from '../../../constants/strings';
 import { showAlert, showConfirm } from '../../../utils/alert';
 import api from '../../../services/api';
@@ -589,7 +590,7 @@ const cdStyles = StyleSheet.create({
   time: {
     fontSize: 36,
     fontWeight: '800',
-    fontVariant: ['tabular-nums'],
+    // fontVariant removed for web compat
     marginBottom: 10,
   },
   progressBarBg: {
@@ -681,11 +682,7 @@ const styles = StyleSheet.create({
     backgroundColor: Colors.surface,
     borderRadius: 16,
     padding: 16,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.06,
-    shadowRadius: 6,
-    elevation: 3,
+    ...createShadow(2, 6, 0.06, 3),
   },
   playingSectionHeader: {
     flexDirection: 'row',
@@ -772,11 +769,7 @@ const styles = StyleSheet.create({
     borderRadius: 14,
     padding: 14,
     marginBottom: 8,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.04,
-    shadowRadius: 4,
-    elevation: 1,
+    ...createShadow(1, 4, 0.04, 1),
   },
   waitingCardHeader: {
     flexDirection: 'row',
@@ -872,11 +865,7 @@ const styles = StyleSheet.create({
     paddingBottom: 32,
     borderTopWidth: 1,
     borderTopColor: Colors.border,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: -2 },
-    shadowOpacity: 0.05,
-    shadowRadius: 4,
-    elevation: 4,
+    ...createShadow(-2, 4, 0.05, 4),
   },
   registerButton: {
     backgroundColor: Colors.primary,

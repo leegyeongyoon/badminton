@@ -1,37 +1,47 @@
-import { useState } from 'react';
+import { useState, useMemo } from 'react';
 import {
   View,
   Text,
-  TextInput,
-  TouchableOpacity,
   StyleSheet,
   KeyboardAvoidingView,
   Platform,
 } from 'react-native';
 import { Link } from 'expo-router';
 import { useAuthStore } from '../../store/authStore';
-import { Colors } from '../../constants/colors';
+import { useTheme } from '../../hooks/useTheme';
+import { useFormValidation } from '../../hooks/useFormValidation';
+import { compose, required, phone as phoneRule, password as passwordRule } from '../../utils/validation';
+import { typography, spacing, radius } from '../../constants/theme';
 import { Strings } from '../../constants/strings';
-import { showAlert } from '../../utils/alert';
+import { showError } from '../../utils/feedback';
+import { Input } from '../../components/ui/Input';
+import { Button } from '../../components/ui/Button';
 
 export default function LoginScreen() {
-  const [phone, setPhone] = useState('');
-  const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
   const { login } = useAuthStore();
+  const { colors } = useTheme();
+
+  const rules = useMemo(() => ({
+    phone: compose(required, phoneRule),
+    password: compose(required, passwordRule),
+  }), []);
+
+  const form = useFormValidation(
+    { phone: '', password: '' },
+    rules,
+  );
 
   const handleLogin = async () => {
-    if (!phone.trim() || !password.trim()) {
-      showAlert('알림', '전화번호와 비밀번호를 입력해주세요');
-      return;
-    }
+    if (!form.validate()) return;
+
     setLoading(true);
     try {
-      await login(phone, password);
+      await login(form.values.phone, form.values.password);
       // Navigation handled by root layout gating
     } catch (err: any) {
       const msg = err.response?.data?.error || err?.message || '로그인에 실패했습니다';
-      showAlert('오류', msg);
+      showError(msg);
     } finally {
       setLoading(false);
     }
@@ -39,43 +49,50 @@ export default function LoginScreen() {
 
   return (
     <KeyboardAvoidingView
-      style={styles.container}
+      style={[styles.container, { backgroundColor: colors.background }]}
       behavior={Platform.OS === 'ios' ? 'padding' : undefined}
     >
       <View style={styles.content}>
-        <Text style={styles.title}>{Strings.app.name}</Text>
-        <Text style={styles.subtitle}>{Strings.auth.login}</Text>
+        <Text style={[styles.title, { color: colors.primary }]}>{Strings.app.name}</Text>
+        <Text style={[styles.subtitle, { color: colors.textSecondary }]}>{Strings.auth.login}</Text>
 
-        <TextInput
-          style={styles.input}
-          placeholder={Strings.auth.phonePlaceholder}
-          value={phone}
-          onChangeText={setPhone}
-          keyboardType="phone-pad"
-          autoCapitalize="none"
-        />
-        <TextInput
-          style={styles.input}
-          placeholder={Strings.auth.passwordPlaceholder}
-          value={password}
-          onChangeText={setPassword}
-          secureTextEntry
-        />
+        <View style={styles.form}>
+          <Input
+            label={Strings.auth.phone}
+            placeholder={Strings.auth.phonePlaceholder}
+            value={form.values.phone}
+            onChangeText={(v) => form.setValue('phone', v)}
+            onBlur={() => form.setTouched('phone')}
+            error={form.touched.phone ? form.errors.phone : undefined}
+            icon="person"
+            keyboardType="phone-pad"
+            autoCapitalize="none"
+          />
+          <Input
+            label={Strings.auth.password}
+            placeholder={Strings.auth.passwordPlaceholder}
+            value={form.values.password}
+            onChangeText={(v) => form.setValue('password', v)}
+            onBlur={() => form.setTouched('password')}
+            error={form.touched.password ? form.errors.password : undefined}
+            icon="link"
+            secureTextEntry
+          />
+        </View>
 
-        <TouchableOpacity
-          style={[styles.button, loading && styles.buttonDisabled]}
+        <Button
+          title={loading ? Strings.common.loading : Strings.auth.loginButton}
           onPress={handleLogin}
+          loading={loading}
           disabled={loading}
-        >
-          <Text style={styles.buttonText}>
-            {loading ? Strings.common.loading : Strings.auth.loginButton}
-          </Text>
-        </TouchableOpacity>
+          fullWidth
+          style={styles.loginButton}
+        />
 
         <Link href="/(auth)/register" asChild>
-          <TouchableOpacity style={styles.linkButton}>
-            <Text style={styles.linkText}>{Strings.auth.goToRegister}</Text>
-          </TouchableOpacity>
+          <Text style={[styles.linkText, { color: colors.primary }]}>
+            {Strings.auth.goToRegister}
+          </Text>
         </Link>
       </View>
     </KeyboardAvoidingView>
@@ -85,58 +102,32 @@ export default function LoginScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: Colors.background,
   },
   content: {
     flex: 1,
     justifyContent: 'center',
-    paddingHorizontal: 24,
+    paddingHorizontal: spacing.xxl,
   },
   title: {
-    fontSize: 28,
-    fontWeight: 'bold',
-    color: Colors.primary,
+    ...typography.h1,
     textAlign: 'center',
-    marginBottom: 8,
+    marginBottom: spacing.sm,
   },
   subtitle: {
-    fontSize: 18,
-    color: Colors.textSecondary,
+    ...typography.subtitle1,
     textAlign: 'center',
-    marginBottom: 32,
+    marginBottom: spacing.xxxl,
   },
-  input: {
-    backgroundColor: Colors.surface,
-    borderWidth: 1,
-    borderColor: Colors.border,
-    borderRadius: 12,
-    paddingHorizontal: 16,
-    paddingVertical: 14,
-    fontSize: 16,
-    marginBottom: 12,
-    color: Colors.text,
+  form: {
+    gap: spacing.lg,
+    marginBottom: spacing.xxl,
   },
-  button: {
-    backgroundColor: Colors.primary,
-    borderRadius: 12,
-    paddingVertical: 16,
-    alignItems: 'center',
-    marginTop: 8,
-  },
-  buttonDisabled: {
-    opacity: 0.6,
-  },
-  buttonText: {
-    color: '#fff',
-    fontSize: 16,
-    fontWeight: '600',
-  },
-  linkButton: {
-    marginTop: 16,
-    alignItems: 'center',
+  loginButton: {
+    marginTop: spacing.sm,
   },
   linkText: {
-    color: Colors.primary,
-    fontSize: 14,
+    ...typography.body2,
+    textAlign: 'center',
+    marginTop: spacing.lg,
   },
 });

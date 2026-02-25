@@ -1,9 +1,8 @@
-import { useEffect, useCallback, useState } from 'react';
-import { useSocketEvent, useFacilityRoom } from './useSocket';
+import { useEffect, useCallback, useState, useRef } from 'react';
+import { useSocketEvent, useFacilityRoom, getSocket } from './useSocket';
 import { useFacilityStore } from '../store/facilityStore';
 import { useAuthStore } from '../store/authStore';
 import api from '../services/api';
-import { recruitmentApi } from '../services/recruitment';
 import { clubSessionApi } from '../services/clubSession';
 
 export interface Capacity {
@@ -45,6 +44,7 @@ export function useBoardData(facilityId: string | undefined) {
   const [rotation, setRotation] = useState<RotationInfo | null>(null);
   const [isAdmin, setIsAdmin] = useState(false);
   const [activeClubSession, setActiveClubSession] = useState<any>(null);
+  const [errors, setErrors] = useState<Record<string, boolean>>({});
 
   // Join facility socket room
   useFacilityRoom(facilityId);
@@ -54,23 +54,31 @@ export function useBoardData(facilityId: string | undefined) {
   const loadCapacity = useCallback(async () => {
     if (!facilityId) return;
     try {
-      const { data } = await api.get(`/facilities/${facilityId}/capacity`);
+      const { data } = await api.get(`/facilities/${facilityId}/capacity`, { _silent: true } as any);
       setCapacity(data);
-    } catch { /* silent */ }
+      setErrors(prev => prev.capacity ? { ...prev, capacity: false } : prev);
+    } catch (e) {
+      console.warn('loadCapacity failed:', e);
+      setErrors(prev => ({ ...prev, capacity: true }));
+    }
   }, [facilityId]);
 
   const loadRecruitments = useCallback(async () => {
     if (!facilityId) return;
     try {
-      const { data } = await recruitmentApi.list(facilityId);
+      const { data } = await api.get(`/facilities/${facilityId}/recruitments`, { _silent: true } as any);
       setRecruitments(data);
-    } catch { /* silent */ }
+      setErrors(prev => prev.recruitments ? { ...prev, recruitments: false } : prev);
+    } catch (e) {
+      console.warn('loadRecruitments failed:', e);
+      setErrors(prev => ({ ...prev, recruitments: true }));
+    }
   }, [facilityId]);
 
   const loadRotation = useCallback(async () => {
     if (!facilityId) return;
     try {
-      const { data } = await api.get(`/facilities/${facilityId}/rotation/current`);
+      const { data } = await api.get(`/facilities/${facilityId}/rotation/current`, { _silent: true } as any);
       if (data && data.status === 'ACTIVE') {
         setRotation({
           id: data.id,
@@ -81,13 +89,18 @@ export function useBoardData(facilityId: string | undefined) {
       } else {
         setRotation(null);
       }
-    } catch { setRotation(null); }
+      setErrors(prev => prev.rotation ? { ...prev, rotation: false } : prev);
+    } catch (e) {
+      console.warn('loadRotation failed:', e);
+      setRotation(null);
+      setErrors(prev => ({ ...prev, rotation: true }));
+    }
   }, [facilityId]);
 
   const loadClubSession = useCallback(async () => {
     if (!facilityId) return;
     try {
-      const { data: clubs } = await api.get('/clubs');
+      const { data: clubs } = await api.get('/clubs', { _silent: true } as any);
       for (const club of clubs) {
         try {
           const { data: session } = await clubSessionApi.getActive(club.id);
@@ -95,10 +108,16 @@ export function useBoardData(facilityId: string | undefined) {
             setActiveClubSession(session);
             return;
           }
-        } catch { /* no active session for this club */ }
+        } catch (e) {
+          console.warn(`loadClubSession: no active session for club ${club.id}:`, e);
+        }
       }
       setActiveClubSession(null);
-    } catch { setActiveClubSession(null); }
+    } catch (e) {
+      console.warn('loadClubSession failed:', e);
+      setActiveClubSession(null);
+      setErrors(prev => ({ ...prev, clubSession: true }));
+    }
   }, [facilityId]);
 
   const checkAdminStatus = useCallback(async () => {
@@ -111,7 +130,8 @@ export function useBoardData(facilityId: string | undefined) {
       try {
         const { data } = await api.get('/users/me/admin-facilities');
         setIsAdmin(Array.isArray(data) && data.some((f: any) => f.id === facilityId));
-      } catch {
+      } catch (e) {
+        console.warn('checkAdminStatus failed:', e);
         setIsAdmin(false);
       }
     }
@@ -127,6 +147,27 @@ export function useBoardData(facilityId: string | undefined) {
     }
   }, [facilityId, fetchBoard, loadCapacity, loadRecruitments, loadRotation, loadClubSession]);
 
+  // --- Debounced versions for socket events ---
+
+  const refreshTimerRef = useRef<NodeJS.Timeout>(undefined);
+  const recruitmentTimerRef = useRef<NodeJS.Timeout>(undefined);
+  const rotationTimerRef = useRef<NodeJS.Timeout>(undefined);
+
+  const debouncedRefreshBoard = useCallback(() => {
+    if (refreshTimerRef.current) clearTimeout(refreshTimerRef.current);
+    refreshTimerRef.current = setTimeout(() => refreshBoard(), 200);
+  }, [refreshBoard]);
+
+  const debouncedLoadRecruitments = useCallback(() => {
+    if (recruitmentTimerRef.current) clearTimeout(recruitmentTimerRef.current);
+    recruitmentTimerRef.current = setTimeout(() => loadRecruitments(), 200);
+  }, [loadRecruitments]);
+
+  const debouncedLoadRotation = useCallback(() => {
+    if (rotationTimerRef.current) clearTimeout(rotationTimerRef.current);
+    rotationTimerRef.current = setTimeout(() => loadRotation(), 200);
+  }, [loadRotation]);
+
   // --- Initial load ---
 
   useEffect(() => {
@@ -138,38 +179,60 @@ export function useBoardData(facilityId: string | undefined) {
       loadClubSession();
     }
     checkAdminStatus();
+    return () => {
+      clearTimeout(refreshTimerRef.current);
+      clearTimeout(recruitmentTimerRef.current);
+      clearTimeout(rotationTimerRef.current);
+    };
   }, [facilityId]);
 
-  // --- Socket event listeners (16 events) ---
+  // --- Reconnect: refresh board after room rejoin ---
+  useEffect(() => {
+    const socket = getSocket();
+    const handleReconnect = () => {
+      // Delay to allow room rejoin to complete
+      setTimeout(() => refreshBoard(), 300);
+    };
+    socket.on('connect', handleReconnect);
+    return () => {
+      socket.off('connect', handleReconnect);
+    };
+  }, [refreshBoard]);
 
-  // Court & turn events -> full board refresh
-  useSocketEvent('court:statusChanged', refreshBoard);
-  useSocketEvent('turn:created', refreshBoard);
-  useSocketEvent('turn:promoted', refreshBoard);
-  useSocketEvent('turn:started', refreshBoard);
-  useSocketEvent('turn:completed', refreshBoard);
-  useSocketEvent('turn:cancelled', refreshBoard);
+  // --- Socket event listeners (16 events, debounced) ---
+
+  // Court & turn events -> debounced full board refresh
+  useSocketEvent('court:statusChanged', debouncedRefreshBoard);
+  useSocketEvent('turn:created', debouncedRefreshBoard);
+  useSocketEvent('turn:promoted', debouncedRefreshBoard);
+  useSocketEvent('turn:started', debouncedRefreshBoard);
+  useSocketEvent('turn:completed', debouncedRefreshBoard);
+  useSocketEvent('turn:cancelled', debouncedRefreshBoard);
 
   // Player capacity events
   useSocketEvent('players:updated', loadCapacity);
 
-  // Recruitment events
-  useSocketEvent('recruitment:created', loadRecruitments);
-  useSocketEvent('recruitment:playerJoined', loadRecruitments);
-  useSocketEvent('recruitment:full', loadRecruitments);
-  useSocketEvent('recruitment:registered', loadRecruitments);
-  useSocketEvent('recruitment:cancelled', loadRecruitments);
+  // Recruitment events -> debounced
+  useSocketEvent('recruitment:created', debouncedLoadRecruitments);
+  useSocketEvent('recruitment:playerJoined', debouncedLoadRecruitments);
+  useSocketEvent('recruitment:full', debouncedLoadRecruitments);
+  useSocketEvent('recruitment:registered', debouncedLoadRecruitments);
+  useSocketEvent('recruitment:cancelled', debouncedLoadRecruitments);
 
-  // Rotation events
-  useSocketEvent('rotation:started', loadRotation);
-  useSocketEvent('rotation:roundAdvanced', loadRotation);
-  useSocketEvent('rotation:completed', loadRotation);
-  useSocketEvent('rotation:cancelled', loadRotation);
+  // Rotation events -> debounced
+  useSocketEvent('rotation:started', debouncedLoadRotation);
+  useSocketEvent('rotation:roundAdvanced', debouncedLoadRotation);
+  useSocketEvent('rotation:completed', debouncedLoadRotation);
+  useSocketEvent('rotation:cancelled', debouncedLoadRotation);
 
-  // Club session events -> full board refresh
-  useSocketEvent('clubSession:started', refreshBoard);
-  useSocketEvent('clubSession:courtsUpdated', refreshBoard);
-  useSocketEvent('clubSession:ended', refreshBoard);
+  // Club session events -> debounced full board refresh
+  useSocketEvent('clubSession:started', debouncedRefreshBoard);
+  useSocketEvent('clubSession:courtsUpdated', debouncedRefreshBoard);
+  useSocketEvent('clubSession:ended', debouncedRefreshBoard);
+
+  // Game board events -> debounced full board refresh
+  useSocketEvent('gameBoard:entryAdded', debouncedRefreshBoard);
+  useSocketEvent('gameBoard:entryPushed', debouncedRefreshBoard);
 
   return {
     capacity,
@@ -177,6 +240,7 @@ export function useBoardData(facilityId: string | undefined) {
     rotation,
     activeClubSession,
     isAdmin,
+    errors,
     refreshBoard,
     loadRecruitments,
   };
