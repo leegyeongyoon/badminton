@@ -48,14 +48,13 @@ export default function GameBoardScreen() {
 
   const [courts, setCourts] = useState<{ id: string; name: string; status: string }[]>([]);
   const [players, setPlayers] = useState<Player[]>([]);
+  const [dedicatedCourtIds, setDedicatedCourtIds] = useState<Set<string>>(new Set());
 
-  // Staging: 4명 모으기
+  // Staging
   const [staged, setStaged] = useState<string[]>([]);
-  // 대기 게임 → 코트 배정 모드
-  const [assigningEntryId, setAssigningEntryId] = useState<string | null>(null);
-
   const bounceAnims = useRef([0, 1, 2, 3].map(() => new RNAnimated.Value(1))).current;
 
+  // Load data
   useEffect(() => {
     if (!facilityId) return;
     Promise.all([
@@ -67,6 +66,14 @@ export default function GameBoardScreen() {
       ),
     ]).catch(() => {});
   }, [facilityId]);
+
+  // Load dedicated courts from club session
+  useEffect(() => {
+    if (!clubSessionId) return;
+    api.get(`/club-sessions/${clubSessionId}`).then(({ data }) => {
+      if (data?.courtIds) setDedicatedCourtIds(new Set(data.courtIds));
+    }).catch(() => {});
+  }, [clubSessionId]);
 
   useEffect(() => {
     if (!board && !loading && clubSessionId && !error) {
@@ -106,7 +113,19 @@ export default function GameBoardScreen() {
 
   const getPlayer = useCallback((id: string) => playerMap.get(id), [playerMap]);
 
-  // NameSkill 컴포넌트: "이경윤S" 형태
+  // 추천 코트 수: 12명당 1코트
+  const recommendedCourts = useMemo(
+    () => Math.floor(allMembers.length / 12),
+    [allMembers],
+  );
+
+  // 전용 코트 목록
+  const dedicatedCourts = useMemo(
+    () => courts.filter((c) => dedicatedCourtIds.has(c.id)),
+    [courts, dedicatedCourtIds],
+  );
+
+  // NameSkill
   const NameSkill = useCallback(({ userId, style }: { userId: string; style?: any }) => {
     const p = playerMap.get(userId);
     if (!p) return <Text style={style}>?</Text>;
@@ -118,6 +137,24 @@ export default function GameBoardScreen() {
       </Text>
     );
   }, [playerMap, colors.textLight]);
+
+  // ─── Court toggle ───────────────────────
+  const toggleCourt = useCallback(async (courtId: string) => {
+    const next = new Set(dedicatedCourtIds);
+    if (next.has(courtId)) next.delete(courtId);
+    else next.add(courtId);
+
+    setDedicatedCourtIds(next);
+    try {
+      await api.patch(`/club-sessions/${clubSessionId}/courts`, {
+        courtIds: Array.from(next),
+      });
+    } catch (err: any) {
+      // Revert on error
+      setDedicatedCourtIds(dedicatedCourtIds);
+      showAlert('오류', err.response?.data?.error || '코트 설정 실패');
+    }
+  }, [clubSessionId, dedicatedCourtIds]);
 
   // ─── Staging ────────────────────────────
   const toggleStaged = useCallback((userId: string) => {
@@ -141,35 +178,63 @@ export default function GameBoardScreen() {
     setStaged([]);
   }, []);
 
-  // ─── 대기 등록 (코트 없이) ──────────────
+  // ─── 대기 등록 ──────────────────────────
   const handleSubmit = useCallback(async () => {
     if (staged.length !== 4) { showAlert('알림', '4명을 선택해주세요'); return; }
     try {
       await addEntry(staged);
       loadBoard();
-      showSuccess('대기 등록 완료!');
+      showSuccess('대기 등록!');
       setStaged([]);
     } catch (err: any) {
       showAlert('오류', err.response?.data?.error || '등록 실패');
     }
   }, [staged, addEntry, loadBoard]);
 
-  // ─── 대기 게임 → 코트 배정 ─────────────
-  const startAssign = useCallback((entryId: string) => {
-    setAssigningEntryId((prev) => (prev === entryId ? null : entryId));
-  }, []);
-
-  const handleAssignToCourt = useCallback(async (courtId: string) => {
-    if (!assigningEntryId) return;
-    try {
-      await pushEntry(assigningEntryId, courtId);
-      loadBoard();
-      showSuccess('코트에 배정됨!');
-      setAssigningEntryId(null);
-    } catch (err: any) {
-      showAlert('오류', err.response?.data?.error || '배정 실패');
+  // ─── 다음 게임 투입 (첫 대기 → 첫 빈 전용코트) ─
+  const handleNextGame = useCallback(async () => {
+    if (queuedEntries.length === 0) {
+      showAlert('알림', '대기 중인 게임이 없습니다');
+      return;
     }
-  }, [assigningEntryId, pushEntry, loadBoard]);
+    // Find first available dedicated court
+    const availableCourt = dedicatedCourts.find((c) => !playingByCourtId.has(c.id));
+    if (!availableCourt) {
+      showAlert('알림', '빈 전용 코트가 없습니다. 게임이 끝나면 투입하세요.');
+      return;
+    }
+    const entry = queuedEntries[0];
+    try {
+      await pushEntry(entry.id, availableCourt.id);
+      loadBoard();
+      showSuccess(`${availableCourt.name}에 투입!`);
+    } catch (err: any) {
+      showAlert('오류', err.response?.data?.error || '투입 실패');
+    }
+  }, [queuedEntries, dedicatedCourts, playingByCourtId, pushEntry, loadBoard]);
+
+  // ─── 특정 코트에 투입 ──────────────────
+  const handlePushToCourt = useCallback(async (courtId: string) => {
+    if (queuedEntries.length === 0) {
+      showAlert('알림', '대기 중인 게임이 없습니다');
+      return;
+    }
+    const entry = queuedEntries[0];
+    const court = courts.find((c) => c.id === courtId);
+    showConfirm(
+      '코트 투입',
+      `대기 1번을 ${court?.name || '코트'}에 투입할까요?`,
+      async () => {
+        try {
+          await pushEntry(entry.id, courtId);
+          loadBoard();
+          showSuccess(`${court?.name}에 투입!`);
+        } catch (err: any) {
+          showAlert('오류', err.response?.data?.error || '투입 실패');
+        }
+      },
+    );
+  }, [queuedEntries, courts, pushEntry, loadBoard]);
 
   const handleDelete = useCallback(
     (entryId: string) =>
@@ -184,20 +249,6 @@ export default function GameBoardScreen() {
     [deleteEntry, loadBoard],
   );
 
-  const handlePushAll = useCallback(
-    () =>
-      showConfirm('전체 걸기', '대기 게임을 빈 코트에 순서대로 배정할까요?', async () => {
-        try {
-          await pushAll();
-          loadBoard();
-          showSuccess('전체 배정됨');
-        } catch (err: any) {
-          showAlert('오류', err.response?.data?.error || '배정 실패');
-        }
-      }),
-    [pushAll, loadBoard],
-  );
-
   if (loading && !board) {
     return (
       <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]}>
@@ -207,7 +258,7 @@ export default function GameBoardScreen() {
   }
 
   const stagedSet = new Set(staged);
-  const isAssigning = !!assigningEntryId;
+  const hasDedicated = dedicatedCourts.length > 0;
 
   return (
     <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]}>
@@ -219,142 +270,137 @@ export default function GameBoardScreen() {
         <Text style={[styles.headerTitle, { color: colors.text }]} numberOfLines={1}>
           {clubName || ''} 모임판
         </Text>
-        {queuedEntries.length > 0 && (
+        {queuedEntries.length > 0 && hasDedicated && (
           <TouchableOpacity
             style={[styles.headerBtn, { backgroundColor: colors.primary }]}
-            onPress={handlePushAll}
+            onPress={handleNextGame}
           >
-            <Text style={styles.headerBtnText}>전체 걸기</Text>
+            <Text style={styles.headerBtnText}>다음 게임 투입</Text>
           </TouchableOpacity>
         )}
       </View>
 
       <ScrollView style={styles.body} contentContainerStyle={styles.bodyContent} showsVerticalScrollIndicator={false}>
 
-        {/* ═══ Section 1: 게임 진행 (코트 현황) ═══ */}
+        {/* ═══ Section 1: 모임 코트 설정 ═══ */}
         <View style={[styles.section, { backgroundColor: colors.surface }, shadows.sm]}>
-          <View style={[styles.sectionBar, { backgroundColor: colors.primary }]}>
-            <Text style={styles.sectionBarText}>게임 진행 명단</Text>
+          <View style={[styles.sectionBar, { backgroundColor: palette.violet600 }]}>
+            <Text style={styles.sectionBarText}>모임 코트</Text>
+            <Text style={[styles.sectionBarSub]}>
+              {allMembers.length}명 → 추천 {recommendedCourts}코트
+            </Text>
           </View>
 
-          {/* 코트 배정 모드 안내 */}
-          {isAssigning && (
-            <View style={[styles.assignBanner, { backgroundColor: colors.warningBg }]}>
-              <Text style={[styles.assignBannerText, { color: colors.warning }]}>
-                배정할 코트를 탭하세요
-              </Text>
-              <TouchableOpacity onPress={() => setAssigningEntryId(null)}>
-                <Text style={[styles.assignBannerCancel, { color: colors.textSecondary }]}>취소</Text>
-              </TouchableOpacity>
-            </View>
-          )}
-
-          <View style={styles.courtsRow}>
-            {courts.map((court, ci) => {
+          <View style={styles.courtSetup}>
+            {courts.map((court) => {
+              const isDedicated = dedicatedCourtIds.has(court.id);
               const playing = playingByCourtId.get(court.id);
-              const isLast = ci === courts.length - 1;
-              const isEmpty = !playing;
               return (
-                <TouchableOpacity
-                  key={court.id}
-                  style={[
-                    styles.courtCol,
-                    !isLast && { borderRightWidth: 1, borderRightColor: colors.border },
-                    isAssigning && isEmpty && { backgroundColor: colors.warningBg },
-                  ]}
-                  activeOpacity={isAssigning && isEmpty ? 0.6 : 1}
-                  onPress={() => {
-                    if (isAssigning && isEmpty) handleAssignToCourt(court.id);
-                  }}
-                  disabled={!isAssigning || !isEmpty}
-                >
-                  <View style={[styles.courtColHead, { backgroundColor: playing ? colors.primaryLight : colors.background }]}>
-                    <Text style={[styles.courtColHeadText, { color: playing ? colors.primary : colors.textSecondary }]}>
+                <View key={court.id} style={styles.courtSetupItem}>
+                  <TouchableOpacity
+                    style={[
+                      styles.courtToggle,
+                      { borderColor: isDedicated ? colors.primary : colors.border },
+                      isDedicated && { backgroundColor: colors.primaryLight },
+                    ]}
+                    onPress={() => toggleCourt(court.id)}
+                    activeOpacity={0.7}
+                  >
+                    <View style={[
+                      styles.courtToggleCheck,
+                      { backgroundColor: isDedicated ? colors.primary : colors.border },
+                    ]}>
+                      {isDedicated && <Text style={styles.courtToggleCheckIcon}>✓</Text>}
+                    </View>
+                    <Text style={[
+                      styles.courtToggleName,
+                      { color: isDedicated ? colors.primary : colors.text },
+                    ]}>
                       {court.name}
                     </Text>
-                    {playing && <View style={[styles.dot, { backgroundColor: colors.courtInGame }]} />}
-                    {isAssigning && isEmpty && (
-                      <Text style={[styles.courtDropHint, { color: colors.warning }]}>← 여기</Text>
-                    )}
-                  </View>
-                  <View style={styles.courtColBody}>
-                    {playing ? (
-                      playing.playerIds.map((pId, i) => (
-                        <View key={i} style={[styles.pRow, i > 0 && { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.divider }]}>
-                          <NameSkill userId={pId} style={[styles.pName, { color: colors.text }]} />
-                        </View>
-                      ))
-                    ) : (
-                      <View style={styles.emptyCourtBody}>
-                        <Text style={[styles.emptyCourtText, { color: isAssigning ? colors.warning : colors.textLight }]}>
-                          {isAssigning ? '탭하여 배정' : '비어있음'}
-                        </Text>
-                      </View>
-                    )}
-                    {playing && playing.playerIds.length < 4 &&
-                      Array.from({ length: 4 - playing.playerIds.length }).map((_, i) => (
-                        <View key={`e${i}`} style={[styles.pRow, { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.divider }]}>
-                          <Text style={[styles.pName, { color: colors.textLight }]}>-</Text>
-                        </View>
-                      ))
-                    }
-                  </View>
-                </TouchableOpacity>
+                  </TouchableOpacity>
+
+                  {/* 전용 코트에 현재 게임 표시 */}
+                  {isDedicated && (
+                    <View style={[styles.courtStatus, { borderColor: colors.border }]}>
+                      {playing ? (
+                        <>
+                          <View style={[styles.courtStatusDot, { backgroundColor: colors.courtInGame }]} />
+                          <View style={styles.courtStatusPlayers}>
+                            {playing.playerIds.map((pId, i) => (
+                              <NameSkill key={pId} userId={pId} style={[styles.courtStatusName, { color: colors.text }]} />
+                            ))}
+                          </View>
+                        </>
+                      ) : (
+                        <TouchableOpacity
+                          style={styles.courtEmptyAction}
+                          onPress={() => handlePushToCourt(court.id)}
+                          disabled={queuedEntries.length === 0}
+                        >
+                          <Text style={[
+                            styles.courtEmptyText,
+                            { color: queuedEntries.length > 0 ? colors.primary : colors.textLight },
+                          ]}>
+                            {queuedEntries.length > 0 ? '탭하여 다음 게임 투입' : '비어있음'}
+                          </Text>
+                        </TouchableOpacity>
+                      )}
+                    </View>
+                  )}
+                </View>
               );
             })}
           </View>
+
+          {!hasDedicated && allMembers.length >= 12 && (
+            <Text style={[styles.courtHint, { color: colors.warning }]}>
+              코트를 선택하여 모임 전용으로 지정하세요
+            </Text>
+          )}
+          {allMembers.length > 0 && allMembers.length < 12 && (
+            <Text style={[styles.courtHint, { color: colors.textSecondary }]}>
+              12명 이상이면 전용 코트를 사용할 수 있어요 (현재 {allMembers.length}명)
+            </Text>
+          )}
         </View>
 
         {/* ═══ Section 2: 대기 명단 ═══ */}
         <View style={[styles.section, { backgroundColor: colors.surface }, shadows.sm]}>
           <View style={[styles.sectionBar, { backgroundColor: colors.warning }]}>
-            <Text style={styles.sectionBarText}>대기 명단 ({queuedEntries.length})</Text>
+            <Text style={styles.sectionBarText}>대기 명단 ({queuedEntries.length}조)</Text>
           </View>
 
           {queuedEntries.length === 0 ? (
             <View style={styles.emptyQueue}>
               <Text style={[styles.emptyQueueText, { color: colors.textLight }]}>
-                아래 회원을 탭하여 게임을 편성하세요
+                아래 회원을 탭하여 4명씩 조를 편성하세요
               </Text>
             </View>
           ) : (
-            queuedEntries.map((entry, idx) => {
-              const isActive = assigningEntryId === entry.id;
-              return (
-                <View
-                  key={entry.id}
-                  style={[
-                    styles.qRow,
-                    { borderBottomColor: colors.divider },
-                    isActive && { backgroundColor: colors.warningBg },
-                  ]}
-                >
-                  <View style={[styles.qNum, { backgroundColor: isActive ? colors.warning : colors.primaryLight }]}>
-                    <Text style={[styles.qNumText, { color: isActive ? '#fff' : colors.primary }]}>{idx + 1}</Text>
-                  </View>
-                  <View style={{ flex: 1, paddingHorizontal: spacing.sm, flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center' }}>
-                    {entry.playerIds.map((pId, i) => (
-                      <Text key={pId} style={{ fontSize: 13, color: colors.text }}>
-                        {i > 0 && <Text style={{ color: colors.textLight }}> / </Text>}
-                        <NameSkill userId={pId} style={{ fontSize: 13 }} />
-                      </Text>
-                    ))}
-                  </View>
-                  <TouchableOpacity
-                    style={[styles.qBtn, { backgroundColor: isActive ? colors.textSecondary : colors.primary }]}
-                    onPress={() => startAssign(entry.id)}
-                  >
-                    <Text style={styles.qBtnText}>{isActive ? '취소' : '코트 배정'}</Text>
-                  </TouchableOpacity>
-                  <TouchableOpacity
-                    style={[styles.qBtn, { backgroundColor: colors.danger }]}
-                    onPress={() => handleDelete(entry.id)}
-                  >
-                    <Text style={styles.qBtnText}>삭제</Text>
-                  </TouchableOpacity>
+            queuedEntries.map((entry, idx) => (
+              <View key={entry.id} style={[styles.qRow, { borderBottomColor: colors.divider }]}>
+                <View style={[styles.qNum, { backgroundColor: idx === 0 ? colors.primary : colors.primaryLight }]}>
+                  <Text style={[styles.qNumText, { color: idx === 0 ? '#fff' : colors.primary }]}>{idx + 1}</Text>
                 </View>
-              );
-            })
+                <View style={styles.qPlayers}>
+                  {entry.playerIds.map((pId, i) => (
+                    <NameSkill key={pId} userId={pId} style={[styles.qPlayerText, { color: colors.text }]} />
+                  ))}
+                </View>
+                {idx === 0 && hasDedicated && (
+                  <View style={[styles.qNextBadge, { backgroundColor: colors.primary }]}>
+                    <Text style={styles.qNextBadgeText}>다음</Text>
+                  </View>
+                )}
+                <TouchableOpacity
+                  style={[styles.qBtn, { backgroundColor: colors.danger }]}
+                  onPress={() => handleDelete(entry.id)}
+                >
+                  <Text style={styles.qBtnText}>삭제</Text>
+                </TouchableOpacity>
+              </View>
+            ))
           )}
         </View>
 
@@ -410,9 +456,7 @@ export default function GameBoardScreen() {
         <View style={{ height: 130 }} />
       </ScrollView>
 
-      {/* ══════════════════════════════════════════
-          Fixed Bottom: 게임 편성 트레이
-         ══════════════════════════════════════════ */}
+      {/* ══════ Fixed Bottom: 게임 편성 트레이 ══════ */}
       <View style={[styles.tray, { backgroundColor: colors.surface, borderTopColor: colors.border }, shadows.lg]}>
         <View style={styles.traySlots}>
           {[0, 1, 2, 3].map((i) => {
@@ -488,30 +532,32 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing.lg, paddingVertical: spacing.sm,
   },
   sectionBarText: { color: palette.white, ...typography.subtitle2 },
+  sectionBarSub: { color: 'rgba(255,255,255,0.8)', fontSize: 11, fontWeight: '600' },
 
-  // Assign banner
-  assignBanner: {
-    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
-    paddingHorizontal: spacing.lg, paddingVertical: spacing.sm,
+  // Court setup
+  courtSetup: { padding: spacing.md, gap: spacing.sm },
+  courtSetupItem: { gap: spacing.xs },
+  courtToggle: {
+    flexDirection: 'row', alignItems: 'center', gap: spacing.sm,
+    paddingHorizontal: spacing.md, paddingVertical: spacing.smd,
+    borderRadius: radius.lg, borderWidth: 1.5,
   },
-  assignBannerText: { ...typography.caption, fontWeight: '700' },
-  assignBannerCancel: { ...typography.buttonSm },
-
-  // Courts
-  courtsRow: { flexDirection: 'row' },
-  courtCol: { flex: 1 },
-  courtColHead: {
-    flexDirection: 'row', alignItems: 'center', justifyContent: 'center',
-    paddingVertical: spacing.sm, gap: 4,
+  courtToggleCheck: {
+    width: 20, height: 20, borderRadius: 4,
+    alignItems: 'center', justifyContent: 'center',
   },
-  courtColHeadText: { ...typography.subtitle2, textAlign: 'center' },
-  dot: { width: 6, height: 6, borderRadius: 3 },
-  courtDropHint: { fontSize: 10, fontWeight: '700' },
-  courtColBody: { minHeight: 96 },
-  pRow: { paddingVertical: 5, paddingHorizontal: spacing.sm, alignItems: 'center' },
-  pName: { ...typography.body2, textAlign: 'center' },
-  emptyCourtBody: { flex: 1, justifyContent: 'center', alignItems: 'center', minHeight: 96 },
-  emptyCourtText: { ...typography.caption },
+  courtToggleCheckIcon: { color: '#fff', fontSize: 13, fontWeight: '800' },
+  courtToggleName: { ...typography.subtitle2 },
+  courtStatus: {
+    marginLeft: 32, paddingHorizontal: spacing.md, paddingVertical: spacing.sm,
+    borderLeftWidth: 2, gap: 3,
+  },
+  courtStatusDot: { width: 6, height: 6, borderRadius: 3, marginBottom: 2 },
+  courtStatusPlayers: { gap: 1 },
+  courtStatusName: { fontSize: 13 },
+  courtEmptyAction: { paddingVertical: spacing.xs },
+  courtEmptyText: { fontSize: 12, fontWeight: '600' },
+  courtHint: { ...typography.caption, paddingHorizontal: spacing.lg, paddingBottom: spacing.md },
 
   // Queue
   emptyQueue: { paddingVertical: spacing.xl, alignItems: 'center' },
@@ -519,13 +565,19 @@ const styles = StyleSheet.create({
   qRow: {
     flexDirection: 'row', alignItems: 'center',
     paddingVertical: spacing.smd, paddingHorizontal: spacing.md,
-    borderBottomWidth: StyleSheet.hairlineWidth, gap: spacing.xs,
+    borderBottomWidth: StyleSheet.hairlineWidth, gap: spacing.sm,
   },
   qNum: {
-    width: 26, height: 26, borderRadius: 13,
+    width: 28, height: 28, borderRadius: 14,
     alignItems: 'center', justifyContent: 'center',
   },
   qNumText: { fontSize: 13, fontWeight: '800' },
+  qPlayers: { flex: 1, gap: 1 },
+  qPlayerText: { fontSize: 13 },
+  qNextBadge: {
+    paddingHorizontal: 6, paddingVertical: 2, borderRadius: 6,
+  },
+  qNextBadgeText: { color: '#fff', fontSize: 10, fontWeight: '700' },
   qBtn: { paddingHorizontal: spacing.sm, paddingVertical: 5, borderRadius: radius.sm },
   qBtnText: { color: palette.white, fontSize: 11, fontWeight: '700' },
 

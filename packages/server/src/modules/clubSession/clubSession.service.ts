@@ -76,6 +76,15 @@ export async function startSession(
   return mapped;
 }
 
+export async function getSession(sessionId: string): Promise<ClubSessionResponse> {
+  const session = await prisma.clubSession.findUnique({
+    where: { id: sessionId },
+    include: { club: true, facility: true, startedBy: true },
+  });
+  if (!session) throw new NotFoundError('모임 세션');
+  return mapClubSession(session);
+}
+
 export async function getActiveSession(clubId: string): Promise<ClubSessionResponse | null> {
   const session = await prisma.clubSession.findFirst({
     where: { clubId, status: 'ACTIVE' },

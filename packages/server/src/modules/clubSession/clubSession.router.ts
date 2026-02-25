@@ -46,6 +46,20 @@ router.get(
   },
 );
 
+// GET /api/v1/club-sessions/:id - get a single club session
+router.get(
+  '/:id',
+  authenticate,
+  async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const session = await clubSessionService.getSession(req.params.id as string);
+      res.json(session);
+    } catch (err) {
+      next(err);
+    }
+  },
+);
+
 // PATCH /api/v1/club-sessions/:id/courts - update court assignments
 router.patch(
   '/:id/courts',

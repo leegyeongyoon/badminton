@@ -159,7 +159,7 @@ export const startClubSessionSchema = z.object({
 });
 
 export const updateClubSessionCourtsSchema = z.object({
-  courtIds: z.array(z.string().uuid()).min(1),
+  courtIds: z.array(z.string().uuid()),
 });
 
 export const bulkRegisterTurnsSchema = z.object({
