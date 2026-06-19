@@ -1,7 +1,36 @@
 import { prisma } from '../../utils/prisma';
-import { NotFoundError, BadRequestError } from '../../utils/errors';
+import { NotFoundError, BadRequestError, ForbiddenError } from '../../utils/errors';
 import { CourtStatus, CourtGameType } from '@badminton/shared';
 import type { CreateCourtInput, UpdateCourtInput } from '@badminton/shared';
+
+/**
+ * Court-management permission for a club operator.
+ *
+ * A court may be created/renamed/marked unavailable BEFORE a session is bound to
+ * a facility, and clubs are not 1:1 with facilities, so a clean per-facility staff
+ * check is not reliably derivable. Per the product decision (low risk for this
+ * app) we allow any club LEADER/STAFF (role on ANY club), OR a FACILITY_ADMIN of
+ * the target facility, to manage courts.
+ *
+ * Throws ForbiddenError if the user is neither.
+ */
+export async function verifyCourtManager(userId: string, facilityId?: string) {
+  // FACILITY_ADMIN of the target facility (when known).
+  if (facilityId) {
+    const admin = await prisma.facilityAdmin.findFirst({
+      where: { userId, facilityId },
+    });
+    if (admin) return;
+  }
+
+  // Any club LEADER/STAFF may manage courts.
+  const staffMembership = await prisma.clubMember.findFirst({
+    where: { userId, role: { in: ['LEADER', 'STAFF'] } },
+  });
+  if (staffMembership) return;
+
+  throw new ForbiddenError('코트 관리는 시설 관리자 또는 모임 대표/운영진만 가능합니다');
+}
 
 export function getPlayersRequired(gameType: CourtGameType): number {
   switch (gameType) {
@@ -16,6 +45,10 @@ export function getPlayersRequired(gameType: CourtGameType): number {
 
 export async function createCourt(facilityId: string, input: CreateCourtInput) {
   const gameType = input.gameType || CourtGameType.DOUBLES;
+  const clash = await prisma.court.findFirst({
+    where: { facilityId, name: input.name },
+  });
+  if (clash) throw new BadRequestError('같은 이름의 코트가 이미 있습니다');
   return prisma.court.create({
     data: { name: input.name, facilityId, gameType },
   });
@@ -40,9 +73,21 @@ export async function listCourts(facilityId: string) {
 export async function updateCourt(courtId: string, input: UpdateCourtInput) {
   const court = await prisma.court.findUnique({ where: { id: courtId } });
   if (!court) throw new NotFoundError('코트');
+
+  // Rename: guard the (facilityId, name) unique constraint with a clear error.
+  if (input.name && input.name !== court.name) {
+    const clash = await prisma.court.findFirst({
+      where: { facilityId: court.facilityId, name: input.name, id: { not: courtId } },
+    });
+    if (clash) throw new BadRequestError('같은 이름의 코트가 이미 있습니다');
+  }
+
   return prisma.court.update({
     where: { id: courtId },
-    data: { ...(input.gameType && { gameType: input.gameType }) },
+    data: {
+      ...(input.name && { name: input.name }),
+      ...(input.gameType && { gameType: input.gameType }),
+    },
   });
 }
 
@@ -62,6 +107,22 @@ export async function updateCourtStatus(courtId: string, status: 'MAINTENANCE' |
     where: { id: courtId },
     data: { status },
   });
+}
+
+export async function deleteCourt(courtId: string) {
+  const court = await prisma.court.findUnique({ where: { id: courtId } });
+  if (!court) throw new NotFoundError('코트');
+  if (court.status === 'IN_USE') {
+    throw new BadRequestError('사용 중인 코트는 삭제할 수 없습니다');
+  }
+  // Preserve history: if the court was ever used (has turns), don't delete it —
+  // suggest marking it 사용 불가 instead.
+  const turnCount = await prisma.courtTurn.count({ where: { courtId } });
+  if (turnCount > 0) {
+    throw new BadRequestError('사용 기록이 있는 코트는 삭제할 수 없어요. 대신 "사용 불가"로 두세요.');
+  }
+  await prisma.court.delete({ where: { id: courtId } });
+  return { id: courtId };
 }
 
 // State machine transitions

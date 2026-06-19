@@ -7,7 +7,6 @@ import { getIO } from '../../socket';
 import { sendPushToUser } from '../notification/notification.service';
 import { scheduleJob, cancelJob } from '../scheduler/scheduler.service';
 import { emitPlayersUpdated } from '../checkin/checkin.service';
-import { maybeRefillFromRotation } from '../rotation/rotation.service';
 
 export async function registerTurn(
   courtId: string,
@@ -217,6 +216,18 @@ async function startTurn(turnId: string, courtId: string, playerIds: string[], f
       courtId,
       status: CourtStatus.IN_USE,
     });
+
+    // "It's your turn" push: notify every player that the game is starting now.
+    // Covers both the position-1 auto-start path and the promotion path.
+    if (policy?.turnNotifyEnabled !== false) {
+      for (const pid of playerIds) {
+        await sendPushToUser(pid, {
+          title: `코트 ${court.name} 게임 시작`,
+          body: `${court.name}으로 입장하세요. 게임이 시작됩니다.`,
+          data: { type: 'your_turn', courtId, turnId },
+        });
+      }
+    }
   }
 
   // Schedule timer jobs if time limit is set
@@ -300,19 +311,9 @@ export async function completeTurn(
   if (waitingTurns.length > 0) {
     const nextTurn = waitingTurns[0];
     const nextPlayerIds = nextTurn.players.map((p) => p.userId);
+    // startTurn already sends the "your_turn" push to promoted players,
+    // so we no longer send a separate promotion push here (avoids double push).
     await startTurn(nextTurn.id, courtId, nextPlayerIds, turn.court.facilityId);
-
-    // Notify players of promotion
-    const policy = turn.court.facility.policy;
-    if (policy?.turnNotifyEnabled !== false) {
-      for (const p of nextTurn.players) {
-        await sendPushToUser(p.userId, {
-          title: '순번 시작',
-          body: `${turn.court.name}에서 게임이 시작됩니다!`,
-          data: { courtId, turnId: nextTurn.id, type: 'turn_started' },
-        });
-      }
-    }
   } else {
     // No more turns, court becomes empty
     await transitionCourtStatus(courtId, CourtStatus.EMPTY);
@@ -331,13 +332,6 @@ export async function completeTurn(
 
   // Emit players updated (players are now AVAILABLE again)
   await emitPlayersUpdated(turn.court.facilityId);
-
-  // Rotation refill: if an active rotation exists, auto-fill next slot
-  try {
-    await maybeRefillFromRotation(courtId, turn.court.facilityId);
-  } catch {
-    // Non-critical: don't fail completeTurn if rotation refill fails
-  }
 
   const updated = await prisma.courtTurn.findUnique({
     where: { id: turnId },

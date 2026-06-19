@@ -54,6 +54,12 @@ export const palette = {
   orange500: '#F97316',
   orange600: '#EA580C',
 
+  // Gender - Rose (female)
+  rose50: '#FFF1F2',
+  rose100: '#FFE4E6',
+  rose500: '#F43F5E',
+  rose600: '#E11D48',
+
   // Info - Violet
   violet50: '#F5F3FF',
   violet100: '#EDE9FE',
@@ -126,6 +132,23 @@ export const lightColors = {
   playerAvailable: palette.green500 as string,
   playerInTurn: palette.red500 as string,
   playerResting: palette.amber500 as string,
+
+  // Gender (accessible, instantly distinguishable: blue ♂ / rose ♀)
+  genderMale: palette.blue500 as string,
+  genderMaleBg: palette.blue50 as string,
+  genderFemale: palette.rose500 as string,
+  genderFemaleBg: palette.rose50 as string,
+
+  // Game type (by 4-player gender composition) — tasteful, not loud.
+  // 남복(all M) blue · 여복(all F) rose · 혼복(mixed) violet · neutral(unknown)
+  gameTypeMale: palette.blue600 as string,
+  gameTypeMaleBg: palette.blue50 as string,
+  gameTypeFemale: palette.rose600 as string,
+  gameTypeFemaleBg: palette.rose50 as string,
+  gameTypeMixed: palette.violet600 as string,
+  gameTypeMixedBg: palette.violet50 as string,
+  gameTypeNeutral: palette.slate400 as string,
+  gameTypeNeutralBg: palette.slate100 as string,
 
   // Timer
   timerSafe: palette.green500 as string,
@@ -202,6 +225,22 @@ export const darkColors: typeof lightColors = {
   playerAvailable: palette.green500,
   playerInTurn: palette.red500,
   playerResting: palette.amber500,
+
+  // Gender (accessible, instantly distinguishable: blue ♂ / rose ♀)
+  genderMale: palette.blue500,
+  genderMaleBg: '#172554',
+  genderFemale: palette.rose500,
+  genderFemaleBg: '#4C0519',
+
+  // Game type (by 4-player gender composition) — tasteful, not loud.
+  gameTypeMale: palette.blue500,
+  gameTypeMaleBg: '#172554',
+  gameTypeFemale: palette.rose500,
+  gameTypeFemaleBg: '#4C0519',
+  gameTypeMixed: palette.violet500,
+  gameTypeMixedBg: '#2E1065',
+  gameTypeNeutral: palette.slate500,
+  gameTypeNeutralBg: palette.slate700,
 
   // Timer
   timerSafe: palette.green500,

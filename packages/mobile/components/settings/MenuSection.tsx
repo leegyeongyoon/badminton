@@ -13,7 +13,6 @@ import type { ThemeMode } from '../../contexts/ThemeContext';
 
 interface MenuSectionProps {
   isAdmin: boolean;
-  facilityId: string | undefined;
   unreadCount: number;
   onNavigate: (route: string) => void;
 }
@@ -26,7 +25,7 @@ const THEME_MODE_LABELS: Record<ThemeMode, string> = {
 
 const THEME_MODE_ORDER: ThemeMode[] = ['light', 'dark', 'system'];
 
-export function MenuSection({ isAdmin, facilityId, unreadCount, onNavigate }: MenuSectionProps) {
+export function MenuSection({ isAdmin, unreadCount, onNavigate }: MenuSectionProps) {
   const { mode, isDark, colors, setThemeMode } = useTheme();
 
   const cycleThemeMode = () => {
@@ -37,7 +36,7 @@ export function MenuSection({ isAdmin, facilityId, unreadCount, onNavigate }: Me
 
   const items: Array<{
     key: string;
-    icon: 'notification' | 'admin' | 'tv';
+    icon: 'notification' | 'admin';
     iconColor: string;
     label: string;
     desc?: string;
@@ -64,15 +63,6 @@ export function MenuSection({ isAdmin, facilityId, unreadCount, onNavigate }: Me
       desc: Strings.settings.adminDesc,
       route: '/admin',
       visible: isAdmin,
-    },
-    {
-      key: 'tv',
-      icon: 'tv',
-      iconColor: colors.info,
-      label: Strings.settings.tvDisplay,
-      desc: Strings.settings.tvDisplayDesc,
-      route: `/display/${facilityId}`,
-      visible: !!facilityId,
     },
   ];
 

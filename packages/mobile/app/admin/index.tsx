@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { View, Text, StyleSheet, ScrollView, ActivityIndicator } from 'react-native';
+import { View, Text, StyleSheet, ScrollView, ActivityIndicator, Platform } from 'react-native';
 import Animated from 'react-native-reanimated';
 import { useRouter } from 'expo-router';
 import { useCheckinStore } from '../../store/checkinStore';
@@ -24,7 +24,6 @@ import { SessionControl } from '../../components/admin/SessionControl';
 import { CapacityOverview } from '../../components/admin/CapacityOverview';
 import { CheckedInUsersList } from '../../components/admin/CheckedInUsersList';
 import { TodayStatsGrid } from '../../components/admin/TodayStatsGrid';
-import { RotationCard } from '../../components/admin/RotationCard';
 import { CourtManagementList } from '../../components/admin/CourtManagementList';
 import { WeeklyTrendsCard } from '../../components/admin/WeeklyTrendsCard';
 import { PeakHoursCard } from '../../components/admin/PeakHoursCard';
@@ -44,7 +43,7 @@ export default function AdminDashboard() {
   }, []);
 
   const {
-    session, courts, capacity, rotation, todayStats,
+    session, courts, capacity, todayStats,
     checkedInUsers, weeklyTrends, peakHours,
     refreshing, onRefresh, loadData,
   } = useAdminData(facilityId);
@@ -60,7 +59,6 @@ export default function AdminDashboard() {
   const fadeUsers = useFadeIn(180);
   const fadeStats = useFadeIn(240);
   const fadeCharts = useFadeIn(300);
-  const fadeRotation = useFadeIn(360);
   const fadeCourts = useFadeIn(420);
 
   const handleOpenSession = () => {
@@ -198,7 +196,7 @@ export default function AdminDashboard() {
       contentContainerStyle={{ padding: spacing.lg, paddingBottom: spacing.xxxxl }}
       onScroll={scrollHandler}
       scrollEventThrottle={16}
-      refreshControl={<AnimatedRefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
+      refreshControl={Platform.OS === 'web' ? undefined : <AnimatedRefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
     >
       {/* Header + Quick Actions */}
       <Animated.View style={[fadeHeader, headerStyle]}>
@@ -209,8 +207,6 @@ export default function AdminDashboard() {
         <QuickActionsBar
           isSessionActive={!!session}
           onToggleSession={session ? handleCloseSession : handleOpenSession}
-          onViewRotation={() => router.push('/admin/rotation')}
-          onViewPenalties={() => router.push('/admin/penalties')}
         />
       </Animated.View>
 
@@ -264,16 +260,6 @@ export default function AdminDashboard() {
             <Skeleton width="100%" height={160} borderRadius={16} />
           </View>
         )}
-      </Animated.View>
-
-      {/* Rotation */}
-      <Animated.View style={[{ marginBottom: spacing.xxl }, fadeRotation]}>
-        <SectionHeader title="로테이션" />
-        <RotationCard
-          rotation={rotation}
-          onViewDetail={() => router.push('/admin/rotation')}
-          onGenerate={() => router.push('/admin/rotation')}
-        />
       </Animated.View>
 
       {/* Court Management */}

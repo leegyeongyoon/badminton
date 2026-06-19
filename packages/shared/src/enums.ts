@@ -23,12 +23,6 @@ export enum TurnStatus {
   CANCELLED = 'CANCELLED',
 }
 
-export enum FacilityRequestStatus {
-  PENDING = 'PENDING',
-  APPROVED = 'APPROVED',
-  REJECTED = 'REJECTED',
-}
-
 export enum SkillLevel {
   S = 'S',
   A = 'A',
@@ -58,14 +52,6 @@ export enum CourtGameType {
   LESSON = 'LESSON',
 }
 
-export enum RecruitmentStatus {
-  RECRUITING = 'RECRUITING',
-  FULL = 'FULL',
-  REGISTERED = 'REGISTERED',
-  CANCELLED = 'CANCELLED',
-  EXPIRED = 'EXPIRED',
-}
-
 export enum PlayerStatus {
   AVAILABLE = 'AVAILABLE',
   IN_TURN = 'IN_TURN',
@@ -75,13 +61,6 @@ export enum PlayerStatus {
 export enum SessionStatus {
   OPEN = 'OPEN',
   CLOSED = 'CLOSED',
-}
-
-export enum RotationStatus {
-  DRAFT = 'DRAFT',
-  ACTIVE = 'ACTIVE',
-  COMPLETED = 'COMPLETED',
-  CANCELLED = 'CANCELLED',
 }
 
 export enum ClubMemberRole {

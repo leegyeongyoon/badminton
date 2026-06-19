@@ -3,6 +3,8 @@ import {
   startClubSessionSchema,
   updateClubSessionCourtsSchema,
   bulkRegisterTurnsSchema,
+  addGuestSchema,
+  updateFeeSchema,
 } from '@badminton/shared';
 import { authenticate } from '../../middleware/auth';
 import { validate } from '../../middleware/validate';
@@ -90,6 +92,78 @@ router.post(
         req.user!.userId,
       );
       res.json(session);
+    } catch (err) {
+      next(err);
+    }
+  },
+);
+
+// POST /api/v1/club-sessions/:id/guests - operator adds a guest (LEADER/STAFF)
+router.post(
+  '/:id/guests',
+  authenticate,
+  validate(addGuestSchema),
+  async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const result = await clubSessionService.addGuest(
+        req.params.id as string,
+        req.user!.userId,
+        req.body,
+      );
+      res.status(201).json(result);
+    } catch (err) {
+      next(err);
+    }
+  },
+);
+
+// GET /api/v1/club-sessions/:id/players/:userId/matchups - who :userId played
+// with IN THIS 정모 + shared-game counts (any club member).
+router.get(
+  '/:id/players/:userId/matchups',
+  authenticate,
+  async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const result = await clubSessionService.getPlayerMatchups(
+        req.params.id as string,
+        req.params.userId as string,
+        req.user!.userId,
+      );
+      res.json(result);
+    } catch (err) {
+      next(err);
+    }
+  },
+);
+
+// GET /api/v1/club-sessions/:id/summary - 정모 종료 요약 리포트 (any club member)
+router.get(
+  '/:id/summary',
+  authenticate,
+  async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const result = await clubSessionService.getSessionSummary(
+        req.params.id as string,
+        req.user!.userId,
+      );
+      res.json(result);
+    } catch (err) {
+      next(err);
+    }
+  },
+);
+
+// GET /api/v1/club-sessions/:id/guest-fees - guest fee settlement view (LEADER/STAFF)
+router.get(
+  '/:id/guest-fees',
+  authenticate,
+  async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const result = await clubSessionService.getGuestFees(
+        req.params.id as string,
+        req.user!.userId,
+      );
+      res.json(result);
     } catch (err) {
       next(err);
     }

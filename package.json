@@ -9,7 +9,9 @@
     "dev:server": "npm run dev -w packages/server",
     "build:shared": "npm run build -w packages/shared",
     "build:server": "npm run build -w packages/server",
+    "db:generate": "npm run db:generate -w packages/server",
     "db:migrate": "npm run db:migrate -w packages/server",
+    "db:deploy": "npm run db:deploy -w packages/server",
     "db:seed": "npm run db:seed -w packages/server",
     "db:studio": "npm run db:studio -w packages/server"
   }

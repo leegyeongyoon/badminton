@@ -6,7 +6,7 @@ import {
   KeyboardAvoidingView,
   Platform,
 } from 'react-native';
-import { Link } from 'expo-router';
+import { Link, useRouter } from 'expo-router';
 import { useAuthStore } from '../../store/authStore';
 import { useTheme } from '../../hooks/useTheme';
 import { useFormValidation } from '../../hooks/useFormValidation';
@@ -21,6 +21,7 @@ export default function LoginScreen() {
   const [loading, setLoading] = useState(false);
   const { login } = useAuthStore();
   const { colors } = useTheme();
+  const router = useRouter();
 
   const rules = useMemo(() => ({
     phone: compose(required, phoneRule),
@@ -94,6 +95,26 @@ export default function LoginScreen() {
             {Strings.auth.goToRegister}
           </Text>
         </Link>
+
+        {/* Divider */}
+        <View style={styles.dividerRow}>
+          <View style={[styles.dividerLine, { backgroundColor: colors.divider }]} />
+          <Text style={[styles.dividerText, { color: colors.textLight }]}>또는</Text>
+          <View style={[styles.dividerLine, { backgroundColor: colors.divider }]} />
+        </View>
+
+        {/* Guest entry — non-members can check in without an account */}
+        <Button
+          title="게스트로 참여"
+          onPress={() => router.push('/(auth)/guest')}
+          variant="outline"
+          icon="person"
+          fullWidth
+          accessibilityLabel="게스트로 출석하기"
+        />
+        <Text style={[styles.guestHint, { color: colors.textLight }]}>
+          회원가입 없이 오늘 모임에 출석할 수 있어요
+        </Text>
       </View>
     </KeyboardAvoidingView>
   );
@@ -129,5 +150,23 @@ const styles = StyleSheet.create({
     ...typography.body2,
     textAlign: 'center',
     marginTop: spacing.lg,
+  },
+  dividerRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.md,
+    marginVertical: spacing.xl,
+  },
+  dividerLine: {
+    flex: 1,
+    height: 1,
+  },
+  dividerText: {
+    ...typography.caption,
+  },
+  guestHint: {
+    ...typography.caption,
+    textAlign: 'center',
+    marginTop: spacing.sm,
   },
 });

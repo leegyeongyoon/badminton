@@ -1,5 +1,12 @@
 import { Router, Request, Response, NextFunction } from 'express';
+import {
+  suggestFoursomeSchema,
+  createQueueGameSchema,
+  reorderQueueSchema,
+  assignEntrySchema,
+} from '@badminton/shared';
 import { authenticate } from '../../middleware/auth';
+import { validate } from '../../middleware/validate';
 import {
   createGameBoard,
   getGameBoard,
@@ -8,9 +15,34 @@ import {
   deleteEntry,
   pushEntry,
   pushAllEntries,
+  suggestNextFoursome,
+  createQueueGame,
+  reorderQueue,
+  assignEntry,
 } from './gameBoard.service';
 
 const router = Router();
+
+// POST /club-sessions/:id/suggest — auto-suggest next foursome(s) for a club session.
+// :id is the clubSessionId (use the /club-sessions mount).
+router.post(
+  '/:id/suggest',
+  authenticate,
+  validate(suggestFoursomeSchema),
+  async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const { courtId, count } = req.body;
+      const result = await suggestNextFoursome(
+        req.params.id as string,
+        { courtId, count },
+        req.user!.userId,
+      );
+      res.json(result);
+    } catch (err) {
+      next(err);
+    }
+  },
+);
 
 // POST /club-sessions/:id/game-board
 router.post(
@@ -46,8 +78,8 @@ router.post(
   authenticate,
   async (req: Request, res: Response, next: NextFunction) => {
     try {
-      const { playerIds, courtId } = req.body;
-      const entry = await addEntry(req.params.id as string, playerIds, req.user!.userId, courtId);
+      const { playerIds, courtId, note } = req.body;
+      const entry = await addEntry(req.params.id as string, playerIds, req.user!.userId, courtId, note);
       res.status(201).json(entry);
     } catch (err) {
       next(err);
@@ -92,6 +124,64 @@ router.post(
     try {
       const { courtId } = req.body;
       const entry = await pushEntry(
+        req.params.id as string,
+        req.params.entryId as string,
+        courtId,
+        req.user!.userId,
+      );
+      res.json(entry);
+    } catch (err) {
+      next(err);
+    }
+  },
+);
+
+// POST /game-boards/:boardId/queue — create a court-less QUEUED game (다음 게임 큐에 추가)
+router.post(
+  '/:id/queue',
+  authenticate,
+  validate(createQueueGameSchema),
+  async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const { playerIds, note } = req.body;
+      const entry = await createQueueGame(
+        req.params.id as string,
+        playerIds,
+        req.user!.userId,
+        note,
+      );
+      res.status(201).json(entry);
+    } catch (err) {
+      next(err);
+    }
+  },
+);
+
+// PATCH /game-boards/:boardId/queue/reorder — set the full new queue order
+router.patch(
+  '/:id/queue/reorder',
+  authenticate,
+  validate(reorderQueueSchema),
+  async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const { entryIds } = req.body;
+      const board = await reorderQueue(req.params.id as string, entryIds, req.user!.userId);
+      res.json(board);
+    } catch (err) {
+      next(err);
+    }
+  },
+);
+
+// POST /game-boards/:boardId/entries/:entryId/assign — assign a queued game to an EMPTY court
+router.post(
+  '/:id/entries/:entryId/assign',
+  authenticate,
+  validate(assignEntrySchema),
+  async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const { courtId } = req.body;
+      const entry = await assignEntry(
         req.params.id as string,
         req.params.entryId as string,
         courtId,

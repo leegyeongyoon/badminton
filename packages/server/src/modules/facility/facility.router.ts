@@ -1,5 +1,5 @@
 import { Router, Request, Response, NextFunction } from 'express';
-import { createFacilitySchema, updatePolicySchema, updateCoordinatesSchema, createFacilityRequestSchema, reviewFacilityRequestSchema } from '@badminton/shared';
+import { createFacilitySchema, updatePolicySchema, updateCoordinatesSchema } from '@badminton/shared';
 import { authenticate } from '../../middleware/auth';
 import { roleGuard } from '../../middleware/roleGuard';
 import { validate } from '../../middleware/validate';
@@ -95,12 +95,14 @@ router.get('/:id/stats/peak-hours', authenticate, async (req: Request, res: Resp
   } catch (err) { next(err); }
 });
 
-// Court endpoints nested under facility
-router.post('/:id/courts', authenticate, roleGuard('FACILITY_ADMIN'), async (req: Request, res: Response, next: NextFunction) => {
+// Court endpoints nested under facility.
+// Allowed for FACILITY_ADMIN of this facility OR any club LEADER/STAFF.
+router.post('/:id/courts', authenticate, async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { createCourtSchema } = await import('@badminton/shared');
     const body = createCourtSchema.parse(req.body);
-    const { createCourt } = await import('../court/court.service');
+    const { createCourt, verifyCourtManager } = await import('../court/court.service');
+    await verifyCourtManager(req.user!.userId, req.params.id as string);
     const court = await createCourt(req.params.id as string, body);
     res.status(201).json(court);
   } catch (err) { next(err); }
@@ -129,46 +131,6 @@ router.get('/:id/capacity', async (req: Request, res: Response, next: NextFuncti
     const { getFacilityCapacity } = await import('../checkin/checkin.service');
     const capacity = await getFacilityCapacity(req.params.id as string);
     res.json(capacity);
-  } catch (err) { next(err); }
-});
-
-// --- Facility Requests ---
-
-// POST /facilities/requests - create a facility request
-router.post('/requests', authenticate, validate(createFacilityRequestSchema), async (req: Request, res: Response, next: NextFunction) => {
-  try {
-    const result = await facilityService.createFacilityRequest(req.user!.userId, req.body);
-    res.status(201).json(result);
-  } catch (err) { next(err); }
-});
-
-// GET /facilities/requests - list all requests (admin)
-router.get('/requests', authenticate, roleGuard('FACILITY_ADMIN'), async (req: Request, res: Response, next: NextFunction) => {
-  try {
-    const status = req.query.status as string | undefined;
-    const requests = await facilityService.listFacilityRequests(status);
-    res.json(requests);
-  } catch (err) { next(err); }
-});
-
-// GET /facilities/requests/mine - my requests
-router.get('/requests/mine', authenticate, async (req: Request, res: Response, next: NextFunction) => {
-  try {
-    const requests = await facilityService.getMyFacilityRequests(req.user!.userId);
-    res.json(requests);
-  } catch (err) { next(err); }
-});
-
-// POST /facilities/requests/:id/review - approve/reject
-router.post('/requests/:id/review', authenticate, roleGuard('FACILITY_ADMIN'), validate(reviewFacilityRequestSchema), async (req: Request, res: Response, next: NextFunction) => {
-  try {
-    const result = await facilityService.reviewFacilityRequest(
-      req.params.id as string,
-      req.user!.userId,
-      req.body.approved,
-      req.body.reviewNote,
-    );
-    res.json(result);
   } catch (err) { next(err); }
 });
 

@@ -1,15 +1,16 @@
 import {
   UserRole, CourtStatus, GameStatus, TurnStatus,
-  FacilityRequestStatus, SkillLevel, GameType, CourtGameType,
-  SessionStatus, RecruitmentStatus, PlayerStatus, RotationStatus,
+  SkillLevel, GameType, CourtGameType,
+  SessionStatus, PlayerStatus,
   ClubMemberRole, ClubSessionStatus, GameBoardEntryStatus,
 } from './enums';
 
 export interface UserResponse {
   id: string;
-  phone: string;
+  phone: string | null;
   name: string;
   role: UserRole;
+  isGuest: boolean;
   createdAt: string;
 }
 
@@ -145,22 +146,6 @@ export interface DisplayCourtData {
   turnPreviews: { position: number; players: string[]; status: TurnStatus }[];
 }
 
-// --- Facility Request ---
-
-export interface FacilityRequestResponse {
-  id: string;
-  userId: string;
-  userName: string;
-  name: string;
-  address: string;
-  status: FacilityRequestStatus;
-  reviewNote: string | null;
-  reviewedById: string | null;
-  reviewedByName: string | null;
-  createdAt: string;
-  reviewedAt: string | null;
-}
-
 // --- Club ---
 
 export interface ClubResponse {
@@ -176,6 +161,8 @@ export interface ClubMemberResponse {
   userId: string;
   name: string;
   role: ClubMemberRole;
+  skillLevel: SkillLevel | null;
+  gender: string | null;
   isCheckedIn: boolean;
   facilityId: string | null;
   playerStatus: PlayerStatus | null;
@@ -290,6 +277,84 @@ export interface AvailablePlayerResponse {
   checkedInAt: string;
   gamesPlayedToday: number;
   status: PlayerStatus;
+  isGuest: boolean;
+}
+
+// --- Attendance leaderboard (출석왕) ---
+
+export type AttendancePeriod = 'month' | 'season' | 'all';
+
+export interface AttendanceLeaderboardEntry {
+  userId: string;
+  name: string;
+  skillLevel: SkillLevel;
+  attendanceCount: number;
+  rank: number;
+}
+
+export interface AttendanceLeaderboardResponse {
+  period: AttendancePeriod;
+  entries: AttendanceLeaderboardEntry[];
+  me: AttendanceLeaderboardEntry | null;
+}
+
+// --- Guests (게스트) ---
+
+export interface GuestCheckInResponse {
+  id: string;
+  userId: string;
+  facilityId: string;
+  clubSessionId: string | null;
+  facilityName: string;
+  feeAmount: number | null;
+  feePaid: boolean;
+  checkedInAt: string;
+}
+
+export interface AddGuestResponse {
+  guest: UserResponse;
+  checkIn: GuestCheckInResponse;
+}
+
+export interface GuestSelfCheckInResponse {
+  user: UserResponse;
+  token: string;
+  checkIn: GuestCheckInResponse;
+}
+
+/**
+ * A single ACTIVE ClubSession (정모) at a facility, returned by the public
+ * GET /checkin/active-sessions endpoint so an (unauthenticated) guest or a
+ * member can pick which 정모 they're attending when more than one is active.
+ */
+export interface ActiveClubSessionItem {
+  clubSessionId: string;
+  clubName: string;
+  facilityName: string;
+  startedAt: string;
+  scheduledStartAt?: string | null;
+  title?: string | null;
+}
+
+// --- Guest fee settlement (게스트비) ---
+
+export interface GuestFeeItem {
+  checkInId: string;
+  userId: string;
+  guestName: string;
+  feeAmount: number | null;
+  feePaid: boolean;
+}
+
+export interface GuestFeeSettlementResponse {
+  clubSessionId: string;
+  items: GuestFeeItem[];
+  totals: {
+    totalFee: number;
+    paidFee: number;
+    unpaidFee: number;
+    guestCount: number;
+  };
 }
 
 export interface FacilityCapacityResponse {
@@ -303,70 +368,6 @@ export interface FacilityCapacityResponse {
   usedTurnSlots: number;
 }
 
-// --- Group Recruitment (조 모집) ---
-
-export interface RecruitmentMemberResponse {
-  userId: string;
-  userName: string;
-  joinedAt: string;
-}
-
-export interface GroupRecruitmentResponse {
-  id: string;
-  facilityId: string;
-  createdById: string;
-  createdByName: string;
-  gameType: CourtGameType;
-  playersRequired: number;
-  targetCourtId: string | null;
-  targetCourtName: string | null;
-  status: RecruitmentStatus;
-  message: string | null;
-  members: RecruitmentMemberResponse[];
-  createdAt: string;
-  expiresAt: string;
-  registeredTurnId: string | null;
-}
-
-// --- Rotation (로테이션/게임 편성) ---
-
-export interface RotationSlotResponse {
-  id: string;
-  round: number;
-  courtIndex: number;
-  courtId: string;
-  courtName: string;
-  playerIds: string[];
-  playerNames: string[];
-  turnId: string | null;
-  materialized: boolean;
-  completed: boolean;
-}
-
-export interface RotationPlayerResponse {
-  userId: string;
-  userName: string;
-  gamesAssigned: number;
-  gamesPlayed: number;
-  sittingOut: number;
-}
-
-export interface RotationScheduleResponse {
-  id: string;
-  facilityId: string;
-  sessionId: string;
-  status: RotationStatus;
-  totalRounds: number;
-  currentRound: number;
-  playerCount: number;
-  courtCount: number;
-  slots: RotationSlotResponse[];
-  players: RotationPlayerResponse[];
-  createdAt: string;
-  startedAt: string | null;
-  completedAt: string | null;
-}
-
 // --- Game Board (모임판) ---
 
 export interface GameBoardResponse {
@@ -376,19 +377,98 @@ export interface GameBoardResponse {
   createdById: string;
   createdAt: string;
   entries: GameBoardEntryResponse[];
+  // SOFT double-booking flags: userIds who are currently PLAYING/IN_TURN
+  // or appear in more than one QUEUED entry. The client renders these red.
+  busyPlayerIds: string[];
+  // Composition-aid data derived from THIS session's games (COMPLETED + currently
+  // PLAYING + QUEUED entries' playerIds). Lets the client flag repeat foursomes
+  // ("이미 친 조합") and over-paired players when staging the next game.
+  //
+  // playedGroups: each = a sorted-and-joined key ("a|b|c|d") of a 4-player group
+  // that has ALREADY occurred (completed/playing game) this session.
+  playedGroups: string[];
+  // pairCounts: key = "<minUserId>|<maxUserId>", value = how many games this
+  // session those two players shared. Only pairs with count >= 1 are included.
+  pairCounts: Record<string, number>;
 }
 
 export interface GameBoardEntryResponse {
   id: string;
   boardId: string;
-  courtId: string;
+  courtId: string | null; // null while QUEUED (not yet assigned to a court)
   courtName: string;
   position: number;
+  queueOrder: number; // global order within the court-less queue (다음 게임 순서)
+  note: string | null;
   playerIds: string[];
   playerNames: string[];
   status: GameBoardEntryStatus;
   turnId: string | null;
   createdAt: string;
+}
+
+// --- Player matchups within a 정모 (선수 매치업) ---
+
+export interface MatchupPartner {
+  userId: string;
+  name: string;
+  skillLevel: SkillLevel | null;
+  gender: string | null;
+  count: number; // number of games shared with the target user this session
+}
+
+export interface PlayerMatchupsResponse {
+  userId: string;
+  totalGames: number; // games the target user played in this 정모
+  partners: MatchupPartner[]; // everyone who shared a game, sorted by count desc
+}
+
+// --- 정모 종료 요약 리포트 (Club session summary) ---
+
+export interface SessionSummaryMember {
+  userId: string;
+  name: string;
+  gamesPlayed: number;
+}
+
+export interface SessionSummaryGuest {
+  userId: string;
+  name: string;
+  gamesPlayed: number;
+  feeAmount: number | null;
+  feePaid: boolean;
+}
+
+export interface SessionSummaryPerPlayer {
+  userId: string;
+  name: string;
+  count: number;
+}
+
+export interface ClubSessionSummaryResponse {
+  session: {
+    title: string | null;
+    startedAt: string;
+    endedAt: string | null;
+    status: ClubSessionStatus;
+  };
+  attendance: {
+    memberCount: number;
+    guestCount: number;
+    total: number;
+    members: SessionSummaryMember[];
+    guests: SessionSummaryGuest[];
+  };
+  games: {
+    total: number;
+    perPlayer: SessionSummaryPerPlayer[];
+  };
+  guestFees: {
+    totalFee: number;
+    paidFee: number;
+    unpaidFee: number;
+    guestCount: number;
+  };
 }
 
 // Socket Events
@@ -410,16 +490,6 @@ export interface ServerToClientEvents {
   'players:updated': (data: { facilityId: string; availableCount: number; inTurnCount: number; restingCount: number }) => void;
   'game:timeWarning': (data: { courtId: string; turnId: string; remainingSeconds: number }) => void;
   'game:timeExpired': (data: { courtId: string; turnId: string }) => void;
-  'recruitment:created': (data: GroupRecruitmentResponse) => void;
-  'recruitment:playerJoined': (data: GroupRecruitmentResponse) => void;
-  'recruitment:full': (data: GroupRecruitmentResponse) => void;
-  'recruitment:registered': (data: GroupRecruitmentResponse) => void;
-  'recruitment:cancelled': (data: GroupRecruitmentResponse) => void;
-  'rotation:generated': (data: RotationScheduleResponse) => void;
-  'rotation:started': (data: RotationScheduleResponse) => void;
-  'rotation:roundAdvanced': (data: { scheduleId: string; currentRound: number }) => void;
-  'rotation:completed': (data: { scheduleId: string }) => void;
-  'rotation:cancelled': (data: { scheduleId: string }) => void;
   'clubSession:started': (data: ClubSessionResponse) => void;
   'clubSession:courtsUpdated': (data: ClubSessionResponse) => void;
   'clubSession:ended': (data: { clubSessionId: string; clubId: string }) => void;
@@ -427,6 +497,7 @@ export interface ServerToClientEvents {
   'gameBoard:entryUpdated': (data: GameBoardEntryResponse) => void;
   'gameBoard:entryRemoved': (data: { entryId: string; boardId: string }) => void;
   'gameBoard:entryPushed': (data: GameBoardEntryResponse) => void;
+  'gameBoard:reordered': (data: { boardId: string; entryIds: string[] }) => void;
 }
 
 export interface ClientToServerEvents {
@@ -434,6 +505,8 @@ export interface ClientToServerEvents {
   'facility:leave': (facilityId: string) => void;
   'court:join': (courtId: string) => void;
   'court:leave': (courtId: string) => void;
+  'clubSession:join': (clubSessionId: string) => void;
+  'clubSession:leave': (clubSessionId: string) => void;
   'user:join': (userId: string) => void;
   'user:leave': (userId: string) => void;
 }

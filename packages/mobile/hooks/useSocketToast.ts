@@ -1,6 +1,8 @@
 import { useCallback } from 'react';
 import { useSocketEvent } from './useSocket';
 import { showInfo, showSuccess } from '../utils/feedback';
+import { useTurnStore } from '../store/turnStore';
+import { useBannerStore } from '../store/bannerStore';
 
 /**
  * Listens to key socket events and shows toast notifications.
@@ -10,6 +12,23 @@ export function useSocketToast() {
   const onTurnStarted = useCallback((data: any) => {
     const court = data?.courtName || '';
     showSuccess(`${court} 게임이 시작되었습니다`);
+
+    // If this started turn belongs to the current user, raise the TurnBanner.
+    // The `turn:started` payload is a court-room broadcast ({ courtId, turnId }),
+    // so we resolve "mine" against the locally-fetched myTurns list.
+    const turnId = data?.turnId;
+    if (turnId) {
+      const myTurn = useTurnStore
+        .getState()
+        .myTurns.find((t) => t.turnId === turnId);
+      if (myTurn) {
+        useBannerStore.getState().show({
+          title: myTurn.courtName ? `${myTurn.courtName} 게임 시작` : '내 차례입니다',
+          subtitle: '코트로 입장하세요',
+          courtName: myTurn.courtName,
+        });
+      }
+    }
   }, []);
 
   const onTurnPromoted = useCallback((data: any) => {

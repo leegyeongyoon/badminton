@@ -7,7 +7,6 @@ import Animated, {
   withSpring,
   withSequence,
 } from 'react-native-reanimated';
-import { useFacilityStore } from '../../store/facilityStore';
 import { useAuthStore } from '../../store/authStore';
 import { useSocketToast } from '../../hooks/useSocketToast';
 import { useUserRoom } from '../../hooks/useSocket';
@@ -92,10 +91,8 @@ const badgeStyles = StyleSheet.create({
 });
 
 export default function TabsLayout() {
-  const { selectedFacility } = useFacilityStore();
   const { user } = useAuthStore();
   const { colors } = useTheme();
-  const facilityName = selectedFacility?.name || '';
   const [unreadCount, setUnreadCount] = useState(0);
 
   // Socket toast notifications for real-time events
@@ -143,15 +140,15 @@ export default function TabsLayout() {
         },
       }}
     >
-      {/* Tab 1: Courts (코트) */}
+      {/* Tab 1: Home (홈) — club-centric player home */}
       <Tabs.Screen
         name="index"
         options={{
-          title: facilityName || Strings.tabs.courts,
+          title: Strings.tabs.home,
           tabBarAccessibilityLabel: A11y.tabs.courts,
-          tabBarLabel: Strings.tabs.courts,
+          tabBarLabel: Strings.tabs.home,
           tabBarIcon: ({ color, focused }) => (
-            <AnimatedTabIcon name="board" color={color} focused={focused} activeColor={colors.primary} />
+            <AnimatedTabIcon name="club" color={color} focused={focused} activeColor={colors.primary} />
           ),
         }}
       />
@@ -180,9 +177,7 @@ export default function TabsLayout() {
         }}
       />
       {/* Hidden tabs - files exist but not shown in tab bar */}
-      <Tabs.Screen name="activity" options={{ href: null }} />
       <Tabs.Screen name="settings" options={{ href: null }} />
-      <Tabs.Screen name="checkin" options={{ href: null }} />
       <Tabs.Screen name="profile" options={{ title: '내 정보', href: null }} />
     </Tabs>
   );

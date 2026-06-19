@@ -161,7 +161,13 @@ export default function MoreScreen() {
             </Text>
           </View>
         )}
-        <TouchableOpacity style={styles.menuItem} onPress={clearSelectedFacility}>
+        <TouchableOpacity
+          style={styles.menuItem}
+          onPress={async () => {
+            await clearSelectedFacility();
+            router.push('/facility-select');
+          }}
+        >
           <Icon name="court" size={18} color={colors.textSecondary} />
           <Text style={[styles.menuItemText, { color: colors.text }]}>{Strings.facility.change}</Text>
         </TouchableOpacity>

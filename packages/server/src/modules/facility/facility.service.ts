@@ -1,7 +1,7 @@
 import { prisma } from '../../utils/prisma';
 import { NotFoundError, ForbiddenError } from '../../utils/errors';
 import { CourtGameType } from '@badminton/shared';
-import type { CreateFacilityInput, UpdatePolicyInput, UpdateCoordinatesInput, DisplayBoardResponse, FacilityRequestResponse, BoardCourtData, ClubSessionInfo } from '@badminton/shared';
+import type { CreateFacilityInput, UpdatePolicyInput, UpdateCoordinatesInput, DisplayBoardResponse, BoardCourtData, ClubSessionInfo } from '@badminton/shared';
 import { getPlayersRequired } from '../court/court.service';
 import QRCode from 'qrcode';
 
@@ -264,69 +264,6 @@ export async function getDisplayBoard(facilityId: string): Promise<DisplayBoardR
   };
 }
 
-// --- Facility Request ---
-
-export async function createFacilityRequest(
-  userId: string,
-  input: { name: string; address: string },
-): Promise<FacilityRequestResponse> {
-  const request = await prisma.facilityRequest.create({
-    data: {
-      userId,
-      name: input.name,
-      address: input.address,
-    },
-    include: { user: true, reviewedBy: true },
-  });
-
-  return mapFacilityRequest(request);
-}
-
-export async function listFacilityRequests(status?: string) {
-  const where = status ? { status: status as any } : {};
-  const requests = await prisma.facilityRequest.findMany({
-    where,
-    orderBy: { createdAt: 'desc' },
-    include: { user: true, reviewedBy: true },
-  });
-  return requests.map(mapFacilityRequest);
-}
-
-export async function getMyFacilityRequests(userId: string) {
-  const requests = await prisma.facilityRequest.findMany({
-    where: { userId },
-    orderBy: { createdAt: 'desc' },
-    include: { user: true, reviewedBy: true },
-  });
-  return requests.map(mapFacilityRequest);
-}
-
-export async function reviewFacilityRequest(
-  requestId: string,
-  reviewerId: string,
-  approved: boolean,
-  reviewNote?: string,
-): Promise<FacilityRequestResponse> {
-  const request = await prisma.facilityRequest.findUnique({ where: { id: requestId } });
-  if (!request) throw new NotFoundError('시설 등록 요청');
-  if (request.status !== 'PENDING') {
-    throw new Error('이미 처리된 요청입니다');
-  }
-
-  const updated = await prisma.facilityRequest.update({
-    where: { id: requestId },
-    data: {
-      status: approved ? 'APPROVED' : 'REJECTED',
-      reviewedById: reviewerId,
-      reviewNote: reviewNote ?? null,
-      reviewedAt: new Date(),
-    },
-    include: { user: true, reviewedBy: true },
-  });
-
-  return mapFacilityRequest(updated);
-}
-
 export async function getTodayStats(facilityId: string) {
   const facility = await prisma.facility.findUnique({
     where: { id: facilityId },
@@ -454,20 +391,4 @@ export async function getPeakHours(facilityId: string): Promise<{
   }
 
   return { hours, days, data };
-}
-
-function mapFacilityRequest(req: any): FacilityRequestResponse {
-  return {
-    id: req.id,
-    userId: req.userId,
-    userName: req.user.name,
-    name: req.name,
-    address: req.address,
-    status: req.status,
-    reviewNote: req.reviewNote,
-    reviewedById: req.reviewedById,
-    reviewedByName: req.reviewedBy?.name ?? null,
-    createdAt: req.createdAt.toISOString(),
-    reviewedAt: req.reviewedAt?.toISOString() ?? null,
-  };
 }

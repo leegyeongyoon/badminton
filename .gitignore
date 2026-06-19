@@ -1,7 +1,12 @@
 node_modules/
 dist/
+# Secrets / local env (never commit real values; see *.env.example)
 .env
 .env.local
+.env.*.local
+packages/server/.env
+packages/server/.env.test
+packages/mobile/.env
 *.log
 .DS_Store
 coverage/

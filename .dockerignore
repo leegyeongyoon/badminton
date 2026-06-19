@@ -1,0 +1,38 @@
+# Build context is the repo ROOT (docker build -f packages/server/Dockerfile .).
+# Exclude everything that must not leak into the image or that the build will
+# regenerate, to keep the context small and the image clean.
+
+# Dependencies / build output (reinstalled & rebuilt inside the image)
+**/node_modules
+**/dist
+packages/shared/dist
+packages/server/dist
+
+# Secrets / local env — NEVER copy real env into the image
+.env
+.env.*
+**/.env
+**/.env.*
+!**/.env.example
+
+# Logs & OS cruft
+*.log
+**/*.log
+.DS_Store
+
+# VCS / CI / editor
+.git
+.gitignore
+.github
+.vscode
+.idea
+.claude
+
+# Local Postgres data / docker
+docker-compose.yml
+
+# Mobile app (not part of the server image)
+packages/mobile
+
+# Test coverage
+coverage

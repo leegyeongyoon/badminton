@@ -9,6 +9,7 @@ import {
   Modal,
   ScrollView,
   Alert,
+  Platform,
 } from 'react-native';
 import { useLocalSearchParams, useRouter, Stack } from 'expo-router';
 import { useClubStore } from '../../store/clubStore';
@@ -19,6 +20,7 @@ import { facilityApi } from '../../services/facility';
 import { Colors } from '../../constants/colors';
 import { Strings } from '../../constants/strings';
 import { showAlert, showConfirm } from '../../utils/alert';
+import { AttendanceLeaderboard } from '../../components/club/AttendanceLeaderboard';
 
 interface ClubMember {
   userId: string;
@@ -120,23 +122,33 @@ export default function ClubDetailScreen() {
     }
   };
 
-  const handleStartSession = async () => {
+  const handleStartSession = async (courtIds?: string[]) => {
     if (!clubId || !checkedInFacilityId) return;
     setIsStarting(true);
     try {
       const { data: newSession } = await clubSessionApi.start(clubId, {
         facilityId: checkedInFacilityId,
-        courtIds: selectedCourtIds.length > 0 ? selectedCourtIds : undefined,
+        courtIds: courtIds && courtIds.length > 0 ? courtIds : undefined,
       });
       setShowStartModal(false);
       setActiveSession(newSession);
-      // 모임 시작하면 바로 모임판으로
-      router.push(`/game-board?clubSessionId=${newSession.id}&clubName=${encodeURIComponent(club?.name || '')}`);
+      // 정모 시작하면 바로 운영판으로
+      router.push(`/session/${newSession.id}/operate`);
     } catch (err: any) {
-      showAlert(Strings.common.error, err?.response?.data?.error || '모임 시작에 실패했습니다');
+      showAlert(Strings.common.error, err?.response?.data?.error || '정모 시작에 실패했습니다');
     } finally {
       setIsStarting(false);
     }
+  };
+
+  // One-tap 정모 start: no scheduling, no court picker required (defaults to
+  // all courts at the checked-in facility). Opens check-in for the club.
+  const handleQuickStartSession = async () => {
+    if (!checkedInFacilityId) {
+      showAlert('알림', '체크인 후에 정모를 시작할 수 있습니다');
+      return;
+    }
+    await handleStartSession();
   };
 
   const handleChangeRole = async (newRole: string) => {
@@ -228,7 +240,7 @@ export default function ClubDetailScreen() {
       <View style={styles.container}>
         <ScrollView
           contentContainerStyle={styles.scrollContent}
-          refreshControl={<RefreshControl refreshing={loadingSession} onRefresh={onRefresh} />}
+          refreshControl={Platform.OS === 'web' ? undefined : <RefreshControl refreshing={loadingSession} onRefresh={onRefresh} />}
         >
           {/* Club info card */}
           {club && (
@@ -276,9 +288,9 @@ export default function ClubDetailScreen() {
                 <View style={styles.quickActions}>
                   <TouchableOpacity
                     style={styles.quickActionBtn}
-                    onPress={() => router.push(`/game-board?clubSessionId=${activeSession.id}&clubName=${encodeURIComponent(activeSession.clubName)}`)}
+                    onPress={() => router.push(`/session/${activeSession.id}/operate`)}
                   >
-                    <Text style={styles.quickActionText}>모임판</Text>
+                    <Text style={styles.quickActionText}>운영판</Text>
                   </TouchableOpacity>
                   <TouchableOpacity
                     style={styles.quickActionBtn}
@@ -291,21 +303,30 @@ export default function ClubDetailScreen() {
             </View>
           )}
 
-          {/* Leader actions */}
+          {/* Leader actions — one-tap 정모 start (no scheduling required) */}
           {isLeaderOrStaff && !activeSession && (
             <View style={styles.leaderActions}>
               <TouchableOpacity
-                style={styles.startSessionBtn}
-                onPress={handleOpenStartModal}
+                style={[styles.startSessionBtn, isStarting && { opacity: 0.6 }]}
+                onPress={handleQuickStartSession}
+                disabled={isStarting}
               >
-                <Text style={styles.startSessionIcon}>+</Text>
-                <Text style={styles.startSessionText}>모임 시작</Text>
+                <Text style={styles.startSessionIcon}>{isStarting ? '' : '▶'}</Text>
+                <Text style={styles.startSessionText}>
+                  {isStarting ? '시작 중...' : '오늘 정모 시작'}
+                </Text>
               </TouchableOpacity>
               <Text style={styles.startSessionHint}>
-                체크인된 시설에서 모임 활동을 시작합니다
+                체크인된 시설에서 바로 정모를 시작하고 출석을 받습니다
               </Text>
+              <TouchableOpacity onPress={handleOpenStartModal} disabled={isStarting}>
+                <Text style={styles.courtPickLink}>코트 선택해서 시작</Text>
+              </TouchableOpacity>
             </View>
           )}
+
+          {/* 출석왕 leaderboard (visible to every club member) */}
+          {clubId && <AttendanceLeaderboard clubId={clubId} />}
 
           {/* Checked-in members section */}
           {checkedInMembers.length > 0 && (
@@ -339,14 +360,14 @@ export default function ClubDetailScreen() {
           <View style={styles.modalOverlay}>
             <View style={styles.modalContent}>
               <View style={styles.modalHeader}>
-                <Text style={styles.modalTitle}>모임 시작</Text>
+                <Text style={styles.modalTitle}>정모 시작</Text>
                 <TouchableOpacity onPress={() => setShowStartModal(false)}>
                   <Text style={styles.modalClose}>✕</Text>
                 </TouchableOpacity>
               </View>
 
               <Text style={styles.modalDesc}>
-                {checkinStatus?.facilityName}에서 모임을 시작합니다
+                {checkinStatus?.facilityName}에서 정모를 시작합니다
               </Text>
 
               {/* Court selection */}
@@ -385,11 +406,11 @@ export default function ClubDetailScreen() {
 
               <TouchableOpacity
                 style={[styles.confirmBtn, isStarting && { opacity: 0.5 }]}
-                onPress={handleStartSession}
+                onPress={() => handleStartSession(selectedCourtIds)}
                 disabled={isStarting}
               >
                 <Text style={styles.confirmBtnText}>
-                  {isStarting ? '시작 중...' : '모임 시작'}
+                  {isStarting ? '시작 중...' : '정모 시작'}
                 </Text>
               </TouchableOpacity>
             </View>
@@ -605,6 +626,13 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: Colors.textLight,
     marginTop: 6,
+  },
+  courtPickLink: {
+    fontSize: 13,
+    color: '#7C3AED',
+    fontWeight: '600',
+    marginTop: 10,
+    textDecorationLine: 'underline',
   },
   // Section
   section: {

@@ -45,15 +45,6 @@ interface Capacity {
   activeCourts: number;
 }
 
-interface RotationInfo {
-  id: string;
-  status: string;
-  currentRound: number;
-  totalRounds: number;
-  playerCount: number;
-  courtCount: number;
-}
-
 interface TodayStats {
   totalGames: number;
   avgWaitMinutes: number;
@@ -64,7 +55,6 @@ export function useAdminData(facilityId: string | undefined) {
   const [session, setSession] = useState<SessionInfo | null>(null);
   const [courts, setCourts] = useState<CourtInfo[]>([]);
   const [capacity, setCapacity] = useState<Capacity | null>(null);
-  const [rotation, setRotation] = useState<RotationInfo | null>(null);
   const [todayStats, setTodayStats] = useState<TodayStats | null>(null);
   const [checkedInUsers, setCheckedInUsers] = useState<CheckedInUser[]>([]);
   const [weeklyTrends, setWeeklyTrends] = useState<{ day: string; count: number }[]>([]);
@@ -74,11 +64,10 @@ export function useAdminData(facilityId: string | undefined) {
   const loadData = useCallback(async () => {
     if (!facilityId) return;
     try {
-      const [sessionRes, courtsRes, capacityRes, rotationRes, statsRes, playersRes, weeklyTrendsRes, peakHoursRes] = await Promise.all([
+      const [sessionRes, courtsRes, capacityRes, statsRes, playersRes, weeklyTrendsRes, peakHoursRes] = await Promise.all([
         api.get(`/facilities/${facilityId}/sessions/current`).catch(() => ({ data: null })),
         api.get(`/facilities/${facilityId}/courts`).catch(() => ({ data: [] })),
         api.get(`/facilities/${facilityId}/capacity`).catch(() => ({ data: null })),
-        api.get(`/facilities/${facilityId}/rotation/current`).catch(() => ({ data: null })),
         api.get(`/facilities/${facilityId}/stats/today`).catch(() => ({ data: null })),
         api.get(`/facilities/${facilityId}/players`).catch(() => ({ data: [] })),
         adminStatsApi.getWeeklyTrends(facilityId).catch(() => []),
@@ -87,7 +76,6 @@ export function useAdminData(facilityId: string | undefined) {
       setSession(sessionRes.data);
       setCourts(courtsRes.data || []);
       setCapacity(capacityRes.data);
-      setRotation(rotationRes.data);
       setTodayStats(statsRes.data);
       setCheckedInUsers((playersRes.data || []).map((p: any) => ({
         userId: p.userId,
@@ -112,7 +100,6 @@ export function useAdminData(facilityId: string | undefined) {
     session,
     courts,
     capacity,
-    rotation,
     todayStats,
     checkedInUsers,
     weeklyTrends,

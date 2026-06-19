@@ -30,7 +30,7 @@ const GAME_TYPE_LABELS: Record<string, { label: string; icon: IconName }> = {
 
 // ─── Props ───────────────────────────────────────────────────
 interface UserProfileCardProps {
-  user: { name?: string; phone?: string } | null;
+  user: { name?: string; phone?: string | null } | null;
   profileData: any;
   onEditProfile: () => void;
 }

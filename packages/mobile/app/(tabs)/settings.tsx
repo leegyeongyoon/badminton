@@ -201,7 +201,6 @@ export default function SettingsScreen() {
 
       <MenuSection
         isAdmin={isAdmin}
-        facilityId={facilityId}
         unreadCount={unreadCount}
         onNavigate={(route) => router.push(route as any)}
       />

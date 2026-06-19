@@ -23,4 +23,21 @@ export const gameBoardApi = {
 
   pushAll: (boardId: string) =>
     api.post(`/game-boards/${boardId}/push-all`),
+
+  // 자동 추천 — 다음 복식 4인 조합 제안 (LEADER/STAFF 전용, 인원 부족 시 [])
+  suggest: (clubSessionId: string, body?: { courtId?: string; count?: number }) =>
+    api.post(`/club-sessions/${clubSessionId}/suggest`, body ?? {}),
+
+  // ─── 전체 "다음 게임" 큐 (코트 없는 QUEUED 게임) ───
+  // 큐에 게임 추가 (2명 또는 4명) — 큐 끝에 append
+  createQueueGame: (boardId: string, playerIds: string[], note?: string) =>
+    api.post(`/game-boards/${boardId}/queue`, { playerIds, ...(note ? { note } : {}) }),
+
+  // 큐 순서 변경 (드래그앤드롭/▲▼) — QUEUED 엔트리 id의 새 전체 순서
+  reorderQueue: (boardId: string, entryIds: string[]) =>
+    api.patch(`/game-boards/${boardId}/queue/reorder`, { entryIds }),
+
+  // 큐 게임을 빈(EMPTY) 코트에 배정 → 게임 시작 (your_turn push)
+  assignEntry: (boardId: string, entryId: string, courtId: string) =>
+    api.post(`/game-boards/${boardId}/entries/${entryId}/assign`, { courtId }),
 };

@@ -29,18 +29,18 @@ const { width: SCREEN_WIDTH } = Dimensions.get('window');
 
 const PAGES = [
   {
-    title: '코트 예약이 이렇게 쉬워요',
-    description: '체육관 코트 현황을 실시간으로 확인하고,\n빈 코트를 한눈에 찾아 바로 등록하세요.',
+    title: 'QR로 간편하게 체크인',
+    description: '정모 장소에 도착하면 QR 코드를 찍어\n바로 출석 체크! 위치 인증까지 한 번에.',
     illustration: <CourtIllustration />,
   },
   {
-    title: '탭 한 번으로 순번 등록',
-    description: '코트를 탭하고 멤버를 선택하면 끝!\n줄 서서 기다릴 필요 없이 앱에서 해결하세요.',
+    title: '운영자가 게임을 짜줘요',
+    description: '출석한 사람들로 운영자가 게임을 편성하고\n코트에 배정해요. 편하게 기다리기만 하세요.',
     illustration: <RegistrationIllustration />,
   },
   {
-    title: '모임도 게임 편성도 간편하게',
-    description: '함께 칠 사람 모집, 자동 게임 편성,\n활동 기록까지 한 곳에서 관리하세요.',
+    title: '내 차례를 알림으로',
+    description: '내 게임이 잡히면 알림이 오고,\n현황 보드로 실시간 순서를 확인할 수 있어요.',
     illustration: <CommunityIllustration />,
   },
 ];

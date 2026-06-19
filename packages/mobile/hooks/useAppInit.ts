@@ -3,6 +3,7 @@ import { useAuthStore } from '../store/authStore';
 import { useFacilityStore } from '../store/facilityStore';
 import { useCheckinStore } from '../store/checkinStore';
 import { useOnboardingStore } from '../store/onboardingStore';
+import { usePushRegistration } from './usePushRegistration';
 
 export function useAppInit() {
   const { loadUser, isAuthenticated, isLoading: authLoading } = useAuthStore();
@@ -10,6 +11,9 @@ export function useAppInit() {
   const { fetchStatus } = useCheckinStore();
   const { loadOnboarding, isLoading: onboardingLoading } = useOnboardingStore();
   const [initDone, setInitDone] = useState(false);
+
+  // Register for push notifications once authenticated (native-only; no-op on web).
+  usePushRegistration();
 
   // Phase 1: Load all persisted state in parallel
   useEffect(() => {

@@ -2,18 +2,23 @@ import { Router, Request, Response, NextFunction } from 'express';
 import { registerSchema, loginSchema, pushTokenSchema, changePasswordSchema } from '@badminton/shared';
 import { validate } from '../../middleware/validate';
 import { authenticate } from '../../middleware/auth';
+import { rateLimit } from '../../middleware/rateLimit';
 import * as authService from './auth.service';
 
 const router = Router();
 
-router.post('/register', validate(registerSchema), async (req: Request, res: Response, next: NextFunction) => {
+// Brute-force / abuse protection (per-IP, in-memory fixed window).
+const registerLimiter = rateLimit({ windowMs: 60 * 60 * 1000, max: 5, keyPrefix: 'auth:register' });
+const loginLimiter = rateLimit({ windowMs: 15 * 60 * 1000, max: 10, keyPrefix: 'auth:login' });
+
+router.post('/register', registerLimiter, validate(registerSchema), async (req: Request, res: Response, next: NextFunction) => {
   try {
     const result = await authService.register(req.body);
     res.status(201).json(result);
   } catch (err) { next(err); }
 });
 
-router.post('/login', validate(loginSchema), async (req: Request, res: Response, next: NextFunction) => {
+router.post('/login', loginLimiter, validate(loginSchema), async (req: Request, res: Response, next: NextFunction) => {
   try {
     const result = await authService.login(req.body);
     res.json(result);

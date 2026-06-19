@@ -37,6 +37,15 @@ export function initSocketIO(httpServer: HttpServer) {
       socket.leave(`court:${courtId}`);
     });
 
+    socket.on('clubSession:join', (clubSessionId: string) => {
+      socket.join(`clubSession:${clubSessionId}`);
+      logger.debug(`Socket ${socket.id} joined clubSession:${clubSessionId}`);
+    });
+
+    socket.on('clubSession:leave', (clubSessionId: string) => {
+      socket.leave(`clubSession:${clubSessionId}`);
+    });
+
     socket.on('user:join', (userId: string) => {
       socket.join(`user:${userId}`);
       logger.debug(`Socket ${socket.id} joined user:${userId}`);

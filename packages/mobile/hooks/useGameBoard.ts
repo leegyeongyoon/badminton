@@ -5,9 +5,13 @@ import { gameBoardApi } from '../services/gameBoard';
 export interface GameBoardEntry {
   id: string;
   boardId: string;
-  courtId: string;
+  /** null = court-less QUEUED game (in the global 다음 게임 queue). */
+  courtId: string | null;
   courtName: string;
   position: number;
+  /** Global queue order for QUEUED entries (다음 게임 순서). */
+  queueOrder: number;
+  note?: string | null;
   playerIds: string[];
   playerNames: string[];
   status: string;
@@ -22,12 +26,31 @@ export interface GameBoard {
   createdById: string;
   createdAt: string;
   entries: GameBoardEntry[];
+  /** userIds who are double-booked (currently playing OR in >1 queued game). SOFT flag. */
+  busyPlayerIds: string[];
+  /**
+   * Each = a sorted-joined key "a|b|c|d" of a 4-player group already played /
+   * queued this 정모. Used to softly flag a repeat foursome composition.
+   */
+  playedGroups?: string[];
+  /**
+   * How many games two players have shared this 정모, keyed by "minId|maxId".
+   * Used to softly hint over-pairing while staging.
+   */
+  pairCounts?: Record<string, number>;
+}
+
+export interface FoursomeSuggestion {
+  playerIds: string[];
+  playerNames: string[];
 }
 
 export function useGameBoard(clubSessionId: string | undefined) {
   const [board, setBoard] = useState<GameBoard | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [suggesting, setSuggesting] = useState(false);
+  const [suggestError, setSuggestError] = useState<string | null>(null);
 
   const loadBoard = useCallback(async () => {
     if (!clubSessionId) return;
@@ -87,6 +110,49 @@ export function useGameBoard(clubSessionId: string | undefined) {
     return data;
   }, [board]);
 
+  // ─── 전체 "다음 게임" 큐 ───
+  // 큐에 새 게임 추가 (2 or 4명). 성공 시 새 보드를 즉시 반영.
+  const createQueueGame = useCallback(async (playerIds: string[], note?: string) => {
+    if (!board) return;
+    const { data } = await gameBoardApi.createQueueGame(board.id, playerIds, note);
+    return data;
+  }, [board]);
+
+  // 큐 순서 변경 (드래그앤드롭 / ▲▼). 서버가 새 보드를 반환 → 즉시 반영.
+  const reorderQueue = useCallback(async (entryIds: string[]) => {
+    if (!board) return;
+    const { data } = await gameBoardApi.reorderQueue(board.id, entryIds);
+    if (data) setBoard(data);
+    return data;
+  }, [board]);
+
+  // 큐 게임을 빈 코트에 배정 (게임 시작).
+  const assignEntry = useCallback(async (entryId: string, courtId: string) => {
+    if (!board) return;
+    const { data } = await gameBoardApi.assignEntry(board.id, entryId, courtId);
+    return data;
+  }, [board]);
+
+  /**
+   * 자동 추천: 다음 복식 4인 조합을 서버에서 받아 첫 추천의 playerIds 반환.
+   * 인원 부족(서버가 빈 배열 반환) 시 [] 반환. 404/오류 시 throw.
+   */
+  const suggestNext = useCallback(async (courtId?: string): Promise<string[]> => {
+    if (!clubSessionId) return [];
+    setSuggesting(true);
+    setSuggestError(null);
+    try {
+      const { data } = await gameBoardApi.suggest(clubSessionId, courtId ? { courtId } : {});
+      const suggestions: FoursomeSuggestion[] = data?.suggestions ?? [];
+      return suggestions[0]?.playerIds ?? [];
+    } catch (err: any) {
+      setSuggestError(err.response?.data?.error || '추천에 실패했습니다');
+      throw err;
+    } finally {
+      setSuggesting(false);
+    }
+  }, [clubSessionId]);
+
   useEffect(() => {
     loadBoard();
   }, [loadBoard]);
@@ -96,11 +162,14 @@ export function useGameBoard(clubSessionId: string | undefined) {
   useSocketEvent('gameBoard:entryUpdated', loadBoard);
   useSocketEvent('gameBoard:entryRemoved', loadBoard);
   useSocketEvent('gameBoard:entryPushed', loadBoard);
+  useSocketEvent('gameBoard:reordered', loadBoard);
 
   return {
     board,
     loading,
     error,
+    suggesting,
+    suggestError,
     loadBoard,
     createBoard,
     addEntry,
@@ -108,5 +177,9 @@ export function useGameBoard(clubSessionId: string | undefined) {
     deleteEntry,
     pushEntry,
     pushAll,
+    suggestNext,
+    createQueueGame,
+    reorderQueue,
+    assignEntry,
   };
 }

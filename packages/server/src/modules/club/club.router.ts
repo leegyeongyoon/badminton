@@ -1,10 +1,21 @@
 import { Router, Request, Response, NextFunction } from 'express';
-import { createClubSchema, joinClubSchema, updateMemberRoleSchema } from '@badminton/shared';
+import {
+  createClubSchema,
+  joinClubSchema,
+  updateMemberRoleSchema,
+  updateMemberProfileSchema,
+  attendancePeriodSchema,
+} from '@badminton/shared';
 import { authenticate } from '../../middleware/auth';
 import { validate } from '../../middleware/validate';
 import * as clubService from './club.service';
 
 const router = Router();
+
+function parsePeriod(raw: unknown) {
+  const result = attendancePeriodSchema.safeParse(raw ?? 'all');
+  return result.success ? result.data : 'all';
+}
 
 router.post('/', authenticate, validate(createClubSchema), async (req: Request, res: Response, next: NextFunction) => {
   try {
@@ -35,6 +46,32 @@ router.get('/:id/members', authenticate, async (req: Request, res: Response, nex
   } catch (err) { next(err); }
 });
 
+// GET /api/v1/clubs/:clubId/attendance/leaderboard?period=month|season|all
+router.get('/:clubId/attendance/leaderboard', authenticate, async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const period = parsePeriod(req.query.period);
+    const result = await clubService.getAttendanceLeaderboard(
+      req.params.clubId as string,
+      period,
+      req.user!.userId,
+    );
+    res.json(result);
+  } catch (err) { next(err); }
+});
+
+// GET /api/v1/clubs/:clubId/attendance/me?period=month|season|all
+router.get('/:clubId/attendance/me', authenticate, async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const period = parsePeriod(req.query.period);
+    const me = await clubService.getMyAttendance(
+      req.params.clubId as string,
+      period,
+      req.user!.userId,
+    );
+    res.json(me);
+  } catch (err) { next(err); }
+});
+
 // PATCH /api/v1/clubs/:id/members/:userId/role
 router.patch('/:id/members/:userId/role', authenticate, validate(updateMemberRoleSchema), async (req: Request, res: Response, next: NextFunction) => {
   try {
@@ -42,6 +79,19 @@ router.patch('/:id/members/:userId/role', authenticate, validate(updateMemberRol
       req.params.id as string,
       req.params.userId as string,
       req.body.role,
+      req.user!.userId,
+    );
+    res.json(result);
+  } catch (err) { next(err); }
+});
+
+// PATCH /api/v1/clubs/:clubId/members/:userId/profile - LEADER/STAFF assigns a member's 급수/성별
+router.patch('/:clubId/members/:userId/profile', authenticate, validate(updateMemberProfileSchema), async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const result = await clubService.updateMemberProfile(
+      req.params.clubId as string,
+      req.params.userId as string,
+      req.body,
       req.user!.userId,
     );
     res.json(result);

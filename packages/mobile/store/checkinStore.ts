@@ -5,8 +5,16 @@ interface CheckInStatus {
   id: string;
   userId: string;
   facilityId: string;
+  /** Present on the POST /checkin response (per-정모 check-in). */
+  clubSessionId?: string | null;
   facilityName: string;
   checkedInAt: string;
+}
+
+interface CheckInOptions {
+  clubSessionId?: string;
+  latitude: number;
+  longitude: number;
 }
 
 interface CheckInState {
@@ -14,7 +22,7 @@ interface CheckInState {
   isLoading: boolean;
   isResting: boolean;
   restingSince: string | null;
-  checkIn: (qrData: string) => Promise<void>;
+  checkIn: (qrData: string, opts: CheckInOptions) => Promise<void>;
   checkOut: () => Promise<void>;
   fetchStatus: () => Promise<void>;
   toggleRest: () => Promise<void>;
@@ -27,8 +35,10 @@ export const useCheckinStore = create<CheckInState>((set, get) => ({
   isResting: false,
   restingSince: null,
 
-  checkIn: async (qrData) => {
-    const { data } = await checkinApi.checkIn(qrData);
+  checkIn: async (qrData, opts) => {
+    // Let the caller (modal) read err.response.data.details on geofence
+    // rejection — do NOT swallow the error here.
+    const { data } = await checkinApi.checkIn(qrData, opts);
     set({ status: data });
   },
 

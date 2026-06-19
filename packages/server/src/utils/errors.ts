@@ -1,10 +1,14 @@
 export class AppError extends Error {
+  public details?: any;
+
   constructor(
     public statusCode: number,
     message: string,
+    details?: any,
   ) {
     super(message);
     this.name = 'AppError';
+    this.details = details;
   }
 }
 
@@ -33,7 +37,7 @@ export class ConflictError extends AppError {
 }
 
 export class BadRequestError extends AppError {
-  constructor(message: string) {
-    super(400, message);
+  constructor(message: string, details?: any) {
+    super(400, message, details);
   }
 }

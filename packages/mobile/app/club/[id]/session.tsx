@@ -7,12 +7,12 @@ import {
   ScrollView,
   RefreshControl,
   Modal,
+  Platform,
 } from 'react-native';
 import { useLocalSearchParams, useRouter, Stack } from 'expo-router';
 import { clubSessionApi } from '../../../services/clubSession';
 import { clubApi } from '../../../services/club';
 import { facilityApi } from '../../../services/facility';
-import api from '../../../services/api';
 import { Colors } from '../../../constants/colors';
 import { Strings } from '../../../constants/strings';
 import { showAlert, showConfirm } from '../../../utils/alert';
@@ -64,14 +64,6 @@ const STATUS_BORDER_COLORS: Record<string, string> = {
   RESTING: Colors.playerResting,
 };
 
-interface RotationData {
-  id: string;
-  status: string;
-  currentRound: number;
-  totalRounds: number;
-  participants: Array<{ userId: string; userName: string }>;
-}
-
 interface FacilityCourt {
   id: string;
   name: string;
@@ -89,7 +81,6 @@ export default function ClubSessionScreen() {
   const [showCourtModal, setShowCourtModal] = useState(false);
   const [allCourts, setAllCourts] = useState<FacilityCourt[]>([]);
   const [selectedCourtIds, setSelectedCourtIds] = useState<string[]>([]);
-  const [rotation, setRotation] = useState<RotationData | null>(null);
 
   const loadData = useCallback(async () => {
     if (!clubId) return;
@@ -106,14 +97,6 @@ export default function ClubSessionScreen() {
         setMembers(membersRes.data || []);
         setBoardData(boardRes.data || []);
         setAllCourts(courtsRes.data || []);
-
-        // Load rotation data
-        try {
-          const { data: rotationData } = await api.get(`/facilities/${sessionData.facilityId}/rotation/current`);
-          setRotation(rotationData || null);
-        } catch {
-          setRotation(null);
-        }
       }
     } catch {
       setSession(null);
@@ -175,24 +158,6 @@ export default function ClubSessionScreen() {
   };
 
 
-  // Rotation
-  const handleAdvanceRotation = () => {
-    if (!session || !rotation) return;
-    showConfirm(
-      '다음 라운드',
-      `라운드 ${rotation.currentRound + 1}로 진행하시겠습니까?`,
-      async () => {
-        try {
-          await api.post(`/facilities/${session.facilityId}/rotation/advance`);
-          loadData();
-        } catch (err: any) {
-          showAlert(Strings.common.error, err?.response?.data?.error || '라운드 진행에 실패했습니다');
-        }
-      },
-      Strings.common.confirm,
-    );
-  };
-
   const checkedInMembers = members.filter((m) => m.isCheckedIn);
   const sessionCourts = boardData.filter(
     (c) => session?.courtIds?.includes(c.court.id),
@@ -243,7 +208,7 @@ export default function ClubSessionScreen() {
       <ScrollView
         style={styles.container}
         contentContainerStyle={styles.content}
-        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
+        refreshControl={Platform.OS === 'web' ? undefined : <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
       >
         {/* Session info header */}
         <View style={styles.sessionHeader}>
@@ -352,11 +317,7 @@ export default function ClubSessionScreen() {
             const waitingCount = turns.filter((t: any) => t.status === 'WAITING').length;
 
             return (
-              <TouchableOpacity
-                key={c.court.id}
-                style={styles.courtCard}
-                onPress={() => router.push(`/court/${c.court.id}`)}
-              >
+              <View key={c.court.id} style={styles.courtCard}>
                 <View style={styles.courtCardHeader}>
                   <Text style={styles.courtCardName}>{c.court.name}</Text>
                   <Text style={styles.courtCardTurns}>
@@ -373,74 +334,22 @@ export default function ClubSessionScreen() {
                 {waitingCount > 0 && (
                   <Text style={styles.courtCardWaiting}>대기 {waitingCount}팀</Text>
                 )}
-              </TouchableOpacity>
+              </View>
             );
           })}
         </View>
-
-        {/* Rotation integration */}
-        {rotation && (
-          <View style={styles.section}>
-            <Text style={styles.sectionTitle}>자동 편성 (로테이션)</Text>
-            <View style={styles.rotationCard}>
-              <View style={styles.rotationHeader}>
-                <View style={styles.rotationProgressRow}>
-                  <Text style={styles.rotationRound}>
-                    라운드 {rotation.currentRound} / {rotation.totalRounds}
-                  </Text>
-                  <View style={[styles.sessionStatusBadge, { backgroundColor: '#EDE9FE' }]}>
-                    <Text style={[styles.sessionStatusText, { color: '#7C3AED' }]}>
-                      {rotation.status === 'ACTIVE' ? '진행중' : rotation.status}
-                    </Text>
-                  </View>
-                </View>
-                <View style={styles.rotationProgressBar}>
-                  <View
-                    style={[
-                      styles.rotationProgressFill,
-                      { width: `${(rotation.currentRound / rotation.totalRounds) * 100}%` },
-                    ]}
-                  />
-                </View>
-              </View>
-              <Text style={styles.rotationParticipants}>
-                참가자 {rotation.participants?.length || 0}명
-              </Text>
-              <View style={styles.rotationActions}>
-                {rotation.status === 'ACTIVE' && rotation.currentRound < rotation.totalRounds && (
-                  <TouchableOpacity style={styles.rotationAdvanceBtn} onPress={handleAdvanceRotation}>
-                    <Text style={styles.rotationAdvanceBtnText}>다음 라운드</Text>
-                  </TouchableOpacity>
-                )}
-                <TouchableOpacity
-                  style={styles.rotationDetailBtn}
-                  onPress={() => router.push('/admin/rotation')}
-                >
-                  <Text style={styles.rotationDetailBtnText}>편성 보기</Text>
-                </TouchableOpacity>
-              </View>
-            </View>
-          </View>
-        )}
 
         {/* Action buttons */}
         <View style={styles.actions}>
           <TouchableOpacity
             style={[styles.actionBtn, styles.primaryActionBtn]}
-            onPress={() => router.push(`/game-board?clubSessionId=${session.id}&clubName=${encodeURIComponent(session.clubName)}`)}
+            onPress={() => router.push(`/session/${session.id}/operate`)}
           >
-            <Text style={styles.primaryActionBtnText}>모임판에서 게임 짜기</Text>
-            <Text style={styles.primaryActionBtnSub}>코트별로 멤버를 배정하고 등록하세요</Text>
+            <Text style={styles.primaryActionBtnText}>운영판에서 게임 짜기</Text>
+            <Text style={styles.primaryActionBtnSub}>자동 추천으로 4명을 편성하고 코트에 투입하세요</Text>
           </TouchableOpacity>
 
           <View style={styles.secondaryActions}>
-            <TouchableOpacity
-              style={[styles.secondaryBtn, { backgroundColor: '#EDE9FE' }]}
-              onPress={() => router.push(`/admin/rotation?clubSessionId=${session.id}`)}
-            >
-              <Text style={[styles.secondaryBtnText, { color: '#7C3AED' }]}>자동 편성</Text>
-            </TouchableOpacity>
-
             <TouchableOpacity
               style={[styles.secondaryBtn, { backgroundColor: Colors.dangerLight || '#FEE2E2' }]}
               onPress={handleEndSession}
@@ -842,72 +751,6 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     marginBottom: 4,
     marginLeft: 4,
-  },
-  // Rotation
-  rotationCard: {
-    backgroundColor: Colors.surface,
-    borderRadius: 12,
-    padding: 14,
-    borderLeftWidth: 3,
-    borderLeftColor: '#7C3AED',
-  },
-  rotationHeader: {
-    marginBottom: 8,
-  },
-  rotationProgressRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 8,
-  },
-  rotationRound: {
-    fontSize: 15,
-    fontWeight: '700',
-    color: Colors.text,
-  },
-  rotationProgressBar: {
-    height: 6,
-    backgroundColor: Colors.border,
-    borderRadius: 3,
-    overflow: 'hidden',
-  },
-  rotationProgressFill: {
-    height: '100%',
-    backgroundColor: '#7C3AED',
-    borderRadius: 3,
-  },
-  rotationParticipants: {
-    fontSize: 13,
-    color: Colors.textSecondary,
-    marginBottom: 10,
-  },
-  rotationActions: {
-    flexDirection: 'row',
-    gap: 8,
-  },
-  rotationAdvanceBtn: {
-    flex: 1,
-    backgroundColor: '#7C3AED',
-    borderRadius: 8,
-    paddingVertical: 10,
-    alignItems: 'center',
-  },
-  rotationAdvanceBtnText: {
-    color: '#fff',
-    fontSize: 14,
-    fontWeight: '600',
-  },
-  rotationDetailBtn: {
-    flex: 1,
-    backgroundColor: '#EDE9FE',
-    borderRadius: 8,
-    paddingVertical: 10,
-    alignItems: 'center',
-  },
-  rotationDetailBtnText: {
-    color: '#7C3AED',
-    fontSize: 14,
-    fontWeight: '600',
   },
   // Court toggle
   courtToggleRow: {

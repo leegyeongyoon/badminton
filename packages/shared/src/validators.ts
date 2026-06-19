@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { UserRole, SkillLevel, GameType, CourtGameType, RecruitmentStatus, ClubMemberRole } from './enums';
+import { UserRole, SkillLevel, GameType, CourtGameType, ClubMemberRole } from './enums';
 
 // Auth
 export const registerSchema = z.object({
@@ -7,6 +7,8 @@ export const registerSchema = z.object({
   password: z.string().min(6, '비밀번호는 6자 이상이어야 합니다'),
   name: z.string().min(1, '이름을 입력하세요').max(20),
   role: z.nativeEnum(UserRole).optional().default(UserRole.PLAYER),
+  skillLevel: z.nativeEnum(SkillLevel).optional(),
+  gender: z.enum(['M', 'F']).optional().nullable(),
 });
 
 export const loginSchema = z.object({
@@ -51,10 +53,13 @@ export const createCourtSchema = z.object({
   gameType: z.nativeEnum(CourtGameType).optional(),
 });
 
+// Rename / update a court. `name` lets LEADER/STAFF rename a court (코트 이름 변경).
 export const updateCourtSchema = z.object({
+  name: z.string().min(1).max(20).optional(),
   gameType: z.nativeEnum(CourtGameType).optional(),
 });
 
+// EMPTY = available/idle (사용 가능), MAINTENANCE = unavailable (못 쓰는 코트)
 export const updateCourtStatusSchema = z.object({
   status: z.enum(['MAINTENANCE', 'EMPTY']),
 });
@@ -62,7 +67,43 @@ export const updateCourtStatusSchema = z.object({
 // Check-in
 export const checkInSchema = z.object({
   qrData: z.string().min(1),
+  clubSessionId: z.string().uuid().optional(),
+  latitude: z.number().min(-90).max(90),
+  longitude: z.number().min(-180).max(180),
 });
+
+// Guest self web check-in (unauthenticated)
+export const guestCheckInSchema = z.object({
+  qrData: z.string().min(1),
+  clubSessionId: z.string().uuid().optional(),
+  name: z.string().min(1, '이름을 입력하세요').max(20),
+  skillLevel: z.nativeEnum(SkillLevel).optional(),
+  gender: z.enum(['M', 'F']).optional().nullable(),
+  latitude: z.number().min(-90).max(90),
+  longitude: z.number().min(-180).max(180),
+});
+
+// Operator adds a guest to a club session (authenticated, LEADER/STAFF)
+export const addGuestSchema = z.object({
+  name: z.string().min(1, '이름을 입력하세요').max(20),
+  skillLevel: z.nativeEnum(SkillLevel).optional(),
+  gender: z.enum(['M', 'F']).optional().nullable(),
+  feeAmount: z.number().int().min(0).max(1000000).optional(),
+});
+
+// Update a (guest) check-in fee / settle payment
+export const updateFeeSchema = z.object({
+  feeAmount: z.number().int().min(0).max(1000000).optional(),
+  feePaid: z.boolean().optional(),
+});
+
+export type GuestCheckInInput = z.infer<typeof guestCheckInSchema>;
+export type AddGuestInput = z.infer<typeof addGuestSchema>;
+export type UpdateFeeInput = z.infer<typeof updateFeeSchema>;
+
+// Attendance leaderboard period
+export const attendancePeriodSchema = z.enum(['month', 'season', 'all']);
+export type AttendancePeriodInput = z.infer<typeof attendancePeriodSchema>;
 
 // Club
 export const createClubSchema = z.object({
@@ -90,17 +131,6 @@ export const requeueTurnSchema = z.object({
   targetCourtId: z.string().uuid().optional(),
 });
 
-// Facility Request
-export const createFacilityRequestSchema = z.object({
-  name: z.string().min(1).max(50),
-  address: z.string().min(1).max(200),
-});
-
-export const reviewFacilityRequestSchema = z.object({
-  approved: z.boolean(),
-  reviewNote: z.string().max(500).optional(),
-});
-
 // Player Profile
 export const updateProfileSchema = z.object({
   skillLevel: z.nativeEnum(SkillLevel).optional(),
@@ -112,14 +142,6 @@ export const updateProfileSchema = z.object({
 // Session
 export const openSessionSchema = z.object({
   note: z.string().max(200).optional(),
-});
-
-// Group Recruitment (조 모집)
-export const createRecruitmentSchema = z.object({
-  gameType: z.nativeEnum(CourtGameType).optional().default(CourtGameType.DOUBLES),
-  targetCourtId: z.string().uuid().optional(),
-  message: z.string().max(100).optional(),
-  initialMemberIds: z.array(z.string().uuid()).max(3).optional(),
 });
 
 export type RegisterInput = z.infer<typeof registerSchema>;
@@ -136,21 +158,8 @@ export type JoinClubInput = z.infer<typeof joinClubSchema>;
 export type RegisterTurnInput = z.infer<typeof registerTurnSchema>;
 export type ExtendTurnInput = z.infer<typeof extendTurnSchema>;
 export type RequeueTurnInput = z.infer<typeof requeueTurnSchema>;
-export type CreateFacilityRequestInput = z.infer<typeof createFacilityRequestSchema>;
-export type ReviewFacilityRequestInput = z.infer<typeof reviewFacilityRequestSchema>;
 export type UpdateProfileInput = z.infer<typeof updateProfileSchema>;
 export type OpenSessionInput = z.infer<typeof openSessionSchema>;
-export type CreateRecruitmentInput = z.infer<typeof createRecruitmentSchema>;
-
-// Rotation (게임 편성)
-export const generateRotationSchema = z.object({
-  playerIds: z.array(z.string().uuid()).min(4).optional(),
-  courtIds: z.array(z.string().uuid()).min(1).optional(),
-  targetRounds: z.number().int().min(1).max(50).optional(),
-  clubSessionId: z.string().uuid().optional(),
-});
-
-export type GenerateRotationInput = z.infer<typeof generateRotationSchema>;
 
 // Club Session (모임 세션)
 export const startClubSessionSchema = z.object({
@@ -174,7 +183,43 @@ export const updateMemberRoleSchema = z.object({
   role: z.nativeEnum(ClubMemberRole),
 });
 
+// Leader/Staff edits a member's 급수 (skill level) and gender
+export const updateMemberProfileSchema = z.object({
+  skillLevel: z.nativeEnum(SkillLevel).optional(),
+  gender: z.enum(['M', 'F']).optional().nullable(),
+});
+
+// Game Board auto-suggest (자동 편성 추천)
+export const suggestFoursomeSchema = z.object({
+  courtId: z.string().uuid().optional(),
+  count: z.number().int().min(1).max(8).optional(),
+});
+
+// Game Board QUEUE (미리 짜두는 다음 게임 큐)
+// Create a court-less QUEUED game appended to the end of the global queue.
+// playerIds: 1~4 — the operator can draft a partial group (2~3) and add more
+// while editing; not forced to a fixed 4.
+export const createQueueGameSchema = z.object({
+  playerIds: z.array(z.string().uuid()).min(1).max(4),
+  note: z.string().max(100).optional(),
+});
+
+// Reorder the global queue: full new order of QUEUED entry ids (drag-and-drop).
+export const reorderQueueSchema = z.object({
+  entryIds: z.array(z.string().uuid()).min(1),
+});
+
+// Assign a QUEUED entry to a court (materializes it to a CourtTurn/Game).
+export const assignEntrySchema = z.object({
+  courtId: z.string().uuid(),
+});
+
 export type StartClubSessionInput = z.infer<typeof startClubSessionSchema>;
 export type UpdateClubSessionCourtsInput = z.infer<typeof updateClubSessionCourtsSchema>;
 export type BulkRegisterTurnsInput = z.infer<typeof bulkRegisterTurnsSchema>;
 export type UpdateMemberRoleInput = z.infer<typeof updateMemberRoleSchema>;
+export type UpdateMemberProfileInput = z.infer<typeof updateMemberProfileSchema>;
+export type SuggestFoursomeInput = z.infer<typeof suggestFoursomeSchema>;
+export type CreateQueueGameInput = z.infer<typeof createQueueGameSchema>;
+export type ReorderQueueInput = z.infer<typeof reorderQueueSchema>;
+export type AssignEntryInput = z.infer<typeof assignEntrySchema>;

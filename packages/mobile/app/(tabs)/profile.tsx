@@ -6,6 +6,7 @@ import {
   StyleSheet,
   ScrollView,
   RefreshControl,
+  Platform,
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { useAuthStore } from '../../store/authStore';
@@ -118,7 +119,9 @@ export default function ProfileScreen() {
       style={styles.container}
       contentContainerStyle={styles.content}
       refreshControl={
-        <RefreshControl refreshing={isLoading} onRefresh={loadProfileData} />
+        Platform.OS === 'web' ? undefined : (
+          <RefreshControl refreshing={isLoading} onRefresh={loadProfileData} />
+        )
       }
     >
       {/* Profile card with skill badge */}

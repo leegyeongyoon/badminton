@@ -1,0 +1,8 @@
+-- AlterTable
+ALTER TABLE "CheckIn" ADD COLUMN     "feeAmount" INTEGER,
+ADD COLUMN     "feePaid" BOOLEAN NOT NULL DEFAULT false;
+
+-- AlterTable
+ALTER TABLE "User" ADD COLUMN     "isGuest" BOOLEAN NOT NULL DEFAULT false,
+ALTER COLUMN "phone" DROP NOT NULL,
+ALTER COLUMN "password" DROP NOT NULL;

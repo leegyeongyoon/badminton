@@ -123,6 +123,7 @@ export const Strings = {
     activity: '내 활동',
     settings: '설정',
     courts: '코트',
+    home: '홈',
     myStatus: '내 현황',
     more: '더보기',
   },

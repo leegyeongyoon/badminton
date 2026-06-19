@@ -7,6 +7,7 @@ import {
   TouchableOpacity,
   RefreshControl,
   ActivityIndicator,
+  Platform,
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { Colors } from '../constants/colors';
@@ -31,9 +32,6 @@ const notificationTypeIcons: Record<string, string> = {
   turn_promoted: '⬆️',
   game_time_warning: '⏰',
   game_time_expired: '🔔',
-  recruitment_created: '📢',
-  recruitment_full: '🎉',
-  recruitment_expired: '⏳',
   club_session_started: '🏟️',
   club_session_ended: '🔚',
   penalty_applied: '⚠️',
@@ -104,12 +102,7 @@ export default function NotificationsScreen() {
       case 'turn_promoted':
       case 'game_time_warning':
       case 'game_time_expired':
-        router.push('/(tabs)/activity');
-        break;
-      case 'recruitment_created':
-      case 'recruitment_full':
-      case 'recruitment_expired':
-        router.push('/(tabs)');
+        router.push('/(tabs)/my-status');
         break;
       case 'club_session_started':
       case 'club_session_ended':
@@ -204,7 +197,9 @@ export default function NotificationsScreen() {
           notifications.length === 0 && styles.listEmpty,
         ]}
         refreshControl={
-          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
+          Platform.OS === 'web' ? undefined : (
+            <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
+          )
         }
         ListEmptyComponent={
           <View style={styles.emptyContainer}>

@@ -33,6 +33,7 @@ export function AnimatedRefreshControl({
   const rotation = useSharedValue(0);
 
   useEffect(() => {
+    if (Platform.OS === 'web') return;
     if (refreshing) {
       rotation.value = withRepeat(
         withTiming(360, { duration: 800, easing: Easing.linear }),
@@ -44,6 +45,11 @@ export function AnimatedRefreshControl({
       rotation.value = withTiming(0, { duration: 200 });
     }
   }, [refreshing]);
+
+  // react-native-web's RefreshControl is not reliably supported and throws
+  // during render, blanking the whole screen. Pull-to-refresh is not a web
+  // gesture anyway, so render nothing on web.
+  if (Platform.OS === 'web') return null;
 
   return (
     <RefreshControl

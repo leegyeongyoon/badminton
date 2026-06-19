@@ -10,7 +10,7 @@ const JWT_REFRESH_SECRET = process.env.JWT_REFRESH_SECRET || 'dev-refresh-secret
 const JWT_EXPIRES_IN = process.env.JWT_EXPIRES_IN || '15m';
 const JWT_REFRESH_EXPIRES_IN = process.env.JWT_REFRESH_EXPIRES_IN || '7d';
 
-function generateTokens(payload: AuthPayload) {
+export function generateTokens(payload: AuthPayload) {
   const accessToken = jwt.sign(payload, JWT_SECRET, { expiresIn: JWT_EXPIRES_IN as jwt.SignOptions['expiresIn'] });
   const refreshToken = jwt.sign(payload, JWT_REFRESH_SECRET, { expiresIn: JWT_REFRESH_EXPIRES_IN as jwt.SignOptions['expiresIn'] });
   return { accessToken, refreshToken };
@@ -32,6 +32,22 @@ export async function register(input: RegisterInput) {
     },
   });
 
+  // Persist skill level (급수) / gender on the user's PlayerProfile when provided at signup.
+  if (input.skillLevel !== undefined || input.gender !== undefined) {
+    await prisma.playerProfile.upsert({
+      where: { userId: user.id },
+      create: {
+        userId: user.id,
+        ...(input.skillLevel !== undefined && { skillLevel: input.skillLevel }),
+        ...(input.gender !== undefined && { gender: input.gender }),
+      },
+      update: {
+        ...(input.skillLevel !== undefined && { skillLevel: input.skillLevel }),
+        ...(input.gender !== undefined && { gender: input.gender }),
+      },
+    });
+  }
+
   const payload: AuthPayload = { userId: user.id, role: user.role };
   const tokens = generateTokens(payload);
 
@@ -41,14 +57,15 @@ export async function register(input: RegisterInput) {
   });
 
   return {
-    user: { id: user.id, phone: user.phone, name: user.name, role: user.role, createdAt: user.createdAt.toISOString() },
+    user: { id: user.id, phone: user.phone, name: user.name, role: user.role, isGuest: user.isGuest, createdAt: user.createdAt.toISOString() },
     tokens,
   };
 }
 
 export async function login(input: LoginInput) {
   const user = await prisma.user.findUnique({ where: { phone: input.phone } });
-  if (!user) {
+  // Guests have null phone/password and can never log in; treat missing password as invalid.
+  if (!user || !user.password) {
     throw new UnauthorizedError('전화번호 또는 비밀번호가 올바르지 않습니다');
   }
 
@@ -66,7 +83,7 @@ export async function login(input: LoginInput) {
   });
 
   return {
-    user: { id: user.id, phone: user.phone, name: user.name, role: user.role, createdAt: user.createdAt.toISOString() },
+    user: { id: user.id, phone: user.phone, name: user.name, role: user.role, isGuest: user.isGuest, createdAt: user.createdAt.toISOString() },
     tokens,
   };
 }
@@ -103,7 +120,7 @@ export async function logout(userId: string) {
 
 export async function changePassword(userId: string, currentPassword: string, newPassword: string) {
   const user = await prisma.user.findUnique({ where: { id: userId } });
-  if (!user) throw new UnauthorizedError();
+  if (!user || !user.password) throw new UnauthorizedError();
 
   const valid = await bcrypt.compare(currentPassword, user.password);
   if (!valid) {
@@ -131,5 +148,5 @@ export async function updatePushToken(userId: string, token: string) {
 export async function getMe(userId: string) {
   const user = await prisma.user.findUnique({ where: { id: userId } });
   if (!user) throw new UnauthorizedError();
-  return { id: user.id, phone: user.phone, name: user.name, role: user.role, createdAt: user.createdAt.toISOString() };
+  return { id: user.id, phone: user.phone, name: user.name, role: user.role, isGuest: user.isGuest, createdAt: user.createdAt.toISOString() };
 }

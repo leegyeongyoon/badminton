@@ -3,7 +3,6 @@ import { logger } from '../../utils/logger';
 import { getIO } from '../../socket';
 import { sendPushToUser } from '../notification/notification.service';
 import { registerJobHandler } from './scheduler.service';
-import { RecruitmentStatus } from '@badminton/shared';
 
 export function registerAllHandlers() {
   // Game time warning handler
@@ -77,55 +76,5 @@ export function registerAllHandlers() {
     }
 
     logger.info(`Game time expired for turn ${turnId}`);
-  });
-
-  // Recruitment expired handler
-  registerJobHandler('recruitment_expired', async (recruitmentId: string) => {
-    const recruitment = await prisma.groupRecruitment.findUnique({
-      where: { id: recruitmentId },
-      include: {
-        createdBy: true,
-        targetCourt: true,
-        members: { include: { user: true }, orderBy: { joinedAt: 'asc' } },
-      },
-    });
-
-    if (!recruitment || !['RECRUITING', 'FULL'].includes(recruitment.status)) return;
-
-    await prisma.groupRecruitment.update({
-      where: { id: recruitmentId },
-      data: { status: RecruitmentStatus.EXPIRED },
-    });
-
-    const io = getIO();
-    io.to(`facility:${recruitment.facilityId}`).emit('recruitment:cancelled', {
-      id: recruitment.id,
-      facilityId: recruitment.facilityId,
-      createdById: recruitment.createdById,
-      createdByName: recruitment.createdBy.name,
-      gameType: recruitment.gameType,
-      playersRequired: recruitment.playersRequired,
-      targetCourtId: recruitment.targetCourtId,
-      targetCourtName: recruitment.targetCourt?.name ?? null,
-      status: RecruitmentStatus.EXPIRED,
-      message: recruitment.message,
-      members: recruitment.members.map((m: any) => ({
-        userId: m.userId,
-        userName: m.user.name,
-        joinedAt: m.joinedAt.toISOString(),
-      })),
-      createdAt: recruitment.createdAt.toISOString(),
-      expiresAt: recruitment.expiresAt.toISOString(),
-      registeredTurnId: null,
-    });
-
-    // Notify creator
-    await sendPushToUser(recruitment.createdById, {
-      title: '모집 만료',
-      body: '모집 시간이 만료되었습니다.',
-      data: { recruitmentId: recruitment.id, type: 'recruitment_expired' },
-    });
-
-    logger.info(`Recruitment ${recruitmentId} expired`);
   });
 }

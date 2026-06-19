@@ -1,77 +1,84 @@
-import { useEffect, useCallback, useState } from 'react';
-import { StyleSheet, ScrollView, View, Text } from 'react-native';
+import { useEffect, useCallback, useState, useMemo } from 'react';
+import { StyleSheet, ScrollView, View, Text, Pressable, Platform } from 'react-native';
+import { useRouter } from 'expo-router';
 import { useTurnStore } from '../../store/turnStore';
 import { useAuthStore } from '../../store/authStore';
 import { useCheckinStore } from '../../store/checkinStore';
+import { useClubStore } from '../../store/clubStore';
+import { clubSessionApi } from '../../services/clubSession';
 import { courtApi } from '../../services/court';
-import { profileApi } from '../../services/profile';
 import { useSocketEvent, useUserRoom } from '../../hooks/useSocket';
-import { useRestMode } from '../../hooks/useRestMode';
 import { useTheme } from '../../hooks/useTheme';
-import { typography, spacing, radius } from '../../constants/theme';
+import { typography, spacing, radius, palette } from '../../constants/theme';
 import { showAlert, showConfirm } from '../../utils/alert';
-import { showSuccess } from '../../utils/feedback';
 import { Strings } from '../../constants/strings';
 import { AnimatedRefreshControl } from '../../components/ui/AnimatedRefreshControl';
-import { SectionHeader } from '../../components/ui/SectionHeader';
-import { RestToggleCard } from '../../components/activity/RestToggleCard';
 import { PlayingTurnCard } from '../../components/activity/PlayingTurnCard';
-import { WaitingTurnCard } from '../../components/activity/WaitingTurnCard';
-import { TodayHistoryList } from '../../components/activity/TodayHistoryList';
 import { EmptyState } from '../../components/ui/EmptyState';
 import { Icon } from '../../components/ui/Icon';
 
-interface GameHistoryItem {
-  id: string;
-  courtName: string;
-  status: string;
-  gameType: string;
-  startedAt: string | null;
-  completedAt: string | null;
-  players: { userName: string }[];
-}
-
+/**
+ * 내 현황 — the player's minimal "enter → see the live situation" surface.
+ *
+ * Shows ONE thing clearly: my current state right now
+ *   대기 중 / 내 차례 (코트 N) / 게임 중
+ * plus a prominent "현황 보드 보기" button into the live session board.
+ *
+ * Intentionally simplified: no self-rest("쉬기") toggle, no history/stats
+ * clutter — a player just enters and sees what's happening.
+ */
 export default function MyStatusScreen() {
+  const router = useRouter();
   const { colors, shadows } = useTheme();
   const { myTurns, isLoading, fetchMyTurns } = useTurnStore();
   const { user } = useAuthStore();
   const { status: checkinStatus } = useCheckinStore();
-  const { isResting, restDurationMinutes, toggleRest } = useRestMode();
-  const [restLoading, setRestLoading] = useState(false);
-  const [todayGames, setTodayGames] = useState<GameHistoryItem[]>([]);
-  const [initialLoaded, setInitialLoaded] = useState(false);
+  const { clubs, fetchClubs } = useClubStore();
+
+  const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
 
   useUserRoom(user?.id);
 
-  useEffect(() => {
-    Promise.all([fetchMyTurns(), loadTodayHistory()]).finally(() =>
-      setInitialLoaded(true),
-    );
-  }, []);
-
-  const loadTodayHistory = async () => {
-    try {
-      const { data } = await profileApi.getHistory(1);
-      const today = new Date().toISOString().split('T')[0];
-      const todayItems = (data?.items || data || []).filter((g: any) => {
-        const date = (g.completedAt || g.startedAt || g.createdAt || '').split('T')[0];
-        return date === today && g.status === 'COMPLETED';
-      });
-      setTodayGames(todayItems);
-    } catch {
-      /* silent */
+  // Derive the active session id for the board button:
+  //  1) prefer the session we checked into,
+  //  2) else find any ACTIVE session across the player's clubs.
+  const resolveActiveSession = useCallback(async () => {
+    if (checkinStatus?.clubSessionId) {
+      setActiveSessionId(checkinStatus.clubSessionId);
+      return;
     }
-  };
+    await fetchClubs();
+    const list = useClubStore.getState().clubs as { id: string }[];
+    if (list.length === 0) {
+      setActiveSessionId(null);
+      return;
+    }
+    const results = await Promise.all(
+      list.map((c) =>
+        clubSessionApi.getActive(c.id).then((r) => r.data).catch(() => null),
+      ),
+    );
+    const active = results.find((s: any) => s && s.status === 'ACTIVE');
+    setActiveSessionId(active ? active.id : null);
+  }, [checkinStatus?.clubSessionId, fetchClubs]);
+
+  useEffect(() => {
+    fetchMyTurns();
+    resolveActiveSession();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const refresh = useCallback(() => {
     fetchMyTurns();
-    loadTodayHistory();
-  }, []);
+    resolveActiveSession();
+  }, [fetchMyTurns, resolveActiveSession]);
 
   useSocketEvent('turn:started', refresh);
   useSocketEvent('turn:completed', refresh);
   useSocketEvent('turn:promoted', refresh);
   useSocketEvent('turn:cancelled', refresh);
+  useSocketEvent('clubSession:started', refresh);
+  useSocketEvent('clubSession:ended', refresh);
 
   const handleCompleteTurn = (turnId: string) => {
     showConfirm('게임 종료', '게임을 종료하시겠습니까?', async () => {
@@ -84,125 +91,116 @@ export default function MyStatusScreen() {
     }, Strings.turn.complete);
   };
 
-  const handleCancelTurn = (turnId: string) => {
-    showConfirm('고깔 취소', '고깔을 취소하시겠습니까?', async () => {
-      try {
-        await courtApi.cancelTurn(turnId);
-        refresh();
-      } catch (err: any) {
-        showAlert('오류', err.response?.data?.error || '고깔 취소에 실패했습니다');
-      }
-    }, Strings.turn.cancel);
-  };
-
   const handleExtendTurn = async (turnId: string) => {
     try {
       await courtApi.extendTurn(turnId, 15);
       fetchMyTurns();
-      showSuccess('시간이 15분 연장되었습니다');
     } catch (err: any) {
       showAlert('오류', err.response?.data?.error || '시간 연장에 실패했습니다');
     }
   };
 
-  const handleRequeue = (gameId: string) => {
-    showConfirm('다시 줄서기', '같은 멤버로 다시 줄서시겠습니까?', async () => {
-      try {
-        await courtApi.requeueTurn(gameId);
-        fetchMyTurns();
-        showSuccess('다시 대기열에 등록되었습니다');
-      } catch (err: any) {
-        showAlert('오류', err.response?.data?.message || '다시 줄서기에 실패했습니다');
-      }
-    });
-  };
+  const playingTurn = useMemo(() => myTurns.find((t) => t.status === 'PLAYING'), [myTurns]);
+  const waitingTurn = useMemo(() => myTurns.find((t) => t.status === 'WAITING'), [myTurns]);
 
-  const handleToggleRest = async () => {
-    setRestLoading(true);
-    try {
-      await toggleRest();
-    } catch (err: any) {
-      showAlert('오류', err.response?.data?.error || '상태 변경에 실패했습니다');
-    } finally {
-      setRestLoading(false);
-    }
-  };
+  // The headline state shown at the top.
+  const state: 'playing' | 'waiting' | 'checkedIn' | 'idle' = playingTurn
+    ? 'playing'
+    : waitingTurn
+      ? 'waiting'
+      : checkinStatus
+        ? 'checkedIn'
+        : 'idle';
 
-  const playingTurns = myTurns.filter((t) => t.status === 'PLAYING');
-  const waitingTurns = myTurns.filter((t) => t.status === 'WAITING');
+  const stateMeta = {
+    playing: {
+      tint: colors.playerInTurn,
+      bg: colors.dangerBg,
+      label: '게임 중',
+      sub: playingTurn ? `${playingTurn.courtName} · 지금 경기 중이에요` : '',
+      icon: 'play' as const,
+    },
+    waiting: {
+      tint: colors.primary,
+      bg: colors.primaryBg,
+      label: waitingTurn && waitingTurn.position > 0 ? `대기 중 · ${waitingTurn.position}번째` : '대기 중',
+      sub: '배정되면 여기와 알림으로 바로 알려드려요',
+      icon: 'waiting' as const,
+    },
+    checkedIn: {
+      tint: colors.secondary,
+      bg: colors.secondaryBg,
+      label: '대기 중',
+      sub: checkinStatus ? `${checkinStatus.facilityName} 체크인 완료` : '',
+      icon: 'success' as const,
+    },
+    idle: {
+      tint: colors.textLight,
+      bg: colors.surfaceSecondary,
+      label: '체크인 전',
+      sub: '정모에 체크인하면 현황이 여기에 나와요',
+      icon: 'court' as const,
+    },
+  }[state];
 
   return (
     <ScrollView
       style={[styles.container, { backgroundColor: colors.background }]}
       contentContainerStyle={styles.content}
       refreshControl={
-        <AnimatedRefreshControl refreshing={isLoading} onRefresh={refresh} />
+        Platform.OS === 'web' ? undefined : (
+          <AnimatedRefreshControl refreshing={isLoading} onRefresh={refresh} />
+        )
       }
     >
-      {/* Checkin status */}
-      {checkinStatus && (
-        <View style={[styles.checkinCard, { backgroundColor: colors.surface }, shadows.sm]}>
-          <Icon name="court" size={16} color={colors.secondary} />
-          <Text style={[styles.checkinText, { color: colors.text }]}>
-            {checkinStatus.facilityName}
-          </Text>
-          <Text style={[styles.checkinTime, { color: colors.textLight }]}>
-            체크인 중
-          </Text>
+      {/* Headline: my current state */}
+      <View style={[styles.statusHero, { backgroundColor: stateMeta.bg }, shadows.sm]}>
+        <View style={[styles.statusIcon, { backgroundColor: stateMeta.tint }]}>
+          <Icon name={stateMeta.icon} size={22} color={palette.white} />
         </View>
+        <Text style={[styles.statusLabel, { color: stateMeta.tint }]}>{stateMeta.label}</Text>
+        {!!stateMeta.sub && (
+          <Text style={[styles.statusSub, { color: colors.textSecondary }]}>{stateMeta.sub}</Text>
+        )}
+      </View>
+
+      {/* Prominent live board entry */}
+      {activeSessionId && (
+        <Pressable
+          onPress={() => router.push(`/session/${activeSessionId}/board`)}
+          style={({ pressed }) => [
+            styles.boardBtn,
+            { backgroundColor: colors.primary },
+            shadows.colored(colors.primary),
+            pressed && { opacity: 0.92 },
+          ]}
+        >
+          <Icon name="tv" size={20} color={palette.white} />
+          <Text style={styles.boardBtnText}>현황 보드 보기</Text>
+          <Icon name="chevronRight" size={20} color={palette.white} />
+        </Pressable>
       )}
 
-      {/* Playing turns */}
-      {playingTurns.map((turn) => (
+      {/* My active game — lets me end/extend my own turn */}
+      {playingTurn && (
         <PlayingTurnCard
-          key={turn.turnId}
-          courtName={turn.courtName}
-          timeLimitAt={(turn as any).timeLimitAt}
-          players={turn.players}
+          key={playingTurn.turnId}
+          courtName={playingTurn.courtName}
+          timeLimitAt={(playingTurn as any).timeLimitAt}
+          players={playingTurn.players}
           currentUserId={user?.id}
-          onExtend={() => handleExtendTurn(turn.turnId)}
-          onComplete={() => handleCompleteTurn(turn.turnId)}
-        />
-      ))}
-
-      {/* Waiting turns */}
-      {waitingTurns.map((turn) => (
-        <WaitingTurnCard
-          key={turn.turnId}
-          courtName={turn.courtName}
-          position={turn.position}
-          players={turn.players}
-          currentUserId={user?.id}
-          onCancel={() => handleCancelTurn(turn.turnId)}
-        />
-      ))}
-
-      {/* Rest toggle */}
-      {checkinStatus && myTurns.length === 0 && (
-        <RestToggleCard
-          isResting={isResting}
-          restLoading={restLoading}
-          onToggle={handleToggleRest}
-          restDurationMinutes={restDurationMinutes}
+          onExtend={() => handleExtendTurn(playingTurn.turnId)}
+          onComplete={() => handleCompleteTurn(playingTurn.turnId)}
         />
       )}
 
-      {/* Empty state */}
-      {!checkinStatus && myTurns.length === 0 && (
+      {/* Idle empty state */}
+      {state === 'idle' && (
         <EmptyState
           icon="court"
           title="체크인 후 이용할 수 있습니다"
-          description="코트 탭에서 고깔을 놓아보세요"
+          description="홈에서 정모에 체크인하면 내 현황을 볼 수 있어요"
         />
-      )}
-
-      {/* Today history */}
-      {todayGames.length > 0 && (
-        <>
-          <View style={[styles.divider, { backgroundColor: colors.divider }]} />
-          <SectionHeader title="오늘 기록" count={todayGames.length} />
-          <TodayHistoryList games={todayGames} onRequeue={handleRequeue} />
-        </>
       )}
     </ScrollView>
   );
@@ -210,24 +208,32 @@ export default function MyStatusScreen() {
 
 const styles = StyleSheet.create({
   container: { flex: 1 },
-  content: { padding: spacing.xl, flexGrow: 1, paddingBottom: spacing.xxxxl },
-  checkinCard: {
-    flexDirection: 'row',
+  content: { padding: spacing.xl, flexGrow: 1, paddingBottom: spacing.xxxxl, gap: spacing.lg },
+
+  statusHero: {
+    borderRadius: radius.card,
+    padding: spacing.xl,
     alignItems: 'center',
     gap: spacing.sm,
-    padding: spacing.lg,
+  },
+  statusIcon: {
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: spacing.xs,
+  },
+  statusLabel: { ...typography.h2 },
+  statusSub: { ...typography.body2, textAlign: 'center' },
+
+  boardBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: spacing.sm,
+    paddingVertical: spacing.lg,
     borderRadius: radius.card,
-    marginBottom: spacing.lg,
   },
-  checkinText: {
-    ...typography.subtitle2,
-    flex: 1,
-  },
-  checkinTime: {
-    ...typography.caption,
-  },
-  divider: {
-    height: 1,
-    marginVertical: spacing.xl,
-  },
+  boardBtnText: { color: palette.white, ...typography.button, fontSize: 16 },
 });
