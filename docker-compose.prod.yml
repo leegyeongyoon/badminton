@@ -1,0 +1,56 @@
+# Production stack for the badminton server, deployed by .github/workflows/deploy.yml.
+#
+#   docker compose -f docker-compose.prod.yml ...
+#
+# Reads runtime secrets from a `.env.prod` file that lives ON THE SERVER ONLY
+# (NOT committed; see .env.prod.example). The `server` service builds the slim
+# runtime image (Dockerfile target `runner`); the one-shot `migrate` service
+# builds the `migrator` target which keeps the Prisma CLI for migrations/seed.
+name: badminton-prod
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: badminton-prod-db
+    environment:
+      POSTGRES_USER: badminton
+      POSTGRES_PASSWORD: badminton
+      POSTGRES_DB: badminton
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U badminton -d badminton']
+      interval: 5s
+      timeout: 5s
+      retries: 12
+    restart: unless-stopped
+
+  # One-shot: `docker compose run --rm migrate` (prisma migrate deploy).
+  # Not started by `up`; invoked explicitly from scripts/deploy-remote.sh.
+  migrate:
+    build:
+      context: .
+      dockerfile: packages/server/Dockerfile
+      target: migrator
+    env_file: .env.prod
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: 'no'
+
+  server:
+    build:
+      context: .
+      dockerfile: packages/server/Dockerfile
+      target: runner
+    container_name: badminton-prod-server
+    env_file: .env.prod
+    depends_on:
+      postgres:
+        condition: service_healthy
+    ports:
+      - '3000:3000'
+    restart: unless-stopped
+
+volumes:
+  pgdata:

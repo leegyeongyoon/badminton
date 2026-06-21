@@ -1,0 +1,60 @@
+name: Deploy
+
+# Deploys the server to the Tailscale-only host (100.67.40.34).
+# Triggers ONLY on push to main and manual dispatch — never on PRs, so fork/PR
+# code can never run with the deploy secrets.
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-production
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # Join the GitHub-hosted runner to the tailnet so it can reach the host.
+      # Requires a Tailscale OAuth client scoped to tag:ci (set in the admin
+      # console) and an ACL granting tag:ci -> host:22.
+      - name: Connect to Tailscale
+        uses: tailscale/github-action@v2
+        with:
+          oauth-client-id: ${{ secrets.TS_OAUTH_CLIENT_ID }}
+          oauth-secret: ${{ secrets.TS_OAUTH_SECRET }}
+          tags: tag:ci
+
+      - name: Install sshpass + rsync
+        run: sudo apt-get update && sudo apt-get install -y sshpass rsync
+
+      # Sync the repo to the server. --delete keeps the remote clean, but server
+      # state (.env.prod, .git) and build inputs we don't need (node_modules,
+      # mobile app) are excluded so they're neither uploaded nor deleted.
+      - name: Sync source to server
+        env:
+          SSHPASS: ${{ secrets.SSH_PASSWORD }}
+        run: |
+          sshpass -e rsync -az --delete \
+            --exclude '.git' \
+            --exclude '.env.prod' \
+            --exclude '.env' \
+            --exclude '**/.env' \
+            --exclude 'node_modules' \
+            --exclude '**/node_modules' \
+            --exclude 'packages/mobile' \
+            --exclude '**/dist' \
+            -e "ssh -o StrictHostKeyChecking=accept-new" \
+            ./ "${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}:/opt/badminton/"
+
+      - name: Run remote deploy
+        env:
+          SSHPASS: ${{ secrets.SSH_PASSWORD }}
+        run: |
+          sshpass -e ssh -o StrictHostKeyChecking=accept-new \
+            "${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}" \
+            'bash /opt/badminton/scripts/deploy-remote.sh'

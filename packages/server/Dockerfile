@@ -81,3 +81,16 @@ WORKDIR /app/packages/server
 # preserves the src/ folder under dist -> the entry point is dist/src/index.js
 # (NOT dist/index.js).
 CMD ["node", "dist/src/index.js"]
+
+# ---------- Migrator (one-shot) ----------
+# The runtime stage above runs `npm prune --omit=dev`, which strips the Prisma
+# CLI (a devDependency) and ts-node — so migrations/seed CANNOT run from it.
+# This stage reuses the FULL builder (Prisma CLI + ts-node + generated client +
+# compiled code all present) purely to run deploy-time DB steps:
+#   docker compose run --rm migrate            -> prisma migrate deploy
+#   docker compose run --rm migrate npm run db:seed
+# It needs a live DATABASE_URL at run time (provided via env_file), never at build.
+# compose targets this explicitly (target: migrator); the server targets `runner`.
+FROM builder AS migrator
+WORKDIR /app/packages/server
+CMD ["npx", "prisma", "migrate", "deploy"]
