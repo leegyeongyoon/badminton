@@ -3,6 +3,7 @@ import { useSocketEvent } from './useSocket';
 import { showInfo, showSuccess } from '../utils/feedback';
 import { useTurnStore } from '../store/turnStore';
 import { useBannerStore } from '../store/bannerStore';
+import { useCheckinStore } from '../store/checkinStore';
 
 /**
  * Listens to key socket events and shows toast notifications.
@@ -24,8 +25,9 @@ export function useSocketToast() {
       if (myTurn) {
         useBannerStore.getState().show({
           title: myTurn.courtName ? `${myTurn.courtName} 게임 시작` : '내 차례입니다',
-          subtitle: '코트로 입장하세요',
+          subtitle: '탭하면 현황 보드가 열려요',
           courtName: myTurn.courtName,
+          clubSessionId: useCheckinStore.getState().status?.clubSessionId ?? undefined,
         });
       }
     }

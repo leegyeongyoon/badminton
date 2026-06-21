@@ -5,6 +5,7 @@ import { emitPlayersUpdated } from '../checkin/checkin.service';
 import { UserRole, ClubSessionStatus } from '@badminton/shared';
 import { sendPushToUser } from '../notification/notification.service';
 import { openSession } from '../session/session.service';
+import QRCode from 'qrcode';
 import type {
   ClubSessionResponse,
   SkillLevel,
@@ -18,6 +19,8 @@ import type {
   SessionSummaryMember,
   SessionSummaryGuest,
   SessionSummaryPerPlayer,
+  SessionQrResponse,
+  MyStatusResponse,
 } from '@badminton/shared';
 
 async function verifyClubStaff(clubId: string, userId: string) {
@@ -58,10 +61,60 @@ function mapClubSession(session: any): ClubSessionResponse {
   };
 }
 
+/**
+ * The courts THIS 정모 owns (Court.clubSessionId = sessionId), as full Court
+ * rows ordered by name. Each 정모 owns its OWN courts (코트1·2·3 …) — fully
+ * independent of every other 정모; another 정모's identically-named courts are
+ * never visible here. Drives the operator board / 코트 관리 modal.
+ */
+export async function getSessionCourts(sessionId: string) {
+  const session = await prisma.clubSession.findUnique({
+    where: { id: sessionId },
+    select: { id: true },
+  });
+  if (!session) throw new NotFoundError('모임 세션');
+  const courts = await prisma.court.findMany({
+    where: { clubSessionId: sessionId },
+    orderBy: { name: 'asc' },
+    include: {
+      // The currently-running game on this court, if any. Surfaced so the
+      // operator board can render an IN_USE court even when the game was created
+      // DIRECTLY (a CourtTurn with no GameBoardEntry — e.g. seeded games or
+      // turns started outside the board flow). Without this the board would
+      // mistake an occupied court for empty and offer to assign onto it, which
+      // the server then rejects ("이미 사용 중인 코트입니다").
+      turns: {
+        where: { status: { in: ['WAITING', 'PLAYING'] } },
+        orderBy: { position: 'asc' },
+        include: { players: { include: { user: { select: { id: true, name: true } } } } },
+      },
+    },
+  });
+
+  return courts.map((c) => {
+    const playing = c.turns.find((t) => t.status === 'PLAYING') ?? c.turns[0] ?? null;
+    const { turns, ...rest } = c;
+    return {
+      ...rest,
+      currentTurn: playing
+        ? {
+            id: playing.id,
+            status: playing.status,
+            playerIds: playing.players.map((p) => p.userId),
+            playerNames: playing.players.map((p) => p.user.name),
+          }
+        : null,
+    };
+  });
+}
+
+/** Default number of courts a 정모 registers when none is given. */
+const DEFAULT_COURT_COUNT = 4;
+
 export async function startSession(
   clubId: string,
   userId: string,
-  input: { facilityId: string; courtIds?: string[] },
+  input: { facilityId: string; courtCount?: number },
 ): Promise<ClubSessionResponse> {
   await verifyClubStaff(clubId, userId);
 
@@ -89,17 +142,12 @@ export async function startSession(
     }
   }
 
-  // Default to all usable (non-maintenance) facility courts when none specified,
-  // so the operator board and viewing board always have courts to work with.
-  let courtIds = input.courtIds ?? [];
-  if (courtIds.length === 0) {
-    const facilityCourts = await prisma.court.findMany({
-      where: { facilityId: input.facilityId, status: { not: 'MAINTENANCE' } },
-      orderBy: { name: 'asc' },
-      select: { id: true },
-    });
-    courtIds = facilityCourts.map((c) => c.id);
-  }
+  // ── Per-정모 OWN courts ──
+  // This 정모 owns its OWN courts. No sharing, no locking, no overlap with any
+  // other 정모. Create 코트 1 … 코트 N (N = registered count, default 4) belonging
+  // ONLY to this session. Another 정모 may have identically-named courts — they
+  // never interact (uniqueness is (clubSessionId, name)).
+  const courtCount = Math.max(1, input.courtCount ?? DEFAULT_COURT_COUNT);
 
   const session = await prisma.clubSession.create({
     data: {
@@ -107,7 +155,7 @@ export async function startSession(
       facilityId: input.facilityId,
       facilitySessionId: facilitySession.id,
       startedById: userId,
-      courtIds,
+      courtIds: [],
     },
     include: {
       club: true,
@@ -116,7 +164,21 @@ export async function startSession(
     },
   });
 
-  const mapped = mapClubSession(session);
+  // Create this 정모's own courts and keep courtIds in sync (existing readers).
+  const courtIds: string[] = [];
+  for (let i = 1; i <= courtCount; i++) {
+    const court = await prisma.court.create({
+      data: { name: `코트 ${i}`, facilityId: input.facilityId, clubSessionId: session.id },
+    });
+    courtIds.push(court.id);
+  }
+  const withCourts = await prisma.clubSession.update({
+    where: { id: session.id },
+    data: { courtIds },
+    include: { club: true, facility: true, startedBy: true },
+  });
+
+  const mapped = mapClubSession(withCourts);
 
   const io = getIO();
   io.to(`facility:${input.facilityId}`).emit('clubSession:started', mapped);
@@ -154,6 +216,38 @@ export async function getSession(sessionId: string): Promise<ClubSessionResponse
   return mapClubSession(session);
 }
 
+/**
+ * Per-정모 출석 QR. Returns a scannable WEB URL payload
+ * `<WEB_BASE_URL>/attend?session=<clubSessionId>` plus a PNG data-URL QR
+ * encoding that URL (generated via QRCode.toDataURL, same as club invite-qr).
+ * Scanning it with a phone camera opens the web app at /attend?session=... which
+ * (after login + profile setup if needed) UNCONDITIONALLY checks the user into
+ * THIS 정모 (the QR shown at the venue is the presence proof — no geofence) and
+ * lands them on the live 현황 보드. Returned for any status (ACTIVE or ENDED);
+ * the client decides how to present an ended 정모. Auth: any member of the
+ * session's club (verified in the router via the userId passed here).
+ */
+export async function getSessionQr(
+  sessionId: string,
+  userId: string,
+): Promise<SessionQrResponse> {
+  const session = await prisma.clubSession.findUnique({
+    where: { id: sessionId },
+    select: { id: true, clubId: true },
+  });
+  if (!session) throw new NotFoundError('모임 세션');
+
+  // Any member of the session's club may view the QR.
+  await verifyClubMember(session.clubId, userId);
+
+  // WEB_BASE_URL points at the web app that serves /attend (defaults to local
+  // dev), mirroring the club join-QR (<WEB_BASE_URL>/join?code=...).
+  const webBaseUrl = process.env.WEB_BASE_URL || 'http://localhost:8081';
+  const payload = `${webBaseUrl}/attend?session=${session.id}`;
+  const qr = await QRCode.toDataURL(payload);
+  return { clubSessionId: session.id, payload, qr };
+}
+
 export async function getActiveSession(clubId: string): Promise<ClubSessionResponse | null> {
   const session = await prisma.clubSession.findFirst({
     where: { clubId, status: 'ACTIVE' },
@@ -184,6 +278,7 @@ export async function updateCourts(
 
   await verifyClubStaff(session.clubId, userId);
 
+  // courtIds is just this 정모's own set (no cross-session locking / overlap).
   const updated = await prisma.clubSession.update({
     where: { id: sessionId },
     data: { courtIds },
@@ -196,6 +291,61 @@ export async function updateCourts(
   io.to(`facility:${session.facilityId}`).emit('clubSession:courtsUpdated', mapped);
 
   return mapped;
+}
+
+/**
+ * 코트 추가 (per-정모): create a NEW court that belongs ONLY to this 정모
+ * (clubSessionId = this session) and add it to courtIds. The name is the next
+ * "코트 N" among THIS session's own courts (코트1,2,3,… within the 정모) — never a
+ * facility-wide scan, so it never collides with or depends on any other 모임.
+ */
+export async function addSessionCourt(
+  sessionId: string,
+  userId: string,
+): Promise<{ court: { id: string; name: string; status: string }; session: ClubSessionResponse }> {
+  const session = await prisma.clubSession.findUnique({
+    where: { id: sessionId },
+    include: { club: true, facility: true, startedBy: true },
+  });
+  if (!session) throw new NotFoundError('모임 세션');
+  if (session.status !== 'ACTIVE') {
+    throw new BadRequestError('활성 세션만 수정할 수 있습니다');
+  }
+  await verifyClubStaff(session.clubId, userId);
+
+  // THIS 정모's own court names → next free "코트 N" within the 정모.
+  const own = await prisma.court.findMany({
+    where: { clubSessionId: sessionId },
+    select: { name: true },
+  });
+  const names = new Set(own.map((c) => c.name));
+  let maxNum = 0;
+  for (const name of names) {
+    const m = /^코트\s*(\d+)$/.exec(name.trim());
+    if (m) maxNum = Math.max(maxNum, parseInt(m[1], 10));
+  }
+  let next = maxNum + 1;
+  while (names.has(`코트 ${next}`)) next += 1; // skip any non-"코트 N"-pattern clash
+  const courtName = `코트 ${next}`;
+
+  const court = await prisma.court.create({
+    data: { name: courtName, facilityId: session.facilityId, clubSessionId: sessionId },
+  });
+
+  const updated = await prisma.clubSession.update({
+    where: { id: sessionId },
+    data: { courtIds: { set: [...session.courtIds, court.id] } },
+    include: { club: true, facility: true, startedBy: true },
+  });
+
+  const mapped = mapClubSession(updated);
+  const io = getIO();
+  io.to(`facility:${session.facilityId}`).emit('clubSession:courtsUpdated', mapped);
+
+  return {
+    court: { id: court.id, name: court.name, status: court.status },
+    session: mapped,
+  };
 }
 
 export async function endSession(
@@ -213,31 +363,18 @@ export async function endSession(
 
   await verifyClubStaff(session.clubId, userId);
 
-  // Clean up so courts don't drift out of sync (mirrors facility closeSession,
-  // but scoped to THIS 정모). Cancel active turns on this session's courts /
-  // tagged with this session, EXCEPT ones belonging to ANOTHER still-ACTIVE 정모
-  // (don't kill a concurrent club's games). Orphan turns from already-ended
-  // sessions get cleaned too (self-heal).
+  // Courts belong exclusively to THIS 정모, so cleanup is trivially scoped: cancel
+  // this session's own active turns/games and free its courts back to EMPTY. The
+  // Court rows are KEPT (their CourtTurns/Games FK to them — history preserved);
+  // we only mark the session ended.
   const activeTurns = await prisma.courtTurn.findMany({
     where: {
+      clubSessionId: sessionId,
       status: { in: ['WAITING', 'PLAYING'] },
-      OR: [{ clubSessionId: sessionId }, { courtId: { in: session.courtIds } }],
     },
-    select: { id: true, courtId: true, clubSessionId: true },
+    select: { id: true },
   });
-  const otherSessionIds = [
-    ...new Set(activeTurns.map((t) => t.clubSessionId).filter((id): id is string => !!id && id !== sessionId)),
-  ];
-  const activeOther = otherSessionIds.length
-    ? await prisma.clubSession.findMany({
-        where: { id: { in: otherSessionIds }, status: 'ACTIVE' },
-        select: { id: true },
-      })
-    : [];
-  const activeOtherSet = new Set(activeOther.map((s) => s.id));
-  const cancelIds = activeTurns
-    .filter((t) => !(t.clubSessionId && activeOtherSet.has(t.clubSessionId)))
-    .map((t) => t.id);
+  const cancelIds = activeTurns.map((t) => t.id);
   if (cancelIds.length > 0) {
     await prisma.courtTurn.updateMany({
       where: { id: { in: cancelIds } },
@@ -249,20 +386,20 @@ export async function endSession(
     });
   }
 
-  // Free this session's courts (and any court whose turns we just cancelled)
-  // back to EMPTY when no active turn remains — never touch MAINTENANCE.
-  const sessionCourtIds = [...new Set([...session.courtIds, ...activeTurns.map((t) => t.courtId)])];
-  for (const courtId of sessionCourtIds) {
-    const stillActive = await prisma.courtTurn.count({
-      where: { courtId, status: { in: ['WAITING', 'PLAYING'] } },
-    });
-    if (stillActive === 0) {
-      await prisma.court.updateMany({
-        where: { id: courtId, status: { not: 'MAINTENANCE' } },
-        data: { status: 'EMPTY' },
-      });
-    }
-  }
+  // Free this 정모's own courts back to EMPTY (never touch MAINTENANCE).
+  await prisma.court.updateMany({
+    where: { clubSessionId: sessionId, status: { not: 'MAINTENANCE' } },
+    data: { status: 'EMPTY' },
+  });
+
+  // BUG-3: check out every still-open CheckIn of this 정모. Leaving them with
+  // checkedOutAt = NULL creates stale rows that (a) inflate facility check-in
+  // counts and (b) can be wrongly closed by a later self-checkout in a DIFFERENT
+  // active session. Closing them here keeps the active pool accurate.
+  await prisma.checkIn.updateMany({
+    where: { clubSessionId: sessionId, checkedOutAt: null },
+    data: { checkedOutAt: new Date() },
+  });
 
   const updated = await prisma.clubSession.update({
     where: { id: sessionId },
@@ -628,5 +765,130 @@ export async function getSessionSummary(
       unpaidFee: totalFee - paidFee,
       guestCount: guestCheckIns.length,
     },
+  };
+}
+
+// --- C: Board-aware player status (내 현황) ---
+
+/**
+ * Board-aware "my upcoming game" for a user. Unlike getMyTurns (which only
+ * reads CourtTurn/TurnPlayer), this ALSO reads the active 정모's GameBoard so a
+ * court-less QUEUED entry surfaces as a real "다음 게임 · 대기 N번째" state
+ * instead of falling through to a flat "대기 중".
+ *
+ * Resolution: find the user's ACTIVE check-in → its 정모 (or the facility's
+ * single ACTIVE 정모) → that 정모's board. Then classify:
+ *   - PLAYING  : a PLAYING CourtTurn in this 정모 (코트 X · 게임 중)
+ *   - QUEUED   : a QUEUED GameBoardEntry containing the user. queueOrder = its
+ *                1-based position among QUEUED entries; courtName null (코트 미정);
+ *                etaGames = games queued ahead of it.
+ *   - AVAILABLE: checked in, nothing staged.
+ *   - null     : not checked into any active 정모.
+ */
+export async function getMyStatus(userId: string): Promise<MyStatusResponse | null> {
+  const active = await prisma.checkIn.findFirst({
+    where: { userId, checkedOutAt: null },
+    orderBy: { checkedInAt: 'desc' },
+    select: { clubSessionId: true, facilityId: true },
+  });
+  if (!active) return null;
+
+  // Candidate 정모(s) to read. A session-scoped check-in pins one 정모; a
+  // facility-only check-in (web/QR) can map to several ACTIVE 정모 at the
+  // facility, so we keep ALL of them and let the board/turn lookup below pick
+  // the one the user is actually composed into. This is what makes the status
+  // board-aware even when the facility runs multiple concurrent 정모.
+  let candidateSessionIds: string[];
+  if (active.clubSessionId) {
+    candidateSessionIds = [active.clubSessionId];
+  } else {
+    const activeSessions = await prisma.clubSession.findMany({
+      where: { facilityId: active.facilityId, status: 'ACTIVE' },
+      select: { id: true },
+    });
+    candidateSessionIds = activeSessions.map((s) => s.id);
+  }
+  if (candidateSessionIds.length === 0) return null;
+
+  // PLAYING turn in any candidate 정모 takes precedence (게임 중).
+  const playing = await prisma.courtTurn.findFirst({
+    where: {
+      clubSessionId: { in: candidateSessionIds },
+      status: 'PLAYING',
+      players: { some: { userId } },
+    },
+    include: { court: { select: { name: true } } },
+  });
+  if (playing) {
+    return {
+      status: 'PLAYING',
+      clubSessionId: playing.clubSessionId!,
+      queueOrder: null,
+      courtName: playing.court?.name ?? null,
+      etaGames: null,
+      turnId: playing.id,
+    };
+  }
+
+  // A WAITING turn (already materialized onto a court) → next up on that court.
+  const waiting = await prisma.courtTurn.findFirst({
+    where: {
+      clubSessionId: { in: candidateSessionIds },
+      status: 'WAITING',
+      players: { some: { userId } },
+    },
+    include: { court: { select: { name: true } } },
+    orderBy: { position: 'asc' },
+  });
+  if (waiting) {
+    return {
+      status: 'QUEUED',
+      clubSessionId: waiting.clubSessionId!,
+      queueOrder: waiting.position,
+      courtName: waiting.court?.name ?? null,
+      etaGames: Math.max(0, waiting.position - 1),
+      turnId: waiting.id,
+    };
+  }
+
+  // A court-less QUEUED board entry → "다음 게임 · 대기 N번째 · 코트 미정".
+  const boards = await prisma.gameBoard.findMany({
+    where: { clubSessionId: { in: candidateSessionIds } },
+    include: { entries: { where: { status: 'QUEUED' }, orderBy: { queueOrder: 'asc' } } },
+  });
+  for (const board of boards) {
+    const queued = board.entries.filter((e) => !e.courtId);
+    const idx = queued.findIndex((e) => (e.playerIds as string[]).includes(userId));
+    if (idx >= 0) {
+      return {
+        status: 'QUEUED',
+        clubSessionId: board.clubSessionId,
+        queueOrder: idx + 1,
+        courtName: null,
+        etaGames: idx,
+        turnId: null,
+      };
+    }
+  }
+
+  // Checked in but not composed into any candidate 정모's game. With a single
+  // candidate we can name the 정모; with several ambiguous ones, fall back to
+  // the most recently started so the board button still resolves.
+  let availableSessionId = candidateSessionIds[0];
+  if (candidateSessionIds.length > 1) {
+    const latest = await prisma.clubSession.findFirst({
+      where: { id: { in: candidateSessionIds } },
+      orderBy: { startedAt: 'desc' },
+      select: { id: true },
+    });
+    if (latest) availableSessionId = latest.id;
+  }
+  return {
+    status: 'AVAILABLE',
+    clubSessionId: availableSessionId,
+    queueOrder: null,
+    courtName: null,
+    etaGames: null,
+    turnId: null,
   };
 }

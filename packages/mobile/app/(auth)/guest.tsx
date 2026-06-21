@@ -36,6 +36,19 @@ interface GeofenceDetails {
   facilityName: string;
 }
 
+/** Prefix for a per-정모 출석 QR payload: `MEETUP:<clubSessionId>`. */
+const MEETUP_PREFIX = 'MEETUP:';
+
+/**
+ * If `code` is a per-정모 출석 QR (`MEETUP:<id>`), return the clubSessionId;
+ * otherwise null (it's a plain facility QR / code → existing qrData path).
+ */
+function parseMeetupSessionId(code: string): string | null {
+  if (!code.startsWith(MEETUP_PREFIX)) return null;
+  const id = code.slice(MEETUP_PREFIX.length).trim();
+  return id || null;
+}
+
 type Phase =
   | { kind: 'idle' }
   | { kind: 'resolving' }
@@ -69,10 +82,12 @@ export default function GuestCheckinScreen() {
 
   /**
    * GPS hard-gate + submit. Receives the already-resolved clubSessionId (the
-   * 정모 the guest is attending). On success store the guest token + route.
+   * 정모 the guest is attending) and, for a facility QR, the raw `code` (qrData).
+   * For a per-정모 MEETUP QR `code` is undefined — the server resolves the
+   * facility/geofence from the clubSessionId. On success store the guest token.
    */
   const submitCheckIn = useCallback(
-    async (code: string, clubSessionId: string) => {
+    async (code: string | undefined, clubSessionId: string) => {
       // 1. Acquire GPS — REQUIRED. Missing location blocks check-in (hard gate).
       setPhase({ kind: 'locating' });
       const coords = await getCurrentPosition();
@@ -85,7 +100,7 @@ export default function GuestCheckinScreen() {
       setPhase({ kind: 'submitting' });
       try {
         const { data } = await checkinApi.guestCheckIn({
-          qrData: code,
+          ...(code ? { qrData: code } : {}),
           clubSessionId,
           name: name.trim(),
           skillLevel: skill,
@@ -130,6 +145,14 @@ export default function GuestCheckinScreen() {
         return;
       }
       setLastCode(code);
+
+      // Per-정모 출석 QR (`MEETUP:<id>`, scanned OR pasted) → attend that 정모
+      // directly with NO qrData; the server resolves the facility/geofence.
+      const meetupSessionId = parseMeetupSessionId(code);
+      if (meetupSessionId) {
+        await submitCheckIn(undefined, meetupSessionId);
+        return;
+      }
 
       // 1. Resolve the active 정모 for this facility code.
       setPhase({ kind: 'resolving' });
@@ -406,8 +429,9 @@ export default function GuestCheckinScreen() {
                           styles.skillChipLabel,
                           { color: selected ? meta.color : colors.textLight },
                         ]}
+                        numberOfLines={1}
                       >
-                        {meta.label}
+                        {meta.description}
                       </Text>
                     </TouchableOpacity>
                   );

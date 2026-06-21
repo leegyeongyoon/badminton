@@ -21,9 +21,13 @@ export interface CheckInOptions {
   longitude: number;
 }
 
-/** Payload for the unauthenticated guest self web check-in. */
+/**
+ * Payload for the unauthenticated guest self web check-in. At least one of
+ * `qrData` (facility QR) or `clubSessionId` (per-정모 MEETUP QR) is required —
+ * with a `clubSessionId` the server resolves the facility + geofence itself.
+ */
 export interface GuestCheckInParams {
-  qrData: string;
+  qrData?: string;
   clubSessionId?: string;
   name: string;
   skillLevel?: string;
@@ -55,8 +59,13 @@ export interface GuestCheckInResponse {
 }
 
 export const checkinApi = {
-  checkIn: (qrData: string, opts: CheckInOptions) =>
-    api.post('/checkin', { qrData, ...opts }),
+  /**
+   * Member check-in. Send EITHER a facility `qrData` OR (via opts) a
+   * `clubSessionId` from a per-정모 MEETUP QR — at least one is required. When
+   * only a `clubSessionId` is given the server resolves the facility/geofence.
+   */
+  checkIn: (qrData: string | undefined, opts: CheckInOptions) =>
+    api.post('/checkin', { ...(qrData ? { qrData } : {}), ...opts }),
   checkOut: () => api.post('/checkin/checkout'),
   getStatus: () => api.get('/checkin/status'),
   setResting: () => api.post('/checkin/rest'),

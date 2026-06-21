@@ -3,6 +3,9 @@ import {
   View, Text, ScrollView, StyleSheet, SafeAreaView, ActivityIndicator,
   TouchableOpacity, Platform,
 } from 'react-native';
+import Animated, {
+  useSharedValue, useAnimatedStyle, withRepeat, withTiming, withSequence, Easing,
+} from 'react-native-reanimated';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useTheme } from '../../../hooks/useTheme';
 import { useResponsiveLayout } from '../../../hooks/useResponsiveLayout';
@@ -43,7 +46,7 @@ export default function ViewBoardScreen() {
 
   const { board, loadBoard } = useGameBoard(clubSessionId);
 
-  const [courts, setCourts] = useState<{ id: string; name: string; status: string }[]>([]);
+  const [courts, setCourts] = useState<{ id: string; name: string; status: string; currentTurn?: { playerIds: string[]; playerNames: string[] } | null }[]>([]);
   const [players, setPlayers] = useState<Player[]>([]);
   const [dedicatedCourtIds, setDedicatedCourtIds] = useState<Set<string>>(new Set());
   const [facilityId, setFacilityId] = useState<string | undefined>(undefined);
@@ -67,7 +70,9 @@ export default function ViewBoardScreen() {
   const loadPool = useCallback(() => {
     if (!facilityId) return;
     Promise.all([
-      api.get(`/facilities/${facilityId}/courts`).then(({ data }) =>
+      // This 정모's OWN courts (per-정모 court model) + their current game —
+      // NOT the facility's courts, whose ids won't match this session's games.
+      api.get(`/club-sessions/${clubSessionId}/courts`).then(({ data }) =>
         setCourts((data || []).filter((c: any) => c.status !== 'MAINTENANCE')),
       ),
       api.get(`/facilities/${facilityId}/players`).then(({ data }) =>
@@ -115,8 +120,16 @@ export default function ViewBoardScreen() {
         map.set(e.courtId, { playerIds: e.playerIds, playerNames: e.playerNames });
       }
     }
+    // currentTurn from the session courts is authoritative — it also covers games
+    // created directly on a court (no GameBoardEntry), e.g. seeded/auto-started.
+    for (const c of courts) {
+      const ct = c.currentTurn;
+      if (ct && ct.playerIds?.length) {
+        map.set(c.id, { playerIds: ct.playerIds, playerNames: ct.playerNames || [] });
+      }
+    }
     return map;
-  }, [board]);
+  }, [board, courts]);
 
   const queuedEntries = useMemo(
     () => (board?.entries || [])
@@ -171,20 +184,50 @@ export default function ViewBoardScreen() {
     const playing = playingByCourtId.get(court.id);
     const isEmpty = !playing;
     const isMine = court.id === myCourtId;
+
+    // Subtle pulse on the viewer's own court so it draws the eye across the grid.
+    const pulse = useSharedValue(0);
+    useEffect(() => {
+      if (isMine) {
+        pulse.value = withRepeat(
+          withSequence(
+            withTiming(1, { duration: 900, easing: Easing.inOut(Easing.quad) }),
+            withTiming(0, { duration: 900, easing: Easing.inOut(Easing.quad) }),
+          ),
+          -1,
+          false,
+        );
+      } else {
+        pulse.value = 0;
+      }
+    }, [isMine, pulse]);
+    const pulseStyle = useAnimatedStyle(() => ({ opacity: 0.45 + pulse.value * 0.55 }));
+
     return (
       <View
         style={[
           styles.courtCard,
           courtWidthStyle,
           { backgroundColor: colors.surface, borderColor: isMine ? colors.primary : colors.border },
-          isMine && { borderWidth: 2.5, backgroundColor: colors.primaryBg },
-          shadows.sm,
+          isMine && { borderWidth: 3, backgroundColor: colors.primaryBg },
+          isMine ? shadows.lg : shadows.sm,
         ]}
       >
         <View style={styles.courtHeader}>
-          <Text style={[styles.courtName, { color: colors.text }]} numberOfLines={1}>{court.name}</Text>
+          <View style={styles.courtNameWrap}>
+            {isMine && (
+              <Animated.View style={[styles.mineDot, { backgroundColor: colors.primary }, pulseStyle]} />
+            )}
+            <Text
+              style={[styles.courtName, { color: isMine ? colors.primary : colors.text }]}
+              numberOfLines={1}
+            >
+              {court.name}
+            </Text>
+          </View>
           {isMine ? (
             <View style={[styles.mineBadge, { backgroundColor: colors.primary }]}>
+              <Icon name="success" size={13} color={palette.white} />
               <Text style={styles.mineBadgeText}>내 코트</Text>
             </View>
           ) : (
@@ -203,8 +246,7 @@ export default function ViewBoardScreen() {
         {playing ? (
           <View style={styles.match}>
             {[[0, 1], [2, 3]].map((pair, side) => (
-              <View key={side} style={styles.teamWrap}>
-                {side === 1 && <Text style={[styles.vs, { color: colors.textLight }]}>VS</Text>}
+              <View key={side} style={styles.teamCol}>
                 <View style={styles.team}>
                   {pair.map((slotIdx) => {
                     const pId = playing.playerIds[slotIdx];
@@ -226,12 +268,21 @@ export default function ViewBoardScreen() {
                     );
                   })}
                 </View>
+                {side === 0 && (
+                  <View style={styles.vsRow}>
+                    <View style={[styles.vsLine, { backgroundColor: colors.border }]} />
+                    <View style={[styles.vsChip, { backgroundColor: colors.surfaceSecondary }]}>
+                      <Text style={[styles.vs, { color: colors.textSecondary }]}>VS</Text>
+                    </View>
+                    <View style={[styles.vsLine, { backgroundColor: colors.border }]} />
+                  </View>
+                )}
               </View>
             ))}
           </View>
         ) : (
           <View style={[styles.emptyBox, { borderColor: colors.border }]}>
-            <Icon name="court" size={26} color={colors.textLight} />
+            <Icon name="court" size={28} color={colors.textLight} />
             <Text style={[styles.emptyText, { color: colors.textLight }]}>비어있음</Text>
           </View>
         )}
@@ -272,9 +323,14 @@ export default function ViewBoardScreen() {
       <ScrollView style={{ flex: 1 }} contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
         {/* Viewer banner */}
         {myCourtId ? (
-          <View style={[styles.myBanner, { backgroundColor: colors.primary }, shadows.md]}>
-            <Text style={styles.myBannerLabel}>내 차례예요!</Text>
-            <Text style={styles.myBannerCourt}>{myCourtName || '코트'}로 입장하세요</Text>
+          <View style={[styles.myBanner, { backgroundColor: colors.primary }, shadows.lg]}>
+            <View style={styles.myBannerIcon}>
+              <Icon name="play" size={22} color={palette.white} />
+            </View>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.myBannerLabel}>내 차례예요!</Text>
+              <Text style={styles.myBannerCourt}>{myCourtName || '코트'}로 입장하세요</Text>
+            </View>
           </View>
         ) : isMeWaiting ? (
           <View style={[styles.myBannerWait, { backgroundColor: colors.surface, borderColor: colors.primary }]}>
@@ -295,36 +351,88 @@ export default function ViewBoardScreen() {
           )}
         </View>
 
-        {/* Next-up queued games */}
+        {/* Next-up queued games — each entry is one clearly-grouped team */}
         {queuedEntries.length > 0 && (
           <>
             <Text style={[styles.sectionTitle, { color: colors.textSecondary }]}>다음 게임 대기열</Text>
-            <View style={[styles.queueCard, { backgroundColor: colors.surface, borderColor: colors.border }, shadows.sm]}>
-              {queuedEntries.map((entry, idx) => (
-                <View key={entry.id} style={[styles.queueRow, { borderBottomColor: colors.divider }]}>
-                  <View style={[styles.queueNum, { backgroundColor: idx === 0 ? colors.primary : colors.primaryLight }]}>
-                    <Text style={[styles.queueNumText, { color: idx === 0 ? palette.white : colors.primary }]}>{idx + 1}</Text>
-                  </View>
-                  <View style={styles.queueNames}>
-                    {entry.playerIds.map((pId, i) => {
-                      const p = getPlayer(pId);
-                      const skill = getSkillMeta(p?.skillLevel);
-                      const g = getGenderMeta(p?.gender);
-                      const isMe = !!user?.id && pId === user.id;
-                      return (
-                        <View key={pId} style={styles.queueNameChip}>
-                          <View style={[styles.queueDot, { backgroundColor: skill.color }]} />
-                          <Text style={[styles.queueName, { color: isMe ? colors.primary : colors.textSecondary }]} numberOfLines={1}>
-                            {p?.userName || entry.playerNames?.[i] || '?'}{isMe ? ' (나)' : ''}
-                          </Text>
-                          {g && <Text style={[styles.queueGender, { color: g.color }]}>{g.symbol}</Text>}
+            <View style={styles.queueList}>
+              {queuedEntries.map((entry, idx) => {
+                const isNext = idx === 0;
+                const meInEntry = !!user?.id && entry.playerIds.includes(user.id);
+                return (
+                  <View
+                    key={entry.id}
+                    style={[
+                      styles.queueEntry,
+                      {
+                        backgroundColor: isNext ? colors.primaryBg : colors.surface,
+                        borderColor: isNext ? colors.primary : colors.border,
+                      },
+                      meInEntry && !isNext && { borderColor: colors.primary },
+                      isNext ? shadows.md : shadows.sm,
+                    ]}
+                  >
+                    {/* header: order + 다음 badge + court */}
+                    <View style={styles.queueEntryHeader}>
+                      <View style={[styles.queueNum, { backgroundColor: isNext ? colors.primary : colors.primaryLight }]}>
+                        <Text style={[styles.queueNumText, { color: isNext ? palette.white : colors.primary }]}>{idx + 1}</Text>
+                      </View>
+                      {isNext && (
+                        <View style={[styles.queueNext, { backgroundColor: colors.primary }]}>
+                          <Text style={styles.queueNextText}>다음 게임</Text>
                         </View>
-                      );
-                    })}
+                      )}
+                      <View style={{ flex: 1 }} />
+                      <View style={[styles.queueCourtChip, { backgroundColor: colors.surfaceSecondary }]}>
+                        <Icon name="court" size={12} color={colors.textSecondary} />
+                        <Text style={[styles.queueCourtText, { color: colors.textSecondary }]}>
+                          {entry.courtName || '코트 미정'}
+                        </Text>
+                      </View>
+                    </View>
+
+                    {/* grouped team of players */}
+                    <View style={styles.queuePlayers}>
+                      {entry.playerIds.map((pId, i) => {
+                        const p = getPlayer(pId);
+                        const skill = getSkillMeta(p?.skillLevel);
+                        const g = getGenderMeta(p?.gender);
+                        const isMe = !!user?.id && pId === user.id;
+                        const hasSkill = !!p?.skillLevel;
+                        return (
+                          <View
+                            key={pId}
+                            style={[
+                              styles.queuePlayerChip,
+                              { backgroundColor: isMe ? colors.primaryLight : colors.surfaceSecondary },
+                            ]}
+                          >
+                            <View
+                              style={[
+                                styles.queueSkillTag,
+                                hasSkill
+                                  ? { backgroundColor: skill.color, borderColor: skill.color }
+                                  : { backgroundColor: colors.surface, borderColor: colors.border },
+                              ]}
+                            >
+                              <Text style={[styles.queueSkillText, { color: hasSkill ? palette.white : colors.textLight }]}>
+                                {hasSkill ? skill.level : '·'}
+                              </Text>
+                            </View>
+                            <Text
+                              style={[styles.queueName, { color: isMe ? colors.primary : colors.text }]}
+                              numberOfLines={1}
+                            >
+                              {p?.userName || entry.playerNames?.[i] || '?'}{isMe ? ' (나)' : ''}
+                            </Text>
+                            {g && <Text style={[styles.queueGender, { color: g.color }]}>{g.symbol}</Text>}
+                          </View>
+                        );
+                      })}
+                    </View>
                   </View>
-                  {idx === 0 && <View style={[styles.queueNext, { backgroundColor: colors.primary }]}><Text style={styles.queueNextText}>다음</Text></View>}
-                </View>
-              ))}
+                );
+              })}
             </View>
           </>
         )}
@@ -380,16 +488,24 @@ const styles = StyleSheet.create({
   content: { padding: spacing.lg, gap: spacing.sm },
 
   // Viewer banner
-  myBanner: { borderRadius: radius.card, padding: spacing.lg, marginBottom: spacing.sm, alignItems: 'center', gap: 2 },
-  myBannerLabel: { ...typography.subtitle2, color: palette.white, opacity: 0.9 },
-  myBannerCourt: { ...typography.h3, color: palette.white },
+  myBanner: {
+    flexDirection: 'row', alignItems: 'center', gap: spacing.md,
+    borderRadius: radius.card, padding: spacing.lg, marginBottom: spacing.sm,
+  },
+  myBannerIcon: {
+    width: 44, height: 44, borderRadius: 22,
+    backgroundColor: 'rgba(255,255,255,0.22)',
+    alignItems: 'center', justifyContent: 'center',
+  },
+  myBannerLabel: { ...typography.subtitle2, color: palette.white, opacity: 0.92 },
+  myBannerCourt: { ...typography.h2, color: palette.white },
   myBannerWait: {
     flexDirection: 'row', alignItems: 'center', gap: spacing.sm,
     borderRadius: radius.card, borderWidth: 1.5, padding: spacing.md, marginBottom: spacing.sm,
   },
   myBannerWaitText: { ...typography.subtitle2, flex: 1 },
 
-  sectionTitle: { ...typography.overline, marginTop: spacing.sm, marginBottom: spacing.xs, paddingHorizontal: spacing.xs },
+  sectionTitle: { ...typography.subtitle2, fontSize: 15, marginTop: spacing.md, marginBottom: spacing.sm, paddingHorizontal: spacing.xs },
 
   // Grid
   grid: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.md },
@@ -398,53 +514,69 @@ const styles = StyleSheet.create({
   col3: { width: '31.8%' },
   empty: { ...typography.body2, padding: spacing.lg, textAlign: 'center', width: '100%' },
 
-  // Court card
-  courtCard: { borderRadius: radius.card, borderWidth: 1, padding: spacing.md, gap: spacing.sm, minHeight: 150 },
-  courtHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: spacing.xs },
-  courtName: { ...typography.subtitle1, flex: 1 },
+  // Court card — bigger, more scannable at arm's length
+  courtCard: { borderRadius: radius.card, borderWidth: 1, padding: spacing.lg, gap: spacing.md, minHeight: 172 },
+  courtHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: spacing.sm, marginBottom: spacing.xs },
+  courtNameWrap: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, flex: 1, minWidth: 0 },
+  courtName: { ...typography.h3, flexShrink: 1 },
+  mineDot: { width: 10, height: 10, borderRadius: 5 },
   courtStateBadge: {
     flexDirection: 'row', alignItems: 'center', gap: 5,
-    paddingHorizontal: spacing.sm, paddingVertical: 3, borderRadius: radius.pill,
+    paddingHorizontal: spacing.smd, paddingVertical: 4, borderRadius: radius.pill,
   },
   courtStateDot: { width: 7, height: 7, borderRadius: 4 },
-  courtStateText: { fontSize: 11, fontWeight: '700' },
-  mineBadge: { paddingHorizontal: spacing.sm, paddingVertical: 3, borderRadius: radius.pill },
-  mineBadgeText: { color: palette.white, fontSize: 11, fontWeight: '800' },
+  courtStateText: { fontSize: 12, fontWeight: '800' },
+  mineBadge: {
+    flexDirection: 'row', alignItems: 'center', gap: spacing.xs,
+    paddingHorizontal: spacing.md, paddingVertical: 5, borderRadius: radius.pill,
+  },
+  mineBadgeText: { color: palette.white, fontSize: 13, fontWeight: '900' },
 
-  // Match 2v2
-  match: { flexDirection: 'row', gap: spacing.sm, alignItems: 'center' },
-  teamWrap: { flex: 1, flexDirection: 'row', alignItems: 'center' },
-  vs: { fontSize: 11, fontWeight: '800', marginRight: spacing.sm },
-  team: { flex: 1, gap: spacing.xs },
+  // Match 2v2 — stacked teams with a clear VS divider between them
+  match: { gap: spacing.xs },
+  teamCol: { gap: spacing.xs },
+  team: { gap: spacing.xs },
+  vsRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, paddingVertical: 2 },
+  vsLine: { flex: 1, height: 1.5 },
+  vsChip: { paddingHorizontal: spacing.md, paddingVertical: 2, borderRadius: radius.pill },
+  vs: { fontSize: 13, fontWeight: '900', letterSpacing: 1 },
   // Empty on-court slot (PlayerCard handles filled slots)
   player: {
     flexDirection: 'row', alignItems: 'center', justifyContent: 'center',
     paddingHorizontal: spacing.sm, paddingVertical: spacing.xs,
     borderRadius: radius.md, borderWidth: 1, minHeight: 38,
   },
-  playerEmpty: { fontSize: 11, fontWeight: '600' },
+  playerEmpty: { fontSize: 12, fontWeight: '600' },
 
   emptyBox: {
-    minHeight: 84, borderWidth: 1, borderStyle: 'dashed',
+    minHeight: 96, borderWidth: 1, borderStyle: 'dashed',
     borderRadius: radius.lg, alignItems: 'center', justifyContent: 'center', gap: spacing.xs,
   },
-  emptyText: { ...typography.subtitle2 },
+  emptyText: { ...typography.subtitle1 },
 
-  // Queue
-  queueCard: { borderRadius: radius.card, borderWidth: 1, padding: spacing.md, gap: spacing.xs },
-  queueRow: {
-    flexDirection: 'row', alignItems: 'center', gap: spacing.sm,
-    paddingVertical: spacing.sm, borderBottomWidth: StyleSheet.hairlineWidth,
+  // Queue — each entry is a grouped, bordered team card
+  queueList: { gap: spacing.sm },
+  queueEntry: { borderRadius: radius.card, borderWidth: 1.5, padding: spacing.md, gap: spacing.smd },
+  queueEntryHeader: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
+  queueNum: { width: 28, height: 28, borderRadius: 14, alignItems: 'center', justifyContent: 'center' },
+  queueNumText: { fontSize: 14, fontWeight: '900' },
+  queueNext: { paddingHorizontal: spacing.smd, paddingVertical: 4, borderRadius: radius.pill },
+  queueNextText: { color: palette.white, fontSize: 12, fontWeight: '900' },
+  queueCourtChip: {
+    flexDirection: 'row', alignItems: 'center', gap: spacing.xs,
+    paddingHorizontal: spacing.sm, paddingVertical: 4, borderRadius: radius.pill,
   },
-  queueNum: { width: 26, height: 26, borderRadius: 13, alignItems: 'center', justifyContent: 'center' },
-  queueNumText: { fontSize: 12, fontWeight: '800' },
-  queueNames: { flex: 1, flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm },
-  queueNameChip: { flexDirection: 'row', alignItems: 'center', gap: spacing.xs },
-  queueDot: { width: 8, height: 8, borderRadius: 4 },
-  queueName: { fontSize: 13, fontWeight: '700' },
-  queueGender: { fontSize: 12, fontWeight: '900' },
-  queueNext: { paddingHorizontal: 7, paddingVertical: 2, borderRadius: radius.sm },
-  queueNextText: { color: palette.white, fontSize: 10, fontWeight: '800' },
+  queueCourtText: { fontSize: 12, fontWeight: '800' },
+  queuePlayers: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm },
+  queuePlayerChip: {
+    flexDirection: 'row', alignItems: 'center', gap: spacing.xs,
+    paddingLeft: spacing.xs, paddingRight: spacing.sm, paddingVertical: spacing.xs,
+    borderRadius: radius.lg,
+  },
+  queueSkillTag: { width: 22, height: 22, borderRadius: radius.sm, borderWidth: 1.5, alignItems: 'center', justifyContent: 'center' },
+  queueSkillText: { fontSize: 13, fontWeight: '900' },
+  queueName: { fontSize: 15, fontWeight: '800', maxWidth: 110 },
+  queueGender: { fontSize: 15, fontWeight: '900' },
 
   // Waiting line — wrapping grid
   waitWrap: { gap: spacing.sm },

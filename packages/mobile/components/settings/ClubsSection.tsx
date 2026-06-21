@@ -42,17 +42,11 @@ export function ClubsSection({
         <Text style={[styles.sectionTitle, { color: colors.text }]}>{Strings.settings.clubs}</Text>
         <View style={styles.headerActions}>
           <Button
-            title={Strings.club.create}
-            onPress={onCreateClub}
+            title={Strings.club.join}
+            onPress={onJoinClub}
             variant="primary"
             size="sm"
             icon="add"
-          />
-          <Button
-            title={Strings.club.join}
-            onPress={onJoinClub}
-            variant="outline"
-            size="sm"
           />
         </View>
       </View>
@@ -62,7 +56,7 @@ export function ClubsSection({
           <EmptyState
             icon="club"
             title={Strings.club.noClubs}
-            description="모임을 만들거나 초대코드로 참여하세요"
+            description="초대코드로 모임에 참여하세요"
           />
         ) : (
           clubs.map((club: Club, idx: number) => (
@@ -117,6 +111,19 @@ export function ClubsSection({
           ))
         )}
       </Card>
+
+      <TouchableOpacity
+        style={styles.createLink}
+        onPress={onCreateClub}
+        activeOpacity={0.6}
+        accessibilityRole="button"
+        accessibilityLabel={Strings.club.create}
+      >
+        <Icon name="add" size={14} color={colors.textSecondary} />
+        <Text style={[styles.createLinkText, { color: colors.textSecondary }]}>
+          새 모임 만들기
+        </Text>
+      </TouchableOpacity>
     </View>
   );
 }
@@ -173,6 +180,18 @@ const styles = StyleSheet.create({
   },
   clubMetaText: {
     ...typography.caption,
+  },
+  createLink: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: spacing.xs,
+    paddingVertical: spacing.md,
+    marginTop: spacing.sm,
+  },
+  createLinkText: {
+    ...typography.body2,
+    fontWeight: '500',
   },
   shareBtn: {
     padding: spacing.xs,

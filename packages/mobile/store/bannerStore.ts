@@ -4,6 +4,8 @@ export interface BannerPayload {
   title: string;
   subtitle?: string;
   courtName?: string;
+  /** Active 정모 id — lets the banner tap route straight to the live board. */
+  clubSessionId?: string;
 }
 
 interface BannerState {
@@ -11,6 +13,7 @@ interface BannerState {
   title: string;
   subtitle?: string;
   courtName?: string;
+  clubSessionId?: string;
   show: (payload: BannerPayload) => void;
   hide: () => void;
 }
@@ -24,9 +27,10 @@ export const useBannerStore = create<BannerState>((set) => ({
   title: '',
   subtitle: undefined,
   courtName: undefined,
+  clubSessionId: undefined,
 
-  show: ({ title, subtitle, courtName }) =>
-    set({ visible: true, title, subtitle, courtName }),
+  show: ({ title, subtitle, courtName, clubSessionId }) =>
+    set({ visible: true, title, subtitle, courtName, clubSessionId }),
 
   hide: () => set({ visible: false }),
 }));

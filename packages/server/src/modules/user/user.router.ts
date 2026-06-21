@@ -4,6 +4,7 @@ import { authenticate } from '../../middleware/auth';
 import { validate } from '../../middleware/validate';
 import * as userService from './user.service';
 import * as turnService from '../turn/turn.service';
+import { getMyStatus } from '../clubSession/clubSession.service';
 
 const router = Router();
 
@@ -12,6 +13,16 @@ router.get('/me/turns/current', authenticate, async (req: Request, res: Response
   try {
     const turns = await turnService.getMyTurns(req.user!.userId);
     res.json(turns);
+  } catch (err) { next(err); }
+});
+
+// GET /users/me/status - board-aware "my upcoming game" (PLAYING/QUEUED/AVAILABLE)
+// derived from the active 정모's board + turns. Powers 내 현황 / 홈 so a court-less
+// QUEUED entry surfaces as "다음 게임 · 대기 N번째" instead of a flat "대기 중".
+router.get('/me/status', authenticate, async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const status = await getMyStatus(req.user!.userId);
+    res.json(status);
   } catch (err) { next(err); }
 });
 

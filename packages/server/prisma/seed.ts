@@ -104,13 +104,12 @@ async function main() {
     },
   });
 
-  // Create 4 courts
-  const courts = [];
+  // Facility-level courts (clubSessionId = null) for the facility-admin dashboard.
+  // 정모s do NOT use these — each 정모 owns its OWN courts (created below).
   for (let i = 1; i <= 4; i++) {
-    const court = await prisma.court.create({
+    await prisma.court.create({
       data: { name: `코트 ${i}`, facilityId: facility.id },
     });
-    courts.push(court);
   }
 
   // Club A: 번개 배드민턴 (leader1 + 15 players)
@@ -143,16 +142,8 @@ async function main() {
     },
   });
 
-  // Check in all users at the facility
-  const allUsers = [admin, leader1, leader2, ...players];
-  for (const u of allUsers) {
-    await prisma.checkIn.create({
-      data: { userId: u.id, facilityId: facility.id },
-    });
-  }
-
   // Open a facility session
-  await prisma.facilitySession.create({
+  const facilitySession = await prisma.facilitySession.create({
     data: {
       facilityId: facility.id,
       openedById: admin.id,
@@ -161,13 +152,56 @@ async function main() {
     },
   });
 
-  // Court 1: Turn 1 (PLAYING) with game in progress
+  // ── ACTIVE 정모 for Club A with its OWN courts (코트 1~4) ──
+  // Courts belong to THIS 정모 (clubSessionId = sessionA). Another 정모 could have
+  // identically-named 코트 1~4 with NO conflict — they never interact.
+  const sessionA = await prisma.clubSession.create({
+    data: {
+      clubId: clubA.id,
+      facilityId: facility.id,
+      facilitySessionId: facilitySession.id,
+      startedById: leader1.id,
+      status: 'ACTIVE',
+      courtIds: [],
+    },
+  });
+  const courts = [];
+  for (let i = 1; i <= 4; i++) {
+    const court = await prisma.court.create({
+      data: { name: `코트 ${i}`, facilityId: facility.id, clubSessionId: sessionA.id },
+    });
+    courts.push(court);
+  }
+  await prisma.clubSession.update({
+    where: { id: sessionA.id },
+    data: { courtIds: courts.map((c) => c.id) },
+  });
+
+  // Check-ins: Club A members are checked into 정모 A (clubSessionId = sessionA)
+  // so they fill the 정모's pool; the rest are facility-only check-ins.
+  const clubAUserIds = new Set<string>([
+    leader1.id,
+    ...players.slice(0, 15).map((p) => p.id),
+  ]);
+  const allUsers = [admin, leader1, leader2, ...players];
+  for (const u of allUsers) {
+    await prisma.checkIn.create({
+      data: {
+        userId: u.id,
+        facilityId: facility.id,
+        ...(clubAUserIds.has(u.id) ? { clubSessionId: sessionA.id } : {}),
+      },
+    });
+  }
+
+  // Court 1 (정모 A): Turn 1 (PLAYING) with game in progress
   const turn1 = await prisma.courtTurn.create({
     data: {
       courtId: courts[0].id,
       position: 1,
       status: 'PLAYING',
       createdById: leader1.id,
+      clubSessionId: sessionA.id,
       startedAt: new Date(),
       players: {
         create: [
@@ -201,13 +235,14 @@ async function main() {
     data: { status: 'IN_USE' },
   });
 
-  // Court 1: Turn 2 (WAITING)
+  // Court 1 (정모 A): Turn 2 (WAITING)
   await prisma.courtTurn.create({
     data: {
       courtId: courts[0].id,
       position: 2,
       status: 'WAITING',
       createdById: players[1].id,
+      clubSessionId: sessionA.id,
       players: {
         create: [
           { userId: players[1].id },  // 박서준 S
@@ -219,13 +254,14 @@ async function main() {
     },
   });
 
-  // Court 2: Turn 1 (PLAYING)
+  // Court 2 (정모 A): Turn 1 (PLAYING)
   const turn2 = await prisma.courtTurn.create({
     data: {
       courtId: courts[1].id,
       position: 1,
       status: 'PLAYING',
-      createdById: leader2.id,
+      createdById: leader1.id,
+      clubSessionId: sessionA.id,
       startedAt: new Date(),
       players: {
         create: [
@@ -267,9 +303,10 @@ async function main() {
   console.log(`Players: 30명 (${MEMBERS.map((m) => `${m.name}${m.skill}`).join(', ')})`);
   console.log(`Club A invite: CLUBAA01 (16명)`);
   console.log(`Club B invite: CLUBBB02 (16명)`);
-  console.log(`Court 1: IN_USE (이경윤S/김민재A/오승우B/강태우C)`);
-  console.log(`Court 2: IN_USE (최동현A/윤성호B/신동욱C/권도윤D)`);
-  console.log(`Courts 3-4: EMPTY`);
+  console.log(`정모 A (번개 배드민턴): ACTIVE — 자기 코트 1~4`);
+  console.log(`  Court 1: IN_USE (이경윤S/김민재A/오승우B/강태우C)`);
+  console.log(`  Court 2: IN_USE (최동현A/윤성호B/신동욱C/권도윤D)`);
+  console.log(`  Courts 3-4: EMPTY`);
 }
 
 main()

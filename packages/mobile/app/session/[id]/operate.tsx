@@ -10,14 +10,14 @@ import { useTheme } from '../../../hooks/useTheme';
 import { useResponsiveLayout, courtColumnsFor } from '../../../hooks/useResponsiveLayout';
 import type { LayoutChangeEvent } from 'react-native';
 import { useAuthStore } from '../../../store/authStore';
-import { useFacilityRoom, useSocketEvent } from '../../../hooks/useSocket';
+import { useFacilityRoom, useClubRoom, useSocketEvent } from '../../../hooks/useSocket';
 import { Icon } from '../../../components/ui/Icon';
 import { getSkillMeta, SKILL_LEVELS } from '../../../constants/skill';
 import { getGenderMeta, getGameType } from '../../../constants/gender';
 import { PlayerCard } from '../../../components/game-board/PlayerCard';
 import api from '../../../services/api';
 import { clubApi } from '../../../services/club';
-import { clubSessionApi, GuestFeeSettlement, PlayerMatchups } from '../../../services/clubSession';
+import { clubSessionApi, GuestFeeSettlement, PlayerMatchups, SessionCourt } from '../../../services/clubSession';
 import { courtApi } from '../../../services/court';
 import { showAlert, showConfirm } from '../../../utils/alert';
 import { showSuccess } from '../../../utils/feedback';
@@ -41,6 +41,15 @@ interface Court {
   id: string;
   name: string;
   status: string; // EMPTY | IN_USE | MAINTENANCE
+  // The currently-running game on this court (from the server), if any. Present
+  // even for games created directly (no GameBoardEntry) so the board never
+  // mistakes an occupied court for empty.
+  currentTurn?: {
+    id: string;
+    status: string;
+    playerIds: string[];
+    playerNames: string[];
+  } | null;
 }
 
 type RoleState = 'loading' | 'allowed' | 'denied';
@@ -109,6 +118,9 @@ export default function OperateScreen() {
   const [players, setPlayers] = useState<Player[]>([]);
   const [facilityId, setFacilityId] = useState<string | undefined>(undefined);
   const [clubName, setClubName] = useState<string>('');
+  const [clubId, setClubId] = useState<string | undefined>(undefined);
+  // 운영판에 머무는 동안 들어온 채팅/건의(특히 짝 요청) 개수 — 헤더에 빨간 점으로 표시.
+  const [unreadChat, setUnreadChat] = useState(0);
 
   // Permission self-guard (per-club role, NOT the global gate)
   const [roleState, setRoleState] = useState<RoleState>('loading');
@@ -124,7 +136,7 @@ export default function OperateScreen() {
   const [feeModal, setFeeModal] = useState(false);
   const [courtModal, setCourtModal] = useState(false);
   // Matchup popup: the player whose "오늘 함께 친 사람" sheet is open (null = closed).
-  const [matchupTarget, setMatchupTarget] = useState<{ userId: string; name: string } | null>(null);
+  const [matchupTarget, setMatchupTarget] = useState<{ userId: string; name: string; isGuest?: boolean } | null>(null);
 
   // Swap: { entryId, slotIndex } of the queued-game slot being replaced
   const [swapTarget, setSwapTarget] = useState<{ entryId: string; slotIndex: number } | null>(null);
@@ -212,6 +224,7 @@ export default function OperateScreen() {
       if (!alive) return;
       setFacilityId(data?.facilityId);
       setClubName(data?.clubName || '');
+      setClubId(data?.clubId);
 
       // per-club role check
       try {
@@ -229,19 +242,24 @@ export default function OperateScreen() {
     return () => { alive = false; };
   }, [clubSessionId, user?.id]);
 
-  // ─── Load courts + players once facility known ───
+  // ─── Load courts + players (per-정모 scoped) ───
+  // Courts come from THIS 정모's courtIds (not the whole facility), so each
+  // operator only sees/assigns to their own courts. Pool is session-scoped so
+  // only THIS 정모's checked-in players show (not the whole facility).
   const loadCourts = useCallback(() => {
-    if (!facilityId) return Promise.resolve();
-    return courtApi.list(facilityId).then(({ data }) => setCourts(data || [])).catch(() => {});
-  }, [facilityId]);
+    if (!clubSessionId) return Promise.resolve();
+    return api.get(`/club-sessions/${clubSessionId}/courts`)
+      .then(({ data }) => setCourts(data || []))
+      .catch(() => {});
+  }, [clubSessionId]);
 
   const loadPool = useCallback(() => {
-    if (!facilityId) return;
+    if (!clubSessionId) return;
     Promise.all([
       loadCourts(),
-      api.get(`/facilities/${facilityId}/players`).then(({ data }) => setPlayers(data || [])),
+      api.get(`/club-sessions/${clubSessionId}/players`).then(({ data }) => setPlayers(data || [])),
     ]).catch(() => {});
-  }, [facilityId, loadCourts]);
+  }, [clubSessionId, loadCourts]);
 
   useEffect(() => { loadPool(); }, [loadPool]);
 
@@ -257,6 +275,13 @@ export default function OperateScreen() {
   useSocketEvent('turn:completed', handleRealtime);
   useSocketEvent('turn:started', handleRealtime);
   useSocketEvent('clubSession:courtsUpdated', handleRealtime);
+
+  // ─── 채팅/건의 실시간: 이 모임 룸에 참여, 새 메시지가 오면 헤더에 미확인 표시 ───
+  useClubRoom(clubId);
+  const handleClubMessage = useCallback((msg: any) => {
+    if (clubId && msg?.clubId === clubId) setUnreadChat((n) => n + 1);
+  }, [clubId]);
+  useSocketEvent('clubMessage:new', handleClubMessage);
 
   // ─── Ensure board exists ───
   useEffect(() => {
@@ -510,32 +535,35 @@ export default function OperateScreen() {
       await assignEntry(entryId, courtId);
       setAssignTarget(null);
       loadBoard();
+      loadCourts();
       loadPool();
       showSuccess(`${court?.name || '코트'}에 배정!`);
     } catch (err: any) {
       showAlert('오류', err.response?.data?.error || '배정 실패');
     }
-  }, [courts, assignEntry, loadBoard, loadPool]);
+  }, [courts, assignEntry, loadBoard, loadCourts, loadPool]);
 
-  // Tap an empty court → assign the first ASSIGNABLE queued game (a full
-  // 4-player doubles foursome) onto it. Partial 2–3 player games can't be
-  // assigned (server needs 4); show a friendly hint instead of erroring.
+  // Tap an empty court → assign the first ASSIGNABLE queued game onto it. A
+  // game is assignable with 2–4 players (단식 2 / 복식 3–4 / 부분 편성). Only a
+  // 1-player draft can't materialize; the server returns the friendly hint.
   const handleAssignToCourt = useCallback((courtId: string) => {
     if (queuedEntries.length === 0) return;
-    const firstFull = queuedEntries.find((e) => e.playerIds.length === 4);
-    if (!firstFull) {
-      showAlert('알림', '배정하려면 4명을 채워주세요 (복식은 4명이 필요해요)');
+    const firstAssignable = queuedEntries.find((e) => e.playerIds.length >= 2);
+    if (!firstAssignable) {
+      showAlert('알림', '2명 이상이어야 배정할 수 있어요');
       return;
     }
-    handleAssign(firstFull.id, courtId);
+    handleAssign(firstAssignable.id, courtId);
   }, [queuedEntries, handleAssign]);
 
   // ─── 게임 종료 (코트 위 게임 턴 완료) ───
   const handleEndGame = useCallback(
     (courtId: string) => {
-      const playing = playingByCourtId.get(courtId);
       const court = courts.find((c) => c.id === courtId);
-      if (!playing?.turnId) {
+      // Prefer the board entry's turnId; fall back to the court's currentTurn
+      // (games created directly have no GameBoardEntry).
+      const turnId = playingByCourtId.get(courtId)?.turnId ?? court?.currentTurn?.id ?? null;
+      if (!turnId) {
         showAlert('알림', '이 코트에서 진행 중인 게임 정보를 찾을 수 없어요.');
         return;
       }
@@ -544,8 +572,9 @@ export default function OperateScreen() {
         `${court?.name || '코트'}의 게임을 종료할까요?`,
         async () => {
           try {
-            await clubSessionApi.completeTurn(playing.turnId as string);
+            await clubSessionApi.completeTurn(turnId);
             loadBoard();
+            loadCourts();
             loadPool();
             showSuccess('게임 종료!');
           } catch (err: any) {
@@ -555,7 +584,7 @@ export default function OperateScreen() {
         '종료', '취소', 'danger',
       );
     },
-    [playingByCourtId, courts, loadBoard, loadPool],
+    [playingByCourtId, courts, loadBoard, loadCourts, loadPool],
   );
 
   const handleDeleteQueued = useCallback(
@@ -593,6 +622,34 @@ export default function OperateScreen() {
       '종료', '취소', 'danger',
     );
   }, [clubSessionId, router]);
+
+  // ─── 운영자: 특정 참가자를 정모에서 체크아웃 ───
+  // Self-checkout과 동일한 정리를 서버에서 수행. 성공 시 모달을 닫고 풀/보드를
+  // 갱신(소켓 players:updated 도 함께 갱신). 실수 방지를 위해 확인 단계를 둠.
+  const handleOperatorCheckout = useCallback(
+    (targetUserId: string, targetName: string) => {
+      if (!clubSessionId) return;
+      showConfirm(
+        '체크아웃 시키기',
+        `${targetName}님을 정모에서 체크아웃할까요? 대기 중인 순번은 취소되고 출석 목록에서 제거됩니다.`,
+        async () => {
+          try {
+            await clubSessionApi.checkoutPlayer(clubSessionId, targetUserId);
+            setMatchupTarget(null);
+            loadPool();
+            loadBoard();
+            showSuccess(`${targetName}님 체크아웃 완료`);
+          } catch (err: any) {
+            showAlert('오류', err?.response?.data?.error || '체크아웃에 실패했어요');
+          }
+        },
+        '체크아웃',
+        '취소',
+        'danger',
+      );
+    },
+    [clubSessionId, loadPool, loadBoard],
+  );
 
   // ─── 플레이어 교체 (큐 게임의 한 슬롯을 다른 사람으로) ───
   const handleSwapPlayer = useCallback(async (replacementId: string) => {
@@ -906,7 +963,7 @@ export default function OperateScreen() {
     const infoButton = (
       <TouchableOpacity
         style={[styles.infoBtn, { borderColor: colors.border, backgroundColor: colors.surface }]}
-        onPress={() => setMatchupTarget({ userId: m.userId, name: m.userName })}
+        onPress={() => setMatchupTarget({ userId: m.userId, name: m.userName, isGuest: m.isGuest })}
         hitSlop={6}
         accessibilityLabel={`${m.userName} 매치업 보기`}
         {...(Platform.OS === 'web'
@@ -1256,9 +1313,12 @@ export default function OperateScreen() {
       }),
     ).current;
 
-    // A queued game is court-assignable only as a full doubles foursome (4).
+    // A queued game is court-assignable with 2–4 players (단식 2 / 복식 3–4 /
+    // 부분 편성). Only a 1-player draft can't be assigned. `isFull` (=4) is kept
+    // for the "(n/4)" affordance hints only.
     const isFull = entry.playerIds.length === 4;
-    const canAssign = emptyCourts.length > 0 && isFull;
+    const isAssignable = entry.playerIds.length >= 2;
+    const canAssign = emptyCourts.length > 0 && isAssignable;
     const isNext = idx === 0;
 
     // ── COLLAPSED: a scannable card-ish row. Two stacked lines:
@@ -1378,16 +1438,16 @@ export default function OperateScreen() {
               >
                 <Icon name="chevronDown" size={15} color={colors.textSecondary} />
               </TouchableOpacity>
-              {/* Court assignment requires a real doubles foursome (4 players).
-                  A partial 2–3 player game can sit in the queue and be edited,
-                  but its 배정 is disabled with a friendly "4명을 채워주세요" hint. */}
+              {/* Court assignment accepts 2–4 players (단식/복식/부분 편성). Only a
+                  1-player draft is blocked with a friendly hint; the server also
+                  guards this ("2명 이상이어야 배정할 수 있어요"). */}
               <TouchableOpacity
                 style={[styles.queueActionBtn, {
                   backgroundColor: canAssign ? colors.primaryBg : colors.surfaceSecondary,
                   borderColor: canAssign ? colors.primary : colors.border,
                 }]}
                 onPress={() => {
-                  if (!isFull) { showAlert('알림', '4명을 채워주세요 (복식은 4명이 필요해요)'); return; }
+                  if (!isAssignable) { showAlert('알림', '2명 이상이어야 배정할 수 있어요'); return; }
                   setAssignTarget(isAssigning ? null : entry.id);
                 }}
                 disabled={emptyCourts.length === 0}
@@ -1395,7 +1455,7 @@ export default function OperateScreen() {
               >
                 <Icon name="play" size={14} color={canAssign ? colors.primary : colors.textLight} />
                 <Text style={[styles.queueActionText, { color: canAssign ? colors.primary : colors.textLight }]}>
-                  {emptyCourts.length === 0 ? '빈 코트 없음' : !isFull ? '4명을 채워주세요' : '코트 배정'}
+                  {emptyCourts.length === 0 ? '빈 코트 없음' : !isAssignable ? '2명 이상 필요' : '코트 배정'}
                 </Text>
               </TouchableOpacity>
               <TouchableOpacity
@@ -1454,9 +1514,19 @@ export default function OperateScreen() {
   );
 
   const CourtCard = ({ court }: { court: Court }) => {
-    const playing = playingByCourtId.get(court.id);
     const isMaint = court.status === 'MAINTENANCE';
-    const isEmpty = !playing && !isMaint;
+    // A court is EMPTY only when the SERVER says so (court.status). Relying on
+    // board entries alone misses games created directly (no GameBoardEntry, e.g.
+    // seeded games or turns started outside the board) and would let the board
+    // offer to assign onto an occupied court. Prefer the board entry for the
+    // in-use details; fall back to the court's own currentTurn so an occupied
+    // court without a board entry still renders correctly.
+    const playingEntry = playingByCourtId.get(court.id);
+    const isEmpty = !isMaint && court.status === 'EMPTY' && !playingEntry;
+    // Unified player data for the in-use card: board entry first, else the
+    // server-provided currentTurn.
+    const occupiedPlayerIds = playingEntry?.playerIds ?? court.currentTurn?.playerIds ?? [];
+    const occupiedPlayerNames = playingEntry?.playerNames ?? court.currentTurn?.playerNames ?? [];
     // Width comes from the MEASURED court area / column count (not the window),
     // so each court is wide enough that its inner 2×2 cell is ≥ ~150px.
     const courtWidth = courtCardWidth ? { width: courtCardWidth } : null;
@@ -1465,15 +1535,15 @@ export default function OperateScreen() {
     // A slim single row: court name + a clear "비어있음 · 탭하여 배정" affordance.
     // Tapping an empty court with a queued game ready assigns the next game.
     if (isEmpty || isMaint) {
-      // Only a full 4-player queued game is assignable; partial games can't.
-      const hasAssignable = queuedEntries.some((e) => e.playerIds.length === 4);
+      // A queued game with 2–4 players is assignable; only a 1-player draft is not.
+      const hasAssignable = queuedEntries.some((e) => e.playerIds.length >= 2);
       const canAssign = isEmpty && hasAssignable;
       const affordance = isMaint
         ? '사용 불가'
         : canAssign
           ? '탭하여 다음 게임 배정'
           : queuedEntries.length > 0
-            ? '4명 채운 게임 없음'
+            ? '배정 가능한 게임 없음'
             : '대기 게임 없음';
       const dotColor = isMaint ? colors.courtMaintenance : colors.courtEmpty;
       const Wrapper: any = canAssign ? TouchableOpacity : View;
@@ -1524,7 +1594,7 @@ export default function OperateScreen() {
       >
         <View style={styles.courtCardHeader}>
           <Text style={[styles.courtCardName, { color: colors.text }]} numberOfLines={1}>{court.name}</Text>
-          <GameTypeLabel playerIds={playing!.playerIds} />
+          <GameTypeLabel playerIds={occupiedPlayerIds} />
           <View style={[styles.courtStateBadge, { backgroundColor: colors.warningLight }]}>
             <View style={[styles.courtStateDot, { backgroundColor: colors.courtInGame }]} />
             <Text style={[styles.courtStateText, { color: colors.warning }]}>게임 중</Text>
@@ -1534,8 +1604,8 @@ export default function OperateScreen() {
         {/* Readable 2×2 grid: 급수 avatar + FULL name + gender + 게임수. */}
         <View style={styles.gameGrid}>
           {[0, 1, 2, 3].map((slotIdx) => {
-            const pId = playing!.playerIds[slotIdx];
-            const name = playing!.playerNames?.[slotIdx];
+            const pId = occupiedPlayerIds[slotIdx];
+            const name = occupiedPlayerNames?.[slotIdx];
             const busy = pId ? busySet.has(pId) : false;
             return (
               <View key={slotIdx} style={styles.gameGridCell}>
@@ -1581,6 +1651,25 @@ export default function OperateScreen() {
         <Icon name="court" size={16} color={colors.primary} />
         <Text style={[styles.headerLinkText, { color: colors.primary }]}>코트 관리</Text>
       </TouchableOpacity>
+      {!!clubId && (
+        <TouchableOpacity
+          style={[styles.headerLink, { borderColor: colors.border }]}
+          onPress={() => {
+            setUnreadChat(0);
+            router.push(`/club/${clubId}/chat`);
+          }}
+          activeOpacity={0.8}
+          accessibilityLabel="채팅 건의"
+        >
+          <Text style={styles.headerChatIcon}>💬</Text>
+          <Text style={[styles.headerLinkText, { color: colors.primary }]}>건의</Text>
+          {unreadChat > 0 && (
+            <View style={[styles.unreadDot, { backgroundColor: colors.danger }]}>
+              <Text style={styles.unreadDotText}>{unreadChat > 9 ? '9+' : unreadChat}</Text>
+            </View>
+          )}
+        </TouchableOpacity>
+      )}
       <TouchableOpacity
         style={[styles.headerLink, { borderColor: colors.border }]}
         onPress={() => router.push(`/session/${clubSessionId}/board`)}
@@ -1588,6 +1677,15 @@ export default function OperateScreen() {
       >
         <Icon name="tv" size={16} color={colors.primary} />
         <Text style={[styles.headerLinkText, { color: colors.primary }]}>현황 보드</Text>
+      </TouchableOpacity>
+      <TouchableOpacity
+        style={[styles.headerLink, { borderColor: colors.border }]}
+        onPress={() => router.push(`/session/${clubSessionId}/qr`)}
+        activeOpacity={0.8}
+        accessibilityLabel="출석 QR"
+      >
+        <Icon name="qr" size={16} color={colors.primary} />
+        <Text style={[styles.headerLinkText, { color: colors.primary }]}>출석 QR</Text>
       </TouchableOpacity>
       <TouchableOpacity
         style={[styles.headerLink, { borderColor: colors.danger, backgroundColor: colors.dangerBg }]}
@@ -1630,7 +1728,6 @@ export default function OperateScreen() {
         <CourtManageModal
           facilityId={facilityId}
           sessionId={clubSessionId!}
-          courts={courts}
           colors={colors}
           occupiedCourtIds={new Set([...playingByCourtId.keys()])}
           onClose={() => setCourtModal(false)}
@@ -1655,6 +1752,7 @@ export default function OperateScreen() {
           clubSessionId={clubSessionId}
           userId={matchupTarget.userId}
           name={matchupTarget.name}
+          onCheckout={() => handleOperatorCheckout(matchupTarget.userId, matchupTarget.name)}
           onClose={() => setMatchupTarget(null)}
         />
       )}
@@ -1851,12 +1949,13 @@ function SwapPlayerModal({
 // count desc) on open. Read-only, calm. Shows "기록 없음" when no partners yet.
 // ─────────────────────────────────────────────────────────
 function MatchupModal({
-  colors, clubSessionId, userId, name, onClose,
+  colors, clubSessionId, userId, name, onCheckout, onClose,
 }: {
   colors: any;
   clubSessionId: string;
   userId: string;
   name: string;
+  onCheckout: () => void;
   onClose: () => void;
 }) {
   const [data, setData] = useState<PlayerMatchups | null>(null);
@@ -1929,6 +2028,20 @@ function MatchupModal({
               })}
             </ScrollView>
           )}
+
+          {/* 운영자 액션: 이 참가자를 정모에서 체크아웃 (danger). 매치업 탭은
+              건드리지 않고 여기 detail 모달에만 둠. 확인 단계를 거침. */}
+          <TouchableOpacity
+            style={[modalStyles.checkoutBtn, { borderColor: colors.danger }]}
+            onPress={onCheckout}
+            activeOpacity={0.85}
+            accessibilityLabel={`${name} 체크아웃 시키기`}
+          >
+            <Icon name="close" size={16} color={colors.danger} />
+            <Text style={[modalStyles.checkoutBtnText, { color: colors.danger }]}>
+              체크아웃 시키기
+            </Text>
+          </TouchableOpacity>
         </View>
       </View>
     </Modal>
@@ -1939,38 +2052,48 @@ function MatchupModal({
 // Court-management modal — list / add / rename / availability
 // ─────────────────────────────────────────────────────────
 function CourtManageModal({
-  facilityId, sessionId, courts, colors, occupiedCourtIds, onClose, onChanged, onEndSession,
+  facilityId, sessionId, colors, occupiedCourtIds, onClose, onChanged, onEndSession,
 }: {
   facilityId: string;
   sessionId: string;
-  courts: Court[];
   colors: any;
   occupiedCourtIds: Set<string>;
   onClose: () => void;
   onChanged: () => Promise<any> | void;
   onEndSession: () => void;
 }) {
-  const [newName, setNewName] = useState('');
   const [adding, setAdding] = useState(false);
   const [renamingId, setRenamingId] = useState<string | null>(null);
   const [renameDraft, setRenameDraft] = useState('');
   const [busyId, setBusyId] = useState<string | null>(null);
 
+  // THIS 정모's OWN courts only (코트1·2·3). No other 모임's courts, no locking.
+  const [facilityCourts, setFacilityCourts] = useState<SessionCourt[]>([]);
+
+  const reload = useCallback(async () => {
+    try {
+      const { data } = await clubSessionApi.getFacilityCourts(sessionId);
+      setFacilityCourts(data || []);
+    } catch { /* keep prior */ }
+    await onChanged();
+  }, [sessionId, onChanged]);
+
+  useEffect(() => { reload(); }, [reload]);
+
+  // 코트 추가 (이 정모 전용): 서버가 이 정모의 다음 "코트 N"을 만들어 붙인다.
+  // 다른 모임과 충돌 없음 — 항상 성공.
   const addCourt = useCallback(async () => {
-    const name = newName.trim();
-    if (!name) { showAlert('알림', '코트 이름을 입력해주세요'); return; }
     setAdding(true);
     try {
-      await courtApi.create(facilityId, name);
-      setNewName('');
-      await onChanged();
-      showSuccess('코트 추가 완료!');
+      const { data } = await clubSessionApi.addCourt(sessionId);
+      await reload();
+      showSuccess(`${data?.court?.name || '코트'} 추가 완료!`);
     } catch (err: any) {
       showAlert('오류', err.response?.data?.error || '코트 추가 실패');
     } finally {
       setAdding(false);
     }
-  }, [newName, facilityId, onChanged]);
+  }, [sessionId, reload]);
 
   const saveRename = useCallback(async (courtId: string) => {
     const name = renameDraft.trim();
@@ -1979,16 +2102,16 @@ function CourtManageModal({
     try {
       await courtApi.rename(courtId, name);
       setRenamingId(null);
-      await onChanged();
+      await reload();
       showSuccess('이름 변경 완료!');
     } catch (err: any) {
       showAlert('오류', err.response?.data?.error || '이름 변경 실패');
     } finally {
       setBusyId(null);
     }
-  }, [renameDraft, onChanged]);
+  }, [renameDraft, reload]);
 
-  const toggleAvailability = useCallback(async (court: Court) => {
+  const toggleAvailability = useCallback(async (court: SessionCourt) => {
     const makeUnavailable = court.status !== 'MAINTENANCE';
     if (makeUnavailable && occupiedCourtIds.has(court.id)) {
       showAlert('알림', '게임이 진행 중인 코트는 사용 불가로 바꿀 수 없어요. 먼저 게임을 종료하세요.');
@@ -1998,18 +2121,18 @@ function CourtManageModal({
     try {
       if (makeUnavailable) await courtApi.setUnavailable(court.id);
       else await courtApi.setAvailable(court.id);
-      await onChanged();
+      await reload();
     } catch (err: any) {
       showAlert('오류', err.response?.data?.error || '상태 변경 실패');
     } finally {
       setBusyId(null);
     }
-  }, [occupiedCourtIds, onChanged]);
+  }, [occupiedCourtIds, reload]);
 
   // Delete a court. The server returns a 400 with a friendly {error} message
   // when the court is IN_USE or has usage history ("사용 기록이 있는 코트는
   // 삭제할 수 없어요. 대신 '사용 불가'로 두세요.") — surface it, never crash.
-  const removeCourt = useCallback((court: Court) => {
+  const removeCourt = useCallback((court: SessionCourt) => {
     if (occupiedCourtIds.has(court.id)) {
       showAlert('알림', '게임이 진행 중인 코트는 삭제할 수 없어요. 먼저 게임을 종료하세요.');
       return;
@@ -2021,7 +2144,7 @@ function CourtManageModal({
         setBusyId(court.id);
         try {
           await courtApi.remove(court.id);
-          await onChanged();
+          await reload();
           showSuccess('코트 삭제 완료!');
         } catch (err: any) {
           showAlert('알림', err.response?.data?.error || '코트를 삭제할 수 없어요');
@@ -2031,7 +2154,7 @@ function CourtManageModal({
       },
       '삭제', '취소', 'danger',
     );
-  }, [occupiedCourtIds, onChanged]);
+  }, [occupiedCourtIds, reload]);
 
   return (
     <Modal visible transparent animationType="fade" onRequestClose={onClose}>
@@ -2044,36 +2167,41 @@ function CourtManageModal({
             </TouchableOpacity>
           </View>
 
-          {/* Add court */}
-          <View style={modalStyles.courtAddRow}>
-            <TextInput
-              style={[modalStyles.input, { flex: 1, color: colors.text, borderColor: colors.border, backgroundColor: colors.background }]}
-              value={newName}
-              onChangeText={setNewName}
-              placeholder="새 코트 이름 (예: 코트 5)"
-              placeholderTextColor={colors.textLight}
-              onSubmitEditing={addCourt}
-            />
-            <TouchableOpacity
-              style={[modalStyles.courtAddBtn, { backgroundColor: colors.primary, opacity: adding ? 0.6 : 1 }]}
-              onPress={addCourt}
-              disabled={adding}
-              activeOpacity={0.85}
-            >
-              {adding ? <ActivityIndicator size="small" color={palette.white} /> : (
-                <Text style={modalStyles.courtAddBtnText}>추가</Text>
-              )}
-            </TouchableOpacity>
-          </View>
+          {/* Add court — auto-named (코트 N), added straight to THIS 정모. */}
+          <TouchableOpacity
+            style={[modalStyles.addCourtBtn, { backgroundColor: colors.primary, opacity: adding ? 0.6 : 1 }]}
+            onPress={addCourt}
+            disabled={adding}
+            activeOpacity={0.85}
+          >
+            {adding ? <ActivityIndicator size="small" color={palette.white} /> : (
+              <>
+                <Icon name="add" size={16} color={palette.white} />
+                <Text style={modalStyles.addCourtBtnText}>코트 추가</Text>
+              </>
+            )}
+          </TouchableOpacity>
 
-          <ScrollView style={{ maxHeight: 380 }} showsVerticalScrollIndicator={false} refreshControl={undefined}>
-            {courts.length === 0 ? (
+          <Text style={[modalStyles.courtSectionHint, { color: colors.textLight }]}>
+            이 정모 전용 코트예요. "코트 추가"로 코트를 더 만들거나, 이름 변경·사용 불가·삭제할 수 있어요. 다른 모임 코트와는 완전히 별개예요.
+          </Text>
+          <ScrollView style={{ maxHeight: 360 }} showsVerticalScrollIndicator={false} refreshControl={undefined}>
+            {facilityCourts.length === 0 ? (
               <Text style={[modalStyles.feeEmpty, { color: colors.textLight }]}>아직 코트가 없어요</Text>
             ) : (
-              courts.map((court) => {
+              facilityCourts.map((court) => {
                 const isMaint = court.status === 'MAINTENANCE';
                 const isOccupied = occupiedCourtIds.has(court.id);
                 const isRenaming = renamingId === court.id;
+                const dotColor = isMaint
+                  ? colors.courtMaintenance
+                  : isOccupied ? colors.courtInGame
+                  : colors.courtEmpty;
+                const stateText = isMaint ? '사용 불가' : isOccupied ? '게임 중' : '비어있음';
+                const stateColor = isMaint
+                  ? colors.textSecondary
+                  : isOccupied ? colors.warning
+                  : colors.secondary;
                 return (
                   <View key={court.id} style={[modalStyles.courtRow, { borderBottomColor: colors.divider }]}>
                     {isRenaming ? (
@@ -2087,15 +2215,9 @@ function CourtManageModal({
                       />
                     ) : (
                       <View style={modalStyles.courtRowName}>
-                        <View style={[modalStyles.courtStatusDot, {
-                          backgroundColor: isMaint ? colors.courtMaintenance : isOccupied ? colors.courtInGame : colors.courtEmpty,
-                        }]} />
+                        <View style={[modalStyles.courtStatusDot, { backgroundColor: dotColor }]} />
                         <Text style={[modalStyles.courtNameText, { color: colors.text }]} numberOfLines={1}>{court.name}</Text>
-                        <Text style={[modalStyles.courtStatusText, {
-                          color: isMaint ? colors.textSecondary : isOccupied ? colors.warning : colors.secondary,
-                        }]}>
-                          {isMaint ? '사용 불가' : isOccupied ? '게임 중' : '사용 가능'}
-                        </Text>
+                        <Text style={[modalStyles.courtStatusText, { color: stateColor }]}>{stateText}</Text>
                       </View>
                     )}
 
@@ -2411,6 +2533,12 @@ const styles = StyleSheet.create({
     borderRadius: radius.pill, borderWidth: 1,
   },
   headerLinkText: { ...typography.buttonSm },
+  headerChatIcon: { fontSize: 14 },
+  unreadDot: {
+    minWidth: 16, height: 16, borderRadius: 8, paddingHorizontal: 4,
+    alignItems: 'center', justifyContent: 'center', marginLeft: 2,
+  },
+  unreadDotText: { color: '#fff', fontSize: 10, fontWeight: '800' },
 
   // Split (tablet)
   split: { flex: 1, flexDirection: 'row' },
@@ -2725,6 +2853,12 @@ const modalStyles = StyleSheet.create({
   matchupGender: { fontSize: 15, fontWeight: '900', lineHeight: 17 },
   matchupCount: { paddingHorizontal: spacing.sm, paddingVertical: 3, borderRadius: radius.pill },
   matchupCountText: { fontSize: 12, fontWeight: '800' },
+  // 운영자 체크아웃 버튼 (danger, outline)
+  checkoutBtn: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: spacing.xs,
+    marginTop: spacing.md, paddingVertical: spacing.md, borderRadius: radius.lg, borderWidth: 1.5,
+  },
+  checkoutBtnText: { ...typography.button },
 
   // Court manage modal
   courtAddRow: { flexDirection: 'row', gap: spacing.sm, marginBottom: spacing.sm },
@@ -2733,11 +2867,21 @@ const modalStyles = StyleSheet.create({
     alignItems: 'center', justifyContent: 'center', minWidth: 64,
   },
   courtAddBtnText: { color: palette.white, ...typography.button },
+  addCourtBtn: {
+    flexDirection: 'row', gap: spacing.xs, alignItems: 'center', justifyContent: 'center',
+    paddingVertical: spacing.sm, borderRadius: radius.lg, marginBottom: spacing.sm,
+  },
+  addCourtBtnText: { color: palette.white, ...typography.button },
   courtRow: {
     flexDirection: 'row', alignItems: 'center', gap: spacing.sm,
     paddingVertical: spacing.sm, borderBottomWidth: StyleSheet.hairlineWidth,
   },
   courtRowName: { flex: 1, flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
+  courtSectionHint: { fontSize: 11, marginBottom: spacing.sm, lineHeight: 16 },
+  courtInSessionBox: {
+    width: 20, height: 20, borderRadius: radius.sm, borderWidth: 1.5,
+    alignItems: 'center', justifyContent: 'center',
+  },
   courtStatusDot: { width: 9, height: 9, borderRadius: 5 },
   courtNameText: { ...typography.subtitle2, flexShrink: 1 },
   courtStatusText: { fontSize: 11, fontWeight: '800' },

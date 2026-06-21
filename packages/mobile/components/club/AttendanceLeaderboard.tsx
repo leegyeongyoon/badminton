@@ -20,7 +20,7 @@ interface AttendanceLeaderboardProps {
 
 const PERIODS: { key: AttendancePeriod; label: string }[] = [
   { key: 'month', label: '이번 달' },
-  { key: 'season', label: '시즌' },
+  { key: 'year', label: '올해' },
   { key: 'all', label: '전체' },
 ];
 
@@ -199,14 +199,18 @@ function AttendanceRow({ entry, isMe, isLast }: AttendanceRowProps) {
           </Text>
           {isMe && <Text style={[styles.meTag, { color: colors.primary }]}>나</Text>}
         </View>
-        {skill.label ? (
+        {entry.skillLevel ? (
           <View style={styles.skillChip}>
             <View style={[styles.skillDot, { backgroundColor: skill.color }]} />
             <Text style={[styles.skillText, { color: skill.color }]}>
-              {skill.level} · {skill.label}
+              {skill.level} · {skill.description}
             </Text>
           </View>
-        ) : null}
+        ) : (
+          <View style={styles.skillChip}>
+            <Text style={[styles.skillText, { color: skill.color }]}>미설정</Text>
+          </View>
+        )}
       </View>
 
       {/* Attendance count */}

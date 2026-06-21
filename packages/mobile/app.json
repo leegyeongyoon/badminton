@@ -41,6 +41,7 @@
     },
     "extra": {
       "apiUrl": "https://api.REPLACE_ME.com",
+      "kakaoRestKey": "REPLACE_WITH_KAKAO_KEY",
       "eas": {
         "projectId": "REPLACE_WITH_EAS_PROJECT_ID"
       }
@@ -48,6 +49,7 @@
     "plugins": [
       "expo-router",
       "expo-secure-store",
+      "expo-web-browser",
       [
         "expo-camera",
         {

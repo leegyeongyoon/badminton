@@ -1,5 +1,5 @@
 import { prisma } from '../../utils/prisma';
-import { NotFoundError, BadRequestError, ConflictError } from '../../utils/errors';
+import { NotFoundError, BadRequestError, ConflictError, ForbiddenError } from '../../utils/errors';
 import { PlayerStatus, SkillLevel, UserRole } from '@badminton/shared';
 import type {
   ActiveClubSessionItem,
@@ -13,14 +13,14 @@ import { generateTokens } from '../auth/auth.service';
 import { logger } from '../../utils/logger';
 
 export interface CheckInParams {
-  qrData: string;
+  qrData?: string;
   clubSessionId?: string;
   latitude: number;
   longitude: number;
 }
 
 export interface GuestCheckInParams {
-  qrData: string;
+  qrData?: string;
   clubSessionId?: string;
   name: string;
   skillLevel?: SkillLevel;
@@ -51,7 +51,7 @@ type ResolvedSession = {
  * resolved session id (null = facility-only check-in).
  */
 async function resolveSessionAndGeofence(params: {
-  qrData: string;
+  qrData?: string;
   clubSessionId?: string;
   latitude: number;
   longitude: number;
@@ -60,28 +60,34 @@ async function resolveSessionAndGeofence(params: {
 }): Promise<{ facility: ResolvedFacility; resolvedSessionId: string | null }> {
   const { qrData, latitude, longitude, auditUserId } = params;
 
-  // a. Find facility by qrData, include policy
-  const facility = await prisma.facility.findUnique({
-    where: { qrCodeData: qrData },
-    include: { policy: true },
-  });
-  if (!facility) throw new NotFoundError('시설');
-
-  // b. Resolve target ClubSession
+  let facility: ResolvedFacility;
   let resolved: ResolvedSession | null = null;
+
   if (params.clubSessionId) {
+    // a/b. MEETUP QR path: the scanned per-정모 QR identifies the target 정모
+    // directly. Resolve the facility (+ policy) from THAT ClubSession; no
+    // facility qrData needed. This path ignores qrData even if present.
     const session = await prisma.clubSession.findUnique({
       where: { id: params.clubSessionId },
+      include: { facility: { include: { policy: true } } },
     });
     if (!session) throw new NotFoundError('모임 세션');
     if (session.status !== 'ACTIVE') {
       throw new BadRequestError('진행 중인 정모가 아닙니다');
     }
-    if (session.facilityId !== facility.id) {
-      throw new BadRequestError('이 정모는 해당 체육관에서 진행되지 않습니다');
-    }
+    facility = session.facility;
     resolved = session;
   } else {
+    // a. Facility static-QR path (backward compatible): find facility by qrData.
+    if (!qrData) throw new BadRequestError('qrData 또는 clubSessionId가 필요합니다');
+    const found = await prisma.facility.findUnique({
+      where: { qrCodeData: qrData },
+      include: { policy: true },
+    });
+    if (!found) throw new NotFoundError('시설');
+    facility = found;
+
+    // b. Resolve target ClubSession from the facility's ACTIVE sessions.
     const activeSessions = await prisma.clubSession.findMany({
       where: { facilityId: facility.id, status: 'ACTIVE' },
     });
@@ -224,6 +230,96 @@ export async function checkIn(userId: string, params: CheckInParams) {
 }
 
 /**
+ * UNCONDITIONAL QR check-in into a 정모 (정모 출석 QR flow).
+ *
+ * The per-정모 출석 QR is shown at the venue, so scanning it IS the presence
+ * proof — this path INTENTIONALLY SKIPS the geofence/coords gate that the normal
+ * /checkin enforces (no haversine, no lat/lng). It is authenticated: the user
+ * must be logged in (the /attend route bounces them through login first).
+ *
+ * Flow:
+ *  - Load the ClubSession (+facility) and assert it is ACTIVE.
+ *  - If the user already has an ACTIVE check-in for this session → return it
+ *    (idempotent: scanning again just lands them back on the board, no error).
+ *  - Otherwise create a session-scoped CheckIn (clubSessionId set, facility from
+ *    the session) WITHOUT coordinates, then emit the same arrived/players-updated
+ *    socket events as a normal check-in so operator boards refresh and the player
+ *    appears in the pool.
+ */
+export async function attendViaQr(clubSessionId: string, userId: string) {
+  const session = await prisma.clubSession.findUnique({
+    where: { id: clubSessionId },
+    include: { facility: true },
+  });
+  if (!session) throw new NotFoundError('모임 세션');
+  if (session.status !== 'ACTIVE') {
+    throw new BadRequestError('진행 중인 정모가 아닙니다');
+  }
+
+  // Idempotent: if already checked into THIS session, return that check-in.
+  // Also treat a facility-scoped active check-in at the session's facility as
+  // "already present" so we never create a duplicate row (mirrors checkIn's
+  // duplicate guard, but without raising an error — scanning again is a no-op).
+  const existing =
+    (await prisma.checkIn.findFirst({
+      where: { userId, clubSessionId, checkedOutAt: null },
+      include: { facility: true },
+    })) ??
+    (await prisma.checkIn.findFirst({
+      where: {
+        userId,
+        facilityId: session.facilityId,
+        clubSessionId: null,
+        checkedOutAt: null,
+      },
+      include: { facility: true },
+    }));
+  if (existing) {
+    return {
+      success: true as const,
+      clubSessionId,
+      id: existing.id,
+      userId: existing.userId,
+      facilityId: existing.facilityId,
+      facilityName: existing.facility.name,
+      checkedInAt: existing.checkedInAt.toISOString(),
+    };
+  }
+
+  // Create a session-scoped check-in WITHOUT any geofence/coords check (the QR
+  // at the venue is the presence proof — see the doc-comment above).
+  const checkIn = await prisma.checkIn.create({
+    data: {
+      userId,
+      facilityId: session.facilityId,
+      clubSessionId: session.id,
+    },
+    include: { facility: true, user: true },
+  });
+
+  // Same socket events as a normal check-in so the operator board + pool refresh.
+  const io = getIO();
+  const arrivedPayload = {
+    userId,
+    userName: checkIn.user.name,
+    facilityId: session.facilityId,
+  };
+  io.to(`facility:${session.facilityId}`).emit('checkin:arrived', arrivedPayload);
+  io.to(`clubSession:${session.id}`).emit('checkin:arrived', arrivedPayload);
+  await emitPlayersUpdated(session.facilityId, session.id);
+
+  return {
+    success: true as const,
+    clubSessionId,
+    id: checkIn.id,
+    userId: checkIn.userId,
+    facilityId: checkIn.facilityId,
+    facilityName: checkIn.facility.name,
+    checkedInAt: checkIn.checkedInAt.toISOString(),
+  };
+}
+
+/**
  * Guest self check-in (UNauthenticated web flow). Reuses the same
  * facility/session resolution + geofence gate as member check-in, then
  * creates a lightweight guest User (isGuest, null phone/password), an
@@ -316,9 +412,24 @@ export async function guestCheckIn(
 }
 
 export async function checkOut(userId: string) {
-  const active = await prisma.checkIn.findFirst({
-    where: { userId, checkedOutAt: null },
-  });
+  // BUG-3: pick the RIGHT open check-in to close. A stale open row left over from
+  // a prior ENDED session must never be chosen over the user's check-in for the
+  // currently ACTIVE 정모 (an unordered findFirst could grab the stale one and
+  // leave the user in the active pool). Prefer a row whose ClubSession is ACTIVE;
+  // otherwise fall back to the most recent open row by checkedInAt.
+  const active =
+    (await prisma.checkIn.findFirst({
+      where: {
+        userId,
+        checkedOutAt: null,
+        clubSession: { status: 'ACTIVE' },
+      },
+      orderBy: { checkedInAt: 'desc' },
+    })) ??
+    (await prisma.checkIn.findFirst({
+      where: { userId, checkedOutAt: null },
+      orderBy: { checkedInAt: 'desc' },
+    }));
   if (!active) throw new BadRequestError('체크인 상태가 아닙니다');
 
   await prisma.checkIn.update({
@@ -345,6 +456,81 @@ export async function checkOut(userId: string) {
   await emitPlayersUpdated(active.facilityId, active.clubSessionId ?? undefined);
 
   return { success: true };
+}
+
+/**
+ * Operator checks out a SPECIFIC player from a 정모 (club session).
+ *
+ * Auth: the operator must be a LEADER or STAFF of the session's club. Finds the
+ * target's ACTIVE check-in for that session (preferring the session-scoped row,
+ * falling back to a facility-scoped row at the session's facility so a player
+ * who checked in facility-only is still removable). Runs the SAME cleanup as a
+ * self-checkout — cancel WAITING turns, strip from QUEUED board entries, leave
+ * any PLAYING turn intact — and emits the players-updated socket event so every
+ * operator board refreshes. Works for guests too (a guest is just a User row).
+ *
+ * Throws ForbiddenError if the caller isn't a leader/staff, NotFoundError if the
+ * session doesn't exist or the target isn't currently checked into it. Returns
+ * the refreshed available-players list for the session.
+ */
+export async function operatorCheckOut(
+  clubSessionId: string,
+  targetUserId: string,
+  operatorUserId: string,
+): Promise<{ success: true; availablePlayers: AvailablePlayerResponse[] }> {
+  // Resolve the session (+ club) to authorize against and to scope the facility.
+  const session = await prisma.clubSession.findUnique({
+    where: { id: clubSessionId },
+    select: { id: true, clubId: true, facilityId: true },
+  });
+  if (!session) throw new NotFoundError('모임 세션');
+
+  // Operator must be LEADER/STAFF of the session's club (same check as
+  // clubSession.service.verifyClubStaff — replicated to avoid a circular import).
+  const member = await prisma.clubMember.findUnique({
+    where: { userId_clubId: { userId: operatorUserId, clubId: session.clubId } },
+  });
+  if (!member || (member.role !== 'LEADER' && member.role !== 'STAFF')) {
+    throw new ForbiddenError('모임 리더 또는 스태프만 가능합니다');
+  }
+
+  // Find the target's ACTIVE check-in for this 정모. Prefer the session-scoped
+  // row; fall back to a facility-scoped row (clubSessionId null) at the session's
+  // facility so a facility-only check-in is still removable from the board.
+  const active =
+    (await prisma.checkIn.findFirst({
+      where: { userId: targetUserId, clubSessionId, checkedOutAt: null },
+    })) ??
+    (await prisma.checkIn.findFirst({
+      where: {
+        userId: targetUserId,
+        facilityId: session.facilityId,
+        clubSessionId: null,
+        checkedOutAt: null,
+      },
+    }));
+  if (!active) throw new NotFoundError('체크인된 참가자');
+
+  await prisma.checkIn.update({
+    where: { id: active.id },
+    data: { checkedOutAt: new Date() },
+  });
+
+  // SAME cleanup as self-checkout (cancel WAITING turns, strip QUEUED board
+  // entries, leave PLAYING intact). Pass the session id explicitly so board
+  // cleanup is unambiguous even for a facility-scoped check-in row.
+  await cleanupTurnsOnCheckout(targetUserId, session.facilityId, clubSessionId);
+
+  // Mirror the self-checkout socket events so member/guest clients react too.
+  const io = getIO();
+  const leftPayload = { userId: targetUserId, facilityId: session.facilityId };
+  io.to(`facility:${session.facilityId}`).emit('checkin:left', leftPayload);
+  io.to(`clubSession:${clubSessionId}`).emit('checkin:left', leftPayload);
+
+  await emitPlayersUpdated(session.facilityId, clubSessionId);
+
+  const availablePlayers = await getAvailablePlayers(session.facilityId, clubSessionId);
+  return { success: true, availablePlayers };
 }
 
 /**
@@ -579,8 +765,15 @@ export async function getAvailablePlayers(facilityId: string, clubSessionId?: st
             where: {
               game: {
                 courtId: { not: undefined },
-                createdAt: { gte: getStartOfDay() },
                 status: { in: ['IN_PROGRESS', 'COMPLETED'] },
+                // A2: per-player game count must be scoped to THIS 정모. When a
+                // clubSessionId is supplied, count ONLY games whose turn belongs
+                // to this 정모 (otherwise games from OTHER 정모s the same day at
+                // the same facility bleed into the count). When facility-scoped
+                // (no clubSessionId), fall back to "games today" at this gym.
+                ...(clubSessionId
+                  ? { turn: { clubSessionId } }
+                  : { createdAt: { gte: getStartOfDay() } }),
               },
             },
           },
@@ -610,12 +803,19 @@ export async function getAvailablePlayers(facilityId: string, clubSessionId?: st
   }
   const dedupedCheckins = Array.from(byUser.values());
 
+  // C: classify QUEUED (편성됨) players from the 정모 board so the operator pool
+  // and member list agree with the board. A player in a court-less QUEUED entry
+  // (and not already on a court) is QUEUED, not AVAILABLE.
+  const queuedUserIds = await getQueuedBoardUserIds(clubSessionId);
+
   return dedupedCheckins.map((c) => {
     let status: PlayerStatus;
     if (c.restingAt) {
       status = PlayerStatus.RESTING;
     } else if (c.user.turnPlayers.length > 0) {
       status = PlayerStatus.IN_TURN;
+    } else if (queuedUserIds.has(c.userId)) {
+      status = PlayerStatus.QUEUED;
     } else {
       status = PlayerStatus.AVAILABLE;
     }
@@ -623,7 +823,7 @@ export async function getAvailablePlayers(facilityId: string, clubSessionId?: st
     return {
       userId: c.userId,
       userName: c.user.name,
-      skillLevel: (c.user.profile?.skillLevel || 'D') as SkillLevel,
+      skillLevel: (c.user.profile?.skillLevel ?? null) as SkillLevel | null,
       preferredGameTypes: (c.user.profile?.preferredGameTypes || ['DOUBLES']) as any[],
       gender: c.user.profile?.gender || null,
       checkedInAt: c.checkedInAt.toISOString(),
@@ -735,21 +935,45 @@ async function computePlayerCounts(scope: { facilityId?: string; clubSessionId?:
     },
   });
 
+  // C: QUEUED (편성됨) players from the board count separately from AVAILABLE.
+  const queuedUserIds = await getQueuedBoardUserIds(scope.clubSessionId);
+
   let availableCount = 0;
   let inTurnCount = 0;
   let restingCount = 0;
+  let queuedCount = 0;
 
   for (const c of checkins) {
     if (c.restingAt) {
       restingCount++;
     } else if (c.user.turnPlayers.length > 0) {
       inTurnCount++;
+    } else if (queuedUserIds.has(c.userId)) {
+      queuedCount++;
     } else {
       availableCount++;
     }
   }
 
-  return { availableCount, inTurnCount, restingCount };
+  return { availableCount, inTurnCount, restingCount, queuedCount };
+}
+
+/**
+ * C: userIds placed in a court-less QUEUED GameBoardEntry on the 정모's board
+ * (편성됨, not yet on a court). Empty set when no clubSessionId / no board.
+ */
+async function getQueuedBoardUserIds(clubSessionId?: string): Promise<Set<string>> {
+  if (!clubSessionId) return new Set();
+  const board = await prisma.gameBoard.findUnique({
+    where: { clubSessionId },
+    include: { entries: { where: { status: 'QUEUED' }, select: { playerIds: true, courtId: true } } },
+  });
+  const ids = new Set<string>();
+  for (const e of board?.entries ?? []) {
+    if (e.courtId) continue; // on a court → counted as IN_TURN elsewhere
+    for (const pid of e.playerIds) ids.add(pid);
+  }
+  return ids;
 }
 
 function getStartOfDay(): Date {

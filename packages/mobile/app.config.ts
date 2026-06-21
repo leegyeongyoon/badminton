@@ -9,6 +9,11 @@ import type { ConfigContext, ExpoConfig } from 'expo/config';
  * editing committed files:
  *
  *   - extra.apiUrl        ← EXPO_PUBLIC_API_URL  (production backend base URL)
+ *   - extra.kakaoRestKey  ← EXPO_PUBLIC_KAKAO_REST_KEY (Kakao REST/JS app key)
+ *                           Falls back to the "REPLACE_WITH_KAKAO_KEY"
+ *                           placeholder from app.json; services/kakao.ts treats
+ *                           that placeholder as "not configured" and never
+ *                           attempts OAuth, so dev/web/preview never crash.
  *   - extra.eas.projectId ← EAS_PROJECT_ID / EXPO_PUBLIC_EAS_PROJECT_ID
  *                           (normally written into app.json by `eas init`)
  *
@@ -19,6 +24,10 @@ import type { ConfigContext, ExpoConfig } from 'expo/config';
  */
 export default ({ config }: ConfigContext): ExpoConfig => {
   const apiUrl = process.env.EXPO_PUBLIC_API_URL ?? config.extra?.apiUrl;
+  const kakaoRestKey =
+    process.env.EXPO_PUBLIC_KAKAO_REST_KEY ??
+    config.extra?.kakaoRestKey ??
+    'REPLACE_WITH_KAKAO_KEY';
   const projectId =
     process.env.EAS_PROJECT_ID ??
     process.env.EXPO_PUBLIC_EAS_PROJECT_ID ??
@@ -32,6 +41,7 @@ export default ({ config }: ConfigContext): ExpoConfig => {
     extra: {
       ...config.extra,
       apiUrl,
+      kakaoRestKey,
       eas: {
         ...config.extra?.eas,
         projectId,

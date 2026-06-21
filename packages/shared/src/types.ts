@@ -12,6 +12,10 @@ export interface UserResponse {
   role: UserRole;
   isGuest: boolean;
   createdAt: string;
+  /** 급수 from the user's PlayerProfile; null when not yet set. */
+  skillLevel?: string | null;
+  /** 성별 ('M' | 'F') from the PlayerProfile; null when not set. */
+  gender?: string | null;
 }
 
 export interface AuthTokens {
@@ -168,6 +172,21 @@ export interface ClubMemberResponse {
   playerStatus: PlayerStatus | null;
 }
 
+// 모임 채팅/건의 메시지. type=REQUEST 는 짝 요청(○○랑 같이 치고 싶어요)으로
+// mentioned 에 지목한 모임원(이름) 목록이 들어간다. authorName/skillLevel 은
+// 작성자 정보를 미리 해석해 클라이언트가 바로 칩을 그릴 수 있게 한다.
+export interface ClubMessageResponse {
+  id: string;
+  clubId: string;
+  userId: string;
+  authorName: string;
+  authorSkillLevel: SkillLevel | null;
+  text: string;
+  type: 'CHAT' | 'REQUEST';
+  mentioned: { userId: string; name: string }[];
+  createdAt: string;
+}
+
 export interface ClubSessionResponse {
   id: string;
   clubId: string;
@@ -181,6 +200,21 @@ export interface ClubSessionResponse {
   courtIds: string[];
   startedAt: string;
   endedAt: string | null;
+}
+
+// --- Per-정모 QR (모임 전용 QR) ---
+
+/**
+ * 출석 QR for a specific ClubSession (정모). The client renders `qr`; scanning it
+ * with a phone camera opens the web app at the URL in `payload`
+ * (`<WEB_BASE_URL>/attend?session=<clubSessionId>`), which (after login if
+ * needed) UNCONDITIONALLY checks the user in (no geofence — the QR at the venue
+ * is the presence proof) and lands them on the live 현황 보드.
+ */
+export interface SessionQrResponse {
+  clubSessionId: string;
+  payload: string; // "<WEB_BASE_URL>/attend?session=<clubSessionId>" (scannable URL)
+  qr: string; // PNG data URL ("data:image/png;base64,...")
 }
 
 // --- Check-in ---
@@ -197,7 +231,8 @@ export interface CheckInResponse {
 
 export interface PlayerProfileResponse {
   userId: string;
-  skillLevel: SkillLevel;
+  /** 급수; null when the user hasn't set one yet (미설정). */
+  skillLevel: SkillLevel | null;
   preferredGameTypes: GameType[];
   gender: string | null;
   birthYear: number | null;
@@ -230,6 +265,28 @@ export interface MyTurnResponse {
   position: number;
   status: TurnStatus;
   players: TurnPlayerResponse[];
+}
+
+/**
+ * Board-aware "my upcoming game" status for the current user (GET /users/me/status).
+ * Derived from the active 정모's GameBoard + CourtTurns so a court-less QUEUED
+ * board entry surfaces as a real "다음 게임 · 대기 N번째" state instead of a flat
+ * "대기 중". null = the user is not checked into any active 정모.
+ *   - PLAYING  : on a court right now.
+ *   - QUEUED   : composed into the next game (court-less board entry OR a WAITING
+ *                turn already materialized onto a court).
+ *   - AVAILABLE: checked in but not yet composed into a game.
+ */
+export interface MyStatusResponse {
+  status: 'PLAYING' | 'QUEUED' | 'AVAILABLE';
+  clubSessionId: string;
+  /** 1-based 대기 순번 (QUEUED) / 코트 순번 (on-court WAITING). */
+  queueOrder: number | null;
+  /** 코트 이름 (PLAYING / on-court WAITING). null = 코트 미정. */
+  courtName: string | null;
+  /** 내 앞에 남은 게임 수 (대략적 ETA). */
+  etaGames: number | null;
+  turnId: string | null;
 }
 
 // --- Session ---
@@ -271,7 +328,8 @@ export interface NotificationResponse {
 export interface AvailablePlayerResponse {
   userId: string;
   userName: string;
-  skillLevel: SkillLevel;
+  /** 급수; null when not set (미설정). */
+  skillLevel: SkillLevel | null;
   preferredGameTypes: GameType[];
   gender: string | null;
   checkedInAt: string;
@@ -282,12 +340,13 @@ export interface AvailablePlayerResponse {
 
 // --- Attendance leaderboard (출석왕) ---
 
-export type AttendancePeriod = 'month' | 'season' | 'all';
+export type AttendancePeriod = 'month' | 'year' | 'all';
 
 export interface AttendanceLeaderboardEntry {
   userId: string;
   name: string;
-  skillLevel: SkillLevel;
+  /** 급수; null when not set (미설정). */
+  skillLevel: SkillLevel | null;
   attendanceCount: number;
   rank: number;
 }
@@ -498,6 +557,7 @@ export interface ServerToClientEvents {
   'gameBoard:entryRemoved': (data: { entryId: string; boardId: string }) => void;
   'gameBoard:entryPushed': (data: GameBoardEntryResponse) => void;
   'gameBoard:reordered': (data: { boardId: string; entryIds: string[] }) => void;
+  'clubMessage:new': (data: ClubMessageResponse) => void;
 }
 
 export interface ClientToServerEvents {
@@ -507,6 +567,8 @@ export interface ClientToServerEvents {
   'court:leave': (courtId: string) => void;
   'clubSession:join': (clubSessionId: string) => void;
   'clubSession:leave': (clubSessionId: string) => void;
+  'club:join': (clubId: string) => void;
+  'club:leave': (clubId: string) => void;
   'user:join': (userId: string) => void;
   'user:leave': (userId: string) => void;
 }

@@ -13,21 +13,14 @@ import { useAuthStore } from '../../store/authStore';
 import { profileApi } from '../../services/profile';
 import { Colors } from '../../constants/colors';
 import { createShadow } from '../../constants/theme';
-import { Strings } from '../../constants/strings';
 import { showAlert } from '../../utils/alert';
+import { SKILL_LEVELS as SKILL_LETTERS, getSkillMeta } from '../../constants/skill';
 
 const roleLabels: Record<string, string> = {
   FACILITY_ADMIN: '시설 관리자',
   CLUB_LEADER: '모임 대표',
   PLAYER: '일반 회원',
 };
-
-const SKILL_LEVELS = [
-  { key: 'BEGINNER', label: Strings.player.skillLevel.BEGINNER, color: Colors.skillBeginner, icon: '🔰' },
-  { key: 'INTERMEDIATE', label: Strings.player.skillLevel.INTERMEDIATE, color: Colors.skillIntermediate, icon: '⭐' },
-  { key: 'ADVANCED', label: Strings.player.skillLevel.ADVANCED, color: Colors.skillAdvanced, icon: '🏅' },
-  { key: 'PRO', label: '프로', color: Colors.skillExpert, icon: '🏆' },
-];
 
 const GAME_TYPES = [
   { key: 'SINGLES', label: '단식' },
@@ -112,7 +105,7 @@ export default function ProfileScreen() {
     (p: any) => p.status === 'ACTIVE' && new Date(p.expiresAt).getTime() > Date.now(),
   );
 
-  const currentSkill = SKILL_LEVELS.find((s) => s.key === skillLevel);
+  const currentSkill = skillLevel ? getSkillMeta(skillLevel) : null;
 
   return (
     <ScrollView
@@ -132,7 +125,7 @@ export default function ProfileScreen() {
           </View>
           {currentSkill && (
             <View style={[styles.skillBadgeOverlay, { backgroundColor: currentSkill.color }]}>
-              <Text style={styles.skillBadgeIcon}>{currentSkill.icon}</Text>
+              <Text style={styles.skillBadgeIcon}>{currentSkill.level}</Text>
             </View>
           )}
         </View>
@@ -147,7 +140,7 @@ export default function ProfileScreen() {
           {currentSkill && (
             <View style={[styles.skillLevelBadge, { backgroundColor: currentSkill.color + '20', borderColor: currentSkill.color }]}>
               <Text style={[styles.skillLevelText, { color: currentSkill.color }]}>
-                {currentSkill.icon} {currentSkill.label}
+                {currentSkill.level} · {currentSkill.description}
               </Text>
             </View>
           )}
@@ -210,26 +203,31 @@ export default function ProfileScreen() {
         <View style={styles.settingCard}>
           <Text style={styles.settingLabel}>실력 수준</Text>
           <View style={styles.skillButtonRow}>
-            {SKILL_LEVELS.map((level) => (
-              <TouchableOpacity
-                key={level.key}
-                style={[
-                  styles.skillButton,
-                  skillLevel === level.key && { backgroundColor: level.color, borderColor: level.color },
-                ]}
-                onPress={() => handleSkillLevelChange(level.key)}
-              >
-                <Text style={styles.skillIcon}>{level.icon}</Text>
-                <Text
+            {SKILL_LETTERS.map((lv) => {
+              const meta = getSkillMeta(lv);
+              const active = skillLevel === lv;
+              return (
+                <TouchableOpacity
+                  key={lv}
                   style={[
-                    styles.skillButtonText,
-                    skillLevel === level.key && styles.skillButtonTextActive,
+                    styles.skillButton,
+                    active && { backgroundColor: meta.color, borderColor: meta.color },
                   ]}
+                  onPress={() => handleSkillLevelChange(lv)}
                 >
-                  {level.label}
-                </Text>
-              </TouchableOpacity>
-            ))}
+                  <Text style={[styles.skillIcon, active && styles.skillButtonTextActive]}>{lv}</Text>
+                  <Text
+                    style={[
+                      styles.skillButtonText,
+                      active && styles.skillButtonTextActive,
+                    ]}
+                    numberOfLines={1}
+                  >
+                    {meta.description}
+                  </Text>
+                </TouchableOpacity>
+              );
+            })}
           </View>
         </View>
 
@@ -519,11 +517,15 @@ const styles = StyleSheet.create({
   },
   skillButtonRow: {
     flexDirection: 'row',
+    flexWrap: 'wrap',
     gap: 8,
   },
   skillButton: {
-    flex: 1,
+    flexGrow: 1,
+    flexBasis: '30%',
+    minWidth: 92,
     paddingVertical: 10,
+    paddingHorizontal: 6,
     borderRadius: 10,
     borderWidth: 1,
     borderColor: Colors.border,
@@ -533,6 +535,8 @@ const styles = StyleSheet.create({
   },
   skillIcon: {
     fontSize: 16,
+    fontWeight: '800',
+    color: Colors.textSecondary,
   },
   skillButtonText: {
     fontSize: 11,

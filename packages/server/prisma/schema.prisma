@@ -69,10 +69,16 @@ enum ClubSessionStatus {
   ENDED
 }
 
+enum ChatMessageType {
+  CHAT
+  REQUEST
+}
+
 model User {
   id            String   @id @default(uuid())
   phone         String?  @unique
   password      String?
+  kakaoId       String?  @unique
   name          String
   role          UserRole @default(PLAYER)
   isGuest       Boolean  @default(false)
@@ -93,12 +99,13 @@ model User {
   turnPlayers         TurnPlayer[]
   startedClubSessions ClubSession[]       @relation("ClubSessionStarter")
   createdGameBoards   GameBoard[]         @relation("GameBoardCreator")
+  clubMessages        ClubMessage[]
 }
 
 model PlayerProfile {
   id                 String     @id @default(uuid())
   userId             String     @unique
-  skillLevel         SkillLevel @default(D)
+  skillLevel         SkillLevel?
   preferredGameTypes GameType[] @default([DOUBLES])
   gender             String?
   birthYear          Int?
@@ -148,20 +155,29 @@ model FacilityPolicy {
 }
 
 model Court {
-  id         String        @id @default(uuid())
-  name       String
-  facilityId String
-  status     CourtStatus   @default(EMPTY)
-  gameType   CourtGameType @default(DOUBLES)
-  createdAt  DateTime      @default(now())
-  updatedAt  DateTime      @updatedAt
+  id            String        @id @default(uuid())
+  name          String
+  facilityId    String
+  // Per-정모 ownership. A court belongs to ONE ClubSession (코트1·2·3 등). Each 정모
+  // names its own courts independently and never sees another 정모's courts.
+  // clubSessionId = null → a facility-level court (facility-admin dashboard).
+  clubSessionId String?
+  status        CourtStatus   @default(EMPTY)
+  gameType      CourtGameType @default(DOUBLES)
+  createdAt     DateTime      @default(now())
+  updatedAt     DateTime      @updatedAt
 
-  facility         Facility           @relation(fields: [facilityId], references: [id], onDelete: Cascade)
+  facility         Facility         @relation(fields: [facilityId], references: [id], onDelete: Cascade)
+  clubSession      ClubSession?     @relation(fields: [clubSessionId], references: [id], onDelete: Cascade)
   turns            CourtTurn[]
   games            Game[]
   gameBoardEntries GameBoardEntry[]
 
-  @@unique([facilityId, name])
+  // Each 정모 names its courts independently (코트1·2·3) — same names across 정모s
+  // never collide. Facility-level courts (clubSessionId = null) are not constrained
+  // by this composite (null sessions don't participate in the unique).
+  @@unique([clubSessionId, name])
+  @@index([clubSessionId])
 }
 
 model FacilityAdmin {
@@ -207,6 +223,7 @@ model Club {
   homeFacility Facility?     @relation(fields: [homeFacilityId], references: [id])
   members      ClubMember[]
   sessions     ClubSession[]
+  messages     ClubMessage[]
 }
 
 model ClubMember {
@@ -219,6 +236,23 @@ model ClubMember {
   club Club @relation(fields: [clubId], references: [id], onDelete: Cascade)
 
   @@unique([userId, clubId])
+}
+
+// 모임 채팅/건의(짝 요청). 모임원이 남기는 메시지. type=REQUEST 는 "○○랑 같이
+// 치고 싶어요 / 누구랑 짜주세요" 짝 요청 — mentionedUserIds 에 지목한 모임원 id.
+model ClubMessage {
+  id               String          @id @default(uuid())
+  clubId           String
+  userId           String
+  text             String          @db.VarChar(500)
+  type             ChatMessageType @default(CHAT)
+  mentionedUserIds String[]        @default([])
+  createdAt        DateTime        @default(now())
+
+  club Club @relation(fields: [clubId], references: [id], onDelete: Cascade)
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([clubId, createdAt])
 }
 
 // --- Turn (순번/고깔) system ---
@@ -407,6 +441,7 @@ model ClubSession {
   facility        Facility           @relation(fields: [facilityId], references: [id], onDelete: Cascade)
   facilitySession FacilitySession    @relation(fields: [facilitySessionId], references: [id], onDelete: Cascade)
   startedBy       User               @relation("ClubSessionStarter", fields: [startedById], references: [id])
+  courts          Court[]
   turns           CourtTurn[]
   gameBoard       GameBoard?
   checkIns        CheckIn[]

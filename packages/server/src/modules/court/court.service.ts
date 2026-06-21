@@ -43,10 +43,13 @@ export function getPlayersRequired(gameType: CourtGameType): number {
   }
 }
 
+// Facility-admin dashboard court creation: a facility-level court
+// (clubSessionId = null). Clash is checked only among other facility-level
+// courts — 정모-owned courts (clubSessionId != null) live in their own namespace.
 export async function createCourt(facilityId: string, input: CreateCourtInput) {
   const gameType = input.gameType || CourtGameType.DOUBLES;
   const clash = await prisma.court.findFirst({
-    where: { facilityId, name: input.name },
+    where: { facilityId, clubSessionId: null, name: input.name },
   });
   if (clash) throw new BadRequestError('같은 이름의 코트가 이미 있습니다');
   return prisma.court.create({
@@ -54,9 +57,11 @@ export async function createCourt(facilityId: string, input: CreateCourtInput) {
   });
 }
 
+// Facility-admin dashboard court list: facility-level courts only
+// (clubSessionId = null). 정모-owned courts are managed inside their own 정모.
 export async function listCourts(facilityId: string) {
   return prisma.court.findMany({
-    where: { facilityId },
+    where: { facilityId, clubSessionId: null },
     orderBy: { name: 'asc' },
     include: {
       turns: {
@@ -74,10 +79,11 @@ export async function updateCourt(courtId: string, input: UpdateCourtInput) {
   const court = await prisma.court.findUnique({ where: { id: courtId } });
   if (!court) throw new NotFoundError('코트');
 
-  // Rename: guard the (facilityId, name) unique constraint with a clear error.
+  // Rename: guard the (clubSessionId, name) unique constraint within the SAME
+  // owner bucket (this 정모, or facility-level when clubSessionId is null).
   if (input.name && input.name !== court.name) {
     const clash = await prisma.court.findFirst({
-      where: { facilityId: court.facilityId, name: input.name, id: { not: courtId } },
+      where: { clubSessionId: court.clubSessionId, name: input.name, id: { not: courtId } },
     });
     if (clash) throw new BadRequestError('같은 이름의 코트가 이미 있습니다');
   }
@@ -122,6 +128,18 @@ export async function deleteCourt(courtId: string) {
     throw new BadRequestError('사용 기록이 있는 코트는 삭제할 수 없어요. 대신 "사용 불가"로 두세요.');
   }
   await prisma.court.delete({ where: { id: courtId } });
+  // Keep per-정모 ownership in sync: strip the deleted court id from any
+  // ACTIVE ClubSession.courtIds that still references it (no orphan ids).
+  const owning = await prisma.clubSession.findMany({
+    where: { status: 'ACTIVE', courtIds: { has: courtId } },
+    select: { id: true, courtIds: true },
+  });
+  for (const s of owning) {
+    await prisma.clubSession.update({
+      where: { id: s.id },
+      data: { courtIds: { set: s.courtIds.filter((id) => id !== courtId) } },
+    });
+  }
   return { id: courtId };
 }
 

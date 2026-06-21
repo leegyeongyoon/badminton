@@ -89,6 +89,25 @@ export function useCourtRoom(courtId: string | undefined) {
   }, [courtId, socket]);
 }
 
+export function useClubRoom(clubId: string | undefined) {
+  const socket = useSocket();
+
+  useEffect(() => {
+    if (!clubId) return;
+    socket.emit('club:join', clubId);
+
+    const handleReconnect = () => {
+      socket.emit('club:join', clubId);
+    };
+    socket.on('connect', handleReconnect);
+
+    return () => {
+      socket.off('connect', handleReconnect);
+      socket.emit('club:leave', clubId);
+    };
+  }, [clubId, socket]);
+}
+
 export function useUserRoom(userId: string | undefined) {
   const socket = useSocket();
 

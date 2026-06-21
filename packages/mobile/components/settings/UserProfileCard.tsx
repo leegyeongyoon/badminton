@@ -9,17 +9,7 @@ import { PlayerAvatar } from '../shared/PlayerAvatar';
 import { typography, radius, spacing } from '../../constants/theme';
 import { alpha } from '../../utils/color';
 import { useFadeIn } from '../../utils/animations';
-
-// ─── Skill Level Config ──────────────────────────────────────
-function useSkillLevels() {
-  const { colors } = useTheme();
-  return {
-    BEGINNER: { label: Strings.player.skillLevel.BEGINNER, color: colors.skillBeginner, icon: 'beginner' as IconName },
-    INTERMEDIATE: { label: Strings.player.skillLevel.INTERMEDIATE, color: colors.skillIntermediate, icon: 'star' as IconName },
-    ADVANCED: { label: Strings.player.skillLevel.ADVANCED, color: colors.skillAdvanced, icon: 'medal' as IconName },
-    PRO: { label: '프로', color: colors.skillExpert, icon: 'trophy' as IconName },
-  };
-}
+import { getSkillMeta } from '../../constants/skill';
 
 // ─── Game Type Config ────────────────────────────────────────
 const GAME_TYPE_LABELS: Record<string, { label: string; icon: IconName }> = {
@@ -39,11 +29,15 @@ interface UserProfileCardProps {
 export function UserProfileCard({ user, profileData, onEditProfile }: UserProfileCardProps) {
   const { colors, shadows } = useTheme();
   const fadeInStyle = useFadeIn();
-  const SKILL_LEVELS = useSkillLevels();
 
   const userName = user?.name || '?';
-  const skillLevel = profileData?.skillLevel;
-  const skillConfig = skillLevel ? SKILL_LEVELS[skillLevel as keyof typeof SKILL_LEVELS] : null;
+  const skillLevel: string | null = profileData?.skillLevel ?? null;
+  // Always show a 급수 chip: the LETTER + criteria when set, or "급수 미설정"
+  // (muted) when unset — never the old 상/중하 word-labels.
+  const skillMeta = getSkillMeta(skillLevel);
+  const skillChipLabel = skillLevel
+    ? `${skillMeta.level} · ${skillMeta.description}`
+    : '급수 미설정';
   const gameTypes: string[] = profileData?.preferredGameTypes || [];
 
   return (
@@ -65,17 +59,15 @@ export function UserProfileCard({ user, profileData, onEditProfile }: UserProfil
         <Text style={[styles.userPhone, { color: colors.textSecondary }]}>{user.phone}</Text>
       ) : null}
 
-      {/* Skill Level Chip */}
-      {skillConfig && (
-        <View style={styles.skillRow}>
-          <Chip
-            label={skillConfig.label}
-            variant="filled"
-            color={skillConfig.color}
-            icon={skillConfig.icon}
-          />
-        </View>
-      )}
+      {/* Skill Level Chip — letter + criteria (or "급수 미설정" when unset) */}
+      <View style={styles.skillRow}>
+        <Chip
+          label={skillChipLabel}
+          variant={skillLevel ? 'filled' : 'outline'}
+          color={skillMeta.color}
+          icon="medal"
+        />
+      </View>
 
       {/* Preferred Game Types */}
       {gameTypes.length > 0 && (

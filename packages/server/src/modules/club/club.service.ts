@@ -1,4 +1,5 @@
 import crypto from 'crypto';
+import QRCode from 'qrcode';
 import { prisma } from '../../utils/prisma';
 import { NotFoundError, ConflictError, ForbiddenError } from '../../utils/errors';
 import type {
@@ -70,6 +71,56 @@ export async function joinClub(userId: string, inviteCode: string) {
   return { success: true, clubId: club.id, clubName: club.name };
 }
 
+/**
+ * Club join QR (모임 참여 QR).
+ *
+ * Returns the club's inviteCode, a web join URL, and a PNG data-URL QR encoding
+ * that URL. Scanning the QR with a phone camera opens the web app at
+ * `<WEB_BASE_URL>/join?code=<inviteCode>`, which (after login + profile setup if
+ * needed) auto-joins the scanner into the club.
+ *
+ * Auth: ANY member of the club may view/share it (a member inviting friends is
+ * the normal case). Non-members are rejected.
+ */
+export async function getInviteQr(clubId: string, userId: string) {
+  const club = await prisma.club.findUnique({ where: { id: clubId } });
+  if (!club) throw new NotFoundError('모임');
+
+  const member = await prisma.clubMember.findUnique({
+    where: { userId_clubId: { userId, clubId } },
+  });
+  if (!member) throw new ForbiddenError('모임 멤버만 조회할 수 있습니다');
+
+  // WEB_BASE_URL points at the web app that serves /join (defaults to local dev).
+  const webBaseUrl = process.env.WEB_BASE_URL || 'http://localhost:8081';
+  const joinUrl = `${webBaseUrl}/join?code=${club.inviteCode}`;
+  const qr = await QRCode.toDataURL(joinUrl);
+
+  return { inviteCode: club.inviteCode, joinUrl, qr };
+}
+
+/**
+ * C: userIds placed in a court-less QUEUED GameBoardEntry on this club's ACTIVE
+ * 정모 board (편성됨). Empty set when there's no active session / board.
+ */
+async function getActiveSessionQueuedUserIds(clubId: string): Promise<Set<string>> {
+  const session = await prisma.clubSession.findFirst({
+    where: { clubId, status: 'ACTIVE' },
+    select: { id: true },
+  });
+  if (!session) return new Set();
+  const board = await prisma.gameBoard.findUnique({
+    where: { clubSessionId: session.id },
+    include: { entries: { where: { status: 'QUEUED' }, select: { playerIds: true, courtId: true } } },
+  });
+  const ids = new Set<string>();
+  for (const e of board?.entries ?? []) {
+    if (e.courtId) continue;
+    for (const pid of e.playerIds) ids.add(pid);
+  }
+  return ids;
+}
+
 export async function getMembers(clubId: string, facilityId?: string): Promise<ClubMemberResponse[]> {
   const facilityFilter = facilityId
     ? { checkedOutAt: null, facilityId }
@@ -96,6 +147,10 @@ export async function getMembers(clubId: string, facilityId?: string): Promise<C
     },
   });
 
+  // C: classify QUEUED (편성됨) members from THIS club's ACTIVE 정모 board so the
+  // member list agrees with the operator board. Court-less QUEUED entry → QUEUED.
+  const queuedUserIds = await getActiveSessionQueuedUserIds(clubId);
+
   return members.map((m) => {
     const isCheckedIn = m.user.checkIns.length > 0;
     const isInTurn = m.user.turnPlayers.length > 0;
@@ -106,6 +161,8 @@ export async function getMembers(clubId: string, facilityId?: string): Promise<C
         playerStatus = PlayerStatus.IN_TURN;
       } else if (checkIn.restingAt) {
         playerStatus = PlayerStatus.RESTING;
+      } else if (queuedUserIds.has(m.user.id)) {
+        playerStatus = PlayerStatus.QUEUED;
       } else {
         playerStatus = PlayerStatus.AVAILABLE;
       }
@@ -236,12 +293,12 @@ async function verifyClubMember(clubId: string, userId: string) {
 function periodStart(period: AttendancePeriod): Date | null {
   const now = new Date();
   if (period === 'month') {
-    // current calendar month
+    // current calendar month: 1st of this month → now
     return new Date(now.getFullYear(), now.getMonth(), 1, 0, 0, 0, 0);
   }
-  if (period === 'season') {
-    // last 3 calendar months including the current one
-    return new Date(now.getFullYear(), now.getMonth() - 2, 1, 0, 0, 0, 0);
+  if (period === 'year') {
+    // current calendar year: Jan 1 of this year → now
+    return new Date(now.getFullYear(), 0, 1, 0, 0, 0, 0);
   }
   return null; // 'all'
 }
@@ -294,7 +351,7 @@ export async function getAttendanceLeaderboard(
   const rows = members.map((m) => ({
     userId: m.userId,
     name: m.user.name,
-    skillLevel: (m.user.profile?.skillLevel ?? 'D') as SkillLevel,
+    skillLevel: (m.user.profile?.skillLevel ?? null) as SkillLevel | null,
     attendanceCount: distinctSessions.get(m.userId)?.size ?? 0,
   }));
 

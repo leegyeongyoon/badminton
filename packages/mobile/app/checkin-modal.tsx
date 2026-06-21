@@ -12,6 +12,7 @@ import Animated, { useSharedValue, useAnimatedStyle, withSpring, withSequence } 
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { useCheckinStore } from '../store/checkinStore';
 import { checkinApi, type ActiveClubSessionItem } from '../services/checkin';
+import { clubSessionApi } from '../services/clubSession';
 import { useTheme } from '../hooks/useTheme';
 import { palette, typography, spacing, radius, opacity } from '../constants/theme';
 import { Icon } from '../components/ui/Icon';
@@ -32,6 +33,30 @@ interface GeofenceDetails {
   distanceM: number;
   radiusM: number;
   facilityName: string;
+}
+
+/** Legacy prefix for a per-정모 출석 QR payload: `MEETUP:<clubSessionId>`. */
+const MEETUP_PREFIX = 'MEETUP:';
+
+/**
+ * If `code` is a 정모 출석 QR, return its clubSessionId; otherwise null (it's a
+ * plain facility QR / code → existing qrData path). Recognizes BOTH the current
+ * attend URL `<...>/attend?session=<id>` AND the legacy `MEETUP:<id>` payload so
+ * old printed QRs keep working.
+ */
+function parseAttendSessionId(code: string): string | null {
+  const trimmed = code.trim();
+  // Legacy MEETUP:<id> text payload.
+  if (trimmed.startsWith(MEETUP_PREFIX)) {
+    const id = trimmed.slice(MEETUP_PREFIX.length).trim();
+    return id || null;
+  }
+  // Current attend URL: <WEB_BASE_URL>/attend?session=<id> (parse the query).
+  if (trimmed.includes('/attend')) {
+    const match = trimmed.match(/[?&]session=([^&\s]+)/);
+    if (match && match[1]) return decodeURIComponent(match[1]).trim() || null;
+  }
+  return null;
 }
 
 type Phase =
@@ -84,10 +109,12 @@ export default function CheckinModalScreen() {
 
   /**
    * GPS hard-gate + submit. Receives the resolved clubSessionId (the 정모 to
-   * check into). The server geofence rejects out-of-range with HTTP 400 + details.
+   * check into) and, for a facility QR, the raw `code` (qrData). For a per-정모
+   * MEETUP QR `code` is undefined — the server resolves the facility/geofence
+   * from the clubSessionId alone. The geofence rejects out-of-range with 400.
    */
   const submitCheckIn = useCallback(
-    async (code: string, resolvedClubSessionId?: string) => {
+    async (code: string | undefined, resolvedClubSessionId?: string) => {
       // 1. Acquire GPS — REQUIRED. Missing location blocks check-in.
       setPhase({ kind: 'locating' });
       const coords = await getCurrentPosition();
@@ -144,6 +171,29 @@ export default function CheckinModalScreen() {
       if (busy) return;
       setLastCode(code);
 
+      // 정모 출석 QR (current attend URL `…/attend?session=<id>` OR legacy
+      // `MEETUP:<id>`, scanned OR pasted) → UNCONDITIONAL attend (NO geofence —
+      // the QR at the venue is the presence proof), then land on the 현황 보드.
+      const attendSessionId = parseAttendSessionId(code);
+      if (attendSessionId) {
+        setPhase({ kind: 'submitting' });
+        try {
+          await clubSessionApi.attend(attendSessionId);
+          await fetchStatus();
+          haptics.success();
+          router.replace(`/session/${attendSessionId}/board`);
+        } catch (err: any) {
+          setPhase({
+            kind: 'error',
+            message:
+              err?.response?.data?.error ||
+              err?.response?.data?.message ||
+              '출석에 실패했습니다',
+          });
+        }
+        return;
+      }
+
       // Explicit 정모 from the param → keep current behavior.
       if (clubSessionId) {
         await submitCheckIn(code, clubSessionId);
@@ -178,7 +228,7 @@ export default function CheckinModalScreen() {
       // 0 → facility-only fallback; 1 → use it automatically.
       await submitCheckIn(code, sessions[0]?.clubSessionId);
     },
-    [busy, clubSessionId, submitCheckIn],
+    [busy, clubSessionId, submitCheckIn, fetchStatus, router],
   );
 
   const handleManualSubmit = useCallback(() => {

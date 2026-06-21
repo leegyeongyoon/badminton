@@ -6,7 +6,7 @@ import { useClubStore } from '../../store/clubStore';
 import { useCheckinStore } from '../../store/checkinStore';
 import { useTurnStore } from '../../store/turnStore';
 import { clubSessionApi } from '../../services/clubSession';
-import { profileApi } from '../../services/profile';
+import { profileApi, MyStatusResponse } from '../../services/profile';
 import { useSocketEvent, useUserRoom } from '../../hooks/useSocket';
 import { useTheme } from '../../hooks/useTheme';
 import { getSkillMeta } from '../../constants/skill';
@@ -54,6 +54,7 @@ export default function HomeScreen() {
 
   const [activeSessions, setActiveSessions] = useState<ActiveSession[]>([]);
   const [skillLevel, setSkillLevel] = useState<string | null>(null);
+  const [myStatus, setMyStatus] = useState<MyStatusResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
 
@@ -84,9 +85,18 @@ export default function HomeScreen() {
     setActiveSessions(results.filter((s): s is ActiveSession => !!s && s.status === 'ACTIVE'));
   }, []);
 
+  const loadMyStatus = useCallback(async () => {
+    try {
+      const { data } = await profileApi.getMyStatus();
+      setMyStatus(data ?? null);
+    } catch {
+      setMyStatus(null);
+    }
+  }, []);
+
   const loadAll = useCallback(async () => {
     try {
-      await Promise.all([fetchStatus(), fetchMyTurns(), loadProfile()]);
+      await Promise.all([fetchStatus(), fetchMyTurns(), loadProfile(), loadMyStatus()]);
       await fetchClubs();
       // fetchClubs updates the store; read the latest list from the store
       const latestClubs = useClubStore.getState().clubs;
@@ -94,7 +104,7 @@ export default function HomeScreen() {
     } finally {
       setLoading(false);
     }
-  }, [fetchStatus, fetchMyTurns, fetchClubs, loadActiveSessions]);
+  }, [fetchStatus, fetchMyTurns, fetchClubs, loadActiveSessions, loadMyStatus]);
 
   const loadProfile = async () => {
     try {
@@ -123,13 +133,17 @@ export default function HomeScreen() {
   const handleRealtime = useCallback(() => {
     fetchMyTurns();
     fetchStatus();
+    loadMyStatus();
     loadActiveSessions(useClubStore.getState().clubs);
-  }, [fetchMyTurns, fetchStatus, loadActiveSessions]);
+  }, [fetchMyTurns, fetchStatus, loadMyStatus, loadActiveSessions]);
   useSocketEvent('clubSession:started', handleRealtime);
   useSocketEvent('clubSession:ended', handleRealtime);
   useSocketEvent('turn:started', handleRealtime);
   useSocketEvent('turn:completed', handleRealtime);
   useSocketEvent('turn:promoted', handleRealtime);
+  useSocketEvent('gameBoard:entryPushed', handleRealtime);
+  useSocketEvent('gameBoard:entryAdded', handleRealtime);
+  useSocketEvent('gameBoard:entryRemoved', handleRealtime);
 
   // ─── Derived ───
   const playingTurn = useMemo(
@@ -206,10 +220,10 @@ export default function HomeScreen() {
               오늘도 즐거운 한 게임!
             </Text>
           </View>
-          {skillMeta && skillMeta.label ? (
+          {skillMeta ? (
             <View style={[styles.skillBadge, { backgroundColor: skillMeta.color }]}>
               <Text style={styles.skillBadgeLevel}>{skillMeta.level}</Text>
-              <Text style={styles.skillBadgeLabel}>{skillMeta.label}</Text>
+              <Text style={styles.skillBadgeLabel}>{skillMeta.description}</Text>
             </View>
           ) : null}
         </View>
@@ -285,14 +299,69 @@ export default function HomeScreen() {
                     </View>
                   )}
 
-                  {/* player state */}
+                  {/* player state — board-aware when this session is the one I'm in.
+                      Split into a status label + distinct 순번 / 코트 chips so it's
+                      legible at a glance rather than one crammed line. */}
                   {checkedIn ? (
-                    <View style={[styles.waitingPill, { backgroundColor: colors.primaryBg }]}>
-                      <Icon name="success" size={16} color={colors.primary} />
-                      <Text style={[styles.waitingPillText, { color: colors.primary }]}>
-                        대기 중 — 배정되면 알림이 와요
-                      </Text>
-                    </View>
+                    (() => {
+                      const mine = myStatus && myStatus.clubSessionId === s.id ? myStatus : null;
+                      const isPlaying = mine?.status === 'PLAYING';
+                      const isQueued = mine?.status === 'QUEUED';
+                      const order = mine?.queueOrder ?? 0;
+
+                      let icon: 'success' | 'play' | 'waiting' = 'success';
+                      let label = '대기 중';
+                      let sub = '배정되면 알림이 와요';
+                      let tint = colors.secondary;
+                      let bg = colors.secondaryBg;
+                      let orderChip: string | null = null;
+                      let courtChip: string | null = null;
+
+                      if (isPlaying) {
+                        icon = 'play';
+                        tint = colors.playerInTurn;
+                        bg = colors.dangerBg;
+                        label = '게임 중';
+                        sub = '지금 코트로 가세요';
+                        courtChip = mine?.courtName ?? null;
+                      } else if (isQueued) {
+                        icon = 'waiting';
+                        tint = colors.primary;
+                        bg = colors.primaryBg;
+                        label = '다음 게임';
+                        sub = '배정되면 알림이 와요';
+                        orderChip = order > 0 ? `대기 ${order}번째` : null;
+                        courtChip = mine?.courtName ?? '코트 미정';
+                      }
+
+                      const strong = isPlaying || isQueued;
+                      return (
+                        <View style={[styles.statePanel, { backgroundColor: bg }, strong && { borderColor: tint, borderWidth: 1.5 }]}>
+                          <View style={styles.stateHeadRow}>
+                            <View style={[styles.stateIcon, { backgroundColor: tint }]}>
+                              <Icon name={icon} size={16} color={palette.white} />
+                            </View>
+                            <Text style={[styles.stateLabel, { color: tint }]}>{label}</Text>
+                          </View>
+                          {(orderChip || courtChip) && (
+                            <View style={styles.stateChipRow}>
+                              {orderChip && (
+                                <View style={[styles.stateChip, { backgroundColor: tint }]}>
+                                  <Text style={styles.stateChipText}>{orderChip}</Text>
+                                </View>
+                              )}
+                              {courtChip && (
+                                <View style={[styles.stateChipOutline, { borderColor: tint }]}>
+                                  <Icon name="court" size={13} color={tint} />
+                                  <Text style={[styles.stateChipOutlineText, { color: tint }]}>{courtChip}</Text>
+                                </View>
+                              )}
+                            </View>
+                          )}
+                          <Text style={[styles.stateSub, { color: colors.textSecondary }]}>{sub}</Text>
+                        </View>
+                      );
+                    })()
                   ) : (
                     <Button
                       title="체크인"
@@ -304,27 +373,28 @@ export default function HomeScreen() {
                     />
                   )}
 
-                  {isStaff && (
+                  {/* Actions grouped on one row so the card isn't a tall button stack.
+                      현황 보기 is always available; 운영판 sits beside it for staff. */}
+                  <View style={styles.sessionActions}>
                     <Button
-                      title="운영판 열기"
-                      icon="board"
-                      variant="outline"
+                      title="현황 보기"
+                      icon="tv"
+                      variant={isStaff ? 'outline' : 'primary'}
                       size="md"
-                      fullWidth
-                      onPress={() => router.push(`/session/${s.id}/operate`)}
-                      style={styles.operateBtn}
+                      onPress={() => router.push(`/session/${s.id}/board`)}
+                      style={{ flex: 1 }}
                     />
-                  )}
-
-                  <Button
-                    title="게임 현황 보기"
-                    icon="tv"
-                    variant="ghost"
-                    size="md"
-                    fullWidth
-                    onPress={() => router.push(`/session/${s.id}/board`)}
-                    style={styles.operateBtn}
-                  />
+                    {isStaff && (
+                      <Button
+                        title="운영판"
+                        icon="board"
+                        variant="primary"
+                        size="md"
+                        onPress={() => router.push(`/session/${s.id}/operate`)}
+                        style={{ flex: 1 }}
+                      />
+                    )}
+                  </View>
                 </View>
               );
             })}
@@ -613,22 +683,43 @@ const styles = StyleSheet.create({
   checkinBtn: {
     marginTop: spacing.lg,
   },
-  operateBtn: {
-    marginTop: spacing.sm,
+  sessionActions: {
+    flexDirection: 'row',
+    gap: spacing.sm,
+    marginTop: spacing.md,
   },
-  waitingPill: {
+
+  // Player-state panel — split label + 순번/코트 chips (replaces the crammed pill)
+  statePanel: {
+    borderRadius: radius.xxl,
+    padding: spacing.lg,
+    marginTop: spacing.lg,
+    gap: spacing.sm,
+  },
+  stateHeadRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
+  stateIcon: {
+    width: 30, height: 30, borderRadius: 15,
+    alignItems: 'center', justifyContent: 'center',
+  },
+  stateLabel: { ...typography.h3, flex: 1 },
+  stateChipRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, flexWrap: 'wrap' },
+  stateChip: {
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.xs + 2,
+    borderRadius: radius.pill,
+  },
+  stateChipText: { color: palette.white, ...typography.subtitle2, fontSize: 15 },
+  stateChipOutline: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: spacing.sm,
-    paddingHorizontal: spacing.lg,
-    paddingVertical: spacing.mlg,
-    borderRadius: radius.xxl,
-    marginTop: spacing.lg,
+    gap: spacing.xs,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.xs + 1,
+    borderRadius: radius.pill,
+    borderWidth: 2,
   },
-  waitingPillText: {
-    ...typography.subtitle2,
-    flex: 1,
-  },
+  stateChipOutlineText: { ...typography.subtitle2, fontSize: 15 },
+  stateSub: { ...typography.body2 },
 
   // Club cards
   allActiveNote: {

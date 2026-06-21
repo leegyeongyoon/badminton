@@ -11,13 +11,15 @@
     "preview": {
       "distribution": "internal",
       "env": {
-        "EXPO_PUBLIC_API_URL": "https://api.REPLACE_ME.com"
+        "EXPO_PUBLIC_API_URL": "https://api.REPLACE_ME.com",
+        "EXPO_PUBLIC_KAKAO_REST_KEY": "REPLACE_WITH_KAKAO_KEY"
       }
     },
     "production": {
       "autoIncrement": true,
       "env": {
-        "EXPO_PUBLIC_API_URL": "https://api.REPLACE_ME.com"
+        "EXPO_PUBLIC_API_URL": "https://api.REPLACE_ME.com",
+        "EXPO_PUBLIC_KAKAO_REST_KEY": "REPLACE_WITH_KAKAO_KEY"
       }
     }
   },

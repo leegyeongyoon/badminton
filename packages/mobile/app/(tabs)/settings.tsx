@@ -184,12 +184,17 @@ export default function SettingsScreen() {
         <Skeleton width="100%" height={220} borderRadius={16} />
       )}
 
-      <FacilitySection
-        facilityName={selectedFacility?.name}
-        checkinStatus={checkinStatus ? { facilityName: checkinStatus.facilityName } : null}
-        onChangeFacility={clearSelectedFacility}
-        onCheckout={handleCheckout}
-      />
+      {/* Facility management (change gym / checkin-checkout) is an admin concern.
+          Regular members/leaders should see settings as a view/account screen,
+          so gate this behind the FACILITY_ADMIN role. */}
+      {user?.role === 'FACILITY_ADMIN' && (
+        <FacilitySection
+          facilityName={selectedFacility?.name}
+          checkinStatus={checkinStatus ? { facilityName: checkinStatus.facilityName } : null}
+          onChangeFacility={clearSelectedFacility}
+          onCheckout={handleCheckout}
+        />
+      )}
 
       <ClubsSection
         clubs={clubs}

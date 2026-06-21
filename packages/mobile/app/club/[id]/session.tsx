@@ -89,10 +89,12 @@ export default function ClubSessionScreen() {
       setSession(sessionData);
 
       if (sessionData) {
+        // Courts are now per-정모 (Court.clubSessionId). Read this 정모's own
+        // courts; the facility board is no longer the source for 정모 courts.
         const [membersRes, boardRes, courtsRes] = await Promise.all([
           clubApi.getMembers(clubId),
           facilityApi.getBoard(sessionData.facilityId),
-          facilityApi.getCourts(sessionData.facilityId),
+          clubSessionApi.getCourts(sessionData.id),
         ]);
         setMembers(membersRes.data || []);
         setBoardData(boardRes.data || []);

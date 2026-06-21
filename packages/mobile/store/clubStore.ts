@@ -14,6 +14,8 @@ interface ClubMember {
   userId: string;
   name: string;
   role: string;
+  skillLevel: string | null;
+  gender: string | null;
   isCheckedIn: boolean;
   facilityId: string | null;
   playerStatus: string | null;
@@ -25,7 +27,8 @@ interface ClubState {
   isLoading: boolean;
   fetchClubs: () => Promise<void>;
   createClub: (name: string) => Promise<void>;
-  joinClub: (inviteCode: string) => Promise<void>;
+  /** Joins the club for the given invite code and returns the joined club's id. */
+  joinClub: (inviteCode: string) => Promise<string>;
   fetchMembers: (clubId: string) => Promise<void>;
 }
 
@@ -54,7 +57,16 @@ export const useClubStore = create<ClubState>((set) => ({
   },
 
   joinClub: async (inviteCode) => {
-    await clubApi.join(inviteCode);
+    const { data } = await clubApi.join(inviteCode);
+    // Refresh the club list so the newly-joined club is available locally.
+    try {
+      const { data: clubs } = await clubApi.list();
+      const mapped = clubs.map((c: any) => ({ ...c, isLeader: c.role === 'LEADER' }));
+      set({ clubs: mapped });
+    } catch {
+      // Non-fatal — navigation can still proceed with the returned clubId.
+    }
+    return data.clubId;
   },
 
   fetchMembers: async (clubId) => {

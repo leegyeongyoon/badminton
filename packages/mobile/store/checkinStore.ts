@@ -22,7 +22,7 @@ interface CheckInState {
   isLoading: boolean;
   isResting: boolean;
   restingSince: string | null;
-  checkIn: (qrData: string, opts: CheckInOptions) => Promise<void>;
+  checkIn: (qrData: string | undefined, opts: CheckInOptions) => Promise<void>;
   checkOut: () => Promise<void>;
   fetchStatus: () => Promise<void>;
   toggleRest: () => Promise<void>;

@@ -8,6 +8,18 @@ import { sendPushToUser } from '../notification/notification.service';
 import { scheduleJob, cancelJob } from '../scheduler/scheduler.service';
 import { emitPlayersUpdated } from '../checkin/checkin.service';
 
+// True when `userId` is LEADER/STAFF of the 정모 that owns this turn — i.e. the
+// operator, who may complete/cancel any game on their board.
+async function isSessionStaff(clubSessionId: string | null, userId: string): Promise<boolean> {
+  if (!clubSessionId) return false;
+  const cs = await prisma.clubSession.findUnique({ where: { id: clubSessionId } });
+  if (!cs) return false;
+  const member = await prisma.clubMember.findUnique({
+    where: { userId_clubId: { userId, clubId: cs.clubId } },
+  });
+  return !!member && (member.role === 'LEADER' || member.role === 'STAFF');
+}
+
 export async function registerTurn(
   courtId: string,
   creatorUserId: string,
@@ -24,6 +36,12 @@ export async function registerTurn(
     throw new BadRequestError('점검 중인 코트에는 순번을 등록할 수 없습니다');
   }
 
+  // BUG-1: resolve the owning 정모 for this turn. The direct route
+  // (POST /courts/:courtId/turns) passes no clubSessionId — courts are now
+  // per-정모, so derive it from the court so the turn is correctly scoped
+  // (never created unscoped/null). The board path already supplies it; keep that.
+  const effectiveClubSessionId = clubSessionId ?? court.clubSessionId ?? null;
+
   // Determine game type and required players
   const effectiveGameType = gameType || (court.gameType as CourtGameType);
 
@@ -38,9 +56,9 @@ export async function registerTurn(
   }
 
   // Club session permission: LEADER/STAFF can register turns for others
-  if (clubSessionId) {
+  if (effectiveClubSessionId) {
     const clubSession = await prisma.clubSession.findUnique({
-      where: { id: clubSessionId },
+      where: { id: effectiveClubSessionId },
     });
     if (clubSession && clubSession.status === 'ACTIVE') {
       const clubMember = await prisma.clubMember.findUnique({
@@ -53,14 +71,16 @@ export async function registerTurn(
     }
   }
 
-  const requiredPlayers = effectiveGameType === CourtGameType.DOUBLES ? 4
-    : Math.max(2, playerIds.length); // LESSON: flexible, min 2
-
-  if (effectiveGameType === CourtGameType.DOUBLES && playerIds.length !== 4) {
-    throw new BadRequestError('복식은 4명이 필요합니다');
-  }
+  // BUG-2: a court turn / game may have 2 to 4 players regardless of the court's
+  // nominal gameType — the operator intentionally drafts partial groups
+  // (2 = 단식, 3-4 = 복식/부분 편성). We no longer hard-require exactly 4 for a
+  // DOUBLES court; we only enforce the universal 2..4 bound so a 2-3 player
+  // QUEUED draft can actually materialize onto a court.
   if (playerIds.length < 2) {
-    throw new BadRequestError('최소 2명이 필요합니다');
+    throw new BadRequestError('2명 이상이어야 코트에 배정할 수 있어요');
+  }
+  if (playerIds.length > 4) {
+    throw new BadRequestError('한 게임에는 최대 4명까지 배정할 수 있어요');
   }
 
   const policy = court.facility.policy;
@@ -89,22 +109,17 @@ export async function registerTurn(
     }
   }
 
-  // Check duplicate: player already in a WAITING or PLAYING turn on this court
-  for (const pid of playerIds) {
-    const existing = await prisma.turnPlayer.findFirst({
-      where: {
-        userId: pid,
-        turn: {
-          courtId,
-          status: { in: ['WAITING', 'PLAYING'] },
-        },
-      },
-    });
-    if (existing) {
-      const user = await prisma.user.findUnique({ where: { id: pid } });
-      throw new BadRequestError(`${user?.name ?? pid}님이 이미 이 코트에 순번이 있습니다`);
-    }
-  }
+  // A1 (SOFT double-booking): the former PLAYER double-booking HARD blocks here
+  // are removed so the operator can assign/promote a player who is already
+  // playing/queued elsewhere this 정모. Specifically removed:
+  //   (1) the session cross-court player guard (player in another WAITING/PLAYING
+  //       turn of this 정모), and
+  //   (2) the per-court duplicate player guard.
+  // The double-booked signal is now the non-blocking red dot (busyPlayerIds).
+  // The physical COURT-occupancy conflict (a court can't host two simultaneous
+  // WAITING/PLAYING turns) is still a HARD block — enforced by assignEntry's
+  // occupancy guard and the maxTurns check below. Maintenance / check-in /
+  // penalty checks above also remain.
 
   // Check max turns
   const activeTurns = await prisma.courtTurn.count({
@@ -122,7 +137,7 @@ export async function registerTurn(
       position: nextPosition,
       gameType: effectiveGameType,
       createdById: creatorUserId,
-      clubSessionId: clubSessionId ?? null,
+      clubSessionId: effectiveClubSessionId,
       players: {
         create: playerIds.map((pid) => ({ userId: pid })),
       },
@@ -266,7 +281,10 @@ export async function completeTurn(
   const isAdmin = await prisma.facilityAdmin.findFirst({
     where: { facilityId: turn.court.facilityId, userId },
   });
-  if (!isPlayer && !isCreator && !isAdmin) {
+  // The operator (LEADER/STAFF of the turn's 정모) can complete any game on their
+  // board — not only ones they created or are playing in.
+  const isClubStaff = await isSessionStaff(turn.clubSessionId, userId);
+  if (!isPlayer && !isCreator && !isAdmin && !isClubStaff) {
     throw new ForbiddenError('이 순번을 종료할 권한이 없습니다');
   }
 
@@ -286,6 +304,13 @@ export async function completeTurn(
   await prisma.courtTurn.update({
     where: { id: turnId },
     data: { status: TurnStatus.COMPLETED, completedAt: new Date(), timeLimitAt: null },
+  });
+
+  // The board entry that materialized into this turn is done — transition it so
+  // the operator board stops showing the court/players as 게임중 (게임 종료 → 비어있음).
+  await prisma.gameBoardEntry.updateMany({
+    where: { turnId, status: { in: ['MATERIALIZED', 'PLAYING'] } },
+    data: { status: 'COMPLETED' },
   });
 
   const courtId = turn.courtId;
@@ -370,13 +395,20 @@ export async function cancelTurn(
   const isAdmin = await prisma.facilityAdmin.findFirst({
     where: { facilityId: turn.court.facilityId, userId },
   });
-  if (!isPlayer && !isCreator && !isAdmin) {
+  const isClubStaff = await isSessionStaff(turn.clubSessionId, userId);
+  if (!isPlayer && !isCreator && !isAdmin && !isClubStaff) {
     throw new ForbiddenError('이 순번을 취소할 권한이 없습니다');
   }
 
   await prisma.courtTurn.update({
     where: { id: turnId },
     data: { status: TurnStatus.CANCELLED },
+  });
+
+  // Transition the linked board entry too, so the board clears it (no 유령 게임중).
+  await prisma.gameBoardEntry.updateMany({
+    where: { turnId, status: { in: ['MATERIALIZED', 'PLAYING'] } },
+    data: { status: 'CANCELLED' },
   });
 
   // Reorder remaining waiting turns

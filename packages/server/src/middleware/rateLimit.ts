@@ -50,6 +50,13 @@ export function rateLimit(options: RateLimitOptions) {
   if (typeof sweep.unref === 'function') sweep.unref();
 
   return function rateLimitMiddleware(req: Request, res: Response, next: NextFunction) {
+    // Rate limiting is a production protection. In development the operator and
+    // any local test traffic share one IP (localhost), so a strict per-IP login
+    // limit would lock everyone out. Skip entirely outside production.
+    if (process.env.NODE_ENV !== 'production') {
+      return next();
+    }
+
     const ip = req.ip || req.socket.remoteAddress || 'unknown';
     const key = `${keyPrefix}:${ip}`;
     const now = Date.now();

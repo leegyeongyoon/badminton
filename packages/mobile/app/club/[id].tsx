@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, useRef } from 'react';
 import {
   View,
   Text,
@@ -8,6 +8,7 @@ import {
   RefreshControl,
   Modal,
   ScrollView,
+  TextInput,
   Alert,
   Platform,
 } from 'react-native';
@@ -16,10 +17,11 @@ import { useClubStore } from '../../store/clubStore';
 import { useCheckinStore } from '../../store/checkinStore';
 import { useAuthStore } from '../../store/authStore';
 import { clubSessionApi } from '../../services/clubSession';
-import { facilityApi } from '../../services/facility';
 import { Colors } from '../../constants/colors';
 import { Strings } from '../../constants/strings';
 import { showAlert, showConfirm } from '../../utils/alert';
+import { showSuccess } from '../../utils/feedback';
+import { getCurrentPosition } from '../../utils/geo';
 import { AttendanceLeaderboard } from '../../components/club/AttendanceLeaderboard';
 
 interface ClubMember {
@@ -29,12 +31,6 @@ interface ClubMember {
   isCheckedIn: boolean;
   facilityId: string | null;
   playerStatus: string | null;
-}
-
-interface FacilityCourt {
-  id: string;
-  name: string;
-  status: string;
 }
 
 const playerStatusColors: Record<string, string> = {
@@ -59,16 +55,18 @@ export default function ClubDetailScreen() {
   const { id: clubId } = useLocalSearchParams<{ id: string }>();
   const router = useRouter();
   const { currentMembers, fetchMembers, clubs } = useClubStore();
-  const { status: checkinStatus } = useCheckinStore();
-  const { user } = useAuthStore();
+  const { status: checkinStatus, checkOut, fetchStatus, checkIn } = useCheckinStore();
+  const { user, isGuest } = useAuthStore();
+
+  const [checkingOut, setCheckingOut] = useState(false);
 
   const [activeSession, setActiveSession] = useState<any>(null);
   const [loadingSession, setLoadingSession] = useState(false);
   const [showStartModal, setShowStartModal] = useState(false);
   const [showRoleModal, setShowRoleModal] = useState(false);
   const [selectedMember, setSelectedMember] = useState<ClubMember | null>(null);
-  const [facilityCourts, setFacilityCourts] = useState<FacilityCourt[]>([]);
-  const [selectedCourtIds, setSelectedCourtIds] = useState<string[]>([]);
+  // 정모 시작 시 등록할 "코트 수" (기본 4). 각 정모는 자기 전용 코트 1..N을 가진다.
+  const [courtCountInput, setCourtCountInput] = useState('4');
   const [isStarting, setIsStarting] = useState(false);
 
   const club = clubs.find((c) => c.id === clubId);
@@ -76,6 +74,9 @@ export default function ClubDetailScreen() {
   const isLeaderOrStaff = myMembership?.role === 'LEADER' || myMembership?.role === 'STAFF';
   const isLeader = myMembership?.role === 'LEADER';
   const checkedInFacilityId = checkinStatus?.facilityId;
+  // Am I currently checked in? Prefer the per-member flag from the club roster
+  // (reflects this club's 정모), falling back to the global check-in status.
+  const isCheckedIn = !!myMembership?.isCheckedIn || !!checkinStatus;
 
   const loadActiveSession = useCallback(async () => {
     if (!clubId) return;
@@ -97,6 +98,41 @@ export default function ClubDetailScreen() {
     }
   }, [clubId]);
 
+  // Auto check-in: when a member opens the club during an ACTIVE 정모 and isn't
+  // checked in yet, silently try to check in IF the device is inside the
+  // facility geofence. The backend enforces the 100m radius — so we just send
+  // the GPS coords and let it accept (inside) or reject (outside). Attempted at
+  // most once per session id. Falls back to the manual 체크인 button when GPS is
+  // denied/unavailable (e.g. web) or the user is outside the geofence.
+  const autoTriedRef = useRef<string | null>(null);
+  const [autoCheckMsg, setAutoCheckMsg] = useState<string | null>(null);
+  useEffect(() => {
+    const sid = activeSession?.id;
+    if (!sid || !user || isGuest || isCheckedIn || !myMembership) return;
+    if (autoTriedRef.current === sid) return;
+    autoTriedRef.current = sid;
+    (async () => {
+      const coords = await getCurrentPosition();
+      if (!coords) return; // no GPS / permission denied → keep the manual button
+      try {
+        await checkIn(undefined, {
+          clubSessionId: sid,
+          latitude: coords.latitude,
+          longitude: coords.longitude,
+        });
+        setAutoCheckMsg(null);
+        showSuccess('현장 확인 — 자동 체크인됐어요');
+        await Promise.all([fetchStatus(), fetchMembers(clubId)]);
+      } catch (err: any) {
+        // Outside the geofence (400) is expected when not yet at the venue —
+        // stay silent and show a small hint; the manual button remains.
+        if (err?.response?.status === 400) {
+          setAutoCheckMsg('정모 장소 100m 이내에 들어오면 자동으로 체크인돼요');
+        }
+      }
+    })();
+  }, [activeSession?.id, user, isGuest, isCheckedIn, myMembership, clubId]);
+
   const onRefresh = useCallback(async () => {
     if (clubId) {
       await Promise.all([
@@ -106,29 +142,25 @@ export default function ClubDetailScreen() {
     }
   }, [clubId]);
 
-  // Load facility courts when opening start session modal
-  const handleOpenStartModal = async () => {
+  // Open the start modal to register the 코트 수 (default 4) for this 정모.
+  const handleOpenStartModal = () => {
     if (!checkedInFacilityId) {
       showAlert('알림', '체크인 후에 모임을 시작할 수 있습니다');
       return;
     }
-    try {
-      const { data } = await facilityApi.get(checkedInFacilityId);
-      setFacilityCourts(data.courts || []);
-      setSelectedCourtIds([]);
-      setShowStartModal(true);
-    } catch {
-      showAlert(Strings.common.error, '시설 정보를 불러올 수 없습니다');
-    }
+    setCourtCountInput('4');
+    setShowStartModal(true);
   };
 
-  const handleStartSession = async (courtIds?: string[]) => {
+  // Start the 정모 with a court COUNT. The server creates this 정모's OWN courts
+  // (코트 1 … 코트 N) — fully independent of any other 모임's courts.
+  const handleStartSession = async (courtCount?: number) => {
     if (!clubId || !checkedInFacilityId) return;
     setIsStarting(true);
     try {
       const { data: newSession } = await clubSessionApi.start(clubId, {
         facilityId: checkedInFacilityId,
-        courtIds: courtIds && courtIds.length > 0 ? courtIds : undefined,
+        ...(courtCount && courtCount > 0 ? { courtCount } : {}),
       });
       setShowStartModal(false);
       setActiveSession(newSession);
@@ -141,14 +173,40 @@ export default function ClubDetailScreen() {
     }
   };
 
-  // One-tap 정모 start: no scheduling, no court picker required (defaults to
-  // all courts at the checked-in facility). Opens check-in for the club.
+  // One-tap 정모 start: defaults to 4 courts (코트 1~4) for this 정모.
   const handleQuickStartSession = async () => {
     if (!checkedInFacilityId) {
       showAlert('알림', '체크인 후에 정모를 시작할 수 있습니다');
       return;
     }
-    await handleStartSession();
+    await handleStartSession(4);
+  };
+
+  // Player self check-out. Confirms, calls the existing checkinStore.checkOut()
+  // (POST /checkin/checkout), then refreshes both the global check-in status and
+  // this club's roster so the "참석 중" indicator / 체크인 button update.
+  const handleCheckOut = () => {
+    showConfirm(
+      '체크아웃',
+      '정모에서 체크아웃할까요? 대기 중인 순번은 취소됩니다.',
+      async () => {
+        setCheckingOut(true);
+        try {
+          await checkOut();
+          await Promise.all([
+            fetchStatus(),
+            clubId ? fetchMembers(clubId) : Promise.resolve(),
+          ]);
+        } catch (err: any) {
+          showAlert(Strings.common.error, err?.response?.data?.error || '체크아웃에 실패했습니다');
+        } finally {
+          setCheckingOut(false);
+        }
+      },
+      '체크아웃',
+      Strings.common.cancel,
+      'danger',
+    );
   };
 
   const handleChangeRole = async (newRole: string) => {
@@ -161,12 +219,6 @@ export default function ClubDetailScreen() {
     } catch (err: any) {
       showAlert(Strings.common.error, err?.response?.data?.error || '역할 변경에 실패했습니다');
     }
-  };
-
-  const toggleCourt = (courtId: string) => {
-    setSelectedCourtIds((prev) =>
-      prev.includes(courtId) ? prev.filter((id) => id !== courtId) : [...prev, courtId],
-    );
   };
 
   const checkedInMembers = currentMembers.filter((m) => m.isCheckedIn);
@@ -254,37 +306,72 @@ export default function ClubDetailScreen() {
                   <Text style={styles.clubMeta}>{currentMembers.length}명</Text>
                 </View>
               </View>
-              <View style={styles.inviteBox}>
+              <TouchableOpacity
+                style={styles.inviteBox}
+                onPress={() => router.push(`/club/${clubId}/qr`)}
+                activeOpacity={0.7}
+                accessibilityLabel="모임 참여 QR 보기"
+              >
                 <Text style={styles.inviteLabel}>초대코드</Text>
                 <Text style={styles.inviteCode}>{club.inviteCode}</Text>
-              </View>
+              </TouchableOpacity>
             </View>
           )}
 
-          {/* Active session banner */}
-          {activeSession && (
-            <View style={styles.sessionBannerWrap}>
-              <TouchableOpacity
-                style={styles.sessionBanner}
-                onPress={() => router.push(`/club/${clubId}/session`)}
-                activeOpacity={0.7}
-              >
-                <View style={styles.sessionBannerLeft}>
-                  <View style={styles.sessionDot} />
-                  <View>
-                    <Text style={styles.sessionBannerTitle}>모임 진행중</Text>
-                    <Text style={styles.sessionBannerSub}>
-                      {activeSession.facilityName} - 코트 {activeSession.courtIds?.length || 0}개
-                    </Text>
-                  </View>
-                </View>
-                <View style={styles.sessionBannerBtn}>
-                  <Text style={styles.sessionBannerBtnText}>모임 관리</Text>
-                </View>
-              </TouchableOpacity>
+          {/* 채팅 / 건의 — 모든 모임원이 사용. 짝 요청(○○랑 같이 치고 싶어요)도 여기서. */}
+          <View style={styles.chatButtonWrap}>
+            <TouchableOpacity
+              style={styles.chatButton}
+              onPress={() => router.push(`/club/${clubId}/chat`)}
+              activeOpacity={0.85}
+              accessibilityLabel="채팅 건의"
+            >
+              <Text style={styles.chatButtonText}>💬 채팅 / 건의 (짝 요청)</Text>
+            </TouchableOpacity>
+          </View>
 
-              {/* Quick actions */}
-              {isLeaderOrStaff && (
+          {/* 모임 참여 QR — 스캔하면 모임에 참여. 관리자(리더/운영진)만 노출. */}
+          {isLeaderOrStaff && (
+            <View style={styles.qrButtonWrap}>
+              <TouchableOpacity
+                style={styles.qrButton}
+                onPress={() => router.push(`/club/${clubId}/qr`)}
+                activeOpacity={0.85}
+                accessibilityLabel="모임 참여 QR"
+              >
+                <Text style={styles.qrButtonText}>모임 참여 QR</Text>
+              </TouchableOpacity>
+            </View>
+          )}
+
+          {/* Active session banner.
+              • LEADER/STAFF: the management banner (→ 턴 관리) + quick actions
+                (운영판 / 턴 관리).
+              • Regular player: a clean, prominent block — 체크인 (if not yet
+                checked in) + 게임 현황 보기 (read-only board). No 관리 UI. */}
+          {activeSession && (
+            isLeaderOrStaff ? (
+              <View style={styles.sessionBannerWrap}>
+                <TouchableOpacity
+                  style={styles.sessionBanner}
+                  onPress={() => router.push(`/club/${clubId}/session`)}
+                  activeOpacity={0.7}
+                >
+                  <View style={styles.sessionBannerLeft}>
+                    <View style={styles.sessionDot} />
+                    <View>
+                      <Text style={styles.sessionBannerTitle}>모임 진행중</Text>
+                      <Text style={styles.sessionBannerSub}>
+                        {activeSession.facilityName} - 코트 {activeSession.courtIds?.length || 0}개
+                      </Text>
+                    </View>
+                  </View>
+                  <View style={styles.sessionBannerBtn}>
+                    <Text style={styles.sessionBannerBtnText}>모임 관리</Text>
+                  </View>
+                </TouchableOpacity>
+
+                {/* Quick actions (operator only) */}
                 <View style={styles.quickActions}>
                   <TouchableOpacity
                     style={styles.quickActionBtn}
@@ -299,8 +386,70 @@ export default function ClubDetailScreen() {
                     <Text style={styles.quickActionText}>턴 관리</Text>
                   </TouchableOpacity>
                 </View>
-              )}
-            </View>
+              </View>
+            ) : (
+              <View style={styles.playerSessionWrap}>
+                <View style={styles.playerSessionHeader}>
+                  <View style={styles.sessionDot} />
+                  <Text style={styles.playerSessionTitle}>모임 진행중</Text>
+                  <Text style={styles.playerSessionSub}>
+                    {activeSession.facilityName} · 코트 {activeSession.courtIds?.length || 0}개
+                  </Text>
+                </View>
+
+                {/* 체크인 — 아직 체크인 안 했을 때만 (가장 눈에 띄게).
+                    네이티브에서는 GPS 지오펜스(100m)가 적용됨. 웹은 GPS가 없어
+                    위치 오류가 날 수 있음(기존 동작 유지). */}
+                {!isCheckedIn && (
+                  <>
+                    <TouchableOpacity
+                      style={styles.playerCheckinBtn}
+                      onPress={() => router.push(`/checkin-modal?clubSessionId=${activeSession.id}`)}
+                      activeOpacity={0.85}
+                      accessibilityLabel="체크인"
+                    >
+                      <Text style={styles.playerCheckinText}>체크인</Text>
+                    </TouchableOpacity>
+                    {!!autoCheckMsg && (
+                      <Text style={styles.autoCheckHint}>📍 {autoCheckMsg}</Text>
+                    )}
+                  </>
+                )}
+
+                {/* 체크인 됨 → "✓ 참석 중" 표시 + 체크아웃 버튼 */}
+                {isCheckedIn && (
+                  <View style={styles.attendingRow}>
+                    <View style={styles.attendingBadge}>
+                      <Text style={styles.attendingText}>✓ 참석 중</Text>
+                    </View>
+                    <TouchableOpacity
+                      style={[styles.playerCheckoutBtn, checkingOut && { opacity: 0.6 }]}
+                      onPress={handleCheckOut}
+                      disabled={checkingOut}
+                      activeOpacity={0.85}
+                      accessibilityLabel="체크아웃"
+                    >
+                      <Text style={styles.playerCheckoutText}>
+                        {checkingOut ? '처리 중...' : '체크아웃'}
+                      </Text>
+                    </TouchableOpacity>
+                  </View>
+                )}
+
+                {/* 게임 현황 보기 — 읽기 전용 보드. 체크인 여부와 무관하게 항상
+                    노출(정모가 진행 중이면 모임원 누구나 볼 수 있어야 함). */}
+                <TouchableOpacity
+                  style={[styles.playerBoardBtn, isCheckedIn && styles.playerBoardBtnPrimary]}
+                  onPress={() => router.push(`/session/${activeSession.id}/board`)}
+                  activeOpacity={0.85}
+                  accessibilityLabel="게임 현황 보기"
+                >
+                  <Text style={[styles.playerBoardText, isCheckedIn && styles.playerBoardTextPrimary]}>
+                    게임 현황 보기
+                  </Text>
+                </TouchableOpacity>
+              </View>
+            )
           )}
 
           {/* Leader actions — one-tap 정모 start (no scheduling required) */}
@@ -370,43 +519,39 @@ export default function ClubDetailScreen() {
                 {checkinStatus?.facilityName}에서 정모를 시작합니다
               </Text>
 
-              {/* Court selection */}
-              <Text style={styles.modalSubtitle}>
-                사용할 코트 선택 (선택 안하면 전체)
-              </Text>
-              <View style={styles.courtGrid}>
-                {facilityCourts.map((court) => {
-                  const isSelected = selectedCourtIds.includes(court.id);
-                  const isMaintenance = court.status === 'MAINTENANCE';
-                  return (
-                    <TouchableOpacity
-                      key={court.id}
-                      style={[
-                        styles.courtOption,
-                        isSelected && styles.courtOptionActive,
-                        isMaintenance && styles.courtOptionDisabled,
-                      ]}
-                      onPress={() => !isMaintenance && toggleCourt(court.id)}
-                      disabled={isMaintenance}
-                    >
-                      <Text style={[
-                        styles.courtOptionText,
-                        isSelected && styles.courtOptionTextActive,
-                        isMaintenance && { color: Colors.textLight },
-                      ]}>
-                        {court.name}
-                      </Text>
-                      {isMaintenance && (
-                        <Text style={styles.courtMaintenanceText}>점검중</Text>
-                      )}
-                    </TouchableOpacity>
-                  );
-                })}
+              {/* 코트 수 — 이 정모 전용 코트 1..N을 만든다 (다른 모임과 독립). */}
+              <Text style={styles.modalSubtitle}>코트 수</Text>
+              <View style={styles.courtCountRow}>
+                <TouchableOpacity
+                  style={styles.courtCountBtn}
+                  onPress={() => setCourtCountInput((v) => String(Math.max(1, (parseInt(v, 10) || 1) - 1)))}
+                  accessibilityLabel="코트 수 줄이기"
+                >
+                  <Text style={styles.courtCountBtnText}>−</Text>
+                </TouchableOpacity>
+                <TextInput
+                  style={styles.courtCountInput}
+                  value={courtCountInput}
+                  onChangeText={(t) => setCourtCountInput(t.replace(/[^0-9]/g, ''))}
+                  keyboardType="number-pad"
+                  maxLength={2}
+                  accessibilityLabel="코트 수"
+                />
+                <TouchableOpacity
+                  style={styles.courtCountBtn}
+                  onPress={() => setCourtCountInput((v) => String(Math.min(30, (parseInt(v, 10) || 0) + 1)))}
+                  accessibilityLabel="코트 수 늘리기"
+                >
+                  <Text style={styles.courtCountBtnText}>＋</Text>
+                </TouchableOpacity>
               </View>
+              <Text style={styles.courtCountHint}>
+                이 정모 전용 코트(코트 1~{Math.max(1, parseInt(courtCountInput, 10) || 1)})가 만들어져요. 운영 중에 추가/삭제할 수 있어요.
+              </Text>
 
               <TouchableOpacity
                 style={[styles.confirmBtn, isStarting && { opacity: 0.5 }]}
-                onPress={() => handleStartSession(selectedCourtIds)}
+                onPress={() => handleStartSession(Math.max(1, parseInt(courtCountInput, 10) || 4))}
                 disabled={isStarting}
               >
                 <Text style={styles.confirmBtnText}>
@@ -595,6 +740,138 @@ const styles = StyleSheet.create({
     fontSize: 13,
     fontWeight: '600',
   },
+  // 채팅 / 건의 버튼 (모든 모임원)
+  chatButtonWrap: {
+    marginHorizontal: 16,
+    marginTop: 12,
+  },
+  chatButton: {
+    borderRadius: 12,
+    paddingVertical: 14,
+    alignItems: 'center',
+    backgroundColor: '#7C3AED',
+  },
+  chatButtonText: {
+    color: '#fff',
+    fontSize: 15,
+    fontWeight: '700',
+  },
+  // 모임 참여 QR 버튼
+  qrButtonWrap: {
+    marginHorizontal: 16,
+    marginTop: 12,
+  },
+  qrButton: {
+    borderWidth: 1.5,
+    borderColor: '#7C3AED',
+    borderRadius: 12,
+    paddingVertical: 12,
+    alignItems: 'center',
+    backgroundColor: '#EDE9FE',
+  },
+  qrButtonText: {
+    color: '#7C3AED',
+    fontSize: 15,
+    fontWeight: '700',
+  },
+  // Player active-session block (clean, no management UI)
+  playerSessionWrap: {
+    margin: 16,
+    marginBottom: 0,
+    backgroundColor: '#EDE9FE',
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: '#7C3AED30',
+    padding: 16,
+    gap: 12,
+  },
+  playerSessionHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  playerSessionTitle: {
+    fontSize: 15,
+    fontWeight: '800',
+    color: '#7C3AED',
+  },
+  playerSessionSub: {
+    fontSize: 12,
+    color: '#6D28D9',
+    flex: 1,
+  },
+  playerCheckinBtn: {
+    backgroundColor: '#7C3AED',
+    borderRadius: 14,
+    paddingVertical: 16,
+    alignItems: 'center',
+  },
+  playerCheckinText: {
+    color: '#fff',
+    fontSize: 17,
+    fontWeight: '800',
+  },
+  autoCheckHint: {
+    marginTop: 8,
+    textAlign: 'center',
+    color: Colors.textSecondary,
+    fontSize: 12.5,
+  },
+  // 참석 중 표시 + 체크아웃 (한 줄)
+  attendingRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+  },
+  attendingBadge: {
+    flex: 1,
+    backgroundColor: Colors.surface,
+    borderRadius: 14,
+    paddingVertical: 14,
+    alignItems: 'center',
+    borderWidth: 1.5,
+    borderColor: Colors.secondary,
+  },
+  attendingText: {
+    color: Colors.secondary,
+    fontSize: 16,
+    fontWeight: '800',
+  },
+  playerCheckoutBtn: {
+    borderRadius: 14,
+    paddingVertical: 14,
+    paddingHorizontal: 20,
+    alignItems: 'center',
+    borderWidth: 1.5,
+    borderColor: Colors.danger,
+    backgroundColor: Colors.surface,
+  },
+  playerCheckoutText: {
+    color: Colors.danger,
+    fontSize: 15,
+    fontWeight: '700',
+  },
+  playerBoardBtn: {
+    borderRadius: 14,
+    paddingVertical: 14,
+    alignItems: 'center',
+    borderWidth: 1.5,
+    borderColor: '#7C3AED',
+    backgroundColor: Colors.surface,
+  },
+  // When already checked in, the board button becomes the primary CTA.
+  playerBoardBtnPrimary: {
+    backgroundColor: '#7C3AED',
+    borderColor: '#7C3AED',
+  },
+  playerBoardText: {
+    color: '#7C3AED',
+    fontSize: 16,
+    fontWeight: '700',
+  },
+  playerBoardTextPrimary: {
+    color: '#fff',
+  },
   // Leader actions
   leaderActions: {
     margin: 16,
@@ -773,42 +1050,46 @@ const styles = StyleSheet.create({
     color: Colors.text,
     marginBottom: 10,
   },
-  // Court selection grid
-  courtGrid: {
+  // 코트 수 입력 (스테퍼)
+  courtCountRow: {
     flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 8,
-    marginBottom: 20,
-  },
-  courtOption: {
-    borderWidth: 1.5,
-    borderColor: Colors.border,
-    borderRadius: 10,
-    paddingVertical: 12,
-    paddingHorizontal: 16,
-    minWidth: '45%',
     alignItems: 'center',
-    backgroundColor: Colors.background,
+    justifyContent: 'center',
+    gap: 16,
+    marginBottom: 8,
   },
-  courtOptionActive: {
+  courtCountBtn: {
+    width: 48,
+    height: 48,
+    borderRadius: 12,
+    borderWidth: 1.5,
     borderColor: '#7C3AED',
+    alignItems: 'center',
+    justifyContent: 'center',
     backgroundColor: '#EDE9FE',
   },
-  courtOptionDisabled: {
-    opacity: 0.4,
-  },
-  courtOptionText: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: Colors.text,
-  },
-  courtOptionTextActive: {
+  courtCountBtnText: {
+    fontSize: 24,
+    fontWeight: '700',
     color: '#7C3AED',
   },
-  courtMaintenanceText: {
-    fontSize: 10,
+  courtCountInput: {
+    minWidth: 72,
+    height: 56,
+    borderWidth: 1.5,
+    borderColor: Colors.border,
+    borderRadius: 12,
+    textAlign: 'center',
+    fontSize: 24,
+    fontWeight: '700',
+    color: Colors.text,
+    backgroundColor: Colors.background,
+  },
+  courtCountHint: {
+    fontSize: 12,
     color: Colors.textLight,
-    marginTop: 2,
+    textAlign: 'center',
+    marginBottom: 20,
   },
   confirmBtn: {
     backgroundColor: '#7C3AED',

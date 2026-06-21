@@ -45,7 +45,13 @@ export async function getGameBoard(clubSessionId: string) {
       // Court-less QUEUED entries ordered by the global queueOrder (다음 게임 순서);
       // on-court / materialized entries keep their createdAt order. formatBoard
       // re-sorts so QUEUED come first by queueOrder, then the rest by createdAt.
-      entries: { orderBy: [{ queueOrder: 'asc' }, { position: 'asc' }] },
+      // Only ACTIVE entries belong on the board. COMPLETED/CANCELLED entries
+      // (their turn finished or was cancelled) must be excluded, otherwise the
+      // operator board keeps showing the court/players as 게임중 forever.
+      entries: {
+        where: { status: { in: ['QUEUED', 'MATERIALIZED', 'PLAYING'] } },
+        orderBy: [{ queueOrder: 'asc' }, { position: 'asc' }],
+      },
     },
   });
   if (!board) throw new NotFoundError('모임판');
@@ -65,6 +71,14 @@ export async function addEntry(
     include: { entries: { where: { status: 'QUEUED' } } },
   });
   if (!board) throw new NotFoundError('모임판');
+
+  // A1 (SOFT double-booking): the operator may PRE-DRAFT a future QUEUED game
+  // with a player already composed/playing elsewhere this 정모. The former HARD
+  // block (assertNotAlreadyBooked) is removed — creating/editing a QUEUED entry
+  // never errors on a player already in another game. The double-booked signal
+  // is now a non-blocking red dot (computeBusyPlayerIds). COURT-occupancy +
+  // check-in + penalty + maintenance + court-ownership checks remain on the
+  // assign/materialize path.
 
   const nextPosition = board.entries.length + 1;
   // Append to the end of the global queue.
@@ -176,16 +190,26 @@ export async function assignEntry(
   courtId: string,
   userId: string,
 ) {
-  await verifyBoardStaff(boardId, userId);
+  const board = await verifyBoardStaff(boardId, userId);
 
   const court = await prisma.court.findUnique({ where: { id: courtId } });
   if (!court) throw new NotFoundError('코트');
   if (court.status === 'MAINTENANCE') {
     throw new BadRequestError('점검 중(사용 불가)인 코트에는 배정할 수 없습니다');
   }
-  // Reject assigning onto an occupied court (an active turn/game is already there).
+
+  // Per-정모 ownership: the court must belong to THIS 정모 (clubSessionId).
+  if (court.clubSessionId !== board.clubSessionId) {
+    throw new BadRequestError('이 정모의 코트가 아닙니다');
+  }
+
+  // Reject only if an active turn/game already occupies this court. Courts are
+  // owned by exactly one 정모, so any active WAITING/PLAYING turn on it is ours.
   const occupied = await prisma.courtTurn.findFirst({
-    where: { courtId, status: { in: ['WAITING', 'PLAYING'] } },
+    where: {
+      courtId,
+      status: { in: ['WAITING', 'PLAYING'] },
+    },
   });
   if (occupied) {
     throw new BadRequestError('이미 사용 중인 코트입니다. 빈 코트에 배정하세요');
@@ -290,23 +314,38 @@ export async function pushAllEntries(boardId: string, userId: string) {
   const board = await prisma.gameBoard.findUnique({
     where: { id: boardId },
     include: {
+      clubSession: true,
       entries: { where: { status: 'QUEUED' }, orderBy: { position: 'asc' } },
     },
   });
   if (!board) throw new NotFoundError('모임판');
 
-  // Get available courts
+  // This 정모's OWN courts (Court.clubSessionId), non-maintenance.
   const courts = await prisma.court.findMany({
-    where: { facilityId: board.facilityId, status: { not: 'MAINTENANCE' } },
+    where: { clubSessionId: board.clubSessionId, status: { not: 'MAINTENANCE' } },
     orderBy: { name: 'asc' },
   });
+  if (courts.length === 0) return [];
+
+  // Only fill EMPTY courts — an active WAITING/PLAYING turn on this 정모's court
+  // means occupied. Never stack onto occupied.
+  const occupiedTurns = await prisma.courtTurn.findMany({
+    where: {
+      clubSessionId: board.clubSessionId,
+      status: { in: ['WAITING', 'PLAYING'] },
+    },
+    select: { courtId: true },
+  });
+  const occupiedCourtIds = new Set(occupiedTurns.map((t) => t.courtId));
+  const emptyCourts = courts.filter((c) => !occupiedCourtIds.has(c.id));
 
   const results = [];
   let courtIdx = 0;
   for (const entry of board.entries) {
-    if (courtIdx >= courts.length) break;
+    if (courtIdx >= emptyCourts.length) break;
+    // assignEntry re-checks the empty-guard + court membership (race-safe).
     try {
-      const result = await pushEntry(boardId, entry.id, courts[courtIdx].id, userId);
+      const result = await assignEntry(boardId, entry.id, emptyCourts[courtIdx].id, userId);
       results.push(result);
       courtIdx++;
     } catch (e) {
@@ -534,28 +573,33 @@ async function computeComposition(
 // SESSION-scoped on purpose: a player busy in a DIFFERENT 정모 at the same gym is
 // not a conflict here. Never a hard block.
 async function computeBusyPlayerIds(clubSessionId: string, rawEntries: any[]): Promise<string[]> {
-  const busy = new Set<string>();
+  // A1: a player is "busy" (double-booked → red dot) only when they are
+  // committed to 2+ active assignments THIS 정모, i.e.
+  //   (number of QUEUED entries containing them)
+  //   + (1 if they are in a WAITING/PLAYING court turn) >= 2.
+  // A player in just one game (one QUEUED entry, or only a court turn) is NOT
+  // flagged. SESSION-scoped: a player busy in a DIFFERENT 정모 isn't a conflict.
+  const counts = new Map<string, number>();
+  const bump = (pid: string, by = 1) => counts.set(pid, (counts.get(pid) ?? 0) + by);
 
-  // (a) Currently playing / queued in a court turn OF THIS 정모.
+  // (a) Each QUEUED entry containing the player counts once.
+  for (const e of rawEntries) {
+    if (e.status !== 'QUEUED') continue;
+    for (const pid of e.playerIds as string[]) bump(pid);
+  }
+
+  // (b) Being in a WAITING/PLAYING court turn OF THIS 정모 counts once more.
   const inTurn = await prisma.turnPlayer.findMany({
     where: { turn: { clubSessionId, status: { in: ['WAITING', 'PLAYING'] } } },
     select: { userId: true },
   });
-  for (const t of inTurn) busy.add(t.userId);
+  for (const t of inTurn) bump(t.userId);
 
-  // (b) Appearing in more than one QUEUED entry.
-  const counts = new Map<string, number>();
-  for (const e of rawEntries) {
-    if (e.status !== 'QUEUED') continue;
-    for (const pid of e.playerIds as string[]) {
-      counts.set(pid, (counts.get(pid) ?? 0) + 1);
-    }
-  }
+  const busy: string[] = [];
   for (const [pid, n] of counts) {
-    if (n > 1) busy.add(pid);
+    if (n >= 2) busy.push(pid);
   }
-
-  return Array.from(busy);
+  return busy;
 }
 
 async function formatEntry(entry: any) {

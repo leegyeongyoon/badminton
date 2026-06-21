@@ -56,6 +56,9 @@ export enum PlayerStatus {
   AVAILABLE = 'AVAILABLE',
   IN_TURN = 'IN_TURN',
   RESTING = 'RESTING',
+  // QUEUED: placed in a court-less QUEUED game on the 정모 board (편성됨), but not
+  // yet on a court. Distinct from IN_TURN (on a court, WAITING/PLAYING).
+  QUEUED = 'QUEUED',
 }
 
 export enum SessionStatus {

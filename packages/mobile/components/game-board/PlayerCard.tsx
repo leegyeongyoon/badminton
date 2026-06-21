@@ -42,11 +42,12 @@ interface PlayerCardProps {
 
 /**
  * One player, shown compactly for scannable rosters:
- *  - a COMPACT 급수 mark (small colored letter S/A/B/C/D/E/F) inline before the name
- *  - name + a GENDER marker (♂ blue / ♀ rose) that's distinguishable at a glance
+ *  - a FILLED 급수 chip (colored bg + readable white letter S/A/B/C/D/E/F)
+ *    inline before the name
+ *  - bigger name + a GENDER marker (♂ blue / ♀ rose) distinguishable at a glance
  *  - 게스트 badge when isGuest
  *  - a left status tint bar (대기 green / 게임중 red / 휴식 amber)
- *  - "N게임" footer for fairness scanning
+ *  - a legible "N게임" CHIP for fairness scanning (low / fair / high tint)
  *
  * Designed to wrap into a multi-column grid so a leader can scan 24+ people.
  */
@@ -68,6 +69,7 @@ export function PlayerCard({
   const name = player.userName || player.name || '?';
   const status = player.status;
   const isCourt = variant === 'court';
+  const hasSkill = !!player.skillLevel;
 
   const statusColor =
     status === 'RESTING'
@@ -76,29 +78,53 @@ export function PlayerCard({
         ? colors.playerInTurn
         : colors.playerAvailable;
 
-  // Staged order-number badge MUST be the exact same footprint as the 급수
-  // skillTag (18×18). The leading element drives the name's flex width, so if
-  // the badge were larger the name box would shrink the moment a player is
-  // staged/selected — that's the "이름표가 작아진다" bug. Keep them identical.
-  const stagedDim = 18;
+  // Staged order-number badge MUST share the exact footprint as the 급수 chip so
+  // the name's flex width never jumps when a player is staged/selected ("이름표가
+  // 작아진다" bug). The chip is a touch wider on the grid variant now (filled +
+  // bigger letter), so keep the staged badge identical in both variants.
+  const chipDim = isCourt ? 20 : 22;
 
   const borderColor = highlighted ? colors.primary : colors.border;
   const bg = highlighted ? colors.primaryLight : colors.surface;
+
+  // ── "N게임" fairness chip ──────────────────────────────────
+  // Tasteful at-a-glance cue: 0게임 reads as a soft "처음" (needs a game),
+  // 3+ games reads warm (played a lot). Mid counts stay neutral.
+  const games = player.gamesPlayedToday ?? 0;
+  const gameTint =
+    games === 0
+      ? { bg: colors.secondaryBg, fg: colors.secondary }
+      : games >= 3
+        ? { bg: colors.warningBg, fg: colors.warning }
+        : { bg: colors.surfaceSecondary, fg: colors.textSecondary };
 
   const content = (
     <>
       {/* status tint rail (grid only) */}
       {!isCourt && <View style={[styles.statusRail, { backgroundColor: statusColor }]} />}
 
-      {/* COMPACT 급수 mark OR staged number */}
+      {/* FILLED 급수 chip OR staged number */}
       {stagedIndex != null ? (
-        <View style={[styles.staged, { width: stagedDim, height: stagedDim, backgroundColor: colors.primary }]}>
+        <View style={[styles.staged, { width: chipDim, height: chipDim, backgroundColor: colors.primary }]}>
           <Text style={styles.stagedText}>{stagedIndex}</Text>
         </View>
       ) : (
-        <View style={[styles.skillTag, { borderColor: skill.color, backgroundColor: colors.surface }]}>
-          <Text style={[styles.skillTagText, { color: skill.color, fontSize: isCourt ? 11 : 12 }]}>
-            {(player.skillLevel || '·').toUpperCase()}
+        <View
+          style={[
+            styles.skillTag,
+            { width: chipDim, height: chipDim },
+            hasSkill
+              ? { backgroundColor: skill.color, borderColor: skill.color }
+              : { backgroundColor: colors.surfaceSecondary, borderColor: colors.border },
+          ]}
+        >
+          <Text
+            style={[
+              styles.skillTagText,
+              { color: hasSkill ? palette.white : colors.textLight, fontSize: isCourt ? 12 : 13 },
+            ]}
+          >
+            {hasSkill ? (player.skillLevel || '').toUpperCase() : '·'}
           </Text>
         </View>
       )}
@@ -127,13 +153,19 @@ export function PlayerCard({
               </View>
             )}
             {showGames && !isCourt && (
-              <Text style={[styles.games, { color: colors.textSecondary }]}>
-                {status === 'RESTING'
-                  ? '휴식'
-                  : status === 'IN_TURN' && stagedIndex == null
-                    ? '게임중'
-                    : `${player.gamesPlayedToday ?? 0}게임`}
-              </Text>
+              status === 'RESTING' ? (
+                <View style={[styles.gamesChip, { backgroundColor: colors.warningBg }]}>
+                  <Text style={[styles.gamesChipText, { color: colors.warning }]}>휴식</Text>
+                </View>
+              ) : status === 'IN_TURN' && stagedIndex == null ? (
+                <View style={[styles.gamesChip, { backgroundColor: colors.dangerBg }]}>
+                  <Text style={[styles.gamesChipText, { color: colors.playerInTurn }]}>게임중</Text>
+                </View>
+              ) : (
+                <View style={[styles.gamesChip, { backgroundColor: gameTint.bg }]}>
+                  <Text style={[styles.gamesChipText, { color: gameTint.fg }]}>{games}게임</Text>
+                </View>
+              )
             )}
           </View>
         )}
@@ -172,23 +204,23 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: spacing.sm,
-    paddingVertical: spacing.xs,
+    paddingVertical: spacing.sm,
     paddingHorizontal: spacing.sm,
-    paddingLeft: spacing.smd,
+    paddingLeft: spacing.md,
     borderRadius: radius.lg,
     borderWidth: 1.5,
-    minHeight: 38,
+    minHeight: 46,
     overflow: 'hidden',
   },
   containerCourt: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: spacing.xs,
+    gap: spacing.sm,
     paddingVertical: spacing.xs,
     paddingHorizontal: spacing.sm,
     borderRadius: radius.md,
     borderWidth: 1,
-    minHeight: 32,
+    minHeight: 38,
   },
   dimmed: { opacity: 0.45 },
 
@@ -200,11 +232,10 @@ const styles = StyleSheet.create({
     width: 4,
   },
 
-  // Compact 급수 mark: a tiny rounded square with the colored 급수 letter on a
-  // thin colored border — far lighter than the old filled circle, so tiles shrink.
+  // FILLED 급수 chip: a solid rounded square in the 급수 color with a readable
+  // white letter — far higher-contrast than the old border-only mark, so it
+  // pops at arm's length. Width/height set inline (court vs grid).
   skillTag: {
-    width: 18,
-    height: 18,
     borderRadius: radius.sm,
     borderWidth: 1.5,
     alignItems: 'center',
@@ -217,21 +248,28 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  stagedText: { color: palette.white, fontSize: 11, fontWeight: '800' },
+  stagedText: { color: palette.white, fontSize: 12, fontWeight: '800' },
 
-  body: { flex: 1, minWidth: 0, gap: 2 },
+  body: { flex: 1, minWidth: 0, gap: 3 },
   nameRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.xs },
-  name: { ...typography.subtitle2, flexShrink: 1 },
-  nameCourt: { ...typography.body2, fontWeight: '700', flexShrink: 1 },
+  name: { ...typography.subtitle1, flexShrink: 1 },
+  nameCourt: { ...typography.subtitle2, fontSize: 15, flexShrink: 1 },
 
   // Gender marker = a BARE colored ♂/♀ glyph (no tinted pill). Bigger + bolder
   // + gender-colored (blue ♂ / rose ♀) so male/female pop at a glance.
-  genderSymbol: { fontSize: 16, fontWeight: '900', lineHeight: 18 },
+  genderSymbol: { fontSize: 17, fontWeight: '900', lineHeight: 19 },
 
   metaRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.xs },
   guestTag: { paddingHorizontal: spacing.sm, paddingVertical: 1, borderRadius: radius.sm },
   guestTagText: { fontSize: 10, fontWeight: '800' },
-  games: { fontSize: 11, fontWeight: '700' },
+
+  // "N게임" is now a legible filled chip (was a tiny low-contrast caption).
+  gamesChip: {
+    paddingHorizontal: spacing.sm,
+    paddingVertical: 2,
+    borderRadius: radius.sm,
+  },
+  gamesChipText: { fontSize: 12, fontWeight: '800' },
 
   // Small, subtle conflict (double-booking) cue. Informational only — never
   // blocks the card. White ring (borderColor = card bg) lifts it off the tile.

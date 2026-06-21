@@ -3,6 +3,7 @@ import { Platform } from 'react-native';
 import * as Notifications from 'expo-notifications';
 import { useRouter } from 'expo-router';
 import { useBannerStore } from '../store/bannerStore';
+import { useCheckinStore } from '../store/checkinStore';
 
 /**
  * Notification types (from server push payloads) that mean "it's your turn /
@@ -50,10 +51,15 @@ export function useNotifications() {
       const data = notification.request.content.data;
       if (isTurnStart(data)) {
         const courtName = (data as { courtName?: string })?.courtName;
+        const clubSessionId =
+          (data as { clubSessionId?: string })?.clubSessionId
+          ?? useCheckinStore.getState().status?.clubSessionId
+          ?? undefined;
         useBannerStore.getState().show({
           title: courtName ? `${courtName} 게임 시작` : '내 차례입니다',
           subtitle: notification.request.content.body ?? undefined,
           courtName,
+          clubSessionId,
         });
       }
     });

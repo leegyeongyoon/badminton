@@ -20,7 +20,7 @@ interface ClubSessionState {
   activeSession: ClubSession | null;
   isLoading: boolean;
   fetchActiveSession: (clubId: string) => Promise<void>;
-  startSession: (clubId: string, facilityId: string, courtIds?: string[]) => Promise<void>;
+  startSession: (clubId: string, facilityId: string, courtCount?: number) => Promise<void>;
   endSession: (sessionId: string) => Promise<void>;
   clearSession: () => void;
 }
@@ -39,10 +39,10 @@ export const useClubSessionStore = create<ClubSessionState>((set) => ({
     }
   },
 
-  startSession: async (clubId, facilityId, courtIds) => {
+  startSession: async (clubId, facilityId, courtCount) => {
     set({ isLoading: true });
     try {
-      const { data } = await clubSessionApi.start(clubId, { facilityId, courtIds });
+      const { data } = await clubSessionApi.start(clubId, { facilityId, courtCount });
       set({ activeSession: data, isLoading: false });
     } catch {
       set({ isLoading: false });

@@ -165,7 +165,7 @@ export async function getHistory(
 export async function getAdminFacilities(userId: string) {
   const adminRecords = await prisma.facilityAdmin.findMany({
     where: { userId },
-    include: { facility: { include: { courts: true } } },
+    include: { facility: { include: { courts: { where: { clubSessionId: null } } } } },
   });
   return adminRecords.map((a) => ({
     id: a.facility.id,

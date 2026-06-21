@@ -26,14 +26,15 @@ export async function createFacility(userId: string, input: CreateFacilityInput)
 
   return prisma.facility.findUnique({
     where: { id: facility.id },
-    include: { courts: true },
+    include: { courts: { where: { clubSessionId: null } } },
   });
 }
 
 export async function listFacilities() {
   const facilities = await prisma.facility.findMany({
     include: {
-      courts: true,
+      // Facility-admin dashboard: facility-level courts only (정모 courts excluded).
+      courts: { where: { clubSessionId: null } },
       sessions: {
         where: { status: 'OPEN' },
         take: 1,
@@ -64,7 +65,7 @@ export async function listFacilities() {
 export async function getFacility(id: string) {
   const facility = await prisma.facility.findUnique({
     where: { id },
-    include: { courts: { orderBy: { name: 'asc' } } },
+    include: { courts: { where: { clubSessionId: null }, orderBy: { name: 'asc' } } },
   });
   if (!facility) throw new NotFoundError('시설');
   return facility;
@@ -118,6 +119,7 @@ export async function getBoard(facilityId: string): Promise<BoardCourtData[]> {
     include: {
       policy: true,
       courts: {
+        where: { clubSessionId: null },
         orderBy: { name: 'asc' },
         include: {
           turns: {
@@ -213,6 +215,7 @@ export async function getDisplayBoard(facilityId: string): Promise<DisplayBoardR
     include: {
       policy: true,
       courts: {
+        where: { clubSessionId: null },
         orderBy: { name: 'asc' },
         include: {
           turns: {

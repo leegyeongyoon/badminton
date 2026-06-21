@@ -5,21 +5,28 @@ import {
   StyleSheet,
   KeyboardAvoidingView,
   Platform,
+  Pressable,
 } from 'react-native';
 import { Link, useRouter } from 'expo-router';
-import { useAuthStore } from '../../store/authStore';
+import { useAuthStore, KakaoNotConfiguredError } from '../../store/authStore';
 import { useTheme } from '../../hooks/useTheme';
 import { useFormValidation } from '../../hooks/useFormValidation';
 import { compose, required, phone as phoneRule, password as passwordRule } from '../../utils/validation';
 import { typography, spacing, radius } from '../../constants/theme';
 import { Strings } from '../../constants/strings';
-import { showError } from '../../utils/feedback';
+import { showError, showInfo } from '../../utils/feedback';
 import { Input } from '../../components/ui/Input';
 import { Button } from '../../components/ui/Button';
 
+// Kakao brand colors (카카오 디자인 가이드): yellow container, near-black label.
+const KAKAO_YELLOW = '#FEE500';
+const KAKAO_LABEL = '#191600';
+
 export default function LoginScreen() {
   const [loading, setLoading] = useState(false);
-  const { login } = useAuthStore();
+  const [kakaoLoading, setKakaoLoading] = useState(false);
+  const [kakaoNotice, setKakaoNotice] = useState<string | null>(null);
+  const { login, kakaoLogin } = useAuthStore();
   const { colors } = useTheme();
   const router = useRouter();
 
@@ -48,6 +55,27 @@ export default function LoginScreen() {
     }
   };
 
+  const handleKakaoLogin = async () => {
+    setKakaoNotice(null);
+    setKakaoLoading(true);
+    try {
+      await kakaoLogin();
+      // Navigation handled by root layout gating
+    } catch (err: any) {
+      if (err instanceof KakaoNotConfiguredError) {
+        // No real Kakao key yet — friendly inline message, no crash.
+        const msg = '카카오 로그인 설정이 준비 중이에요 (키 필요)';
+        setKakaoNotice(msg);
+        showInfo(msg);
+      } else {
+        const msg = err.response?.data?.error || err?.message || '카카오 로그인에 실패했습니다';
+        showError(msg);
+      }
+    } finally {
+      setKakaoLoading(false);
+    }
+  };
+
   return (
     <KeyboardAvoidingView
       style={[styles.container, { backgroundColor: colors.background }]}
@@ -56,6 +84,44 @@ export default function LoginScreen() {
       <View style={styles.content}>
         <Text style={[styles.title, { color: colors.primary }]}>{Strings.app.name}</Text>
         <Text style={[styles.subtitle, { color: colors.textSecondary }]}>{Strings.auth.login}</Text>
+
+        {/* Primary path for players: Kakao social login. */}
+        <Pressable
+          onPress={handleKakaoLogin}
+          disabled={kakaoLoading}
+          accessibilityRole="button"
+          accessibilityLabel="카카오로 로그인"
+          accessibilityState={{ disabled: kakaoLoading, busy: kakaoLoading }}
+          style={({ pressed }) => [
+            styles.kakaoButton,
+            { backgroundColor: KAKAO_YELLOW, opacity: kakaoLoading ? 0.6 : pressed ? 0.9 : 1 },
+          ]}
+        >
+          <Text style={[styles.kakaoBubble, { color: KAKAO_LABEL }]}>카카오</Text>
+          <Text style={[styles.kakaoText, { color: KAKAO_LABEL }]}>
+            {kakaoLoading ? '카카오 로그인 중…' : '카카오로 로그인'}
+          </Text>
+        </Pressable>
+
+        {kakaoNotice ? (
+          <Text style={[styles.kakaoNotice, { color: colors.textSecondary }]}>
+            {kakaoNotice}
+          </Text>
+        ) : (
+          <Text style={[styles.kakaoHint, { color: colors.textLight }]}>
+            회원은 카카오로 간편하게 로그인하세요
+          </Text>
+        )}
+
+        {/* Divider */}
+        <View style={styles.dividerRow}>
+          <View style={[styles.dividerLine, { backgroundColor: colors.divider }]} />
+          <Text style={[styles.dividerText, { color: colors.textLight }]}>또는</Text>
+          <View style={[styles.dividerLine, { backgroundColor: colors.divider }]} />
+        </View>
+
+        {/* Operator / admin path: phone + password (운영자·관리자 전용). */}
+        <Text style={[styles.sectionLabel, { color: colors.textSecondary }]}>운영자/관리자 로그인</Text>
 
         <View style={styles.form}>
           <Input
@@ -96,13 +162,6 @@ export default function LoginScreen() {
           </Text>
         </Link>
 
-        {/* Divider */}
-        <View style={styles.dividerRow}>
-          <View style={[styles.dividerLine, { backgroundColor: colors.divider }]} />
-          <Text style={[styles.dividerText, { color: colors.textLight }]}>또는</Text>
-          <View style={[styles.dividerLine, { backgroundColor: colors.divider }]} />
-        </View>
-
         {/* Guest entry — non-members can check in without an account */}
         <Button
           title="게스트로 참여"
@@ -111,6 +170,7 @@ export default function LoginScreen() {
           icon="person"
           fullWidth
           accessibilityLabel="게스트로 출석하기"
+          style={styles.guestButton}
         />
         <Text style={[styles.guestHint, { color: colors.textLight }]}>
           회원가입 없이 오늘 모임에 출석할 수 있어요
@@ -143,8 +203,48 @@ const styles = StyleSheet.create({
     gap: spacing.lg,
     marginBottom: spacing.xxl,
   },
+  kakaoButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: spacing.sm,
+    borderRadius: radius.xxl,
+    minHeight: 52,
+    paddingHorizontal: spacing.xl,
+    width: '100%',
+  },
+  kakaoBubble: {
+    ...typography.caption,
+    fontWeight: '700',
+    borderRadius: radius.sm,
+    overflow: 'hidden',
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    backgroundColor: 'rgba(0,0,0,0.06)',
+  },
+  kakaoText: {
+    ...typography.button,
+    fontSize: 16,
+  },
+  kakaoHint: {
+    ...typography.caption,
+    textAlign: 'center',
+    marginTop: spacing.sm,
+  },
+  kakaoNotice: {
+    ...typography.body2,
+    textAlign: 'center',
+    marginTop: spacing.sm,
+  },
+  sectionLabel: {
+    ...typography.subtitle2,
+    marginBottom: spacing.md,
+  },
   loginButton: {
     marginTop: spacing.sm,
+  },
+  guestButton: {
+    marginTop: spacing.xl,
   },
   linkText: {
     ...typography.body2,

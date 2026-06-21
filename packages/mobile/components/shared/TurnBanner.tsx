@@ -1,5 +1,5 @@
 import { useEffect, useRef, useCallback } from 'react';
-import { Text, StyleSheet, Pressable, Platform } from 'react-native';
+import { View, Text, StyleSheet, Pressable } from 'react-native';
 import Animated, {
   useSharedValue,
   useAnimatedStyle,
@@ -15,20 +15,25 @@ import { palette, radius, spacing, typography } from '../../constants/theme';
 import { springPresets } from '../../utils/animations';
 import { haptics } from '../../utils/haptics';
 import { useBannerStore } from '../../store/bannerStore';
+import { Icon } from '../ui/Icon';
 
-const AUTO_HIDE_MS = 6000;
+// Persist long enough to be noticed and acted on (the old 6s was too aggressive).
+const AUTO_HIDE_MS = 12000;
 
 /**
  * Top-anchored, full-width animated "내 차례" banner.
- * Reads from bannerStore; springs in on show, auto-hides after ~6s, and
- * routes to /(tabs)/my-status on tap. Triggers haptics on show.
- * Render once near the root overlay container so it floats over all screens.
+ * Reads from bannerStore; springs in on show, auto-hides after ~12s (or via the
+ * manual × close), and on tap routes DIRECTLY to the live board
+ * (/session/<clubSessionId>/board) so the player sees their court immediately.
+ * Falls back to /(tabs)/my-status when no session id is known. Triggers haptics
+ * on show. Render once near the root overlay container so it floats over all
+ * screens.
  */
 export function TurnBanner() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const { colors, shadows } = useTheme();
-  const { visible, title, subtitle, hide } = useBannerStore();
+  const { visible, title, subtitle, clubSessionId, hide } = useBannerStore();
 
   const translateY = useSharedValue(-160);
   const opacity = useSharedValue(0);
@@ -63,8 +68,12 @@ export function TurnBanner() {
 
   const handlePress = useCallback(() => {
     dismiss();
-    router.push('/(tabs)/my-status');
-  }, [dismiss, router]);
+    if (clubSessionId) {
+      router.push(`/session/${clubSessionId}/board`);
+    } else {
+      router.push('/(tabs)/my-status');
+    }
+  }, [dismiss, router, clubSessionId]);
 
   const animatedStyle = useAnimatedStyle(() => ({
     opacity: opacity.value,
@@ -82,14 +91,28 @@ export function TurnBanner() {
         onPress={handlePress}
         style={[styles.banner, { backgroundColor: colors.primary }, shadows.lg]}
       >
-        <Text style={styles.title} numberOfLines={1}>
-          {title}
-        </Text>
-        {subtitle ? (
-          <Text style={styles.subtitle} numberOfLines={2}>
-            {subtitle}
+        <View style={styles.iconWrap}>
+          <Icon name="play" size={20} color={palette.white} />
+        </View>
+        <View style={styles.textCol}>
+          <Text style={styles.title} numberOfLines={1}>
+            {title}
           </Text>
-        ) : null}
+          {subtitle ? (
+            <Text style={styles.subtitle} numberOfLines={2}>
+              {subtitle}
+            </Text>
+          ) : null}
+        </View>
+        <Pressable
+          onPress={dismiss}
+          hitSlop={12}
+          style={styles.closeBtn}
+          accessibilityRole="button"
+          accessibilityLabel="닫기"
+        >
+          <Icon name="close" size={18} color={palette.white} />
+        </Pressable>
       </Pressable>
     </Animated.View>
   );
@@ -103,10 +126,22 @@ const styles = StyleSheet.create({
     zIndex: 10000,
   },
   banner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.md,
     borderRadius: radius.banner,
     paddingVertical: spacing.lg,
-    paddingHorizontal: spacing.xl,
+    paddingHorizontal: spacing.lg,
   },
+  iconWrap: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: 'rgba(255,255,255,0.22)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  textCol: { flex: 1, minWidth: 0 },
   title: {
     ...typography.subtitle1,
     color: palette.white,
@@ -114,7 +149,15 @@ const styles = StyleSheet.create({
   subtitle: {
     ...typography.body2,
     color: palette.white,
-    opacity: 0.9,
-    marginTop: spacing.xs,
+    opacity: 0.92,
+    marginTop: 2,
+  },
+  closeBtn: {
+    width: 30,
+    height: 30,
+    borderRadius: 15,
+    backgroundColor: 'rgba(255,255,255,0.18)',
+    alignItems: 'center',
+    justifyContent: 'center',
   },
 });

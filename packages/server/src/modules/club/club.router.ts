@@ -8,13 +8,21 @@ import {
 } from '@badminton/shared';
 import { authenticate } from '../../middleware/auth';
 import { validate } from '../../middleware/validate';
+import { BadRequestError } from '../../utils/errors';
 import * as clubService from './club.service';
 
 const router = Router();
 
+// Parse the ?period query. Absent/empty defaults to 'all'. A present-but-invalid
+// value (e.g. the removed 'season') is rejected with 400 rather than silently
+// falling back, so clients get clear feedback that the period is unsupported.
 function parsePeriod(raw: unknown) {
-  const result = attendancePeriodSchema.safeParse(raw ?? 'all');
-  return result.success ? result.data : 'all';
+  if (raw === undefined || raw === '') return 'all' as const;
+  const result = attendancePeriodSchema.safeParse(raw);
+  if (!result.success) {
+    throw new BadRequestError('지원하지 않는 기간입니다 (month, year, all)');
+  }
+  return result.data;
 }
 
 router.post('/', authenticate, validate(createClubSchema), async (req: Request, res: Response, next: NextFunction) => {
@@ -38,6 +46,15 @@ router.post('/join', authenticate, validate(joinClubSchema), async (req: Request
   } catch (err) { next(err); }
 });
 
+// GET /api/v1/clubs/:id/invite-qr - club join QR (any member of the club).
+// Returns { inviteCode, joinUrl: "<WEB_BASE_URL>/join?code=...", qr: data URL }.
+router.get('/:id/invite-qr', authenticate, async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const result = await clubService.getInviteQr(req.params.id as string, req.user!.userId);
+    res.json(result);
+  } catch (err) { next(err); }
+});
+
 router.get('/:id/members', authenticate, async (req: Request, res: Response, next: NextFunction) => {
   try {
     const facilityId = req.query.facilityId as string | undefined;
@@ -46,7 +63,7 @@ router.get('/:id/members', authenticate, async (req: Request, res: Response, nex
   } catch (err) { next(err); }
 });
 
-// GET /api/v1/clubs/:clubId/attendance/leaderboard?period=month|season|all
+// GET /api/v1/clubs/:clubId/attendance/leaderboard?period=month|year|all
 router.get('/:clubId/attendance/leaderboard', authenticate, async (req: Request, res: Response, next: NextFunction) => {
   try {
     const period = parsePeriod(req.query.period);
@@ -59,7 +76,7 @@ router.get('/:clubId/attendance/leaderboard', authenticate, async (req: Request,
   } catch (err) { next(err); }
 });
 
-// GET /api/v1/clubs/:clubId/attendance/me?period=month|season|all
+// GET /api/v1/clubs/:clubId/attendance/me?period=month|year|all
 router.get('/:clubId/attendance/me', authenticate, async (req: Request, res: Response, next: NextFunction) => {
   try {
     const period = parsePeriod(req.query.period);
