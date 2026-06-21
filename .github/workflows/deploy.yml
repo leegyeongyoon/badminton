@@ -14,8 +14,7 @@ name: Deploy
 # SSH calls, so a dropped tunnel during the multi-minute ARM build is harmless.
 on:
   push:
-    # TODO(validation): feature 브랜치는 검증용 임시 트리거 — 검증 후 main만 남길 것.
-    branches: [main, feature/club-meetup-restructure]
+    branches: [main]
   workflow_dispatch:
 
 concurrency:
