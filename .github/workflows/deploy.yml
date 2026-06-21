@@ -1,11 +1,21 @@
 name: Deploy
 
-# Deploys the server to the Tailscale-only host (100.67.40.34).
+# Deploys the server to the Raspberry Pi via the existing Cloudflare Tunnel SSH
+# route (same mechanism as the honbabnono project — no Tailscale needed).
 # Triggers ONLY on push to main and manual dispatch — never on PRs, so fork/PR
 # code can never run with the deploy secrets.
+#
+# Required repo secrets:
+#   SSH_HOST     - Cloudflare SSH hostname for the Pi (e.g. deploy.eattable.kr)
+#   SSH_USER     - deploy user (gyoungyoon)
+#   SSH_PASSWORD - that user's password (used via sshpass)
+#
+# The build runs ON the Pi but is launched DETACHED (setsid) and polled via short
+# SSH calls, so a dropped tunnel during the multi-minute ARM build is harmless.
 on:
   push:
-    branches: [main]
+    # TODO(validation): feature 브랜치는 검증용 임시 트리거 — 검증 후 main만 남길 것.
+    branches: [main, feature/club-meetup-restructure]
   workflow_dispatch:
 
 concurrency:
@@ -15,46 +25,87 @@ concurrency:
 jobs:
   deploy:
     runs-on: ubuntu-latest
+    timeout-minutes: 35
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      # Join the GitHub-hosted runner to the tailnet so it can reach the host.
-      # Requires a Tailscale OAuth client scoped to tag:ci (set in the admin
-      # console) and an ACL granting tag:ci -> host:22.
-      - name: Connect to Tailscale
-        uses: tailscale/github-action@v2
-        with:
-          oauth-client-id: ${{ secrets.TS_OAUTH_CLIENT_ID }}
-          oauth-secret: ${{ secrets.TS_OAUTH_SECRET }}
-          tags: tag:ci
+      - name: Install cloudflared + sshpass + rsync
+        run: |
+          curl -fsSL https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64.deb -o cloudflared.deb
+          sudo dpkg -i cloudflared.deb
+          sudo apt-get update && sudo apt-get install -y sshpass rsync
 
-      - name: Install sshpass + rsync
-        run: sudo apt-get update && sudo apt-get install -y sshpass rsync
+      - name: Configure SSH over Cloudflare Tunnel
+        run: |
+          mkdir -p ~/.ssh
+          cat >> ~/.ssh/config << SSHCONFIG
+          Host ${{ secrets.SSH_HOST }}
+            ProxyCommand cloudflared access ssh --hostname %h
+            StrictHostKeyChecking no
+            UserKnownHostsFile /dev/null
+          SSHCONFIG
 
-      # Sync the repo to the server. --delete keeps the remote clean, but server
-      # state (.env.prod, .git) and build inputs we don't need (node_modules,
-      # mobile app) are excluded so they're neither uploaded nor deleted.
-      - name: Sync source to server
+      - name: Sync source to Pi
         env:
           SSHPASS: ${{ secrets.SSH_PASSWORD }}
         run: |
-          sshpass -e rsync -az --delete \
-            --exclude '.git' \
-            --exclude '.env.prod' \
-            --exclude '.env' \
-            --exclude '**/.env' \
-            --exclude 'node_modules' \
-            --exclude '**/node_modules' \
-            --exclude 'packages/mobile' \
-            --exclude '**/dist' \
-            -e "ssh -o StrictHostKeyChecking=accept-new" \
-            ./ "${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}:/opt/badminton/"
+          for attempt in 1 2 3; do
+            sshpass -e rsync -az --delete \
+              --exclude '.git' \
+              --exclude '.env.prod' \
+              --exclude '.env' \
+              --exclude '**/.env' \
+              --exclude 'node_modules' \
+              --exclude '**/node_modules' \
+              --exclude 'packages/mobile' \
+              --exclude '**/dist' \
+              -e "ssh -o ConnectTimeout=25" \
+              ./ "${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}:/opt/badminton/" && break
+            echo "rsync 재시도 $attempt..."; sleep 10
+          done
 
-      - name: Run remote deploy
+      - name: Build & deploy on Pi (detached) + poll
         env:
           SSHPASS: ${{ secrets.SSH_PASSWORD }}
         run: |
-          sshpass -e ssh -o StrictHostKeyChecking=accept-new \
-            "${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}" \
-            'bash /opt/badminton/scripts/deploy-remote.sh'
+          ssh_pi() { sshpass -e ssh -o ConnectTimeout=25 "${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}" "$1"; }
+
+          # Build on the Pi takes several minutes and the tunnel can drop, so run
+          # it detached and write OK/FAIL to a status file we poll for.
+          for attempt in 1 2 3; do
+            if ssh_pi 'rm -f /opt/badminton/deploy.status /opt/badminton/deploy.log; setsid bash -c "
+              cd /opt/badminton
+              if bash scripts/deploy-remote.sh >> deploy.log 2>&1; then echo OK > deploy.status; else echo FAIL > deploy.status; fi
+            " < /dev/null > /dev/null 2>&1 &'; then
+              echo "배포 시작(detached)."; break
+            fi
+            echo "시작 SSH 재시도 $attempt..."; sleep 15
+          done
+
+          echo "=== 배포 완료 폴링 (최대 ~20분) ==="
+          STATUS=""
+          for i in $(seq 1 40); do
+            sleep 30
+            STATUS=$(ssh_pi "cat /opt/badminton/deploy.status 2>/dev/null" 2>/dev/null || echo "")
+            echo "[$i/40] 상태: ${STATUS:-진행중}"
+            [ -n "$STATUS" ] && break
+          done
+
+          echo "=== 배포 로그(마지막 30줄) ==="
+          ssh_pi "tail -30 /opt/badminton/deploy.log 2>/dev/null" || true
+
+          if [ "$STATUS" != "OK" ]; then
+            echo "::error::배포 실패 (status=${STATUS:-timeout}). 기존 컨테이너는 유지됨."
+            exit 1
+          fi
+
+          echo "=== 헬스체크 ==="
+          for i in $(seq 1 12); do
+            sleep 5
+            code=$(ssh_pi "curl -s -o /dev/null -w '%{http_code}' http://localhost:3000/api/v1/health" 2>/dev/null || echo "000")
+            echo "[$i/12] API health: $code"
+            [ "$code" = "200" ] && { echo "Deploy SUCCESS"; exit 0; }
+          done
+          echo "헬스체크 실패"; ssh_pi "docker logs badminton-prod-server --tail 30" || true
+          exit 1
