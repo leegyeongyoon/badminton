@@ -34,3 +34,7 @@ jobs:
       - name: Validate Prisma schema
         run: npx prisma validate
         working-directory: packages/server
+        env:
+          # prisma validate resolves env("DATABASE_URL") in the datasource block.
+          # No DB is contacted — any well-formed URL satisfies the check in CI.
+          DATABASE_URL: postgresql://user:password@localhost:5432/db
