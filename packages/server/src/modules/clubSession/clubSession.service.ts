@@ -376,12 +376,17 @@ export async function endSession(
   });
   const cancelIds = activeTurns.map((t) => t.id);
   if (cancelIds.length > 0) {
-    await prisma.courtTurn.updateMany({
-      where: { id: { in: cancelIds } },
-      data: { status: 'CANCELLED' },
-    });
+    // BUG-3: a game that is live when the operator ends the 정모 DID happen, so
+    // it must still count in the summary (getSessionSummary counts only
+    // IN_PROGRESS|COMPLETED games). Mark such games COMPLETED rather than
+    // CANCELLED so they don't vanish from the played count. The turns are still
+    // cancelled below so the courts are freed for cleanup.
     await prisma.game.updateMany({
       where: { turnId: { in: cancelIds }, status: 'IN_PROGRESS' },
+      data: { status: 'COMPLETED' },
+    });
+    await prisma.courtTurn.updateMany({
+      where: { id: { in: cancelIds } },
       data: { status: 'CANCELLED' },
     });
   }

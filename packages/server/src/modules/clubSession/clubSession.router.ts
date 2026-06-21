@@ -63,7 +63,7 @@ router.get(
   },
 );
 
-// GET /api/v1/club-sessions/:id/qr - per-정모 QR (payload "MEETUP:<id>" + PNG data URL).
+// GET /api/v1/club-sessions/:id/qr - per-정모 QR (payload "<WEB_BASE_URL>/attend?session=<id>" + PNG data URL).
 // Auth: any member of the session's club (enforced in the service).
 router.get(
   '/:id/qr',

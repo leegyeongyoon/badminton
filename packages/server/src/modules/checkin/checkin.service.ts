@@ -239,8 +239,10 @@ export async function checkIn(userId: string, params: CheckInParams) {
  *
  * Flow:
  *  - Load the ClubSession (+facility) and assert it is ACTIVE.
- *  - If the user already has an ACTIVE check-in for this session → return it
+ *  - If the user already has an ACTIVE check-in FOR THIS session → return it
  *    (idempotent: scanning again just lands them back on the board, no error).
+ *  - Else if they hold an OPEN facility-only check-in here → upgrade it in place
+ *    (set its clubSessionId) so they join THIS 정모 without a duplicate row.
  *  - Otherwise create a session-scoped CheckIn (clubSessionId set, facility from
  *    the session) WITHOUT coordinates, then emit the same arrived/players-updated
  *    socket events as a normal check-in so operator boards refresh and the player
@@ -256,24 +258,14 @@ export async function attendViaQr(clubSessionId: string, userId: string) {
     throw new BadRequestError('진행 중인 정모가 아닙니다');
   }
 
-  // Idempotent: if already checked into THIS session, return that check-in.
-  // Also treat a facility-scoped active check-in at the session's facility as
-  // "already present" so we never create a duplicate row (mirrors checkIn's
-  // duplicate guard, but without raising an error — scanning again is a no-op).
-  const existing =
-    (await prisma.checkIn.findFirst({
-      where: { userId, clubSessionId, checkedOutAt: null },
-      include: { facility: true },
-    })) ??
-    (await prisma.checkIn.findFirst({
-      where: {
-        userId,
-        facilityId: session.facilityId,
-        clubSessionId: null,
-        checkedOutAt: null,
-      },
-      include: { facility: true },
-    }));
+  // BUG-4: Idempotency must key ONLY on an existing OPEN check-in scoped to THIS
+  // session. A facility-only (clubSessionId null) open check-in does NOT mean the
+  // member is in this 정모's pool — treating it as "already present" left them out
+  // of the 정모. So we look up ONLY a session-scoped row here.
+  const existing = await prisma.checkIn.findFirst({
+    where: { userId, clubSessionId, checkedOutAt: null },
+    include: { facility: true },
+  });
   if (existing) {
     return {
       success: true as const,
@@ -286,16 +278,33 @@ export async function attendViaQr(clubSessionId: string, userId: string) {
     };
   }
 
-  // Create a session-scoped check-in WITHOUT any geofence/coords check (the QR
-  // at the venue is the presence proof — see the doc-comment above).
-  const checkIn = await prisma.checkIn.create({
-    data: {
+  // BUG-4: if the member holds an OPEN facility-only check-in at this facility,
+  // upgrade it in place (set its clubSessionId) so we don't create a duplicate
+  // row while still landing them in THIS 정모's pool. Otherwise create a new
+  // session-scoped check-in WITHOUT any geofence/coords check (the QR at the
+  // venue is the presence proof — see the doc-comment above).
+  const facilityOnly = await prisma.checkIn.findFirst({
+    where: {
       userId,
       facilityId: session.facilityId,
-      clubSessionId: session.id,
+      clubSessionId: null,
+      checkedOutAt: null,
     },
-    include: { facility: true, user: true },
   });
+  const checkIn = facilityOnly
+    ? await prisma.checkIn.update({
+        where: { id: facilityOnly.id },
+        data: { clubSessionId: session.id },
+        include: { facility: true, user: true },
+      })
+    : await prisma.checkIn.create({
+        data: {
+          userId,
+          facilityId: session.facilityId,
+          clubSessionId: session.id,
+        },
+        include: { facility: true, user: true },
+      });
 
   // Same socket events as a normal check-in so the operator board + pool refresh.
   const io = getIO();
@@ -597,6 +606,20 @@ async function cleanupTurnsOnCheckout(
     });
   }
 
+  // BUG-1: cancelling the CourtTurn alone leaves its linked GameBoardEntry stuck
+  // at MATERIALIZED/PLAYING, so the operator board keeps showing that court as
+  // 게임중 forever. Transition those entries to CANCELLED too — mirroring
+  // turn.service.ts cancelTurn — so the board clears them (no 유령 게임중).
+  if (waitingTurns.length > 0) {
+    await prisma.gameBoardEntry.updateMany({
+      where: {
+        turnId: { in: waitingTurns.map((t) => t.id) },
+        status: { in: ['MATERIALIZED', 'PLAYING'] },
+      },
+      data: { status: 'CANCELLED' },
+    });
+  }
+
   // Re-position the remaining WAITING/PLAYING turns on each affected court.
   for (const courtId of affectedCourtIds) {
     const remaining = await prisma.courtTurn.findMany({
@@ -757,8 +780,15 @@ export async function getAvailablePlayers(facilityId: string, clubSessionId?: st
         include: {
           profile: true,
           turnPlayers: {
+            // BUG-2: scope the IN_TURN status check to THIS 정모 when one is in
+            // play, otherwise a player PLAYING in another 정모 at the same
+            // facility leaks an IN_TURN status into this pool. (Fall back to
+            // facility-wide WAITING/PLAYING when no clubSessionId.)
             where: {
-              turn: { status: { in: ['WAITING', 'PLAYING'] } },
+              turn: {
+                status: { in: ['WAITING', 'PLAYING'] },
+                ...(clubSessionId ? { clubSessionId } : {}),
+              },
             },
           },
           gamePlayers: {
@@ -843,6 +873,9 @@ export async function getFacilityCapacity(facilityId: string): Promise<FacilityC
       user: {
         include: {
           turnPlayers: {
+            // BUG-2: this is the facility-wide capacity view (no clubSessionId in
+            // scope), so the IN_TURN check intentionally stays facility-scoped —
+            // this is the documented fallback behavior.
             where: {
               turn: { status: { in: ['WAITING', 'PLAYING'] } },
             },
@@ -926,8 +959,14 @@ async function computePlayerCounts(scope: { facilityId?: string; clubSessionId?:
       user: {
         include: {
           turnPlayers: {
+            // BUG-2: scope IN_TURN to THIS 정모 when one is in play so a player
+            // PLAYING in another 정모 at the same facility doesn't leak an
+            // IN_TURN count into this session's counts.
             where: {
-              turn: { status: { in: ['WAITING', 'PLAYING'] } },
+              turn: {
+                status: { in: ['WAITING', 'PLAYING'] },
+                ...(scope.clubSessionId ? { clubSessionId: scope.clubSessionId } : {}),
+              },
             },
           },
         },
