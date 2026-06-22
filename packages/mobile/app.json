@@ -40,7 +40,7 @@
       "favicon": "./assets/favicon.png"
     },
     "extra": {
-      "apiUrl": "https://badminton.eattable.kr",
+      "apiUrl": "https://api.badmintoncourt.store",
       "kakaoRestKey": "REPLACE_WITH_KAKAO_KEY",
       "eas": {
         "projectId": "REPLACE_WITH_EAS_PROJECT_ID"
