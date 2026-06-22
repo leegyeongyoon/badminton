@@ -17,6 +17,7 @@ import { useClubStore } from '../../store/clubStore';
 import { useCheckinStore } from '../../store/checkinStore';
 import { useAuthStore } from '../../store/authStore';
 import { clubSessionApi } from '../../services/clubSession';
+import { facilityApi } from '../../services/facility';
 import { Colors } from '../../constants/colors';
 import { Strings } from '../../constants/strings';
 import { showAlert, showConfirm } from '../../utils/alert';
@@ -68,6 +69,9 @@ export default function ClubDetailScreen() {
   // 정모 시작 시 등록할 "코트 수" (기본 4). 각 정모는 자기 전용 코트 1..N을 가진다.
   const [courtCountInput, setCourtCountInput] = useState('4');
   const [isStarting, setIsStarting] = useState(false);
+  // 정모를 열 시설. 체크인 없이도 시작할 수 있도록 시설을 직접 고른다.
+  const [facilities, setFacilities] = useState<any[]>([]);
+  const [selectedFacilityId, setSelectedFacilityId] = useState<string | null>(null);
 
   const club = clubs.find((c) => c.id === clubId);
   const myMembership = currentMembers.find((m) => m.userId === user?.id);
@@ -77,6 +81,18 @@ export default function ClubDetailScreen() {
   // Am I currently checked in? Prefer the per-member flag from the club roster
   // (reflects this club's 정모), falling back to the global check-in status.
   const isCheckedIn = !!myMembership?.isCheckedIn || !!checkinStatus;
+  // 정모를 시작할 시설: 명시 선택 > 체크인한 곳 > 클럽 홈 시설 > 첫 시설.
+  // (체크인 여부와 무관하게 리더가 바로 시작할 수 있어야 한다.)
+  const startFacilityId =
+    selectedFacilityId ||
+    checkedInFacilityId ||
+    (club as any)?.homeFacilityId ||
+    facilities[0]?.id ||
+    null;
+  const startFacilityName =
+    facilities.find((f) => f.id === startFacilityId)?.name ||
+    checkinStatus?.facilityName ||
+    '';
 
   const loadActiveSession = useCallback(async () => {
     if (!clubId) return;
@@ -97,6 +113,14 @@ export default function ClubDetailScreen() {
       loadActiveSession();
     }
   }, [clubId]);
+
+  // Facilities for the 정모 start (so a leader can start without checking in).
+  useEffect(() => {
+    facilityApi
+      .list()
+      .then(({ data }) => setFacilities(Array.isArray(data) ? data : []))
+      .catch(() => {});
+  }, []);
 
   // Auto check-in on entering an ACTIVE 정모: a club member who opens the 정모 is
   // checked in automatically (NO geofence — per product decision). Done at most
@@ -134,23 +158,26 @@ export default function ClubDetailScreen() {
   }, [clubId]);
 
   // Open the start modal to register the 코트 수 (default 4) for this 정모.
+  // 체크인 없이도 열 수 있다 — 시설은 startFacilityId로 결정된다.
   const handleOpenStartModal = () => {
-    if (!checkedInFacilityId) {
-      showAlert('알림', '체크인 후에 모임을 시작할 수 있습니다');
-      return;
-    }
+    setSelectedFacilityId(startFacilityId);
     setCourtCountInput('4');
     setShowStartModal(true);
   };
 
   // Start the 정모 with a court COUNT. The server creates this 정모's OWN courts
   // (코트 1 … 코트 N) — fully independent of any other 모임's courts.
+  // 체크인은 필요 없다. 시설은 startFacilityId(선택>체크인>홈>첫 시설)로 정한다.
   const handleStartSession = async (courtCount?: number) => {
-    if (!clubId || !checkedInFacilityId) return;
+    const facilityId = startFacilityId;
+    if (!clubId || !facilityId) {
+      showAlert('알림', '시설 정보를 불러오는 중이에요. 잠시 후 다시 시도해 주세요');
+      return;
+    }
     setIsStarting(true);
     try {
       const { data: newSession } = await clubSessionApi.start(clubId, {
-        facilityId: checkedInFacilityId,
+        facilityId,
         ...(courtCount && courtCount > 0 ? { courtCount } : {}),
       });
       setShowStartModal(false);
@@ -165,9 +192,10 @@ export default function ClubDetailScreen() {
   };
 
   // One-tap 정모 start: defaults to 4 courts (코트 1~4) for this 정모.
+  // 여러 시설이 있으면 모달에서 고르도록 유도, 아니면 바로 시작.
   const handleQuickStartSession = async () => {
-    if (!checkedInFacilityId) {
-      showAlert('알림', '체크인 후에 정모를 시작할 수 있습니다');
+    if (facilities.length > 1 && !checkedInFacilityId && !(club as any)?.homeFacilityId) {
+      handleOpenStartModal();
       return;
     }
     await handleStartSession(4);
@@ -457,10 +485,10 @@ export default function ClubDetailScreen() {
                 </Text>
               </TouchableOpacity>
               <Text style={styles.startSessionHint}>
-                체크인된 시설에서 바로 정모를 시작하고 출석을 받습니다
+                {startFacilityName ? `${startFacilityName}에서 ` : ''}바로 정모를 시작하고 출석을 받습니다 (체크인 불필요)
               </Text>
               <TouchableOpacity onPress={handleOpenStartModal} disabled={isStarting}>
-                <Text style={styles.courtPickLink}>코트 선택해서 시작</Text>
+                <Text style={styles.courtPickLink}>시설·코트 선택해서 시작</Text>
               </TouchableOpacity>
             </View>
           )}
@@ -507,8 +535,31 @@ export default function ClubDetailScreen() {
               </View>
 
               <Text style={styles.modalDesc}>
-                {checkinStatus?.facilityName}에서 정모를 시작합니다
+                {startFacilityName || '시설'}에서 정모를 시작합니다 (체크인 불필요)
               </Text>
+
+              {/* 시설 선택 — 여러 곳이 있을 때만. 체크인 없이도 고를 수 있다. */}
+              {facilities.length > 1 && (
+                <>
+                  <Text style={styles.modalSubtitle}>시설</Text>
+                  <View style={styles.facilityPickRow}>
+                    {facilities.map((f) => {
+                      const active = (selectedFacilityId || startFacilityId) === f.id;
+                      return (
+                        <TouchableOpacity
+                          key={f.id}
+                          style={[styles.facilityChip, active && styles.facilityChipActive]}
+                          onPress={() => setSelectedFacilityId(f.id)}
+                        >
+                          <Text style={[styles.facilityChipText, active && styles.facilityChipTextActive]}>
+                            {f.name}
+                          </Text>
+                        </TouchableOpacity>
+                      );
+                    })}
+                  </View>
+                </>
+              )}
 
               {/* 코트 수 — 이 정모 전용 코트 1..N을 만든다 (다른 모임과 독립). */}
               <Text style={styles.modalSubtitle}>코트 수</Text>
@@ -1040,6 +1091,33 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     color: Colors.text,
     marginBottom: 10,
+  },
+  // 시설 선택 칩 (여러 시설일 때)
+  facilityPickRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+    marginBottom: 18,
+  },
+  facilityChip: {
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: Colors.border,
+    backgroundColor: Colors.surface,
+  },
+  facilityChipActive: {
+    borderColor: Colors.primary,
+    backgroundColor: Colors.primary + '14',
+  },
+  facilityChipText: {
+    fontSize: 13,
+    color: Colors.textSecondary,
+    fontWeight: '600',
+  },
+  facilityChipTextActive: {
+    color: Colors.primary,
   },
   // 코트 수 입력 (스테퍼)
   courtCountRow: {
