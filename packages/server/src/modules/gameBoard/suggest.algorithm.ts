@@ -13,10 +13,12 @@
  * 3. "먹고치기": if N = M*4, no one sits out
  * 4. N > M*4: highest-priority (fewest-games + longest-wait) players prioritized
  *
- * Mode-based single-foursome picking (the 6 운영자 modes) is a UNIFIED scoring
+ * Mode-based single-foursome picking (the 5 운영자 modes) is a UNIFIED scoring
  * function over candidate groups of 4 — see scoreGroup / selectFoursomeByMode.
  * Every mode keeps the fairness + variety baseline; the mode only adds a flavor
- * term on top (skill spread / balance / high-skill / gender / extra variety).
+ * term on top. The 5 modes form a SKILL-SPREAD SPECTRUM (same-level → middle →
+ * big-gap): fair (no skill flavor) · similar (tightest spread) · balanced
+ * (moderate, even 2v2) · competitive (폴라라이즈 2강 2약) · fresh (extra variety).
  */
 
 export interface RotationInput {
@@ -126,12 +128,12 @@ export function generateRotation(input: RotationInput): RotationOutput {
 // • variety(group): sum of recency-weighted pair-history among the 6 pairs.
 //   Recent pairings weigh more than old ones. Lower ⇒ better. Meaningful in
 //   ALL modes (largest weight in 'fresh') so partners ROTATE.
-// • modeTerm: the per-mode flavor ON TOP of fairness+variety.
-//     fair        → 0           (pure fairness + variety)
-//     similar     → skill spread (max−min) of the four
-//     balanced    → best 2v2 skill imbalance
-//     competitive → prefer high skill (negative mean skill)
-//     mixed       → 0 if 2M+2F else large penalty
+// • modeTerm: the per-mode flavor ON TOP of fairness+variety. The 5 modes form a
+//   skill-spread spectrum (tight → moderate → polarized):
+//     fair        → 0                  (pure fairness + variety, no skill flavor)
+//     similar     → skill spread (max−min) of the four — TIGHTEST band
+//     balanced    → best 2v2 imbalance — MODERATE, two evenly-matched teams
+//     competitive → −gap(top2 mean, bottom2 mean) — POLARIZED 2강 2약 (빡센)
 //     fresh       → extra variety (more pair-history penalty)
 
 export type SuggestMode =
@@ -139,8 +141,7 @@ export type SuggestMode =
   | 'similar'
   | 'balanced'
   | 'competitive'
-  | 'fresh'
-  | 'mixed';
+  | 'fresh';
 
 export interface ModePlayer {
   id: string;
@@ -153,7 +154,10 @@ export interface ModePlayer {
 
 export interface ModeResult {
   playerIds: string[];
-  /** True when 'mixed' fell back to 'fair' because the pool lacked 2M+2F. */
+  /**
+   * Reserved fallback signal (no mode currently triggers it; kept so the caller
+   * can stay generic if a future mode needs a hard constraint).
+   */
   fellBack?: boolean;
 }
 
@@ -182,12 +186,11 @@ const MODE_WEIGHTS: Record<SuggestMode, ModeWeights> = {
   // (per-player fairness cost spans ~[-2,2]) while fairness still pulls from the
   // owed pool and variety still rotates partners.
   similar: { wFair: 1.0, wVariety: 1.0, wMode: 1.5 },
-  // even 2v2 split
+  // even 2v2 split (moderate spread, two evenly-matched teams)
   balanced: { wFair: 1.0, wVariety: 1.0, wMode: 1.5 },
-  // high-skill bias
+  // 2강 2약 polarized gap (빡센 게임). modeTerm is −gap so a clearly bimodal four
+  // (strong pair + weak pair) wins; sized to overcome a moderate fairness gap.
   competitive: { wFair: 1.0, wVariety: 1.0, wMode: 1.5 },
-  // gender 2M2F (hard-ish constraint via large penalty term in modeTerm)
-  mixed: { wFair: 1.0, wVariety: 1.0, wMode: 1.0 },
   // anti-routine: variety dominates
   fresh: { wFair: 1.0, wVariety: 3.0, wMode: 0 },
 };
@@ -241,28 +244,24 @@ function modeTerm(group: ModePlayer[], mode: SuggestMode): number {
       return Math.max(...skills) - Math.min(...skills);
     }
     case 'competitive': {
-      // Prefer high skill → negative mean skill (so stronger groups cost less).
-      const mean = skills.reduce((s, x) => s + x, 0) / group.length;
-      return -mean;
+      // 빡센 게임 = 2강 2약. Reward a POLARIZED/bimodal four whose sorted skills
+      // split into a clearly STRONG pair + clearly WEAK pair. Sort the four and
+      // take the gap between the top-2 mean and bottom-2 mean; return it NEGATED
+      // so a BIGGER gap costs LESS. e.g. sorted [F,E,A,S] → top2 (A,S)=6.5,
+      // bottom2 (F,E)=1.5, gap=5 beats [B,A,S,S] (top2 7, bottom2 5.5, gap 1.5).
+      const s = [...skills].sort((a, b) => a - b);
+      if (s.length < 4) return 0;
+      const bottom2 = (s[0] + s[1]) / 2;
+      const top2 = (s[2] + s[3]) / 2;
+      return -(top2 - bottom2);
     }
     case 'balanced': {
-      // Prefer the four that split into the most even 2v2. For a sorted four the
-      // tightest split pairs the ends together: (s0+s3) vs (s1+s2).
+      // 균형 접전 = the MIDDLE of the spectrum: a moderate, even mix. Prefer the
+      // four that split into the most even 2v2. For a sorted four the tightest
+      // split pairs the ends together: (s0+s3) vs (s1+s2).
       const s = [...skills].sort((a, b) => a - b);
       if (s.length < 4) return 0;
       return Math.abs(s[0] + s[3] - (s[1] + s[2]));
-    }
-    case 'mixed': {
-      // Hard-ish: require exactly 2M + 2F. Anything else is heavily penalized so
-      // the scorer only ever picks a valid 2M2F group when one exists among the
-      // candidates. Among valid groups, keep the two mixed teams balanced.
-      const males = group.filter((p) => p.gender === 'M');
-      const females = group.filter((p) => p.gender === 'F');
-      if (males.length !== 2 || females.length !== 2) return 1000;
-      const [m1, m2] = [...males].sort((a, b) => b.skill - a.skill); // strong, weak
-      const [f1, f2] = [...females].sort((a, b) => a.skill - b.skill); // weak, strong
-      // Team A = strongM+weakF, Team B = weakM+strongF.
-      return Math.abs(m1.skill + f1.skill - (m2.skill + f2.skill));
     }
     case 'fresh':
     case 'fair':
@@ -300,7 +299,6 @@ function scoreGroup(
  * more). Used by the variety baseline in every mode.
  *
  * Read-only. Falls back gracefully when the pool is short (returns what's there).
- * 'mixed' signals fellBack when no 2M+2F group exists among the candidates.
  */
 export function selectFoursomeByMode(
   pool: ModePlayer[],
@@ -310,12 +308,7 @@ export function selectFoursomeByMode(
   topN = 20,
 ): ModeResult {
   if (pool.length <= size) {
-    // Whole pool plays; for 'mixed', honor the 2M+2F requirement.
-    if (mode === 'mixed') {
-      const males = pool.filter((p) => p.gender === 'M').length;
-      const females = pool.filter((p) => p.gender === 'F').length;
-      if (males < 2 || females < 2) return { playerIds: [], fellBack: true };
-    }
+    // Whole pool plays.
     return { playerIds: pool.map((p) => p.id) };
   }
 
@@ -352,16 +345,6 @@ export function selectFoursomeByMode(
 
   if (!best) {
     return { playerIds: ranked.slice(0, size).map((p) => p.id) };
-  }
-
-  // 'mixed': if even the best group is not a valid 2M+2F (penalty hit), signal
-  // fallback so the caller can use 'fair' and note it.
-  if (mode === 'mixed') {
-    const males = best.filter((p) => p.gender === 'M').length;
-    const females = best.filter((p) => p.gender === 'F').length;
-    if (males !== 2 || females !== 2) {
-      return { playerIds: [], fellBack: true };
-    }
   }
 
   return { playerIds: best.map((p) => p.id) };

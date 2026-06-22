@@ -135,8 +135,7 @@ export function useGameBoard(clubSessionId: string | undefined) {
 
   /**
    * 자동 추천: 다음 복식 4인 조합을 서버에서 받아 첫 추천의 playerIds 반환.
-   * opts.mode 로 매칭 전략 선택(기본 fair). 서버가 실제 적용한 mode/note 도 함께 반환
-   * (mixed 인원 부족 시 fair 로 대체될 수 있어 effectiveMode 가 요청과 다를 수 있음).
+   * opts.mode 로 매칭 전략 선택(기본 fair). 서버가 실제 적용한 mode 도 함께 반환.
    * 인원 부족(서버가 빈 배열 반환) 시 playerIds [] 반환. 404/오류 시 throw.
    */
   const suggestNext = useCallback(

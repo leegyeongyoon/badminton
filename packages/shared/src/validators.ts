@@ -242,18 +242,18 @@ export const updateMemberProfileSchema = z.object({
 });
 
 // Game Board auto-suggest (자동 편성 추천)
-// mode: 매칭 전략 (운영자가 선택)
+// mode: 매칭 전략 (운영자가 선택) — 5개 모드가 실력 격차 스펙트럼을 이룸
+//       (비슷 → 중간 → 큰 격차):
 //   fair        공정      — gamesPlayedToday 적은 사람 우선 + 파트너 중복 최소 (기본)
-//   similar     비슷한 급수 — 급수 차이가 가장 작은 4인 (수준 맞춘 게임)
-//   balanced    균형 접전  — 2:2 팀 합이 비슷하도록 (실력 균형 접전)
-//   competitive 빡센 게임  — 급수가 가장 높은 4인 (고수 게임)
+//   similar     비슷한 급수 — 급수 차이가 가장 작은 4인 (수준 맞춘 게임, 가장 좁은 폭)
+//   balanced    균형 접전  — 2:2 팀 합이 비슷하도록 (중간 정도 격차의 팽팽한 접전)
+//   competitive 빡센 게임  — 2강 2약 (상위 2인 + 하위 2인, 실력 격차 큰 도전)
 //   fresh       새 조합    — 함께 친 적이 가장 적은 4인
-//   mixed       혼복      — 남2 여2 (혼복 가능 구성)
 export const suggestFoursomeSchema = z.object({
   courtId: z.string().uuid().optional(),
   count: z.number().int().min(1).max(8).optional(),
   mode: z
-    .enum(['fair', 'similar', 'balanced', 'competitive', 'fresh', 'mixed'])
+    .enum(['fair', 'similar', 'balanced', 'competitive', 'fresh'])
     .optional(),
 });
 

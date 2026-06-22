@@ -58,6 +58,8 @@ type RoleState = 'loading' | 'allowed' | 'denied';
 
 // 자동 추천 매칭 모드 — 운영자가 전략을 고르는 칩. label(짧은 이름) + hint(한 줄 설명)
 // + note(추천 후 트레이에 보여줄 안내문). 서버 mode enum 과 1:1.
+// 순서 = 실력 격차 스펙트럼: 비슷 → 중간 → 큰 격차
+//   공정 / 비슷한 급수 / 균형 접전 / 빡센 게임 / 새 조합
 const SUGGEST_MODES: {
   mode: SuggestMode;
   emoji: string;
@@ -66,11 +68,10 @@ const SUGGEST_MODES: {
   note: string;
 }[] = [
   { mode: 'fair', emoji: '⚖️', label: '공정', hint: '적게 친 사람 우선 · 새 파트너', note: '공정하게 추천했어요' },
-  { mode: 'similar', emoji: '🎯', label: '비슷한 급수', hint: '급수 차이가 가장 작게', note: '비슷한 급수로 추천했어요' },
-  { mode: 'balanced', emoji: '🤝', label: '균형 접전', hint: '2:2 실력이 팽팽하게', note: '균형 접전으로 추천했어요' },
-  { mode: 'competitive', emoji: '🔥', label: '빡센 게임', hint: '가장 고수 4인', note: '빡센 게임으로 추천했어요' },
+  { mode: 'similar', emoji: '🎯', label: '비슷한 급수', hint: '급수 차이가 가장 작게 · 수준 맞춘 게임', note: '비슷한 급수로 추천했어요' },
+  { mode: 'balanced', emoji: '🤝', label: '균형 접전', hint: '2:2 실력이 팽팽하게 · 중간 격차', note: '균형 접전으로 추천했어요' },
+  { mode: 'competitive', emoji: '🔥', label: '빡센 게임', hint: '2강 2약 · 실력 격차 큰 도전', note: '빡센 게임으로 추천했어요' },
   { mode: 'fresh', emoji: '✨', label: '새 조합', hint: '안 친 사람들끼리', note: '새 조합으로 추천했어요' },
-  { mode: 'mixed', emoji: '👫', label: '혼복', hint: '남2 여2', note: '혼복으로 추천했어요' },
 ];
 
 // ─── Drag-to-compose registry ───────────────────────────────

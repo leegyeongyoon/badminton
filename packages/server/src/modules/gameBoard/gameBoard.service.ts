@@ -550,9 +550,7 @@ export async function suggestNextFoursome(
     addPairWeight((e.playerIds as string[]) ?? [], nowMs);
   }
 
-  const requestedMode: SuggestMode = opts.mode ?? 'fair';
-  let mode: SuggestMode = requestedMode;
-  let modeNote: string | undefined;
+  const mode: SuggestMode = opts.mode ?? 'fair';
 
   // ── Unified scoring selection (EVERY mode = fairness + variety + modeTerm) ──
   // Pick `count` foursomes. After each pick, FEED the chosen pairings back into
@@ -567,15 +565,6 @@ export async function suggestNextFoursome(
     if (available.length < 4) break;
 
     const picked = selectFoursomeByMode(available, mode, pairWeight, 4);
-
-    if (picked.fellBack) {
-      // 'mixed' could not form 2M+2F → fall back to 'fair' and note it.
-      mode = 'fair';
-      modeNote = '혼복 인원이 부족해 공정 추천으로 대체했어요';
-      const refair = selectFoursomeByMode(available, 'fair', pairWeight, 4);
-      if (refair.playerIds.length < 4) break;
-      picked.playerIds = refair.playerIds;
-    }
     if (picked.playerIds.length < 4) break;
 
     slotPlayerIds.push(picked.playerIds);
@@ -605,7 +594,7 @@ export async function suggestNextFoursome(
     playerNames: ids.map((id) => nameMap.get(id) ?? ''),
   }));
 
-  return { suggestions, mode, ...(modeNote ? { note: modeNote } : {}) };
+  return { suggestions, mode };
 }
 
 // ─── Helpers ────────────────────────────────

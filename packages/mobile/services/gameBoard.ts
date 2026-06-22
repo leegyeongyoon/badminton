@@ -1,13 +1,13 @@
 import api from './api';
 
 // 자동 추천 매칭 모드 (서버 suggestFoursomeSchema.mode 와 1:1).
+// 5개 모드가 실력 격차 스펙트럼(비슷 → 중간 → 큰 격차)을 이룸.
 export type SuggestMode =
   | 'fair'
   | 'similar'
   | 'balanced'
   | 'competitive'
-  | 'fresh'
-  | 'mixed';
+  | 'fresh';
 
 export const gameBoardApi = {
   create: (clubSessionId: string) =>
@@ -34,7 +34,7 @@ export const gameBoardApi = {
     api.post(`/game-boards/${boardId}/push-all`),
 
   // 자동 추천 — 다음 복식 4인 조합 제안 (LEADER/STAFF 전용, 인원 부족 시 [])
-  // mode: 매칭 전략 (fair/similar/balanced/competitive/fresh/mixed), 기본 fair
+  // mode: 매칭 전략 (fair/similar/balanced/competitive/fresh), 기본 fair
   suggest: (
     clubSessionId: string,
     body?: { courtId?: string; count?: number; mode?: SuggestMode },
