@@ -163,20 +163,44 @@ export default function OperateScreen() {
   const poolMovedRef = useRef(false);
 
   // ─── Queue-card reorder drag (drag a whole 다음 게임 card up/down) ───
-  // Mirrors the pool-drag system: a floating label follows the finger/cursor,
-  // each queue card is registered as a 'queue-card' drop target, and on release
-  // we hit-test to find the hovered index and call moveQueueItem(from, to).
+  // The WHOLE card is the drag trigger (press + move past threshold). A
+  // full card-shaped copy is lifted under the finger/cursor; the remaining
+  // cards animate (Animated translateY) to OPEN A CARD-SIZED GAP at the
+  // insertion index so it visibly looks like the card will slot in there.
+  // On release we resolve the insertion index and call moveQueueItem(from, to).
   const [queueDrag, setQueueDrag] = useState<
-    { entryId: string; fromIdx: number; label: string; x: number; y: number } | null
+    {
+      entryId: string; fromIdx: number;
+      // The lifted card's own size + grab offset so the floating copy sits
+      // exactly under the finger and is a real card, not a tiny pill.
+      width: number; height: number; grabX: number; grabY: number;
+      x: number; y: number;
+    } | null
   >(null);
-  // The index the dragged card currently hovers over (drives the drop indicator
-  // line). null = no active queue-card drag.
-  const [queueHoverIdx, setQueueHoverIdx] = useState<number | null>(null);
+  // The INSERTION index (0..n) the dragged card currently targets. Drives the
+  // gap animation: cards at/after this index slide down to open a card-sized
+  // gap. null = no active queue-card drag.
+  const [queueInsertIdx, setQueueInsertIdx] = useState<number | null>(null);
   const queueDragRef = useRef<{ entryId: string; fromIdx: number } | null>(null);
   const queueMovedRef = useRef(false);
   // resolveQueueDrop kept in a ref so the web window listeners (bound once at
   // drag start) always call the latest version (assigned just below).
   const resolveQueueDropRef = useRef<(fromIdx: number, x: number, y: number) => void>(() => {});
+  // Per-card persistent Animated.Value for the gap-open translateY, keyed by
+  // entry id (survives re-renders). The dragged card's measured height is the
+  // gap size so the opening slot is exactly card-sized.
+  const queueShiftAnims = useRef<Map<string, RNAnimated.Value>>(new Map()).current;
+  const getQueueShift = useCallback((entryId: string) => {
+    let v = queueShiftAnims.get(entryId);
+    if (!v) { v = new RNAnimated.Value(0); queueShiftAnims.set(entryId, v); }
+    return v;
+  }, [queueShiftAnims]);
+  // Height of the card being dragged = size of the gap to open. Stored in a ref
+  // so the move handler (bound once at drag start) can read it without re-render.
+  const queueGapHRef = useRef(0);
+  // computeQueueShifts kept in a ref so the move handlers always call the latest
+  // version (it closes over queuedEntries; assigned just below where defined).
+  const computeQueueShiftsRef = useRef<(fromIdx: number, insertIdx: number) => void>(() => {});
 
   // Hit-test the registered drop targets at a point. `kindFilter` (optional)
   // restricts the search to one or more DropKinds. Pool drags pass
@@ -235,27 +259,51 @@ export default function OperateScreen() {
     w.addEventListener('pointerup', onUp, true);
   }, [hitTestDrop]);
 
-  // WEB queue-card reorder controller. Mirrors beginPoolDrag but for whole
-  // 다음 게임 cards: a CONFIRMED drag (movement already detected by the handle's
-  // pointerdown bootstrap) is driven by window pointer listeners until release,
-  // then resolves the new index via moveQueueItem. Native uses a PanResponder on
-  // the handle that claims on move and calls this on grant.
+  // Compute the INSERTION index (0..n) for a release/hover point by comparing the
+  // cursor's Y against each registered queue-card rect midpoint. This is what
+  // drives both the live gap animation and the final drop. Independent of which
+  // card is hit so it works in the gap between cards too.
+  const queueInsertIndexAt = useCallback((pageY: number): number => {
+    const cards: DropTarget[] = [];
+    for (const t of dropTargets.current.values()) {
+      if (t.kind === 'queue-card') cards.push(t);
+    }
+    if (cards.length === 0) return 0;
+    cards.sort((a, b) => a.slotIndex - b.slotIndex);
+    // Above the first card's middle → index 0; else find first card whose
+    // midpoint is below the cursor → insert before it; past the last → append.
+    for (const c of cards) {
+      const mid = c.rect.y + c.rect.h / 2;
+      if (pageY < mid) return c.slotIndex;
+    }
+    return cards.length;
+  }, []);
+
+  // WEB queue-card reorder controller. A CONFIRMED drag (movement already
+  // detected by the card-body pointerdown bootstrap) is driven by window pointer
+  // listeners until release; on each move it recomputes the insertion index and
+  // animates the card-sized gap, then on release resolves via moveQueueItem.
+  // Native uses a PanResponder on the card body that claims on move + calls this.
   const beginQueueDrag = useCallback((
-    entryId: string, fromIdx: number, label: string,
+    entryId: string, fromIdx: number,
+    cardW: number, cardH: number, grabX: number, grabY: number,
     startX: number, startY: number,
   ) => {
     queueDragRef.current = { entryId, fromIdx };
     queueMovedRef.current = true;
-    setQueueHoverIdx(fromIdx);
-    setQueueDrag({ entryId, fromIdx, label, x: startX, y: startY });
+    queueGapHRef.current = cardH;
+    setQueueInsertIdx(fromIdx);
+    computeQueueShiftsRef.current(fromIdx, fromIdx);
+    setQueueDrag({ entryId, fromIdx, width: cardW, height: cardH, grabX, grabY, x: startX, y: startY });
     if (Platform.OS !== 'web') return;
     const w = window as any;
     const onMove = (ev: PointerEvent) => {
       const x = ev.pageX; const y = ev.pageY;
       queueMovedRef.current = true;
       setQueueDrag((prev) => (prev ? { ...prev, x, y } : prev));
-      const hit = hitTestDrop(x, y, 'queue-card');
-      setQueueHoverIdx(hit ? hit.slotIndex : null);
+      const insert = queueInsertIndexAt(y);
+      setQueueInsertIdx(insert);
+      computeQueueShiftsRef.current(fromIdx, insert);
     };
     const onUp = (ev: PointerEvent) => {
       w.removeEventListener('pointermove', onMove, true);
@@ -264,13 +312,13 @@ export default function OperateScreen() {
       const moved = queueMovedRef.current;
       queueDragRef.current = null;
       setQueueDrag(null);
-      setQueueHoverIdx(null);
+      setQueueInsertIdx(null);
       if (!drag) return;
       if (moved) resolveQueueDropRef.current(drag.fromIdx, ev.pageX, ev.pageY);
     };
     w.addEventListener('pointermove', onMove, true);
     w.addEventListener('pointerup', onUp, true);
-  }, [hitTestDrop]);
+  }, [queueInsertIndexAt]);
 
   // ─── Load session meta (facilityId, clubId) + permission ───
   useEffect(() => {
@@ -365,6 +413,19 @@ export default function OperateScreen() {
       .sort((a, b) => a.queueOrder - b.queueOrder),
     [board],
   );
+  // When the queue order/membership changes from the server (after a persisted
+  // reorder, add, remove, …) AND no drag is in flight, snap every gap-shift back
+  // to 0 so the new order renders flat, and prune anim values for gone entries.
+  const queueOrderKey = useMemo(() => queuedEntries.map((e) => e.id).join('|'), [queuedEntries]);
+  useEffect(() => {
+    if (queueDragRef.current) return; // mid-drag: keep the live gap
+    const ids = new Set(queuedEntries.map((e) => e.id));
+    queueShiftAnims.forEach((v, id) => {
+      if (!ids.has(id)) { queueShiftAnims.delete(id); return; }
+      v.setValue(0);
+    });
+  }, [queueOrderKey]); // eslint-disable-line react-hooks/exhaustive-deps
+
   // On-court games (have a courtId, currently materialized/playing).
   const playingEntries = useMemo(
     () => (board?.entries || []).filter((e) => e.courtId && (e.status === 'PLAYING' || e.status === 'MATERIALIZED')),
@@ -810,16 +871,57 @@ export default function OperateScreen() {
   }, [hitTestDrop, placeStagedAt, handleDropOnQueueSlot]);
   resolveDropRef.current = resolveDrop;
 
+  // ─── Animate the card-sized gap open/closed for a given hover state ───
+  // Given the dragged card's original index `fromIdx` and the current INSERTION
+  // index `insertIdx` (0..n), translate every OTHER card so a card-sized gap
+  // opens exactly at the insertion point. Uniform card height (the dragged
+  // card's measured height) is used as the gap size, which is exact for the
+  // collapsed rows that dominate the queue. The math (with the source removed):
+  //   shift(i) = (i >= insertIdx ? +gapH : 0) − (i > fromIdx ? +gapH : 0)
+  // i.e. cards at/after the gap move down, cards that were below the lifted card
+  // move up to fill its vacated space, and the two cancel below the gap.
+  const computeQueueShifts = useCallback((fromIdx: number, insertIdx: number) => {
+    const gapH = queueGapHRef.current || 64;
+    queuedEntries.forEach((e, i) => {
+      const v = getQueueShift(e.id);
+      let target = 0;
+      if (i !== fromIdx) {
+        if (i >= insertIdx) target += gapH;
+        if (i > fromIdx) target -= gapH;
+      }
+      RNAnimated.spring(v, {
+        toValue: target,
+        useNativeDriver: true,
+        friction: 12, tension: 140,
+      }).start();
+    });
+  }, [queuedEntries, getQueueShift]);
+  computeQueueShiftsRef.current = computeQueueShifts;
+
+  // Settle all cards back to 0 (gap closed). Used on drop/cancel so the list
+  // resolves smoothly into its new order.
+  const settleQueueShifts = useCallback(() => {
+    queueShiftAnims.forEach((v) => {
+      RNAnimated.spring(v, { toValue: 0, useNativeDriver: true, friction: 12, tension: 140 }).start();
+    });
+  }, [queueShiftAnims]);
+
   // ─── Resolve a queue-card reorder drop (called on queue-card drag release) ───
-  // Hit-test the release point against the registered 'queue-card' targets; if
-  // it lands on a different index, persist via moveQueueItem (→ reorderQueue →
-  // PATCH /game-boards/:id/queue/reorder), which also refreshes the board.
+  // Compute the insertion index from the release Y; if it maps to a different
+  // position, persist via moveQueueItem (→ reorderQueue → PATCH
+  // /game-boards/:id/queue/reorder), which also refreshes the board. Always
+  // settle the gap animations closed so the list resolves smoothly.
   const resolveQueueDrop = useCallback((fromIdx: number, pageX: number, pageY: number) => {
-    const hit = hitTestDrop(pageX, pageY, 'queue-card');
-    if (!hit) return;
-    const toIdx = hit.slotIndex;
+    const insertIdx = queueInsertIndexAt(pageY);
+    settleQueueShifts();
+    // An insertion index in 0..n maps to a destination row. Inserting at a
+    // position after the source shifts left by one once the source is removed.
+    let toIdx = insertIdx;
+    if (insertIdx > fromIdx) toIdx -= 1;
+    if (toIdx < 0) toIdx = 0;
+    if (toIdx > queuedEntries.length - 1) toIdx = queuedEntries.length - 1;
     if (toIdx !== fromIdx) moveQueueItem(fromIdx, toIdx);
-  }, [hitTestDrop, moveQueueItem]);
+  }, [queueInsertIndexAt, settleQueueShifts, moveQueueItem, queuedEntries.length]);
   resolveQueueDropRef.current = resolveQueueDrop;
 
   // ─── Permission states ───
@@ -1394,45 +1496,81 @@ export default function OperateScreen() {
     const isAssigning = assignTarget === entry.id;
     const editing = editingEntryId === entry.id;
 
-    // ── Queue-card reorder drag (drag the whole card up/down by its handle) ──
-    // This is the active, finger-following reorder used on the COLLAPSED cards.
-    // It reuses the registerDrop / hitTestDrop / moveQueueItem infrastructure
-    // (same pattern as the pool→slot drag): each card registers its rect as a
-    // 'queue-card' target, the floating label follows the cursor, and on release
-    // resolveQueueDrop persists the new order.
+    // ── Queue-card reorder drag (drag the WHOLE card up/down) ──
+    // The entire card body is the drag trigger: press + move past a small
+    // threshold lifts a full card-shaped copy under the finger, while the other
+    // cards animate to open a card-sized gap at the insertion point. Inner
+    // buttons (▲▼/수정/삭제/cocourt) still work because the drag is claimed on
+    // MOVE (native onMoveShouldSet) / threshold (web pointerdown→move), never on
+    // start — so a tap falls through to those buttons.
     const cardRef = useRef<View>(null);
     const cardDropId = `qcard-${entry.id}`;
     const isCardDragSource = queueDrag?.entryId === entry.id;
-    const isCardHover = queueHoverIdx === idx && queueDrag != null;
+    // Persistent gap-open offset for THIS card (translateY).
+    const shiftAnim = getQueueShift(entry.id);
+    // Latest measured rect of this card (for the lifted-copy geometry on grant).
+    const cardRectRef = useRef<{ x: number; y: number; w: number; h: number }>({ x: 0, y: 0, w: 0, h: 0 });
 
     const measureCard = useCallback(() => {
+      // Don't re-measure mid-drag: cards are translated by the gap animation, so
+      // measureInWindow would return shifted positions and corrupt the rects the
+      // insertion-index math relies on. The resting rects captured before the
+      // drag stay valid (the list itself doesn't reflow until the drop persists).
+      if (queueDragRef.current) return;
       cardRef.current?.measureInWindow((x, y, w, h) => {
+        cardRectRef.current = { x, y, w, h };
         registerDrop({ id: cardDropId, kind: 'queue-card', entryId: entry.id, slotIndex: idx, rect: { x, y, w, h } });
       });
     }, [cardDropId, idx, entry.id]);
 
+    // Re-measure/register every render (cheap; keeps rects fresh as the list
+    // changes) — BUT skip the work entirely while a drag is in flight: the
+    // measure is guarded (cards are translated mid-drag) and, crucially, the
+    // cleanup must NOT unregister during a drag or it would wipe the resting
+    // rects the insertion-index math relies on between a move and the drop.
     useEffect(() => {
+      if (queueDragRef.current) return;          // mid-drag: leave rects intact
       const t = setTimeout(measureCard, 0);
-      return () => { clearTimeout(t); unregisterDrop(cardDropId); };
+      return () => {
+        clearTimeout(t);
+        if (!queueDragRef.current) unregisterDrop(cardDropId);
+      };
     });
 
-    const handleLabel = `${idx + 1}번 게임`;
+    // Kick off the lifted-card drag from a confirmed press point, supplying the
+    // card's size + the grab offset so the floating copy sits under the finger.
+    // `idx` can change after a reorder while the once-created PanResponder keeps
+    // its first closure, so the trigger reads the live idx from a ref.
+    const idxRef = useRef(idx);
+    idxRef.current = idx;
+    const startCardDrag = useCallback((pageX: number, pageY: number) => {
+      if (queueDragRef.current) return; // a drag is already active → idempotent
+      const r = cardRectRef.current;
+      const grabX = r.w ? pageX - r.x : 60;
+      const grabY = r.h ? pageY - r.y : 24;
+      beginQueueDrag(entry.id, idxRef.current, r.w || 280, r.h || 64, grabX, grabY, pageX, pageY);
+    }, [entry.id]);
+    const startCardDragRef = useRef(startCardDrag);
+    startCardDragRef.current = startCardDrag;
 
-    // NATIVE handle drag: claim the responder only on a real vertical MOVE so a
-    // plain tap on the handle never starts a stuck drag.
+    // NATIVE: claim the responder only on a real MOVE so taps reach the inner
+    // buttons. Once granted, the whole card drives the drag. All handlers go
+    // through refs so the once-created responder always runs the latest logic.
     const cardPan = useRef(
       PanResponder.create({
         onStartShouldSetPanResponder: () => false,
-        onMoveShouldSetPanResponder: (_e, g) => Math.abs(g.dy) > 4 || Math.abs(g.dx) > 4,
+        onMoveShouldSetPanResponder: (_e, g) => Math.abs(g.dy) > 6 || Math.abs(g.dx) > 6,
         onPanResponderGrant: (e) => {
-          beginQueueDrag(entry.id, idx, handleLabel, e.nativeEvent.pageX, e.nativeEvent.pageY);
+          startCardDragRef.current(e.nativeEvent.pageX, e.nativeEvent.pageY);
         },
         onPanResponderMove: (e) => {
           if (Platform.OS === 'web') return;
           const { pageX, pageY } = e.nativeEvent;
           setQueueDrag((prev) => (prev ? { ...prev, x: pageX, y: pageY } : prev));
-          const hit = hitTestDrop(pageX, pageY, 'queue-card');
-          setQueueHoverIdx(hit ? hit.slotIndex : null);
+          const drag = queueDragRef.current;
+          const insert = queueInsertIndexAt(pageY);
+          setQueueInsertIdx(insert);
+          if (drag) computeQueueShiftsRef.current(drag.fromIdx, insert);
         },
         onPanResponderRelease: (e) => {
           if (Platform.OS === 'web') return; // handled by window pointerup
@@ -1440,33 +1578,35 @@ export default function OperateScreen() {
           const drag = queueDragRef.current;
           queueDragRef.current = null;
           setQueueDrag(null);
-          setQueueHoverIdx(null);
-          if (drag) resolveQueueDrop(drag.fromIdx, pageX, pageY);
+          setQueueInsertIdx(null);
+          if (drag) resolveQueueDropRef.current(drag.fromIdx, pageX, pageY);
         },
         onPanResponderTerminate: () => {
           if (Platform.OS === 'web') return;
           queueDragRef.current = null;
           setQueueDrag(null);
-          setQueueHoverIdx(null);
+          setQueueInsertIdx(null);
+          settleQueueShifts();
         },
       }),
     ).current;
 
-    // WEB handle drag: threshold-gated pointerdown bootstrap WITHOUT claiming a
-    // responder, so the handle stays inert on a plain tap and only begins the
-    // window-pointer drag once the finger moves past the threshold.
-    const onHandlePointerDownWeb = useCallback((ev: any) => {
+    // WEB: threshold-gated pointerdown bootstrap WITHOUT claiming a responder, so
+    // a plain click still reaches the inner buttons. Only once the pointer moves
+    // past the threshold does it lift the card and hand off to beginQueueDrag's
+    // window listeners. A click on an inner button stops propagation so it never
+    // even arms this bootstrap.
+    const onCardPointerDownWeb = useCallback((ev: any) => {
       if (Platform.OS !== 'web') return;
       if (ev.button != null && ev.button !== 0) return; // left/primary only
-      ev.stopPropagation?.();
       const startX = ev.pageX; const startY = ev.pageY;
       let started = false;
       const w = window as any;
       const onMove = (e: PointerEvent) => {
         if (!started) {
-          if (Math.abs(e.pageX - startX) <= 4 && Math.abs(e.pageY - startY) <= 4) return;
+          if (Math.abs(e.pageX - startX) <= 6 && Math.abs(e.pageY - startY) <= 6) return;
           started = true;
-          beginQueueDrag(entry.id, idx, handleLabel, e.pageX, e.pageY);
+          startCardDrag(startX, startY);
         }
         if (started) {
           w.removeEventListener('pointermove', onMove, true);
@@ -1479,13 +1619,29 @@ export default function OperateScreen() {
       };
       w.addEventListener('pointermove', onMove, true);
       w.addEventListener('pointerup', onUp, true);
-    }, [entry.id, idx, handleLabel]);
+    }, [startCardDrag]);
 
-    // The shared drag-handle button rendered on every card (collapsed + edit).
+    // Drag-trigger props spread onto the card body. On web the inner buttons stop
+    // propagation of their own pointerdown so they never start a drag.
+    const dragTriggerProps = {
+      ...cardPan.panHandlers,
+      ...(Platform.OS === 'web' ? { onPointerDown: onCardPointerDownWeb } : {}),
+    };
+
+    // Spread onto every inner interactive control (▲▼/수정/삭제/배정/슬롯) so a
+    // press there never arms the card-drag bootstrap (web stops pointerdown
+    // propagation). The control keeps its own onPress. Native is already safe
+    // because the card PanResponder claims on MOVE, not start.
+    const stopDragProps = Platform.OS === 'web'
+      ? { onPointerDown: (e: any) => e.stopPropagation?.() }
+      : {};
+
+    // Subtle ≡ affordance for discoverability (NOT the trigger — the whole card
+    // is draggable now). Purely decorative; pointer events pass through to the
+    // card body's drag handlers.
     const QueueDragHandle = (
       <View
-        {...cardPan.panHandlers}
-        {...(Platform.OS === 'web' ? { onPointerDown: onHandlePointerDownWeb } : {})}
+        pointerEvents="none"
         style={[styles.dragHandle, { borderColor: colors.border, backgroundColor: colors.surfaceSecondary }]}
         accessibilityLabel="드래그하여 순서 변경"
       >
@@ -1509,16 +1665,15 @@ export default function OperateScreen() {
     // old single cramped line. No game-type color rail/tint — calm + uniform.
     if (!editing) {
       return (
-        <View>
-          {/* Drop indicator: a thick primary line marking where the dragged card
-              would land. Shown above the hovered card (or below the last one). */}
-          {isCardHover && (
-            <View style={[styles.queueDropLine, { backgroundColor: colors.primary }]} />
-          )}
+        <RNAnimated.View
+          // Open the card-sized gap: this card slides to make room (or back).
+          style={{ transform: [{ translateY: shiftAnim }] }}
+        >
           <View
             ref={cardRef}
             onLayout={measureCard}
             collapsable={false}
+            {...dragTriggerProps}
             style={[
               styles.queueRow2,
               {
@@ -1526,14 +1681,9 @@ export default function OperateScreen() {
                 borderColor: isNext ? colors.primary : colors.border,
                 borderWidth: isNext ? 1.5 : 1,
               },
-              // Lift the dragged card: dim + dashed primary outline so it reads as
-              // "picked up" while the floating label follows the cursor.
-              isCardDragSource && {
-                opacity: 0.45,
-                borderColor: colors.primary,
-                borderStyle: 'dashed',
-                borderWidth: 1.5,
-              },
+              // The lifted card is shown as a floating copy under the finger, so
+              // hide the in-list original entirely → leaves a clean card-sized gap.
+              isCardDragSource && { opacity: 0 },
             ]}
           >
             <View style={styles.queueRow2Top}>
@@ -1554,6 +1704,7 @@ export default function OperateScreen() {
                 accessibilityLabel="수정"
                 activeOpacity={0.8}
                 hitSlop={6}
+                {...stopDragProps}
               >
                 <Icon name="edit" size={12} color={colors.textSecondary} />
                 <Text style={[styles.editBtnText, { color: colors.textSecondary }]}>수정</Text>
@@ -1570,16 +1721,16 @@ export default function OperateScreen() {
               ))}
             </View>
           </View>
-        </View>
+        </RNAnimated.View>
       );
     }
 
     // ── EXPANDED (editing): full editable 2×2 view + controls. ──
+    // The body is NOT a drag trigger here (too many controls; reorder while
+    // editing uses ▲▼). It still gets the gap-shift wrapper so it makes room
+    // when another card is dragged past it, and stays a registered drop target.
     return (
-      <View>
-        {isCardHover && (
-          <View style={[styles.queueDropLine, { backgroundColor: colors.primary }]} />
-        )}
+      <RNAnimated.View style={{ transform: [{ translateY: shiftAnim }] }}>
         <View
           ref={cardRef}
           onLayout={measureCard}
@@ -1588,7 +1739,6 @@ export default function OperateScreen() {
             styles.queueItem,
             { backgroundColor: colors.primaryBg, borderColor: colors.primary },
             { borderWidth: 2 },
-            isCardDragSource && { opacity: 0.45, borderStyle: 'dashed' },
           ]}
         >
         {/* ─── Header: drag handle + order # + (muted) type label + 완료 ─── */}
@@ -1696,7 +1846,7 @@ export default function OperateScreen() {
           </>
         )}
         </View>
-      </View>
+      </RNAnimated.View>
     );
   };
 
@@ -1704,7 +1854,7 @@ export default function OperateScreen() {
     <View style={[styles.queueCard, { backgroundColor: colors.surface, borderColor: colors.border }, shadows.sm]}>
       <View style={styles.queueHeaderRow}>
         <Text style={[styles.queueHeading, { color: colors.text }]}>다음 게임 ({queuedEntries.length}조)</Text>
-        <Text style={[styles.queueHint, { color: colors.textLight }]}>≡ 드래그=순서 · 수정=편집</Text>
+        <Text style={[styles.queueHint, { color: colors.textLight }]}>카드를 끌어 순서 변경 · 수정=편집</Text>
       </View>
       {queuedEntries.length === 0 ? (
         <Text style={[styles.queueEmpty, { color: colors.textLight }]}>
@@ -1996,21 +2146,53 @@ export default function OperateScreen() {
     </View>
   ) : null;
 
-  // Floating label that follows the finger/cursor while reordering a queue card.
-  const QueueDragOverlay = queueDrag ? (
+  // Lifted, card-shaped copy that follows the finger/cursor while reordering a
+  // queue card. NOT a pill — it's an actual full card (same content + size as the
+  // collapsed row) raised with a shadow + slight scale, so it clearly reads as
+  // "the card itself is being carried" into its new slot.
+  const queueDragEntry = queueDrag
+    ? queuedEntries.find((e) => e.id === queueDrag.entryId)
+    : undefined;
+  const QueueDragOverlay = queueDrag && queueDragEntry ? (
     <View
       pointerEvents="none"
-      style={[
-        styles.dragGhost,
-        {
-          left: queueDrag.x - 40,
-          top: queueDrag.y - 18,
-          backgroundColor: colors.primary,
-        },
-      ]}
+      style={{
+        position: 'absolute',
+        zIndex: 9999,
+        elevation: 14,
+        left: queueDrag.x - queueDrag.grabX,
+        top: queueDrag.y - queueDrag.grabY,
+        width: queueDrag.width,
+        transform: [{ scale: 1.03 }],
+      }}
     >
-      <Icon name="menu" size={13} color={palette.white} />
-      <Text style={styles.dragGhostText} numberOfLines={1}>{queueDrag.label}</Text>
+      <View
+        style={[
+          styles.queueRow2,
+          styles.queueDragLifted,
+          { backgroundColor: colors.surface, borderColor: colors.primary, borderWidth: 1.5 },
+        ]}
+      >
+        <View style={styles.queueRow2Top}>
+          <View style={[styles.dragHandle, { borderColor: colors.border, backgroundColor: colors.surfaceSecondary }]}>
+            <Icon name="menu" size={14} color={colors.textLight} />
+          </View>
+          <View style={[styles.queueNumSm, { backgroundColor: colors.primary }]}>
+            <Text style={[styles.queueNumText, { color: palette.white }]}>{queueDrag.fromIdx + 1}</Text>
+          </View>
+          <GameTypeLabel playerIds={queueDragEntry.playerIds} />
+          <View style={{ flex: 1 }} />
+        </View>
+        <View style={styles.miniChipRow}>
+          {[0, 1, 2, 3].map((slotIdx) => (
+            <QueueMiniChip
+              key={slotIdx}
+              pId={queueDragEntry.playerIds[slotIdx]}
+              name={queueDragEntry.playerNames?.[slotIdx]}
+            />
+          ))}
+        </View>
+      </View>
     </View>
   ) : null;
 
@@ -2904,8 +3086,12 @@ const styles = StyleSheet.create({
     gap: spacing.sm, overflow: 'hidden',
   },
   queueRow2Top: { flexDirection: 'row', alignItems: 'center', gap: spacing.xs },
-  // Drop indicator line shown above the queue card a dragged card would land on.
-  queueDropLine: { height: 3, borderRadius: 2, marginVertical: 3 },
+  // The lifted floating copy of a card while dragging (shadow makes it read as
+  // physically picked up off the list, hovering over the card-sized gap).
+  queueDragLifted: {
+    shadowColor: '#000', shadowOpacity: 0.28, shadowRadius: 14,
+    shadowOffset: { width: 0, height: 8 },
+  },
   queueNumSm: { width: 22, height: 22, borderRadius: 11, alignItems: 'center', justifyContent: 'center' },
   nextTag: { paddingHorizontal: spacing.sm, paddingVertical: 2, borderRadius: radius.sm },
   nextTagText: { fontSize: 11, fontWeight: '800' },
