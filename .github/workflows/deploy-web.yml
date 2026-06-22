@@ -44,6 +44,9 @@ jobs:
         env:
           # Baked into the web bundle so the site calls the live API.
           EXPO_PUBLIC_API_URL: https://api.badmintoncourt.store
+          # Kakao REST key = public OAuth client_id (safe to ship; only the
+          # client_secret is private and stays server-side on the Pi).
+          EXPO_PUBLIC_KAKAO_REST_KEY: 5a202bd90ab8dff01348f24cb1c37f3f
         run: |
           npx expo export --platform web
           # SPA fallback: client-routed paths (/join, /attend, refresh) -> index.html

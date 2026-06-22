@@ -41,7 +41,7 @@
     },
     "extra": {
       "apiUrl": "https://api.badmintoncourt.store",
-      "kakaoRestKey": "REPLACE_WITH_KAKAO_KEY",
+      "kakaoRestKey": "5a202bd90ab8dff01348f24cb1c37f3f",
       "eas": {
         "projectId": "REPLACE_WITH_EAS_PROJECT_ID"
       }
