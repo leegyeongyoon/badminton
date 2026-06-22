@@ -49,6 +49,15 @@ jobs:
           EXPO_PUBLIC_KAKAO_REST_KEY: 5a202bd90ab8dff01348f24cb1c37f3f
         run: |
           npx expo export --platform web
+          # Cloudflare Pages SKIPS any directory named `node_modules` during
+          # upload, so the @expo/vector-icons fonts (and any other asset) that
+          # Metro emits under dist/assets/.../node_modules/... never deploy →
+          # broken icons / 404s. Rename every node_modules dir in the output to
+          # `nm` (deepest-first) and rewrite the path refs in the JS bundle so the
+          # assets actually ship and resolve.
+          find dist -depth -type d -name node_modules -exec bash -c 'mv "$0" "$(dirname "$0")/nm"' {} \;
+          grep -rlI '/node_modules/' dist | xargs -r sed -i 's#/node_modules/#/nm/#g'
+          test "$(find dist -type d -name node_modules | wc -l)" = "0"   # fail the build if any remain
           # SPA fallback: client-routed paths (/join, /attend, refresh) -> index.html
           printf '/*    /index.html   200\n' > dist/_redirects
 
