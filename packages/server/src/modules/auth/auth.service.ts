@@ -173,12 +173,18 @@ async function exchangeKakaoCode(code: string, redirectUri: string): Promise<str
   }
 
   if (!tokenRes.ok) {
-    throw new UnauthorizedError('카카오 인증에 실패했습니다');
+    // Surface Kakao's actual error (status + body) so misconfig (invalid_client /
+    // redirect_uri mismatch / KOE codes) is diagnosable. The body holds Kakao
+    // error codes only — never our client_secret.
+    let detail = '';
+    try { detail = (await tokenRes.text()).slice(0, 300); } catch { /* noop */ }
+    console.error('[kakao] token exchange failed', tokenRes.status, detail);
+    throw new UnauthorizedError(`카카오 인증 실패(토큰교환) [${tokenRes.status}] ${detail}`);
   }
 
   const tokenData = (await tokenRes.json()) as { access_token?: string };
   if (!tokenData.access_token) {
-    throw new UnauthorizedError('카카오 인증에 실패했습니다');
+    throw new UnauthorizedError('카카오 인증 실패(토큰없음)');
   }
   return tokenData.access_token;
 }
@@ -216,7 +222,10 @@ export async function kakaoLogin(input: KakaoLoginInput) {
   }
 
   if (!kakaoRes.ok) {
-    throw new UnauthorizedError('카카오 인증에 실패했습니다');
+    let detail = '';
+    try { detail = (await kakaoRes.text()).slice(0, 300); } catch { /* noop */ }
+    console.error('[kakao] user/me failed', kakaoRes.status, detail);
+    throw new UnauthorizedError(`카카오 인증 실패(사용자조회) [${kakaoRes.status}] ${detail}`);
   }
 
   const data = (await kakaoRes.json()) as {
