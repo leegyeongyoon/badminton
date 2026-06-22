@@ -35,9 +35,10 @@ export const gameBoardApi = {
 
   // 자동 추천 — 다음 복식 4인 조합 제안 (LEADER/STAFF 전용, 인원 부족 시 [])
   // mode: 매칭 전략 (fair/similar/balanced/competitive/fresh), 기본 fair
+  // exclude: 이미 트레이에 올려둔/큐에 편성된 인원 → 풀에서 제외 (연속 편성 시 새 인원)
   suggest: (
     clubSessionId: string,
-    body?: { courtId?: string; count?: number; mode?: SuggestMode },
+    body?: { courtId?: string; count?: number; mode?: SuggestMode; exclude?: string[] },
   ) => api.post(`/club-sessions/${clubSessionId}/suggest`, body ?? {}),
 
   // ─── 전체 "다음 게임" 큐 (코트 없는 QUEUED 게임) ───

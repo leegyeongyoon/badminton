@@ -255,6 +255,11 @@ export const suggestFoursomeSchema = z.object({
   mode: z
     .enum(['fair', 'similar', 'balanced', 'competitive', 'fresh'])
     .optional(),
+  // Player ids to EXCLUDE from the eligible pool, on top of the server-side
+  // exclusions (currently playing / queued / resting / penalized). The client
+  // sends the players it has STAGED in the next-game tray plus those already in
+  // QUEUED upcoming games, so building game-after-game keeps using fresh people.
+  exclude: z.array(z.string().uuid()).optional(),
 });
 
 // Game Board QUEUE (미리 짜두는 다음 게임 큐)

@@ -380,7 +380,7 @@ export async function pushAllEntries(boardId: string, userId: string) {
 // Does NOT mutate any state.
 export async function suggestNextFoursome(
   clubSessionId: string,
-  opts: { courtId?: string; count?: number; mode?: SuggestMode },
+  opts: { courtId?: string; count?: number; mode?: SuggestMode; exclude?: string[] },
   userId: string,
 ) {
   const clubSession = await prisma.clubSession.findUnique({
@@ -436,6 +436,12 @@ export async function suggestNextFoursome(
   });
   const penalizedIds = new Set(penalties.map((p) => p.userId));
 
+  // Client-supplied exclusions: players the operator has STAGED in the next-game
+  // tray (not yet a QUEUED entry) plus any already-queued upcoming players, so
+  // building game-after-game keeps using FRESH people. This is on top of the
+  // server-side exclusions above (resting / in-turn / queued / penalized).
+  const excludeIds = new Set(opts.exclude ?? []);
+
   // Build eligible pool --------------------------------------------------------
   const poolIds = checkins
     .map((c) => c.userId)
@@ -444,7 +450,8 @@ export async function suggestNextFoursome(
         !restingIds.has(id) &&
         !inTurnIds.has(id) &&
         !queuedIds.has(id) &&
-        !penalizedIds.has(id),
+        !penalizedIds.has(id) &&
+        !excludeIds.has(id),
     );
 
   if (poolIds.length < 4) {

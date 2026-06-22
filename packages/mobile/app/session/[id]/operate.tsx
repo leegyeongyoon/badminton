@@ -633,7 +633,10 @@ export default function OperateScreen() {
     setSuggestNote(null);
     setModeChooserOpen(false);
     try {
-      const { playerIds, effectiveMode, note } = await suggestNext({ mode });
+      // Exclude players already STAGED in the tray + those already placed in a
+      // QUEUED upcoming game, so building game-after-game uses fresh people.
+      const exclude = Array.from(new Set([...staged, ...queuedPlayerIds]));
+      const { playerIds, effectiveMode, note } = await suggestNext({ mode, exclude });
       if (!playerIds || playerIds.length < 4) {
         setSuggestNote('추천할 수 있는 인원이 부족해요 (최소 4명)');
         return;
@@ -651,7 +654,7 @@ export default function OperateScreen() {
         setSuggestNote(err?.response?.data?.error || '추천에 실패했어요');
       }
     }
-  }, [suggestNext, prefillStaged]);
+  }, [suggestNext, prefillStaged, staged, queuedPlayerIds]);
 
   // ─── 다음 게임 추가 (큐에 등록) ───
   const handleAddToQueue = useCallback(async () => {

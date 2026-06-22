@@ -139,7 +139,7 @@ export function useGameBoard(clubSessionId: string | undefined) {
    * 인원 부족(서버가 빈 배열 반환) 시 playerIds [] 반환. 404/오류 시 throw.
    */
   const suggestNext = useCallback(
-    async (opts?: { courtId?: string; mode?: SuggestMode }): Promise<{
+    async (opts?: { courtId?: string; mode?: SuggestMode; exclude?: string[] }): Promise<{
       playerIds: string[];
       effectiveMode?: SuggestMode;
       note?: string;
@@ -148,9 +148,10 @@ export function useGameBoard(clubSessionId: string | undefined) {
       setSuggesting(true);
       setSuggestError(null);
       try {
-        const body: { courtId?: string; mode?: SuggestMode } = {};
+        const body: { courtId?: string; mode?: SuggestMode; exclude?: string[] } = {};
         if (opts?.courtId) body.courtId = opts.courtId;
         if (opts?.mode) body.mode = opts.mode;
+        if (opts?.exclude && opts.exclude.length > 0) body.exclude = opts.exclude;
         const { data } = await gameBoardApi.suggest(clubSessionId, body);
         const suggestions: FoursomeSuggestion[] = data?.suggestions ?? [];
         return {

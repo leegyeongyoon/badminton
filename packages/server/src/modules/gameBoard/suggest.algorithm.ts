@@ -169,6 +169,41 @@ const WAIT_REF_SECONDS = 15 * 60;
 // Recency-decay half-life for pair history (older shared games count less).
 const PAIR_RECENCY_HALFLIFE_SECONDS = 45 * 60;
 
+// ── Controlled tie-breaking randomness (anti-determinism) ────────────────────
+// The unified scoring is otherwise fully deterministic, so when many players are
+// tied on fairness (e.g. everyone has 0 games / similar wait) the SAME top-scored
+// foursome wins every call. We inject a small random jitter into each player's
+// priority so equally-owed players ROTATE across calls — while a real ≥1-game
+// difference still dominates (a 5-game player never out-jitters a 0-game player).
+//
+// JITTER_GAME_EQUIV is the half-amplitude in game-equivalent units. At 0.35 the
+// jitter spans ~[-0.35, +0.35] (full span 0.7 < 1 game), so two players whose
+// priorityCost differs by ≥1 (a whole game / ~15 min wait) keep their order with
+// certainty, but a 0-vs-0 tie shuffles freely. Mode terms (skill band, 2강2약,
+// even teams) are scored WITHOUT jitter, so each call still honors the mode — it
+// just picks a different equally-fair foursome.
+const JITTER_GAME_EQUIV = 0.35;
+// Owed-band width (game-equivalents): when widening the candidate set we keep
+// every player within this much of the most-owed player's jittered priority, so
+// clearly-more-owed players are always in, clearly-less-owed always out. ~1.5
+// games lets a couple of game-bands of owed players into the shuffled pool.
+const OWED_BAND_GAME_EQUIV = 1.5;
+
+// Uniform jitter in [-JITTER_GAME_EQUIV, +JITTER_GAME_EQUIV]. Math.random() is
+// fine in normal server Node code (the no-random rule is workflow-scripts only).
+function priorityJitter(): number {
+  return (Math.random() * 2 - 1) * JITTER_GAME_EQUIV;
+}
+
+// In-place Fisher–Yates shuffle (returns the same array for convenience).
+function shuffleInPlace<T>(arr: T[]): T[] {
+  for (let i = arr.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [arr[i], arr[j]] = [arr[j], arr[i]];
+  }
+  return arr;
+}
+
 // Per-mode scoring weights. wFair/wVariety form the universal baseline (present
 // in EVERY mode); wMode scales that mode's flavor term. Values are tuned so the
 // baseline always pulls from owed/waiting players and rotates partners, while
@@ -213,11 +248,15 @@ export function priorityCost(p: ModePlayer): number {
   return p.games - waitWorth;
 }
 
-// fairness(group): sum of per-player priorityCost. Lower ⇒ the four are more
-// "owed" a game (few games and/or long waits) ⇒ better.
-function fairnessCost(group: ModePlayer[]): number {
+// fairness(group): sum of per-player JITTERED priorityCost. Lower ⇒ the four are
+// more "owed" a game (few games and/or long waits) ⇒ better. `jitterById` maps a
+// player id → priorityCost + a small (<1 game) random jitter computed ONCE per
+// call, so the combo search itself ROTATES among equally-owed ties across calls
+// while a real ≥1-game gap still dominates. Falls back to raw priorityCost if a
+// player has no jitter entry (defensive; the caller always supplies one).
+function fairnessCost(group: ModePlayer[], jitterById: Map<string, number>): number {
   let c = 0;
-  for (const p of group) c += priorityCost(p);
+  for (const p of group) c += jitterById.get(p.id) ?? priorityCost(p);
   return c;
 }
 
@@ -270,15 +309,20 @@ function modeTerm(group: ModePlayer[], mode: SuggestMode): number {
   }
 }
 
-// Unified score for a group of 4 (lower = better).
+// Unified score for a group of 4 (lower = better). `jitterById` carries the
+// per-player jittered fairness cost (priorityCost + sub-one-game jitter) so the
+// combo search rotates equally-owed players across calls without breaking a real
+// fairness gap; mode/variety terms stay un-jittered so each call still honors
+// the mode (tight band / 2강2약 / even teams) and rotates partners.
 function scoreGroup(
   group: ModePlayer[],
   mode: SuggestMode,
   pairWeight: Record<string, number>,
+  jitterById: Map<string, number>,
 ): number {
   const w = MODE_WEIGHTS[mode];
   return (
-    w.wFair * fairnessCost(group) +
+    w.wFair * fairnessCost(group, jitterById) +
     w.wVariety * varietyCost(group, pairWeight) +
     w.wMode * modeTerm(group, mode)
   );
@@ -288,12 +332,15 @@ function scoreGroup(
  * selectFoursomeByMode — pick `size` (default 4) players from `pool` using the
  * unified scoring function for the given mode.
  *
- * Candidate generation (efficient for ~40): rank the pool by per-player
- * priorityCost (fairness: fewest games + longest wait first), take the top-N
- * (default 20), then bounded combo-search over groups of 4 among them, scoring
- * each group and keeping the best. This keeps fairness (only owed/waiting
- * players are considered) while letting variety + the mode flavor decide WHO
- * among them plays and ROTATES partners.
+ * Candidate generation (efficient for ~40): rank the pool by a JITTERED
+ * per-player priorityCost (fairness: fewest games + longest wait first, with a
+ * small sub-one-game random jitter that only reorders TIES / near-ties). Keep
+ * every player within an "owed band" of the most-owed (so clearly-more-owed are
+ * always in, clearly-less-owed always out), SHUFFLE that band, and cap at top-N.
+ * Then bounded combo-search over groups of 4 among them, scoring each group and
+ * keeping the best. This keeps fairness (only owed/waiting players are
+ * considered) while letting the jitter + shuffle + mode flavor decide WHICH of
+ * the equally-owed play and ROTATE partners — so REPEATED calls differ.
  *
  * `pairWeight`: recency-weighted shared-history per pairKey (recent games weigh
  * more). Used by the variety baseline in every mode.
@@ -312,13 +359,34 @@ export function selectFoursomeByMode(
     return { playerIds: pool.map((p) => p.id) };
   }
 
-  // Fairness-first candidate pool: the top-N most-owed/longest-waiting players.
+  // Jittered fairness key per player: priorityCost + small (<1 game) random
+  // jitter. The jitter only matters when two players are within ~1 game of each
+  // other; a clearly more-owed player (≥1 fewer game / ≥15 min more wait) still
+  // sorts ahead. Compute ONCE per call so the band cut + sort agree.
+  const jitterById = new Map<string, number>();
+  for (const p of pool) jitterById.set(p.id, priorityCost(p) + priorityJitter());
+  const key = (p: ModePlayer): number => jitterById.get(p.id) as number;
+
+  // Fairness-first ranking on the jittered key (ties already broken by jitter).
   const ranked = [...pool].sort((a, b) => {
-    const d = priorityCost(a) - priorityCost(b);
+    const d = key(a) - key(b);
     if (d !== 0) return d;
-    return a.id < b.id ? -1 : a.id > b.id ? 1 : 0; // deterministic tiebreak
+    return a.id < b.id ? -1 : a.id > b.id ? 1 : 0; // stable fallback
   });
-  const candidates = ranked.slice(0, Math.min(topN, ranked.length));
+
+  // Widen + shuffle the candidate set instead of always taking the same
+  // deterministic top-N. Take the OWED BAND: every player whose jittered key is
+  // within OWED_BAND_GAME_EQUIV of the most-owed player. This guarantees the 4
+  // chosen are still low-games / long-wait (clearly-less-owed players fall
+  // outside the band and are never sampled), but the band is then shuffled so a
+  // DIFFERENT equally-owed subset feeds the combo search each call.
+  const bestKey = key(ranked[0]);
+  const band = ranked.filter((p) => key(p) - bestKey <= OWED_BAND_GAME_EQUIV);
+  // Always have at least enough to form a group + some rotation room.
+  const minBand = Math.min(ranked.length, Math.max(size + 4, 8));
+  const banded = band.length >= minBand ? band : ranked.slice(0, minBand);
+  shuffleInPlace(banded);
+  const candidates = banded.slice(0, Math.min(topN, banded.length));
 
   // Bounded combo search over C(|candidates|, 4). With topN=20 that's C(20,4)=
   // 4845 groups — cheap. Score each; keep the best (lowest cost).
@@ -332,15 +400,16 @@ export function selectFoursomeByMode(
         for (let c = b + 1; c < n; c++)
           for (let d = c + 1; d < n; d++) {
             const group = [candidates[a], candidates[b], candidates[c], candidates[d]];
-            const s = scoreGroup(group, mode, pairWeight);
+            const s = scoreGroup(group, mode, pairWeight, jitterById);
             if (s < bestScore) {
               bestScore = s;
               best = group;
             }
           }
   } else {
-    // size ≠ 4 (rare): just take the highest-priority `size` players.
-    best = candidates.slice(0, size);
+    // size ≠ 4 (rare): just take the highest-priority `size` players (by the
+    // jittered key, so still owed-first with tie rotation; band is shuffled).
+    best = [...candidates].sort((a, b) => key(a) - key(b)).slice(0, size);
   }
 
   if (!best) {
