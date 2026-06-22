@@ -2047,19 +2047,15 @@ export default function OperateScreen() {
   // ─────────────────────────────────────────────────────────
   // Header + side actions
   // ─────────────────────────────────────────────────────────
-  const Header = (
-    <View style={[styles.header, { backgroundColor: colors.surface, borderBottomColor: colors.border }]}>
-      <TouchableOpacity onPress={() => (router.canGoBack() ? router.back() : router.replace('/(tabs)'))} hitSlop={10} style={styles.headerBack}>
-        <Icon name="back" size={22} color={colors.text} />
-      </TouchableOpacity>
-      <View style={{ flex: 1 }}>
-        <Text style={[styles.headerTitle, { color: colors.text }]} numberOfLines={1}>
-          {clubName ? `${clubName} 운영판` : '운영판'}
-        </Text>
-        <Text style={[styles.headerSub, { color: colors.textSecondary }]}>
-          미편성 {freePool.length}명 · 코트 {courts.length}개{guestCount > 0 ? ` · 게스트 ${guestCount}명` : ''}
-        </Text>
-      </View>
+  // On NARROW screens (phones / small tablets) the 6 action buttons can't fit
+  // inline next to the title without squishing it into a 1-char column and
+  // overflowing off-screen. There we render TWO rows: a full-width title row,
+  // then a horizontally-scrollable button row (web-safe). Wide screens (≥ the
+  // tablet breakpoint) keep the original single inline row.
+  const narrowHeader = layout.width < 768;
+
+  const headerActions = (
+    <>
       <TouchableOpacity
         style={[styles.headerLink, { borderColor: colors.border }]}
         onPress={() => setCourtModal(true)}
@@ -2127,6 +2123,46 @@ export default function OperateScreen() {
         <Icon name="stop" size={16} color={colors.danger} />
         <Text style={[styles.headerLinkText, { color: colors.danger }]}>정모 종료</Text>
       </TouchableOpacity>
+    </>
+  );
+
+  const backButton = (
+    <TouchableOpacity onPress={() => (router.canGoBack() ? router.back() : router.replace('/(tabs)'))} hitSlop={10} style={styles.headerBack}>
+      <Icon name="back" size={22} color={colors.text} />
+    </TouchableOpacity>
+  );
+
+  const titleBlock = (
+    <View style={styles.headerTitleBlock}>
+      <Text style={[styles.headerTitle, { color: colors.text }]} numberOfLines={1}>
+        {clubName ? `${clubName} 운영판` : '운영판'}
+      </Text>
+      <Text style={[styles.headerSub, { color: colors.textSecondary }]} numberOfLines={1}>
+        미편성 {freePool.length}명 · 코트 {courts.length}개{guestCount > 0 ? ` · 게스트 ${guestCount}명` : ''}
+      </Text>
+    </View>
+  );
+
+  const Header = narrowHeader ? (
+    <View style={[styles.headerNarrow, { backgroundColor: colors.surface, borderBottomColor: colors.border }]}>
+      <View style={styles.headerTitleRow}>
+        {backButton}
+        {titleBlock}
+      </View>
+      <ScrollView
+        horizontal
+        showsHorizontalScrollIndicator={false}
+        contentContainerStyle={styles.headerActionsScroll}
+        refreshControl={undefined}
+      >
+        {headerActions}
+      </ScrollView>
+    </View>
+  ) : (
+    <View style={[styles.header, { backgroundColor: colors.surface, borderBottomColor: colors.border }]}>
+      {backButton}
+      {titleBlock}
+      {headerActions}
     </View>
   );
 
@@ -3007,6 +3043,16 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing.lg, paddingVertical: spacing.md,
     borderBottomWidth: 1, gap: spacing.sm,
   },
+  // NARROW (phone / small tablet) header: title row on top, horizontally
+  // scrollable action-button row below. Keeps the title readable on one line and
+  // every action reachable without horizontal page overflow.
+  headerNarrow: {
+    paddingHorizontal: spacing.md, paddingTop: spacing.sm, paddingBottom: spacing.sm,
+    borderBottomWidth: 1, gap: spacing.sm,
+  },
+  headerTitleRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.xs },
+  headerActionsScroll: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, paddingRight: spacing.xs },
+  headerTitleBlock: { flex: 1, minWidth: 0 },
   headerBack: { padding: spacing.xs },
   headerTitle: { ...typography.subtitle1 },
   headerSub: { ...typography.caption, marginTop: 1 },
@@ -3014,6 +3060,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row', alignItems: 'center', gap: spacing.xs,
     paddingHorizontal: spacing.md, paddingVertical: spacing.sm,
     borderRadius: radius.pill, borderWidth: 1,
+    flexShrink: 0,
   },
   headerLinkText: { ...typography.buttonSm },
   headerChatIcon: { fontSize: 14 },
