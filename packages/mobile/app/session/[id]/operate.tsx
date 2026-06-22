@@ -6,6 +6,7 @@ import {
 } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useGameBoard, GameBoardEntry } from '../../../hooks/useGameBoard';
+import type { SuggestMode } from '../../../services/gameBoard';
 import { useTheme } from '../../../hooks/useTheme';
 import { useResponsiveLayout, courtColumnsFor } from '../../../hooks/useResponsiveLayout';
 import type { LayoutChangeEvent } from 'react-native';
@@ -54,6 +55,23 @@ interface Court {
 }
 
 type RoleState = 'loading' | 'allowed' | 'denied';
+
+// 자동 추천 매칭 모드 — 운영자가 전략을 고르는 칩. label(짧은 이름) + hint(한 줄 설명)
+// + note(추천 후 트레이에 보여줄 안내문). 서버 mode enum 과 1:1.
+const SUGGEST_MODES: {
+  mode: SuggestMode;
+  emoji: string;
+  label: string;
+  hint: string;
+  note: string;
+}[] = [
+  { mode: 'fair', emoji: '⚖️', label: '공정', hint: '적게 친 사람 우선 · 새 파트너', note: '공정하게 추천했어요' },
+  { mode: 'similar', emoji: '🎯', label: '비슷한 급수', hint: '급수 차이가 가장 작게', note: '비슷한 급수로 추천했어요' },
+  { mode: 'balanced', emoji: '🤝', label: '균형 접전', hint: '2:2 실력이 팽팽하게', note: '균형 접전으로 추천했어요' },
+  { mode: 'competitive', emoji: '🔥', label: '빡센 게임', hint: '가장 고수 4인', note: '빡센 게임으로 추천했어요' },
+  { mode: 'fresh', emoji: '✨', label: '새 조합', hint: '안 친 사람들끼리', note: '새 조합으로 추천했어요' },
+  { mode: 'mixed', emoji: '👫', label: '혼복', hint: '남2 여2', note: '혼복으로 추천했어요' },
+];
 
 // ─── Drag-to-compose registry ───────────────────────────────
 // A tiny absolute-coordinate drop-target registry so a player tile dragged
@@ -129,6 +147,8 @@ export default function OperateScreen() {
   const [staged, setStaged] = useState<string[]>([]);
   const [suggestNote, setSuggestNote] = useState<string | null>(null);
   const [suggestUnavailable, setSuggestUnavailable] = useState(false);
+  // 자동 추천 모드 칩 표시 여부 (🎲 자동 추천 탭 시 토글).
+  const [modeChooserOpen, setModeChooserOpen] = useState(false);
   const bounceAnims = useRef([0, 1, 2, 3].map(() => new RNAnimated.Value(1))).current;
 
   // Modals
@@ -607,15 +627,21 @@ export default function OperateScreen() {
   }, [bounceAnims]);
 
   // ─── Auto-suggest ───
-  const handleSuggest = useCallback(async () => {
+  // mode 별 전략으로 다음 4인 추천 → 트레이 prefill + 안내문. mode 미지정 시 'fair'.
+  const handleSuggest = useCallback(async (mode: SuggestMode = 'fair') => {
     setSuggestNote(null);
+    setModeChooserOpen(false);
     try {
-      const ids = await suggestNext();
-      if (!ids || ids.length < 4) {
+      const { playerIds, effectiveMode, note } = await suggestNext({ mode });
+      if (!playerIds || playerIds.length < 4) {
         setSuggestNote('추천할 수 있는 인원이 부족해요 (최소 4명)');
         return;
       }
-      prefillStaged(ids);
+      prefillStaged(playerIds);
+      // 서버가 실제 적용한 mode 의 안내문 사용(mixed→fair 대체 시 fair 문구).
+      const applied = effectiveMode ?? mode;
+      const meta = SUGGEST_MODES.find((m) => m.mode === applied);
+      setSuggestNote(note ?? meta?.note ?? null);
     } catch (err: any) {
       if (err?.response?.status === 404) {
         setSuggestUnavailable(true);
@@ -1350,17 +1376,25 @@ export default function OperateScreen() {
         <TouchableOpacity
           style={[
             styles.suggestBtn,
-            { backgroundColor: suggestUnavailable ? colors.textLight : colors.info },
+            {
+              backgroundColor: suggestUnavailable ? colors.textLight : colors.info,
+              opacity: modeChooserOpen ? 0.9 : 1,
+            },
           ]}
-          onPress={handleSuggest}
+          onPress={() => {
+            if (suggestUnavailable) return;
+            setSuggestNote(null);
+            setModeChooserOpen((o) => !o);
+          }}
           disabled={suggesting || suggestUnavailable}
           activeOpacity={0.85}
+          accessibilityLabel="자동 추천"
         >
           {suggesting ? (
             <ActivityIndicator size="small" color={palette.white} />
           ) : (
             <Text style={styles.suggestBtnText}>
-              {suggestUnavailable ? '준비 중' : '🎲 자동 추천'}
+              {suggestUnavailable ? '준비 중' : `🎲 자동 추천${modeChooserOpen ? ' ▴' : ' ▾'}`}
             </Text>
           )}
         </TouchableOpacity>
@@ -1370,6 +1404,34 @@ export default function OperateScreen() {
           </TouchableOpacity>
         )}
       </View>
+
+      {/* 매칭 모드 선택기 — 🎲 자동 추천 탭 시 펼쳐지는 칩 묶음. 칩 탭 → 해당 모드로 추천. */}
+      {modeChooserOpen && !suggestUnavailable && (
+        <View style={[styles.modeChooser, { borderColor: colors.border, backgroundColor: colors.background }]}>
+          <Text style={[styles.modeChooserTitle, { color: colors.textSecondary }]}>
+            어떻게 추천할까요?
+          </Text>
+          <View style={styles.modeChips}>
+            {SUGGEST_MODES.map((m) => (
+              <TouchableOpacity
+                key={m.mode}
+                style={[styles.modeChip, { borderColor: colors.border, backgroundColor: colors.surface }]}
+                onPress={() => handleSuggest(m.mode)}
+                disabled={suggesting}
+                activeOpacity={0.8}
+                accessibilityLabel={`${m.label} 추천`}
+              >
+                <Text style={[styles.modeChipLabel, { color: colors.text }]}>
+                  {m.emoji} {m.label}
+                </Text>
+                <Text style={[styles.modeChipHint, { color: colors.textSecondary }]} numberOfLines={1}>
+                  {m.hint}
+                </Text>
+              </TouchableOpacity>
+            ))}
+          </View>
+        </View>
+      )}
 
       <TouchableOpacity
         style={[styles.registerBtn, { backgroundColor: staged.length >= 2 ? colors.primary : colors.textLight }]}
@@ -3055,6 +3117,20 @@ const styles = StyleSheet.create({
     alignItems: 'center', justifyContent: 'center', minHeight: 46,
   },
   suggestBtnText: { color: palette.white, ...typography.button },
+  // 매칭 모드 선택기 (칩 묶음)
+  modeChooser: {
+    marginTop: spacing.sm, padding: spacing.sm,
+    borderWidth: 1, borderRadius: radius.lg, gap: spacing.xs,
+  },
+  modeChooserTitle: { ...typography.caption, fontWeight: '700', marginBottom: 2 },
+  modeChips: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.xs },
+  modeChip: {
+    flexGrow: 1, flexBasis: '31%', minWidth: 96,
+    paddingVertical: spacing.xs, paddingHorizontal: spacing.sm,
+    borderWidth: 1, borderRadius: radius.md,
+  },
+  modeChipLabel: { ...typography.buttonSm, fontWeight: '700' },
+  modeChipHint: { fontSize: 10, marginTop: 1 },
   clearBtn: {
     paddingHorizontal: spacing.lg, borderRadius: radius.lg,
     borderWidth: 1, alignItems: 'center', justifyContent: 'center',

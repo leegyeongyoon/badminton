@@ -1,5 +1,14 @@
 import api from './api';
 
+// 자동 추천 매칭 모드 (서버 suggestFoursomeSchema.mode 와 1:1).
+export type SuggestMode =
+  | 'fair'
+  | 'similar'
+  | 'balanced'
+  | 'competitive'
+  | 'fresh'
+  | 'mixed';
+
 export const gameBoardApi = {
   create: (clubSessionId: string) =>
     api.post(`/club-sessions/${clubSessionId}/game-board`),
@@ -25,8 +34,11 @@ export const gameBoardApi = {
     api.post(`/game-boards/${boardId}/push-all`),
 
   // 자동 추천 — 다음 복식 4인 조합 제안 (LEADER/STAFF 전용, 인원 부족 시 [])
-  suggest: (clubSessionId: string, body?: { courtId?: string; count?: number }) =>
-    api.post(`/club-sessions/${clubSessionId}/suggest`, body ?? {}),
+  // mode: 매칭 전략 (fair/similar/balanced/competitive/fresh/mixed), 기본 fair
+  suggest: (
+    clubSessionId: string,
+    body?: { courtId?: string; count?: number; mode?: SuggestMode },
+  ) => api.post(`/club-sessions/${clubSessionId}/suggest`, body ?? {}),
 
   // ─── 전체 "다음 게임" 큐 (코트 없는 QUEUED 게임) ───
   // 큐에 게임 추가 (2명 또는 4명) — 큐 끝에 append

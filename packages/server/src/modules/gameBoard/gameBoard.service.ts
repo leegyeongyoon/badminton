@@ -3,7 +3,27 @@ import { NotFoundError, BadRequestError, ForbiddenError } from '../../utils/erro
 import { getIO } from '../../socket';
 import { registerTurn } from '../turn/turn.service';
 import { sendPushToUser } from '../notification/notification.service';
-import { generateRotation } from './suggest.algorithm';
+import {
+  selectFoursomeByMode,
+  SUGGEST_TUNABLES,
+  type SuggestMode,
+  type ModePlayer,
+} from './suggest.algorithm';
+
+// Map a SkillLevel enum (S strongest … F weakest; null=미설정) to a number used
+// by the mode-based matching. null → 4 (mid), matching the spec.
+const SKILL_TO_NUM: Record<string, number> = {
+  S: 7,
+  A: 6,
+  B: 5,
+  C: 4,
+  D: 3,
+  E: 2,
+  F: 1,
+};
+function skillToNum(level: string | null | undefined): number {
+  return level ? SKILL_TO_NUM[level] ?? 4 : 4;
+}
 
 export async function createGameBoard(clubSessionId: string, userId: string) {
   const clubSession = await prisma.clubSession.findUnique({
@@ -360,7 +380,7 @@ export async function pushAllEntries(boardId: string, userId: string) {
 // Does NOT mutate any state.
 export async function suggestNextFoursome(
   clubSessionId: string,
-  opts: { courtId?: string; count?: number },
+  opts: { courtId?: string; count?: number; mode?: SuggestMode },
   userId: string,
 ) {
   const clubSession = await prisma.clubSession.findUnique({
@@ -431,47 +451,161 @@ export async function suggestNextFoursome(
     return { suggestions: [] };
   }
 
-  // initialGamesCount: games already played this session per pool user.
-  // A "game played this session" = a GamePlayer row whose Game's CourtTurn
-  // belongs to this clubSession.
-  const gamePlayers = await prisma.gamePlayer.findMany({
-    where: {
-      userId: { in: poolIds },
-      game: { turn: { clubSessionId } },
+  // ── Per-player session data for fairness (games + wait time) ───────────────
+  // Games already played this 정모, AND the timestamp of each player's LAST game,
+  // so we can compute wait time. A "game played this session" = a GamePlayer row
+  // whose Game's CourtTurn belongs to this clubSession. We read each Game's
+  // timestamps to derive (a) per-player games count and (b) last-game time.
+  const sessionGames = await prisma.game.findMany({
+    where: { turn: { clubSessionId } },
+    select: {
+      // Use the turn's completedAt when available (game actually ended),
+      // otherwise the game's own updatedAt/createdAt as the "when it happened".
+      createdAt: true,
+      updatedAt: true,
+      turn: { select: { startedAt: true, completedAt: true } },
+      players: { select: { userId: true } },
     },
-    select: { userId: true },
   });
+
   const initialGamesCount: Record<string, number> = {};
   for (const pid of poolIds) initialGamesCount[pid] = 0;
-  for (const gp of gamePlayers) {
-    initialGamesCount[gp.userId] = (initialGamesCount[gp.userId] ?? 0) + 1;
+  // lastGameAt: most recent game time per pool user (ms epoch), 0 if none.
+  const lastGameAtMs: Record<string, number> = {};
+  for (const g of sessionGames) {
+    const t = (g.turn?.completedAt ?? g.turn?.startedAt ?? g.updatedAt ?? g.createdAt);
+    const tMs = t ? new Date(t).getTime() : 0;
+    for (const gp of g.players) {
+      if (!(gp.userId in initialGamesCount)) continue; // only pool users
+      initialGamesCount[gp.userId] = (initialGamesCount[gp.userId] ?? 0) + 1;
+      if (tMs > (lastGameAtMs[gp.userId] ?? 0)) lastGameAtMs[gp.userId] = tMs;
+    }
   }
 
-  // Generate rotation. The algorithm fills courts of 4; we request `count` rounds
-  // on a single (virtual or real) court and take the first `count` slots.
-  const rotation = generateRotation({
-    playerIds: poolIds,
-    courtIds: [opts.courtId ?? 'virtual'],
-    targetRounds: count,
-    initialGamesCount,
+  // checkedInAt per pool user (arrival time). Wait = now − max(checkedInAt,
+  // lastGameAt): early arrivals idling and people just-not-playing both rise; a
+  // player who JUST finished a game has wait≈0.
+  const checkedInAtMs: Record<string, number> = {};
+  const checkinTimes = await prisma.checkIn.findMany({
+    where: { clubSessionId, checkedOutAt: null, userId: { in: poolIds } },
+    select: { userId: true, checkedInAt: true },
   });
+  for (const c of checkinTimes) {
+    checkedInAtMs[c.userId] = new Date(c.checkedInAt).getTime();
+  }
 
-  const slots = rotation.slots.slice(0, count);
+  const nowMs = now.getTime();
+  function waitSecondsFor(id: string): number {
+    const lastActivity = Math.max(checkedInAtMs[id] ?? nowMs, lastGameAtMs[id] ?? 0);
+    return Math.max(0, (nowMs - lastActivity) / 1000);
+  }
+
+  // ── Per-player skill + gender (PlayerProfile is optional) ──────────────────
+  const profiles = await prisma.playerProfile.findMany({
+    where: { userId: { in: poolIds } },
+    select: { userId: true, skillLevel: true, gender: true },
+  });
+  const profileMap = new Map(profiles.map((p) => [p.userId, p]));
+
+  const modePool: ModePlayer[] = poolIds.map((id) => {
+    const prof = profileMap.get(id);
+    const g = prof?.gender;
+    return {
+      id,
+      skill: skillToNum(prof?.skillLevel),
+      games: initialGamesCount[id] ?? 0,
+      gender: g === 'M' || g === 'F' ? g : null,
+      waitSeconds: waitSecondsFor(id),
+    };
+  });
+  const poolById = new Map(modePool.map((p) => [p.id, p]));
+
+  // ── Recency-weighted pair history (variety baseline, ALL modes) ────────────
+  // Build pairWeight: pairKey → Σ recency-decayed weight of shared games. Recent
+  // shared games weigh more (exponential decay by half-life). Includes COMPLETED
+  // /IN_PROGRESS games this 정모 AND the pairings implied by staged QUEUED
+  // entries (treated as "now", full weight, since they're about to be played).
+  const pairWeight: Record<string, number> = {};
+  const HL = SUGGEST_TUNABLES.PAIR_RECENCY_HALFLIFE_SECONDS;
+  const decay = (whenMs: number): number => {
+    if (!whenMs) return 0.25; // unknown-time game: small constant weight
+    const ageSec = Math.max(0, (nowMs - whenMs) / 1000);
+    return Math.pow(0.5, ageSec / HL);
+  };
+  const pkey = (a: string, b: string) => (a < b ? `${a}|${b}` : `${b}|${a}`);
+  const addPairWeight = (ids: string[], whenMs: number) => {
+    const w = decay(whenMs);
+    for (let i = 0; i < ids.length; i++)
+      for (let j = i + 1; j < ids.length; j++) {
+        const k = pkey(ids[i], ids[j]);
+        pairWeight[k] = (pairWeight[k] ?? 0) + w;
+      }
+  };
+  for (const g of sessionGames) {
+    const t = (g.turn?.completedAt ?? g.turn?.startedAt ?? g.updatedAt ?? g.createdAt);
+    addPairWeight(g.players.map((p) => p.userId), t ? new Date(t).getTime() : 0);
+  }
+  // QUEUED staged entries → about-to-play pairings (full weight = now).
+  for (const e of board?.entries ?? []) {
+    addPairWeight((e.playerIds as string[]) ?? [], nowMs);
+  }
+
+  const requestedMode: SuggestMode = opts.mode ?? 'fair';
+  let mode: SuggestMode = requestedMode;
+  let modeNote: string | undefined;
+
+  // ── Unified scoring selection (EVERY mode = fairness + variety + modeTerm) ──
+  // Pick `count` foursomes. After each pick, FEED the chosen pairings back into
+  // pairWeight (full weight) and bump games/reset wait for those players, so the
+  // next slot ROTATES partners and rebalances fairness — this is the multi-slot
+  // analogue of the per-game rotation that drives anti-routine variety.
+  let slotPlayerIds: string[][] = [];
+  const usedThisCall = new Set<string>();
+
+  for (let slot = 0; slot < count; slot++) {
+    const available = modePool.filter((p) => !usedThisCall.has(p.id));
+    if (available.length < 4) break;
+
+    const picked = selectFoursomeByMode(available, mode, pairWeight, 4);
+
+    if (picked.fellBack) {
+      // 'mixed' could not form 2M+2F → fall back to 'fair' and note it.
+      mode = 'fair';
+      modeNote = '혼복 인원이 부족해 공정 추천으로 대체했어요';
+      const refair = selectFoursomeByMode(available, 'fair', pairWeight, 4);
+      if (refair.playerIds.length < 4) break;
+      picked.playerIds = refair.playerIds;
+    }
+    if (picked.playerIds.length < 4) break;
+
+    slotPlayerIds.push(picked.playerIds);
+
+    // Feed this foursome back so subsequent slots rotate + rebalance.
+    for (const id of picked.playerIds) usedThisCall.add(id);
+    addPairWeight(picked.playerIds, nowMs);
+    for (const id of picked.playerIds) {
+      const mp = poolById.get(id);
+      if (mp) {
+        mp.games += 1;
+        mp.waitSeconds = 0; // they just got a game
+      }
+    }
+  }
 
   // Resolve player names
-  const allIds = Array.from(new Set(slots.flatMap((s) => s.playerIds)));
+  const allIds = Array.from(new Set(slotPlayerIds.flat()));
   const users = await prisma.user.findMany({
     where: { id: { in: allIds } },
     select: { id: true, name: true },
   });
   const nameMap = new Map(users.map((u) => [u.id, u.name]));
 
-  const suggestions = slots.map((s) => ({
-    playerIds: s.playerIds,
-    playerNames: s.playerIds.map((id) => nameMap.get(id) ?? ''),
+  const suggestions = slotPlayerIds.map((ids) => ({
+    playerIds: ids,
+    playerNames: ids.map((id) => nameMap.get(id) ?? ''),
   }));
 
-  return { suggestions };
+  return { suggestions, mode, ...(modeNote ? { note: modeNote } : {}) };
 }
 
 // ─── Helpers ────────────────────────────────

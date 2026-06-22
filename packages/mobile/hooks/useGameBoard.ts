@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useSocketEvent } from './useSocket';
-import { gameBoardApi } from '../services/gameBoard';
+import { gameBoardApi, type SuggestMode } from '../services/gameBoard';
 
 export interface GameBoardEntry {
   id: string;
@@ -135,23 +135,39 @@ export function useGameBoard(clubSessionId: string | undefined) {
 
   /**
    * 자동 추천: 다음 복식 4인 조합을 서버에서 받아 첫 추천의 playerIds 반환.
-   * 인원 부족(서버가 빈 배열 반환) 시 [] 반환. 404/오류 시 throw.
+   * opts.mode 로 매칭 전략 선택(기본 fair). 서버가 실제 적용한 mode/note 도 함께 반환
+   * (mixed 인원 부족 시 fair 로 대체될 수 있어 effectiveMode 가 요청과 다를 수 있음).
+   * 인원 부족(서버가 빈 배열 반환) 시 playerIds [] 반환. 404/오류 시 throw.
    */
-  const suggestNext = useCallback(async (courtId?: string): Promise<string[]> => {
-    if (!clubSessionId) return [];
-    setSuggesting(true);
-    setSuggestError(null);
-    try {
-      const { data } = await gameBoardApi.suggest(clubSessionId, courtId ? { courtId } : {});
-      const suggestions: FoursomeSuggestion[] = data?.suggestions ?? [];
-      return suggestions[0]?.playerIds ?? [];
-    } catch (err: any) {
-      setSuggestError(err.response?.data?.error || '추천에 실패했습니다');
-      throw err;
-    } finally {
-      setSuggesting(false);
-    }
-  }, [clubSessionId]);
+  const suggestNext = useCallback(
+    async (opts?: { courtId?: string; mode?: SuggestMode }): Promise<{
+      playerIds: string[];
+      effectiveMode?: SuggestMode;
+      note?: string;
+    }> => {
+      if (!clubSessionId) return { playerIds: [] };
+      setSuggesting(true);
+      setSuggestError(null);
+      try {
+        const body: { courtId?: string; mode?: SuggestMode } = {};
+        if (opts?.courtId) body.courtId = opts.courtId;
+        if (opts?.mode) body.mode = opts.mode;
+        const { data } = await gameBoardApi.suggest(clubSessionId, body);
+        const suggestions: FoursomeSuggestion[] = data?.suggestions ?? [];
+        return {
+          playerIds: suggestions[0]?.playerIds ?? [],
+          effectiveMode: data?.mode as SuggestMode | undefined,
+          note: data?.note as string | undefined,
+        };
+      } catch (err: any) {
+        setSuggestError(err.response?.data?.error || '추천에 실패했습니다');
+        throw err;
+      } finally {
+        setSuggesting(false);
+      }
+    },
+    [clubSessionId],
+  );
 
   useEffect(() => {
     loadBoard();

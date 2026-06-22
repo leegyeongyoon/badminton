@@ -31,10 +31,10 @@ router.post(
   validate(suggestFoursomeSchema),
   async (req: Request, res: Response, next: NextFunction) => {
     try {
-      const { courtId, count } = req.body;
+      const { courtId, count, mode } = req.body;
       const result = await suggestNextFoursome(
         req.params.id as string,
-        { courtId, count },
+        { courtId, count, mode },
         req.user!.userId,
       );
       res.json(result);
