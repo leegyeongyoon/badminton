@@ -30,8 +30,10 @@ fi
 # `seed` subcommand: explicit one-off, never part of the automated deploy.
 if [[ "${1:-}" == "seed" ]]; then
   [[ "$USE_BUNDLED_DB" == "1" ]] && $COMPOSE up -d postgres
-  echo "==> Seeding database (prisma seed)"
-  $COMPOSE run --rm migrate npm run db:seed
+  # Use the COMPILED seed: the migrator image is pruned (--omit=dev) so ts-node
+  # is gone; dist/prisma/seed.js runs on production deps only.
+  echo "==> Seeding database (compiled seed)"
+  $COMPOSE run --rm migrate node dist/prisma/seed.js
   echo "==> Seed complete"
   exit 0
 fi
