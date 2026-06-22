@@ -48,8 +48,10 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+    # host 3131 -> container 3000 (app PORT). 3000을 비워두기 위해 호스트 포트만 변경.
+    # Cloudflare 터널 public hostname 도 localhost:3131 로 연결.
     ports:
-      - '3000:3000'
+      - '3131:3000'
     restart: unless-stopped
 
 volumes:
