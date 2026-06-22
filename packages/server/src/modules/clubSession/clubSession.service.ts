@@ -508,6 +508,90 @@ export async function addGuest(
   };
 }
 
+// Pools for generating random sample guests (Feature 2 — test/demo only).
+const RANDOM_GUEST_SURNAMES = [
+  '김', '이', '박', '최', '정', '강', '조', '윤', '장', '임',
+  '한', '오', '서', '신', '권', '황', '안', '송', '류', '홍',
+];
+const RANDOM_GUEST_GIVEN_NAMES = [
+  '민준', '서연', '도윤', '하은', '지호', '서윤', '예준', '지우', '주원', '하윤',
+  '시우', '지민', '하준', '수아', '건우', '지유', '우진', '채원', '선우', '다은',
+  '현우', '예린', '유준', '소율', '준서', '서아', '연우', '윤서', '정우', '하린',
+];
+// Realistic skill spread for a club 정모: more B/C/D mid-tier, fewer S/A/F.
+const RANDOM_GUEST_SKILL_SPREAD: SkillLevel[] = [
+  'S', 'A', 'A', 'B', 'B', 'B', 'C', 'C', 'C', 'C',
+  'D', 'D', 'D', 'E', 'E', 'F',
+] as SkillLevel[];
+
+function pickRandom<T>(arr: T[]): T {
+  return arr[Math.floor(Math.random() * arr.length)];
+}
+
+/**
+ * Operator generates N random sample guests for a 정모 and checks them all in
+ * (Feature 2 — quick testing/demo). Each is created exactly like an operator-added
+ * guest (isGuest, null phone/password, optional PlayerProfile) with a random
+ * Korean name, a varied skillLevel (realistic S..F spread), and a random gender,
+ * then checked into the session so it lands in the pool and is gameable. EPHEMERAL:
+ * like any guest, these vanish on 정모 종료 (their open check-ins are closed).
+ *
+ * Auth: LEADER/STAFF of the session's club. Reuses addGuest's guest-creation +
+ * check-in + socket shape per guest. Returns the count created.
+ */
+export async function addRandomGuests(
+  sessionId: string,
+  userId: string,
+  count: number,
+): Promise<{ createdCount: number; clubSessionId: string }> {
+  const session = await prisma.clubSession.findUnique({
+    where: { id: sessionId },
+    include: { facility: true },
+  });
+  if (!session) throw new NotFoundError('모임 세션');
+  if (session.status !== 'ACTIVE') {
+    throw new BadRequestError('활성 세션에만 게스트를 추가할 수 있습니다');
+  }
+  await verifyClubStaff(session.clubId, userId);
+
+  const io = getIO();
+  let createdCount = 0;
+  for (let i = 0; i < count; i++) {
+    const name = `${pickRandom(RANDOM_GUEST_SURNAMES)}${pickRandom(RANDOM_GUEST_GIVEN_NAMES)}`;
+    const skillLevel = pickRandom(RANDOM_GUEST_SKILL_SPREAD);
+    const gender = Math.random() < 0.5 ? 'M' : 'F';
+
+    const guest = await prisma.user.create({
+      data: {
+        name,
+        isGuest: true,
+        role: 'PLAYER',
+        profile: { create: { skillLevel, gender } },
+      },
+    });
+    await prisma.checkIn.create({
+      data: {
+        userId: guest.id,
+        facilityId: session.facilityId,
+        clubSessionId: session.id,
+        feePaid: false,
+      },
+    });
+    // Mirror addGuest's arrival event per guest so member/guest clients react.
+    io.to(`facility:${session.facilityId}`).emit('checkin:arrived', {
+      userId: guest.id,
+      userName: guest.name,
+      facilityId: session.facilityId,
+    });
+    createdCount += 1;
+  }
+
+  // One players-updated refresh after the batch so operator boards re-render once.
+  await emitPlayersUpdated(session.facilityId, session.id);
+
+  return { createdCount, clubSessionId: session.id };
+}
+
 /**
  * Guest fee settlement view for a club session (LEADER/STAFF).
  * Returns each guest check-in's fee + paid state, plus totals.

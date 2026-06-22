@@ -82,6 +82,11 @@ model User {
   name          String
   role          UserRole @default(PLAYER)
   isGuest       Boolean  @default(false)
+  // Operator-managed club member: a real, PERSISTENT club member with no app
+  // login (운영자가 등록한 멤버). Unlike a session guest (isGuest=true, vanishes
+  // when the 정모 ends), a managed member keeps its ClubMember row and shows in
+  // the roster across 정모s. The operator just takes attendance each 정모.
+  isManaged     Boolean  @default(false)
   expoPushToken String?
   refreshToken  String?
   createdAt     DateTime @default(now())

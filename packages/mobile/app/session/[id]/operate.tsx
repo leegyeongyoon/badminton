@@ -156,6 +156,8 @@ export default function OperateScreen() {
   const [guestModal, setGuestModal] = useState(false);
   const [feeModal, setFeeModal] = useState(false);
   const [courtModal, setCourtModal] = useState(false);
+  // 테스트/데모용 랜덤 게스트 일괄 추가 진행 상태 (실제 출석 아님).
+  const [addingTestGuests, setAddingTestGuests] = useState(false);
   // Matchup popup: the player whose "오늘 함께 친 사람" sheet is open (null = closed).
   const [matchupTarget, setMatchupTarget] = useState<{ userId: string; name: string; isGuest?: boolean } | null>(null);
 
@@ -953,6 +955,26 @@ export default function OperateScreen() {
     if (toIdx !== fromIdx) moveQueueItem(fromIdx, toIdx);
   }, [queueInsertIndexAt, settleQueueShifts, moveQueueItem, queuedEntries.length]);
   resolveQueueDropRef.current = resolveQueueDrop;
+
+  // 테스트/데모용: 랜덤 샘플 게스트 N명을 만들어 정모에 즉시 체크인. 실제 출석이
+  // 아니라 빠른 테스트용이며, 정모 종료 시 일반 게스트처럼 사라진다. (Hook must
+  // live above the permission early-returns below — Rules of Hooks.)
+  const handleAddTestGuests = useCallback(
+    async (count: number) => {
+      if (!clubSessionId || addingTestGuests) return;
+      setAddingTestGuests(true);
+      try {
+        const { data } = await clubSessionApi.addRandomGuests(clubSessionId, count);
+        showSuccess(`테스트 게스트 ${data?.createdCount ?? count}명 추가됨`);
+        loadPool();
+      } catch (err: any) {
+        showAlert('오류', err?.response?.data?.error || '테스트 게스트 추가 실패');
+      } finally {
+        setAddingTestGuests(false);
+      }
+    },
+    [clubSessionId, addingTestGuests, loadPool],
+  );
 
   // ─── Permission states ───
   if (roleState === 'loading' || (roleState === 'allowed' && loading && !board)) {
@@ -2171,23 +2193,50 @@ export default function OperateScreen() {
   );
 
   const PoolActions = (
-    <View style={styles.poolActions}>
-      <TouchableOpacity
-        style={[styles.poolActionBtn, { backgroundColor: colors.secondaryLight }]}
-        onPress={() => setGuestModal(true)}
-        activeOpacity={0.8}
-      >
-        <Icon name="add" size={15} color={colors.secondary} />
-        <Text style={[styles.poolActionText, { color: colors.secondary }]}>게스트</Text>
-      </TouchableOpacity>
-      <TouchableOpacity
-        style={[styles.poolActionBtn, { backgroundColor: colors.warningLight }]}
-        onPress={() => setFeeModal(true)}
-        activeOpacity={0.8}
-      >
-        <Icon name="stats" size={15} color={colors.warning} />
-        <Text style={[styles.poolActionText, { color: colors.warning }]}>게스트비 정산</Text>
-      </TouchableOpacity>
+    <View style={styles.poolActionsWrap}>
+      <View style={styles.poolActions}>
+        <TouchableOpacity
+          style={[styles.poolActionBtn, { backgroundColor: colors.secondaryLight }]}
+          onPress={() => setGuestModal(true)}
+          activeOpacity={0.8}
+        >
+          <Icon name="add" size={15} color={colors.secondary} />
+          <Text style={[styles.poolActionText, { color: colors.secondary }]}>게스트</Text>
+        </TouchableOpacity>
+        <TouchableOpacity
+          style={[styles.poolActionBtn, { backgroundColor: colors.warningLight }]}
+          onPress={() => setFeeModal(true)}
+          activeOpacity={0.8}
+        >
+          <Icon name="stats" size={15} color={colors.warning} />
+          <Text style={[styles.poolActionText, { color: colors.warning }]}>게스트비 정산</Text>
+        </TouchableOpacity>
+      </View>
+
+      {/* 테스트/데모용 랜덤 게스트 — 실제 출석과 혼동하지 않도록 별도 줄 + 라벨 */}
+      <View style={[styles.testGuestRow, { borderColor: colors.border }]}>
+        <Text style={[styles.testGuestLabel, { color: colors.textSecondary }]} numberOfLines={1}>
+          🧪 테스트 게스트
+        </Text>
+        {[5, 10, 20].map((n) => (
+          <TouchableOpacity
+            key={n}
+            style={[
+              styles.testGuestBtn,
+              { borderColor: colors.border, backgroundColor: colors.surface },
+              addingTestGuests && { opacity: 0.5 },
+            ]}
+            onPress={() => handleAddTestGuests(n)}
+            disabled={addingTestGuests}
+            activeOpacity={0.8}
+            accessibilityLabel={`테스트 게스트 ${n}명 추가`}
+          >
+            <Text style={[styles.testGuestBtnText, { color: colors.textSecondary }]}>
+              {addingTestGuests ? '...' : `+${n}`}
+            </Text>
+          </TouchableOpacity>
+        ))}
+      </View>
     </View>
   );
 
@@ -3083,12 +3132,26 @@ const styles = StyleSheet.create({
   colHeaderRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
   colHeader: { ...typography.overline, marginBottom: spacing.xs, paddingHorizontal: spacing.xs },
 
-  poolActions: { flexDirection: 'row', gap: spacing.sm, marginBottom: spacing.xs },
+  poolActionsWrap: { marginBottom: spacing.xs, gap: spacing.xs },
+  poolActions: { flexDirection: 'row', gap: spacing.sm },
   poolActionBtn: {
     flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: spacing.xs,
     paddingVertical: spacing.sm, borderRadius: radius.lg,
   },
   poolActionText: { ...typography.buttonSm },
+  // 테스트/데모용 랜덤 게스트 (실제 출석 아님)
+  testGuestRow: {
+    flexDirection: 'row', alignItems: 'center', gap: spacing.xs,
+    paddingVertical: 6, paddingHorizontal: spacing.sm,
+    borderWidth: 1, borderStyle: 'dashed', borderRadius: radius.lg,
+  },
+  testGuestLabel: { ...typography.caption, flex: 1 },
+  testGuestBtn: {
+    minWidth: 44, alignItems: 'center', justifyContent: 'center',
+    paddingVertical: 5, paddingHorizontal: 10,
+    borderWidth: 1, borderRadius: radius.md,
+  },
+  testGuestBtnText: { ...typography.buttonSm },
 
   // Pool boxes
   poolList: { paddingBottom: spacing.sm, gap: spacing.sm },

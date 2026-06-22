@@ -145,9 +145,33 @@ export const updateFeeSchema = z.object({
   feePaid: z.boolean().optional(),
 });
 
+// Operator generates N random sample guests for quick testing/demo (LEADER/STAFF).
+// EPHEMERAL — same as normal guests, they vanish on 정모 종료. The server picks
+// the random names / skill / gender, so the body is just a count (1–50).
+export const bulkRandomGuestsSchema = z.object({
+  count: z.number().int().min(1, '최소 1명').max(50, '최대 50명'),
+});
+
 export type GuestCheckInInput = z.infer<typeof guestCheckInSchema>;
 export type AddGuestInput = z.infer<typeof addGuestSchema>;
 export type UpdateFeeInput = z.infer<typeof updateFeeSchema>;
+export type BulkRandomGuestsInput = z.infer<typeof bulkRandomGuestsSchema>;
+
+// --- Managed members (운영자 관리 멤버) ---
+// Operator bulk-registers PERSISTENT club members who don't use the app. Unlike
+// session guests, these survive 정모 종료 and stay in the club roster.
+export const managedMemberInputSchema = z.object({
+  name: z.string().min(1, '이름을 입력하세요').max(20),
+  skillLevel: z.nativeEnum(SkillLevel).optional(),
+  gender: z.enum(['M', 'F']).optional().nullable(),
+});
+
+export const bulkAddManagedMembersSchema = z.object({
+  members: z.array(managedMemberInputSchema).min(1, '최소 1명').max(50, '최대 50명'),
+});
+
+export type ManagedMemberInput = z.infer<typeof managedMemberInputSchema>;
+export type BulkAddManagedMembersInput = z.infer<typeof bulkAddManagedMembersSchema>;
 
 // Attendance leaderboard period: current calendar month | current calendar year | all-time
 export const attendancePeriodSchema = z.enum(['month', 'year', 'all']);

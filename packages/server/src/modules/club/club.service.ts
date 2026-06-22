@@ -8,6 +8,9 @@ import type {
   AttendancePeriod,
   AttendanceLeaderboardEntry,
   AttendanceLeaderboardResponse,
+  ManagedMemberInput,
+  BulkAddManagedMembersResponse,
+  ManagedMemberResponse,
 } from '@badminton/shared';
 import type { ClubMemberRole, SkillLevel } from '@badminton/shared';
 import { PlayerStatus } from '@badminton/shared';
@@ -277,6 +280,96 @@ export async function updateMemberProfile(
     facilityId: target.user.checkIns[0]?.facilityId ?? null,
     playerStatus,
   };
+}
+
+// --- Managed members (운영자 관리 멤버) ---
+
+/**
+ * Bulk-register PERSISTENT operator-managed members for a club (LEADER/STAFF).
+ *
+ * A managed member is a real, persistent club member who has NO app login:
+ *  - a User row with isManaged=true (no usable password; phone left null so the
+ *    unique phone constraint never collides — managed members never sign in),
+ *  - an optional PlayerProfile (skillLevel / gender) so they surface on the board
+ *    with the same attributes as app members,
+ *  - a ClubMember row (role MEMBER) so they PERSIST in the roster across 정모s.
+ *
+ * Idempotent-ish: a name that already belongs to a managed member of THIS club is
+ * skipped (returned in `skipped`) rather than duplicated. Returns the created
+ * members + the skipped names.
+ */
+export async function bulkAddManagedMembers(
+  clubId: string,
+  requesterId: string,
+  members: ManagedMemberInput[],
+): Promise<BulkAddManagedMembersResponse> {
+  const club = await prisma.club.findUnique({ where: { id: clubId } });
+  if (!club) throw new NotFoundError('모임');
+
+  // LEADER/STAFF of this club only.
+  const requester = await prisma.clubMember.findUnique({
+    where: { userId_clubId: { userId: requesterId, clubId } },
+  });
+  if (!requester || (requester.role !== 'LEADER' && requester.role !== 'STAFF')) {
+    throw new ForbiddenError('운영진만 멤버를 추가할 수 있습니다');
+  }
+
+  // Existing managed-member names in this club, to skip exact duplicates.
+  const existing = await prisma.clubMember.findMany({
+    where: { clubId, user: { isManaged: true } },
+    select: { user: { select: { name: true } } },
+  });
+  const existingNames = new Set(existing.map((m) => m.user.name));
+
+  const created: ManagedMemberResponse[] = [];
+  const skipped: string[] = [];
+  // Track names handled within THIS request too (dedupe duplicates in the payload).
+  const seenInBatch = new Set<string>();
+
+  for (const m of members) {
+    const name = m.name.trim();
+    if (!name) continue;
+    if (existingNames.has(name) || seenInBatch.has(name)) {
+      skipped.push(name);
+      continue;
+    }
+    seenInBatch.add(name);
+
+    const profileData =
+      m.skillLevel || m.gender
+        ? {
+            profile: {
+              create: {
+                ...(m.skillLevel ? { skillLevel: m.skillLevel as any } : {}),
+                ...(m.gender ? { gender: m.gender } : {}),
+              },
+            },
+          }
+        : {};
+
+    // User (isManaged, no login) + ClubMember (role MEMBER) created together so a
+    // managed member always lands in the roster atomically.
+    const user = await prisma.user.create({
+      data: {
+        name,
+        isManaged: true,
+        role: 'PLAYER',
+        ...profileData,
+        clubMembers: { create: { clubId, role: 'MEMBER' } },
+      },
+      include: { profile: true },
+    });
+
+    created.push({
+      userId: user.id,
+      name: user.name,
+      role: 'MEMBER' as ClubMemberRole,
+      skillLevel: (user.profile?.skillLevel ?? null) as SkillLevel | null,
+      gender: user.profile?.gender ?? null,
+    });
+  }
+
+  return { created, skipped };
 }
 
 // --- Attendance leaderboard (출석왕) ---

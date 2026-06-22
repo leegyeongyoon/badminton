@@ -140,6 +140,14 @@ export const clubSessionApi = {
     body: { name: string; skillLevel?: string; feeAmount?: number },
   ) => api.post(`/club-sessions/${sessionId}/guests`, body),
 
+  // 테스트/데모용: 랜덤 샘플 게스트 N명을 만들어 즉시 정모에 체크인 (LEADER/STAFF).
+  // 일반 게스트와 동일하게 정모 종료 시 사라짐 — 실제 출석과 혼동 금지.
+  addRandomGuests: (sessionId: string, count: number) =>
+    api.post<{ createdCount: number; clubSessionId: string }>(
+      `/club-sessions/${sessionId}/guests/bulk-random`,
+      { count },
+    ),
+
   // 게스트비 정산 목록 + 합계
   getGuestFees: (sessionId: string) =>
     api.get<GuestFeeSettlement>(`/club-sessions/${sessionId}/guest-fees`),
@@ -158,6 +166,19 @@ export const clubSessionApi = {
   // 수행하고 갱신된 출석 풀을 반환. 게스트도 동작.
   checkoutPlayer: (clubSessionId: string, userId: string) =>
     api.post(`/club-sessions/${clubSessionId}/checkout/${userId}`),
+
+  // ─── 운영자: 정모 출석 체크 (관리 멤버 포함, LEADER/STAFF) ───
+  // 특정 모임원을 진행 중인 정모에 체크인(출석). 멱등 — 이미 체크인이면 created=false.
+  checkInMember: (clubSessionId: string, userId: string) =>
+    api.post<{ success: boolean; created: boolean; userId: string; clubSessionId: string }>(
+      `/club-sessions/${clubSessionId}/members/${userId}/check-in`,
+    ),
+
+  // 아직 체크인 안 된 모든 모임원을 한 번에 체크인 (전체 체크인). 새로 체크인된 수 반환.
+  checkInAllMembers: (clubSessionId: string) =>
+    api.post<{ success: boolean; checkedInCount: number; clubSessionId: string }>(
+      `/club-sessions/${clubSessionId}/members/check-in-all`,
+    ),
 
   // ─── 매치업: 한 선수가 이 정모에서 함께 친 사람 목록 (모든 모임원 조회 가능) ───
   getMatchups: (clubSessionId: string, userId: string) =>

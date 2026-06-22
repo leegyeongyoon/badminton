@@ -543,6 +543,138 @@ export async function operatorCheckOut(
 }
 
 /**
+ * Operator checks a CLUB MEMBER into the active 정모 (출석 체크). Used to take
+ * attendance for operator-managed members (and any club member) who don't scan
+ * the QR themselves. Creates a session-scoped CheckIn so they enter the 정모 pool
+ * and are gameable, mirroring addGuest's check-in + sockets but WITHOUT creating a
+ * new user (the member already exists).
+ *
+ * Auth: the operator must be LEADER/STAFF of the session's club. The target must
+ * be a member of that club. Idempotent: if the target already holds an OPEN
+ * check-in for this session (or a facility-only one at this facility, which is
+ * upgraded in place), no duplicate row is created.
+ */
+export async function memberCheckIn(
+  clubSessionId: string,
+  targetUserId: string,
+  operatorUserId: string,
+): Promise<{ success: true; created: boolean; userId: string; clubSessionId: string }> {
+  const session = await prisma.clubSession.findUnique({
+    where: { id: clubSessionId },
+    select: { id: true, clubId: true, facilityId: true, status: true },
+  });
+  if (!session) throw new NotFoundError('모임 세션');
+  if (session.status !== 'ACTIVE') {
+    throw new BadRequestError('진행 중인 정모가 아닙니다');
+  }
+
+  // Operator must be LEADER/STAFF of the session's club.
+  const operator = await prisma.clubMember.findUnique({
+    where: { userId_clubId: { userId: operatorUserId, clubId: session.clubId } },
+  });
+  if (!operator || (operator.role !== 'LEADER' && operator.role !== 'STAFF')) {
+    throw new ForbiddenError('모임 리더 또는 스태프만 가능합니다');
+  }
+
+  // Target must be a member of the session's club.
+  const target = await prisma.clubMember.findUnique({
+    where: { userId_clubId: { userId: targetUserId, clubId: session.clubId } },
+    include: { user: { select: { id: true, name: true } } },
+  });
+  if (!target) throw new NotFoundError('모임 멤버');
+
+  // Idempotency: already in THIS session's pool → return without creating a row.
+  const existing = await prisma.checkIn.findFirst({
+    where: { userId: targetUserId, clubSessionId, checkedOutAt: null },
+  });
+  if (existing) {
+    return { success: true, created: false, userId: targetUserId, clubSessionId };
+  }
+
+  // Upgrade an open facility-only check-in in place (mirror attendViaQr) rather
+  // than creating a duplicate row.
+  const facilityOnly = await prisma.checkIn.findFirst({
+    where: {
+      userId: targetUserId,
+      facilityId: session.facilityId,
+      clubSessionId: null,
+      checkedOutAt: null,
+    },
+  });
+  if (facilityOnly) {
+    await prisma.checkIn.update({
+      where: { id: facilityOnly.id },
+      data: { clubSessionId: session.id },
+    });
+  } else {
+    await prisma.checkIn.create({
+      data: {
+        userId: targetUserId,
+        facilityId: session.facilityId,
+        clubSessionId: session.id,
+      },
+    });
+  }
+
+  // Same socket events as a normal check-in so the operator board + pool refresh.
+  const io = getIO();
+  const arrivedPayload = {
+    userId: targetUserId,
+    userName: target.user.name,
+    facilityId: session.facilityId,
+  };
+  io.to(`facility:${session.facilityId}`).emit('checkin:arrived', arrivedPayload);
+  io.to(`clubSession:${session.id}`).emit('checkin:arrived', arrivedPayload);
+  await emitPlayersUpdated(session.facilityId, session.id);
+
+  return { success: true, created: true, userId: targetUserId, clubSessionId };
+}
+
+/**
+ * Convenience: operator checks in ALL of the club's members not yet checked into
+ * the active 정모 (전체 체크인). Reuses memberCheckIn per member so each gets the
+ * same idempotent upgrade/create + socket refresh. Returns the count of members
+ * NEWLY checked in by this call. Auth is enforced by memberCheckIn.
+ */
+export async function memberCheckInAll(
+  clubSessionId: string,
+  operatorUserId: string,
+): Promise<{ success: true; checkedInCount: number; clubSessionId: string }> {
+  const session = await prisma.clubSession.findUnique({
+    where: { id: clubSessionId },
+    select: { id: true, clubId: true, status: true },
+  });
+  if (!session) throw new NotFoundError('모임 세션');
+  if (session.status !== 'ACTIVE') {
+    throw new BadRequestError('진행 중인 정모가 아닙니다');
+  }
+
+  // memberCheckIn re-verifies operator + session per call; do one upfront check
+  // here so 전체 체크인 fails fast (and clearly) for a non-operator.
+  const operator = await prisma.clubMember.findUnique({
+    where: { userId_clubId: { userId: operatorUserId, clubId: session.clubId } },
+  });
+  if (!operator || (operator.role !== 'LEADER' && operator.role !== 'STAFF')) {
+    throw new ForbiddenError('모임 리더 또는 스태프만 가능합니다');
+  }
+
+  // All members of the club (managed + app members). Guests are not ClubMembers,
+  // so they're naturally excluded.
+  const members = await prisma.clubMember.findMany({
+    where: { clubId: session.clubId },
+    select: { userId: true },
+  });
+
+  let checkedInCount = 0;
+  for (const m of members) {
+    const result = await memberCheckIn(clubSessionId, m.userId, operatorUserId);
+    if (result.created) checkedInCount += 1;
+  }
+
+  return { success: true, checkedInCount, clubSessionId };
+}
+
+/**
  * On checkout, defensively clean a user's half-states for the active session:
  *  - Cancel any WAITING CourtTurn they're a player in (a waiting turn that loses
  *    a player is no longer valid — cancelling is simplest and safest). Remaining

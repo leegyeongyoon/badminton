@@ -5,12 +5,13 @@ import {
   bulkRegisterTurnsSchema,
   addGuestSchema,
   updateFeeSchema,
+  bulkRandomGuestsSchema,
 } from '@badminton/shared';
 import { authenticate } from '../../middleware/auth';
 import { validate } from '../../middleware/validate';
 import * as clubSessionService from './clubSession.service';
 import { registerTurn } from '../turn/turn.service';
-import { operatorCheckOut, attendViaQr } from '../checkin/checkin.service';
+import { operatorCheckOut, attendViaQr, memberCheckIn, memberCheckInAll } from '../checkin/checkin.service';
 
 const router = Router();
 
@@ -221,6 +222,27 @@ router.post(
   },
 );
 
+// POST /api/v1/club-sessions/:id/guests/bulk-random - operator generates N random
+// SAMPLE guests (테스트/데모용) and checks them into the 정모. LEADER/STAFF only
+// (enforced in the service). EPHEMERAL — vanish on 정모 종료 like any guest.
+router.post(
+  '/:id/guests/bulk-random',
+  authenticate,
+  validate(bulkRandomGuestsSchema),
+  async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const result = await clubSessionService.addRandomGuests(
+        req.params.id as string,
+        req.user!.userId,
+        req.body.count,
+      );
+      res.status(201).json(result);
+    } catch (err) {
+      next(err);
+    }
+  },
+);
+
 // GET /api/v1/club-sessions/:id/players/:userId/matchups - who :userId played
 // with IN THIS 정모 + shared-game counts (any club member).
 router.get(
@@ -283,6 +305,42 @@ router.post(
   async (req: Request, res: Response, next: NextFunction) => {
     try {
       const result = await operatorCheckOut(
+        req.params.id as string,
+        req.params.userId as string,
+        req.user!.userId,
+      );
+      res.json(result);
+    } catch (err) {
+      next(err);
+    }
+  },
+);
+
+// POST /api/v1/club-sessions/:id/members/check-in-all - operator checks in ALL of
+// the club's members not yet checked into this 정모 (전체 체크인). LEADER/STAFF
+// only (enforced in the service). Declared BEFORE the :userId route so
+// "check-in-all" is never captured as a userId.
+router.post(
+  '/:id/members/check-in-all',
+  authenticate,
+  async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const result = await memberCheckInAll(req.params.id as string, req.user!.userId);
+      res.json(result);
+    } catch (err) {
+      next(err);
+    }
+  },
+);
+
+// POST /api/v1/club-sessions/:id/members/:userId/check-in - operator checks a
+// SPECIFIC club member into this 정모 (출석 체크). LEADER/STAFF only. Idempotent.
+router.post(
+  '/:id/members/:userId/check-in',
+  authenticate,
+  async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const result = await memberCheckIn(
         req.params.id as string,
         req.params.userId as string,
         req.user!.userId,

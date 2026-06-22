@@ -5,6 +5,7 @@ import {
   updateMemberRoleSchema,
   updateMemberProfileSchema,
   attendancePeriodSchema,
+  bulkAddManagedMembersSchema,
 } from '@badminton/shared';
 import { authenticate } from '../../middleware/auth';
 import { validate } from '../../middleware/validate';
@@ -60,6 +61,20 @@ router.get('/:id/members', authenticate, async (req: Request, res: Response, nex
     const facilityId = req.query.facilityId as string | undefined;
     const members = await clubService.getMembers(req.params.id as string, facilityId);
     res.json(members);
+  } catch (err) { next(err); }
+});
+
+// POST /api/v1/clubs/:clubId/members/bulk - LEADER/STAFF bulk-registers PERSISTENT
+// operator-managed members (no app login). Body { members: [{ name, skillLevel?,
+// gender? }] } (1–50). Skips exact-duplicate managed names. Returns created members.
+router.post('/:clubId/members/bulk', authenticate, validate(bulkAddManagedMembersSchema), async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const result = await clubService.bulkAddManagedMembers(
+      req.params.clubId as string,
+      req.user!.userId,
+      req.body.members,
+    );
+    res.status(201).json(result);
   } catch (err) { next(err); }
 });
 

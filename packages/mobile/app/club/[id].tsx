@@ -17,6 +17,7 @@ import { useClubStore } from '../../store/clubStore';
 import { useCheckinStore } from '../../store/checkinStore';
 import { useAuthStore } from '../../store/authStore';
 import { clubSessionApi } from '../../services/clubSession';
+import { clubApi } from '../../services/club';
 import { facilityApi } from '../../services/facility';
 import { Colors } from '../../constants/colors';
 import { Strings } from '../../constants/strings';
@@ -52,6 +53,9 @@ const roleLabels: Record<string, string> = {
   MEMBER: '회원',
 };
 
+// 급수(skill level) 선택지 — 관리 멤버 추가 시 사용.
+const SKILL_LEVELS = ['S', 'A', 'B', 'C', 'D', 'E', 'F'] as const;
+
 export default function ClubDetailScreen() {
   const { id: clubId } = useLocalSearchParams<{ id: string }>();
   const router = useRouter();
@@ -72,6 +76,17 @@ export default function ClubDetailScreen() {
   // 정모를 열 시설. 체크인 없이도 시작할 수 있도록 시설을 직접 고른다.
   const [facilities, setFacilities] = useState<any[]>([]);
   const [selectedFacilityId, setSelectedFacilityId] = useState<string | null>(null);
+
+  // 운영자 관리 멤버 추가 모달 (이름 + 급수 + 성별) — 단건 추가.
+  const [showAddMemberModal, setShowAddMemberModal] = useState(false);
+  const [newMemberName, setNewMemberName] = useState('');
+  const [newMemberSkill, setNewMemberSkill] = useState<string | null>(null);
+  const [newMemberGender, setNewMemberGender] = useState<'M' | 'F' | null>(null);
+  const [addingMember, setAddingMember] = useState(false);
+
+  // 출석 체크: 전체 체크인 / 개별 토글 진행 상태.
+  const [checkingInAll, setCheckingInAll] = useState(false);
+  const [togglingUserId, setTogglingUserId] = useState<string | null>(null);
 
   const club = clubs.find((c) => c.id === clubId);
   const myMembership = currentMembers.find((m) => m.userId === user?.id);
@@ -240,6 +255,76 @@ export default function ClubDetailScreen() {
     }
   };
 
+  // 운영자 관리 멤버 추가 (단건). 이름 필수, 급수/성별 선택. 추가 후 명단 갱신.
+  const handleAddMember = async () => {
+    const name = newMemberName.trim();
+    if (!clubId || !name) {
+      showAlert('알림', '이름을 입력하세요');
+      return;
+    }
+    setAddingMember(true);
+    try {
+      const { data } = await clubApi.bulkAddMembers(clubId, [
+        {
+          name,
+          ...(newMemberSkill ? { skillLevel: newMemberSkill } : {}),
+          ...(newMemberGender ? { gender: newMemberGender } : {}),
+        },
+      ]);
+      if (data.created.length === 0 && data.skipped.length > 0) {
+        showAlert('알림', '이미 등록된 멤버예요');
+      } else {
+        showSuccess(`${name} 멤버를 추가했어요`);
+      }
+      setShowAddMemberModal(false);
+      setNewMemberName('');
+      setNewMemberSkill(null);
+      setNewMemberGender(null);
+      await fetchMembers(clubId);
+    } catch (err: any) {
+      showAlert(Strings.common.error, err?.response?.data?.error || '멤버 추가에 실패했습니다');
+    } finally {
+      setAddingMember(false);
+    }
+  };
+
+  // 출석: 진행 중인 정모에 아직 체크인 안 된 모든 멤버를 한 번에 체크인.
+  const handleCheckInAll = async () => {
+    if (!clubId || !activeSession?.id) return;
+    setCheckingInAll(true);
+    try {
+      const { data } = await clubSessionApi.checkInAllMembers(activeSession.id);
+      showSuccess(
+        data.checkedInCount > 0
+          ? `${data.checkedInCount}명 체크인했어요`
+          : '이미 모두 체크인되어 있어요',
+      );
+      await fetchMembers(clubId);
+    } catch (err: any) {
+      showAlert(Strings.common.error, err?.response?.data?.error || '전체 체크인에 실패했습니다');
+    } finally {
+      setCheckingInAll(false);
+    }
+  };
+
+  // 출석: 개별 멤버 체크인/체크아웃 토글 (진행 중인 정모 대상).
+  const handleToggleAttendance = async (member: ClubMember) => {
+    if (!clubId || !activeSession?.id) return;
+    setTogglingUserId(member.userId);
+    try {
+      if (member.isCheckedIn) {
+        await clubSessionApi.checkoutPlayer(activeSession.id, member.userId);
+      } else {
+        await clubSessionApi.checkInMember(activeSession.id, member.userId);
+      }
+      await fetchMembers(clubId);
+    } catch (err: any) {
+      showAlert(Strings.common.error, err?.response?.data?.error || '출석 변경에 실패했습니다');
+    } finally {
+      setTogglingUserId(null);
+    }
+  };
+
   const checkedInMembers = currentMembers.filter((m) => m.isCheckedIn);
   const notCheckedInMembers = currentMembers.filter((m) => !m.isCheckedIn);
 
@@ -296,11 +381,40 @@ export default function ClubDetailScreen() {
           )}
         </View>
       </View>
-      {!item.isCheckedIn && (
-        <Text style={styles.offlineText}>오프라인</Text>
-      )}
-      {isLeader && item.userId !== user?.id && (
-        <Text style={styles.editHint}>...</Text>
+      {/* 출석 토글 — 진행 중인 정모가 있을 때 운영진에게만 노출. 본인은 제외
+          (운영자는 입장 시 자동 체크인되며 별도 체크아웃 UI 사용). */}
+      {isLeaderOrStaff && !!activeSession && item.userId !== user?.id ? (
+        <TouchableOpacity
+          style={[
+            styles.attendToggle,
+            item.isCheckedIn ? styles.attendToggleOn : styles.attendToggleOff,
+            togglingUserId === item.userId && { opacity: 0.5 },
+          ]}
+          onPress={() => handleToggleAttendance(item)}
+          disabled={togglingUserId === item.userId}
+          activeOpacity={0.8}
+          accessibilityLabel={item.isCheckedIn ? '체크아웃' : '체크인'}
+        >
+          <Text
+            style={[
+              styles.attendToggleText,
+              item.isCheckedIn ? styles.attendToggleTextOn : styles.attendToggleTextOff,
+            ]}
+          >
+            {togglingUserId === item.userId
+              ? '...'
+              : item.isCheckedIn
+              ? '✓ 출석'
+              : '체크인'}
+          </Text>
+        </TouchableOpacity>
+      ) : (
+        <>
+          {!item.isCheckedIn && <Text style={styles.offlineText}>오프라인</Text>}
+          {isLeader && item.userId !== user?.id && (
+            <Text style={styles.editHint}>...</Text>
+          )}
+        </>
       )}
     </TouchableOpacity>
   );
@@ -496,6 +610,33 @@ export default function ClubDetailScreen() {
           {/* 출석왕 leaderboard (visible to every club member) */}
           {clubId && <AttendanceLeaderboard clubId={clubId} />}
 
+          {/* 운영진 멤버 관리: 멤버 추가 + (정모 진행 중이면) 전체 체크인 */}
+          {isLeaderOrStaff && (
+            <View style={styles.memberAdminBar}>
+              <TouchableOpacity
+                style={styles.addMemberBtn}
+                onPress={() => setShowAddMemberModal(true)}
+                activeOpacity={0.85}
+                accessibilityLabel="멤버 추가"
+              >
+                <Text style={styles.addMemberBtnText}>＋ 멤버 추가</Text>
+              </TouchableOpacity>
+              {!!activeSession && (
+                <TouchableOpacity
+                  style={[styles.checkInAllBtn, checkingInAll && { opacity: 0.5 }]}
+                  onPress={handleCheckInAll}
+                  disabled={checkingInAll}
+                  activeOpacity={0.85}
+                  accessibilityLabel="전체 체크인"
+                >
+                  <Text style={styles.checkInAllBtnText}>
+                    {checkingInAll ? '체크인 중...' : '✓ 전체 체크인'}
+                  </Text>
+                </TouchableOpacity>
+              )}
+            </View>
+          )}
+
           {/* Checked-in members section */}
           {checkedInMembers.length > 0 && (
             <View style={styles.section}>
@@ -598,6 +739,83 @@ export default function ClubDetailScreen() {
               >
                 <Text style={styles.confirmBtnText}>
                   {isStarting ? '시작 중...' : '정모 시작'}
+                </Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </Modal>
+
+        {/* 운영자 관리 멤버 추가 모달 (이름 + 급수 + 성별) */}
+        <Modal visible={showAddMemberModal} transparent animationType="slide">
+          <View style={styles.modalOverlay}>
+            <View style={styles.modalContent}>
+              <View style={styles.modalHeader}>
+                <Text style={styles.modalTitle}>멤버 추가</Text>
+                <TouchableOpacity onPress={() => setShowAddMemberModal(false)}>
+                  <Text style={styles.modalClose}>✕</Text>
+                </TouchableOpacity>
+              </View>
+
+              <Text style={styles.modalDesc}>
+                앱을 쓰지 않는 회원을 등록해요. 정모마다 출석만 체크하면 됩니다.
+              </Text>
+
+              <Text style={styles.modalSubtitle}>이름</Text>
+              <TextInput
+                style={styles.memberNameInput}
+                value={newMemberName}
+                onChangeText={setNewMemberName}
+                placeholder="회원 이름"
+                placeholderTextColor={Colors.textLight}
+                maxLength={20}
+                accessibilityLabel="멤버 이름"
+              />
+
+              <Text style={styles.modalSubtitle}>급수 (선택)</Text>
+              <View style={styles.chipRow}>
+                {SKILL_LEVELS.map((lvl) => {
+                  const active = newMemberSkill === lvl;
+                  return (
+                    <TouchableOpacity
+                      key={lvl}
+                      style={[styles.skillChip, active && styles.skillChipActive]}
+                      onPress={() => setNewMemberSkill(active ? null : lvl)}
+                      accessibilityLabel={`급수 ${lvl}`}
+                    >
+                      <Text style={[styles.skillChipText, active && styles.skillChipTextActive]}>
+                        {lvl}
+                      </Text>
+                    </TouchableOpacity>
+                  );
+                })}
+              </View>
+
+              <Text style={styles.modalSubtitle}>성별 (선택)</Text>
+              <View style={styles.chipRow}>
+                {([['M', '남'], ['F', '여']] as const).map(([val, label]) => {
+                  const active = newMemberGender === val;
+                  return (
+                    <TouchableOpacity
+                      key={val}
+                      style={[styles.genderChip, active && styles.skillChipActive]}
+                      onPress={() => setNewMemberGender(active ? null : val)}
+                      accessibilityLabel={`성별 ${label}`}
+                    >
+                      <Text style={[styles.skillChipText, active && styles.skillChipTextActive]}>
+                        {label}
+                      </Text>
+                    </TouchableOpacity>
+                  );
+                })}
+              </View>
+
+              <TouchableOpacity
+                style={[styles.confirmBtn, (addingMember || !newMemberName.trim()) && { opacity: 0.5 }]}
+                onPress={handleAddMember}
+                disabled={addingMember || !newMemberName.trim()}
+              >
+                <Text style={styles.confirmBtnText}>
+                  {addingMember ? '추가 중...' : '멤버 추가'}
                 </Text>
               </TouchableOpacity>
             </View>
@@ -1224,5 +1442,113 @@ const styles = StyleSheet.create({
     fontSize: 15,
     color: Colors.textSecondary,
     fontWeight: '500',
+  },
+  // 운영진 멤버 관리 바 (멤버 추가 / 전체 체크인)
+  memberAdminBar: {
+    flexDirection: 'row',
+    gap: 8,
+    marginTop: 16,
+    paddingHorizontal: 16,
+  },
+  addMemberBtn: {
+    flex: 1,
+    borderRadius: 12,
+    paddingVertical: 12,
+    alignItems: 'center',
+    borderWidth: 1.5,
+    borderColor: Colors.primary,
+    backgroundColor: Colors.surface,
+  },
+  addMemberBtnText: {
+    color: Colors.primary,
+    fontSize: 14,
+    fontWeight: '700',
+  },
+  checkInAllBtn: {
+    flex: 1,
+    borderRadius: 12,
+    paddingVertical: 12,
+    alignItems: 'center',
+    backgroundColor: Colors.primary,
+  },
+  checkInAllBtnText: {
+    color: '#fff',
+    fontSize: 14,
+    fontWeight: '700',
+  },
+  // 출석 토글 (멤버 카드 우측)
+  attendToggle: {
+    borderRadius: 999,
+    paddingHorizontal: 14,
+    paddingVertical: 7,
+    borderWidth: 1.5,
+  },
+  attendToggleOn: {
+    backgroundColor: Colors.secondary + '18',
+    borderColor: Colors.secondary,
+  },
+  attendToggleOff: {
+    backgroundColor: Colors.surface,
+    borderColor: Colors.primary,
+  },
+  attendToggleText: {
+    fontSize: 13,
+    fontWeight: '700',
+  },
+  attendToggleTextOn: {
+    color: Colors.secondary,
+  },
+  attendToggleTextOff: {
+    color: Colors.primary,
+  },
+  // 멤버 추가 모달 입력
+  memberNameInput: {
+    borderWidth: 1.5,
+    borderColor: Colors.border,
+    borderRadius: 12,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    fontSize: 16,
+    color: Colors.text,
+    backgroundColor: Colors.background,
+    marginBottom: 16,
+  },
+  chipRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+    marginBottom: 16,
+  },
+  skillChip: {
+    minWidth: 40,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 999,
+    borderWidth: 1.5,
+    borderColor: Colors.border,
+    backgroundColor: Colors.surface,
+    alignItems: 'center',
+  },
+  genderChip: {
+    minWidth: 56,
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    borderRadius: 999,
+    borderWidth: 1.5,
+    borderColor: Colors.border,
+    backgroundColor: Colors.surface,
+    alignItems: 'center',
+  },
+  skillChipActive: {
+    borderColor: Colors.primary,
+    backgroundColor: Colors.primary + '14',
+  },
+  skillChipText: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: Colors.textSecondary,
+  },
+  skillChipTextActive: {
+    color: Colors.primary,
   },
 });

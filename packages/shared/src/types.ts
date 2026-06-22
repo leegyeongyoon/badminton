@@ -375,6 +375,49 @@ export interface AddGuestResponse {
   checkIn: GuestCheckInResponse;
 }
 
+/** Result of generating N random sample guests (테스트용 게스트). EPHEMERAL —
+ *  they vanish on 정모 종료, same as any guest. */
+export interface BulkRandomGuestsResponse {
+  /** Number of random guests created and checked into the session. */
+  createdCount: number;
+  clubSessionId: string;
+}
+
+// --- Managed members (운영자 관리 멤버) ---
+
+/** A persistent, operator-managed club member (no app login). */
+export interface ManagedMemberResponse {
+  userId: string;
+  name: string;
+  role: ClubMemberRole;
+  skillLevel: SkillLevel | null;
+  gender: string | null;
+}
+
+/** Result of bulk-adding managed members. `skipped` = exact-duplicate names
+ *  already managed in the club (idempotent-ish). */
+export interface BulkAddManagedMembersResponse {
+  created: ManagedMemberResponse[];
+  skipped: string[];
+}
+
+/** Operator checks a club member into the active 정모 (출석). */
+export interface MemberCheckInResponse {
+  success: boolean;
+  /** false when the member was already checked into the session (idempotent). */
+  created: boolean;
+  userId: string;
+  clubSessionId: string;
+}
+
+/** Convenience: check in ALL not-yet-checked-in club members. */
+export interface MemberCheckInAllResponse {
+  success: boolean;
+  /** Number of members newly checked in by this call. */
+  checkedInCount: number;
+  clubSessionId: string;
+}
+
 export interface GuestSelfCheckInResponse {
   user: UserResponse;
   token: string;
