@@ -102,7 +102,8 @@ export default function CheckinModalScreen() {
   // If already checked in, just go back (don't show success)
   useEffect(() => {
     if (status) {
-      router.back();
+      if (router.canGoBack()) router.back();
+      else router.replace('/(tabs)');
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -139,7 +140,8 @@ export default function CheckinModalScreen() {
           withSpring(1, { damping: 15, stiffness: 150 }),
         );
         setTimeout(() => {
-          router.back();
+          if (router.canGoBack()) router.back();
+          else router.replace('/(tabs)');
         }, 1500);
       } catch (err: any) {
         const details: GeofenceDetails | undefined = err?.response?.data?.details;
@@ -273,7 +275,7 @@ export default function CheckinModalScreen() {
     <View style={[styles.container, { backgroundColor: colors.background }]}>
       {/* Header */}
       <View style={[styles.header, { backgroundColor: colors.surface, borderBottomColor: colors.divider }]}>
-        <TouchableOpacity onPress={() => router.back()} style={styles.backButton}>
+        <TouchableOpacity onPress={() => (router.canGoBack() ? router.back() : router.replace('/(tabs)'))} style={styles.backButton}>
           <Icon name="back" size={24} color={colors.text} />
         </TouchableOpacity>
         <Text style={[styles.headerTitle, { color: colors.text }]}>체크인</Text>
@@ -422,20 +424,20 @@ export default function CheckinModalScreen() {
               <View style={styles.manualSection}>
                 {Platform.OS === 'web' && (
                   <View style={styles.webCheckinHeader}>
-                    <Icon name="facility" size={40} color={colors.primary} />
-                    <Text style={[styles.webCheckinTitle, { color: colors.text }]}>시설 코드로 체크인</Text>
+                    <Icon name="link" size={40} color={colors.primary} />
+                    <Text style={[styles.webCheckinTitle, { color: colors.text }]}>코드/링크로 직접 입력</Text>
                     <Text style={[styles.webCheckinDesc, { color: colors.textSecondary }]}>
-                      체육관에 비치된 시설 코드를 입력해주세요
+                      운영자가 공유한 출석 링크나 코드를 붙여넣으면 출석돼요
                     </Text>
                   </View>
                 )}
                 <View style={[styles.codeCard, { backgroundColor: colors.surface }, shadows.md]}>
                   <View style={[styles.codeIconWrap, { backgroundColor: colors.primaryLight }]}>
-                    <Icon name="qr" size={32} color={colors.primary} />
+                    <Icon name="link" size={32} color={colors.primary} />
                   </View>
-                  <Text style={[styles.codeTitle, { color: colors.text }]}>시설 코드 입력</Text>
+                  <Text style={[styles.codeTitle, { color: colors.text }]}>코드/링크로 직접 입력</Text>
                   <Text style={[styles.codeDesc, { color: colors.textSecondary }]}>
-                    시설에 표시된 QR 코드 값이나 체크인 코드를 입력하세요
+                    출석 링크(…/attend?session=…) 또는 시설/체크인 코드를 붙여넣으세요
                   </Text>
                   <TextInput
                     style={[styles.codeInput, {
@@ -443,7 +445,7 @@ export default function CheckinModalScreen() {
                       borderColor: colors.border,
                       color: colors.text,
                     }, Platform.OS === 'web' && styles.codeInputWeb]}
-                    placeholder="시설 코드를 입력하세요"
+                    placeholder="출석 링크 또는 코드 붙여넣기"
                     placeholderTextColor={colors.textLight}
                     value={manualCode}
                     onChangeText={setManualCode}
@@ -840,11 +842,11 @@ const styles = StyleSheet.create({
     fontSize: 14,
     textAlign: 'center',
   },
-  // Web code input (larger/more prominent)
+  // Web code input (larger/more prominent). No letter-spacing — it now also
+  // accepts a pasted attend URL, which looks wrong when spaced out.
   codeInputWeb: {
-    fontSize: 18,
+    fontSize: 16,
     paddingVertical: spacing.lg,
-    letterSpacing: 2,
   },
   // Switch mode
   switchModeButton: {

@@ -126,7 +126,8 @@ export default function ClubSessionScreen() {
         try {
           await clubSessionApi.end(session.id);
           setSession(null);
-          router.back();
+          if (router.canGoBack()) router.back();
+          else router.replace('/(tabs)');
         } catch (err: any) {
           showAlert(Strings.common.error, err?.response?.data?.error || '모임 종료에 실패했습니다');
         }
@@ -196,7 +197,7 @@ export default function ClubSessionScreen() {
         <Stack.Screen options={{ headerShown: true, title: '모임 활동' }} />
         <View style={styles.centerContainer}>
           <Text style={styles.emptyText}>진행 중인 모임이 없습니다</Text>
-          <TouchableOpacity style={styles.backBtn} onPress={() => router.back()}>
+          <TouchableOpacity style={styles.backBtn} onPress={() => (router.canGoBack() ? router.back() : router.replace('/(tabs)'))}>
             <Text style={styles.backBtnText}>돌아가기</Text>
           </TouchableOpacity>
         </View>

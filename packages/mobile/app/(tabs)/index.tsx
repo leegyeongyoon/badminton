@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useMemo } from 'react';
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { View, Text, ScrollView, StyleSheet, Pressable, Platform } from 'react-native';
 import { useRouter } from 'expo-router';
 import { useAuthStore } from '../../store/authStore';
@@ -7,6 +7,8 @@ import { useCheckinStore } from '../../store/checkinStore';
 import { useTurnStore } from '../../store/turnStore';
 import { clubSessionApi } from '../../services/clubSession';
 import { profileApi, MyStatusResponse } from '../../services/profile';
+import { getItem, setItem } from '../../services/storage';
+import { showSuccess } from '../../utils/feedback';
 import { useSocketEvent, useUserRoom } from '../../hooks/useSocket';
 import { useTheme } from '../../hooks/useTheme';
 import { getSkillMeta } from '../../constants/skill';
@@ -105,6 +107,46 @@ export default function HomeScreen() {
       setLoading(false);
     }
   }, [fetchStatus, fetchMyTurns, fetchClubs, loadActiveSessions, loadMyStatus]);
+
+  // One-tap 체크인 — 무조건 출석(코드/지오펜스 없이). 홈 카드의 '체크인' 버튼이
+  // 수동 코드 모달 대신 이걸 호출한다.
+  const [quickCheckinSid, setQuickCheckinSid] = useState<string | null>(null);
+  const handleQuickCheckin = useCallback(async (sessionId: string) => {
+    setQuickCheckinSid(sessionId);
+    try {
+      await clubSessionApi.attend(sessionId);
+      await Promise.all([fetchStatus(), loadMyStatus(), loadActiveSessions(useClubStore.getState().clubs)]);
+      showSuccess('체크인됐어요');
+    } catch {
+      /* non-fatal */
+    } finally {
+      setQuickCheckinSid(null);
+    }
+  }, [fetchStatus, loadMyStatus, loadActiveSessions]);
+
+  // Auto check-in: a member who opens the home with an ACTIVE 정모 they belong to
+  // is checked in automatically (no code/geofence). Once per 정모 (persisted) so a
+  // later checkout isn't auto-undone — the 체크인 버튼 re-checks-in manually.
+  const autoAttendedRef = useRef<Set<string>>(new Set());
+  useEffect(() => {
+    if (!user || activeSessions.length === 0) return;
+    (async () => {
+      const KEY = 'badminton_auto_attended_sessions';
+      let done: string[] = [];
+      try { done = JSON.parse((await getItem(KEY)) || '[]'); } catch { done = []; }
+      let changed = false;
+      for (const s of activeSessions) {
+        if (autoAttendedRef.current.has(s.id) || done.includes(s.id)) continue;
+        autoAttendedRef.current.add(s.id);
+        try { await clubSessionApi.attend(s.id); done.push(s.id); changed = true; } catch { /* noop */ }
+      }
+      if (changed) {
+        try { await setItem(KEY, JSON.stringify(done)); } catch { /* noop */ }
+        await Promise.all([fetchStatus(), loadMyStatus(), loadActiveSessions(useClubStore.getState().clubs)]);
+        showSuccess('정모 참여 — 자동 체크인됐어요');
+      }
+    })();
+  }, [activeSessions, user]);
 
   const loadProfile = async () => {
     try {
@@ -368,7 +410,8 @@ export default function HomeScreen() {
                       icon="checkin"
                       size="lg"
                       fullWidth
-                      onPress={() => router.push(`/checkin-modal?clubSessionId=${s.id}`)}
+                      loading={quickCheckinSid === s.id}
+                      onPress={() => handleQuickCheckin(s.id)}
                       style={styles.checkinBtn}
                     />
                   )}

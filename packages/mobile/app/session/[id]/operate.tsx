@@ -20,7 +20,8 @@ import { clubApi } from '../../../services/club';
 import { clubSessionApi, GuestFeeSettlement, PlayerMatchups, SessionCourt } from '../../../services/clubSession';
 import { courtApi } from '../../../services/court';
 import { showAlert, showConfirm } from '../../../utils/alert';
-import { showSuccess } from '../../../utils/feedback';
+import { showSuccess, showError } from '../../../utils/feedback';
+import { copyToClipboard } from '../../../utils/clipboard';
 import { typography, spacing, radius, palette } from '../../../constants/theme';
 
 if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental) {
@@ -275,6 +276,17 @@ export default function OperateScreen() {
   useSocketEvent('turn:completed', handleRealtime);
   useSocketEvent('turn:started', handleRealtime);
   useSocketEvent('clubSession:courtsUpdated', handleRealtime);
+  // Queue + board real-time events (previously missing → operator queue/court
+  // states only updated on the poll). All emitted to the facility room.
+  useSocketEvent('gameBoard:entryAdded', handleRealtime);
+  useSocketEvent('gameBoard:entryPushed', handleRealtime);
+  useSocketEvent('gameBoard:entryUpdated', handleRealtime);
+  useSocketEvent('gameBoard:entryRemoved', handleRealtime);
+  useSocketEvent('gameBoard:reordered', handleRealtime);
+  useSocketEvent('turn:created', handleRealtime);
+  useSocketEvent('turn:promoted', handleRealtime);
+  useSocketEvent('turn:cancelled', handleRealtime);
+  useSocketEvent('court:statusChanged', handleRealtime);
 
   // ─── 채팅/건의 실시간: 이 모임 룸에 참여, 새 메시지가 오면 헤더에 미확인 표시 ───
   useClubRoom(clubId);
@@ -623,6 +635,30 @@ export default function OperateScreen() {
     );
   }, [clubSessionId, router]);
 
+  // ─── 출석 링크 복사 ───
+  // QR 화면을 열지 않고도 출석 링크(payload)를 바로 클립보드에 복사해 카톡 등에
+  // 붙여넣을 수 있게 한다. (GET /club-sessions/:id/qr → payload)
+  const [copyingLink, setCopyingLink] = useState(false);
+  const copyAttendLink = useCallback(async () => {
+    if (!clubSessionId || copyingLink) return;
+    setCopyingLink(true);
+    try {
+      const { data } = await clubSessionApi.getSessionQr(clubSessionId);
+      const link = data?.payload;
+      if (!link) {
+        showError('출석 링크를 불러오지 못했어요');
+        return;
+      }
+      const ok = await copyToClipboard(link);
+      if (ok) showSuccess('출석 링크 복사됨');
+      else showError('복사하지 못했어요');
+    } catch (err: any) {
+      showError(err?.response?.data?.error || '출석 링크를 불러오지 못했어요');
+    } finally {
+      setCopyingLink(false);
+    }
+  }, [clubSessionId, copyingLink]);
+
   // ─── 운영자: 특정 참가자를 정모에서 체크아웃 ───
   // Self-checkout과 동일한 정리를 서버에서 수행. 성공 시 모달을 닫고 풀/보드를
   // 갱신(소켓 players:updated 도 함께 갱신). 실수 방지를 위해 확인 단계를 둠.
@@ -739,7 +775,7 @@ export default function OperateScreen() {
           </Text>
           <TouchableOpacity
             style={[styles.deniedBtn, { backgroundColor: colors.primary }]}
-            onPress={() => router.back()}
+            onPress={() => (router.canGoBack() ? router.back() : router.replace('/(tabs)'))}
           >
             <Text style={styles.deniedBtnText}>돌아가기</Text>
           </TouchableOpacity>
@@ -884,8 +920,11 @@ export default function OperateScreen() {
   //               through to the PlayerCard's onPress.
   const PoolCard = ({ m, stageable }: { m: Player; stageable: boolean }) => {
     const isStaged = stagedSet.has(m.userId);
-    const canTap = stageable && (m.status !== 'RESTING' || isStaged);
-    const draggable = stageable && m.status !== 'RESTING';
+    // Any checked-in player can be composed into the next game regardless of
+    // state — 미편성/대기, 휴식(RESTING), 대기 편성됨, 게임 중 모두 편성 가능.
+    // (중복은 빨간 점만, 막지 않음 — 운영자가 판단.)
+    const canTap = stageable;
+    const draggable = stageable;
     const tap = canTap ? () => toggleStaged(m.userId) : undefined;
     // Double-booked (in another game's roster) → small subtle red dot only.
     const busy = busySet.has(m.userId);
@@ -1036,13 +1075,15 @@ export default function OperateScreen() {
         label="미편성 (대기)" count={freePool.length} list={freePool}
         tint={colors.playerAvailable} stageable emptyText="대기 중인 회원이 없어요"
       />
+      {/* 대기 편성됨 / 게임 중 도 stageable — 이미 편성됐거나 게임 중인 사람도
+          '미리 다음 게임'에 넣을 수 있어야 함(소프트 중복 = 빨간 점만, 막지 않음). */}
       <PoolBox
         label="대기 편성됨" count={queuedPool.length} list={queuedPool}
-        tint={colors.info} stageable={false} emptyText="아직 편성된 회원이 없어요"
+        tint={colors.info} stageable emptyText="아직 편성된 회원이 없어요"
       />
       <PoolBox
         label="게임 중" count={playingPool.length} list={playingPool}
-        tint={colors.playerInTurn} stageable={false} emptyText="진행 중인 게임이 없어요"
+        tint={colors.playerInTurn} stageable emptyText="진행 중인 게임이 없어요"
       />
     </>
   );
@@ -1632,7 +1673,7 @@ export default function OperateScreen() {
   // ─────────────────────────────────────────────────────────
   const Header = (
     <View style={[styles.header, { backgroundColor: colors.surface, borderBottomColor: colors.border }]}>
-      <TouchableOpacity onPress={() => router.back()} hitSlop={10} style={styles.headerBack}>
+      <TouchableOpacity onPress={() => (router.canGoBack() ? router.back() : router.replace('/(tabs)'))} hitSlop={10} style={styles.headerBack}>
         <Icon name="back" size={22} color={colors.text} />
       </TouchableOpacity>
       <View style={{ flex: 1 }}>
@@ -1686,6 +1727,20 @@ export default function OperateScreen() {
       >
         <Icon name="qr" size={16} color={colors.primary} />
         <Text style={[styles.headerLinkText, { color: colors.primary }]}>출석 QR</Text>
+      </TouchableOpacity>
+      <TouchableOpacity
+        style={[styles.headerLink, { borderColor: colors.border }]}
+        onPress={copyAttendLink}
+        activeOpacity={0.8}
+        disabled={copyingLink}
+        accessibilityLabel="출석 링크 복사"
+      >
+        {copyingLink ? (
+          <ActivityIndicator size="small" color={colors.primary} />
+        ) : (
+          <Icon name="link" size={16} color={colors.primary} />
+        )}
+        <Text style={[styles.headerLinkText, { color: colors.primary }]}>출석 링크 복사</Text>
       </TouchableOpacity>
       <TouchableOpacity
         style={[styles.headerLink, { borderColor: colors.danger, backgroundColor: colors.dangerBg }]}

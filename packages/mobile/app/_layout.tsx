@@ -18,6 +18,8 @@ import { ThemeProvider, useThemeContext } from '../contexts/ThemeContext';
 import { useNetworkStatus } from '../hooks/useNetworkStatus';
 import { useDeepLinking } from '../hooks/useDeepLinking';
 import { useNotifications } from '../hooks/useNotifications';
+import { useSocketToast } from '../hooks/useSocketToast';
+import { useSocket, useUserRoom } from '../hooks/useSocket';
 import { useOnboardingStore } from '../store/onboardingStore';
 import { useAppInit } from '../hooks/useAppInit';
 import { transitions } from '../utils/transitions';
@@ -55,6 +57,14 @@ function RootLayoutInner() {
   const isNavigatingRef = useRef(false);
   useDeepLinking();
   useNotifications();
+  // Establish the websocket app-wide on load (before any screen mounts), so
+  // real-time sync + the network status are accurate everywhere.
+  useSocket();
+  // Your-turn banner + real-time toasts must work on ALL screens (incl. stack
+  // screens outside the tabs like the operator board), so mount the listener
+  // + the user-room join ONCE here at the root rather than in (tabs)/_layout.
+  useUserRoom(user?.id);
+  useSocketToast();
 
   // Gating redirect logic
   useEffect(() => {

@@ -19,7 +19,7 @@ import { PlayerCard } from '../../../components/game-board/PlayerCard';
 import api from '../../../services/api';
 import { typography, spacing, radius, palette } from '../../../constants/theme';
 
-const POLL_INTERVAL_MS = 10000;
+const POLL_INTERVAL_MS = 7000;
 
 interface Player {
   userId: string;
@@ -84,6 +84,12 @@ export default function ViewBoardScreen() {
   useEffect(() => { loadPool(); }, [loadPool]);
 
   // ─── Real-time + light polling ───
+  // refresh reloads BOTH the courts (/club-sessions/:id/courts via loadPool) and
+  // the game-board (loadBoard) so the on-court games AND the 다음 게임 대기열 both
+  // update live. All gameBoard:* / turn:* / court:statusChanged events are emitted
+  // to the facility room (which board.tsx joins via useFacilityRoom) by the
+  // backend, so subscribing here makes the queue + court states reflect changes
+  // within ~1s instead of waiting for the poll fallback below.
   useFacilityRoom(facilityId);
   const refresh = useCallback(() => { loadPool(); loadBoard(); }, [loadPool, loadBoard]);
   useSocketEvent('players:updated', refresh);
@@ -92,6 +98,16 @@ export default function ViewBoardScreen() {
   useSocketEvent('turn:started', refresh);
   useSocketEvent('turn:completed', refresh);
   useSocketEvent('clubSession:courtsUpdated', refresh);
+  // Queue + board real-time events (previously missing → queue only updated on poll).
+  useSocketEvent('gameBoard:entryAdded', refresh);
+  useSocketEvent('gameBoard:entryPushed', refresh);
+  useSocketEvent('gameBoard:entryUpdated', refresh);
+  useSocketEvent('gameBoard:entryRemoved', refresh);
+  useSocketEvent('gameBoard:reordered', refresh);
+  useSocketEvent('turn:created', refresh);
+  useSocketEvent('turn:promoted', refresh);
+  useSocketEvent('turn:cancelled', refresh);
+  useSocketEvent('court:statusChanged', refresh);
 
   useEffect(() => {
     const t = setInterval(refresh, POLL_INTERVAL_MS);
@@ -244,41 +260,22 @@ export default function ViewBoardScreen() {
         </View>
 
         {playing ? (
+          // 그냥 이 게임의 인원(2~4명)을 나열 — 팀(VS) 구분 없이.
           <View style={styles.match}>
-            {[[0, 1], [2, 3]].map((pair, side) => (
-              <View key={side} style={styles.teamCol}>
-                <View style={styles.team}>
-                  {pair.map((slotIdx) => {
-                    const pId = playing.playerIds[slotIdx];
-                    const p = pId ? getPlayer(pId) : null;
-                    const name = p?.userName || playing.playerNames?.[slotIdx];
-                    const isMe = !!user?.id && pId === user.id;
-                    return pId ? (
-                      <PlayerCard
-                        key={slotIdx}
-                        variant="court"
-                        player={p || { userId: pId, userName: name }}
-                        highlighted={isMe}
-                        nameSuffix={isMe ? ' (나)' : ''}
-                      />
-                    ) : (
-                      <View key={slotIdx} style={[styles.player, { borderColor: colors.border }]}>
-                        <Text style={[styles.playerEmpty, { color: colors.textLight }]}>빈 자리</Text>
-                      </View>
-                    );
-                  })}
-                </View>
-                {side === 0 && (
-                  <View style={styles.vsRow}>
-                    <View style={[styles.vsLine, { backgroundColor: colors.border }]} />
-                    <View style={[styles.vsChip, { backgroundColor: colors.surfaceSecondary }]}>
-                      <Text style={[styles.vs, { color: colors.textSecondary }]}>VS</Text>
-                    </View>
-                    <View style={[styles.vsLine, { backgroundColor: colors.border }]} />
-                  </View>
-                )}
-              </View>
-            ))}
+            {playing.playerIds.map((pId, slotIdx) => {
+              const p = pId ? getPlayer(pId) : null;
+              const name = p?.userName || playing.playerNames?.[slotIdx];
+              const isMe = !!user?.id && pId === user.id;
+              return (
+                <PlayerCard
+                  key={pId || slotIdx}
+                  variant="court"
+                  player={p || { userId: pId, userName: name }}
+                  highlighted={isMe}
+                  nameSuffix={isMe ? ' (나)' : ''}
+                />
+              );
+            })}
           </View>
         ) : (
           <View style={[styles.emptyBox, { borderColor: colors.border }]}>
@@ -303,7 +300,7 @@ export default function ViewBoardScreen() {
     <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]}>
       {/* Header */}
       <View style={[styles.header, { backgroundColor: colors.surface, borderBottomColor: colors.border }]}>
-        <TouchableOpacity onPress={() => router.back()} hitSlop={10} style={styles.headerBack}>
+        <TouchableOpacity onPress={() => (router.canGoBack() ? router.back() : router.replace('/(tabs)'))} hitSlop={10} style={styles.headerBack}>
           <Icon name="back" size={22} color={colors.text} />
         </TouchableOpacity>
         <View style={{ flex: 1 }}>

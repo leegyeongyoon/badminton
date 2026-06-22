@@ -21,7 +21,7 @@ import { Colors } from '../../constants/colors';
 import { Strings } from '../../constants/strings';
 import { showAlert, showConfirm } from '../../utils/alert';
 import { showSuccess } from '../../utils/feedback';
-import { getCurrentPosition } from '../../utils/geo';
+import { getItem, setItem } from '../../services/storage';
 import { AttendanceLeaderboard } from '../../components/club/AttendanceLeaderboard';
 
 interface ClubMember {
@@ -98,38 +98,29 @@ export default function ClubDetailScreen() {
     }
   }, [clubId]);
 
-  // Auto check-in: when a member opens the club during an ACTIVE 정모 and isn't
-  // checked in yet, silently try to check in IF the device is inside the
-  // facility geofence. The backend enforces the 100m radius — so we just send
-  // the GPS coords and let it accept (inside) or reject (outside). Attempted at
-  // most once per session id. Falls back to the manual 체크인 button when GPS is
-  // denied/unavailable (e.g. web) or the user is outside the geofence.
+  // Auto check-in on entering an ACTIVE 정모: a club member who opens the 정모 is
+  // checked in automatically (NO geofence — per product decision). Done at most
+  // ONCE per 정모 (persisted), so a member who later checks out is NOT auto
+  // re-checked-in — they re-check-in with the manual 체크인 button. Guests and
+  // non-members are excluded.
   const autoTriedRef = useRef<string | null>(null);
-  const [autoCheckMsg, setAutoCheckMsg] = useState<string | null>(null);
+  const [autoCheckMsg] = useState<string | null>(null);
+  const AUTO_ATTEND_KEY = 'badminton_auto_attended_sessions';
   useEffect(() => {
     const sid = activeSession?.id;
     if (!sid || !user || isGuest || isCheckedIn || !myMembership) return;
     if (autoTriedRef.current === sid) return;
     autoTriedRef.current = sid;
     (async () => {
-      const coords = await getCurrentPosition();
-      if (!coords) return; // no GPS / permission denied → keep the manual button
+      let done: string[] = [];
+      try { done = JSON.parse((await getItem(AUTO_ATTEND_KEY)) || '[]'); } catch { done = []; }
+      if (done.includes(sid)) return; // already auto-attended once (e.g. then checked out)
       try {
-        await checkIn(undefined, {
-          clubSessionId: sid,
-          latitude: coords.latitude,
-          longitude: coords.longitude,
-        });
-        setAutoCheckMsg(null);
-        showSuccess('현장 확인 — 자동 체크인됐어요');
+        await clubSessionApi.attend(sid); // unconditional check-in (no geofence)
+        try { await setItem(AUTO_ATTEND_KEY, JSON.stringify([...done, sid])); } catch { /* noop */ }
+        showSuccess('정모 참여 — 자동 체크인됐어요');
         await Promise.all([fetchStatus(), fetchMembers(clubId)]);
-      } catch (err: any) {
-        // Outside the geofence (400) is expected when not yet at the venue —
-        // stay silent and show a small hint; the manual button remains.
-        if (err?.response?.status === 400) {
-          setAutoCheckMsg('정모 장소 100m 이내에 들어오면 자동으로 체크인돼요');
-        }
-      }
+      } catch { /* non-fatal — 수동 체크인 버튼 유지 */ }
     })();
   }, [activeSession?.id, user, isGuest, isCheckedIn, myMembership, clubId]);
 

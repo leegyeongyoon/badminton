@@ -9,6 +9,8 @@ import { Icon } from '../../../components/ui/Icon';
 import api from '../../../services/api';
 import { clubSessionApi } from '../../../services/clubSession';
 import { typography, spacing, radius } from '../../../constants/theme';
+import { copyToClipboard } from '../../../utils/clipboard';
+import { showSuccess, showError } from '../../../utils/feedback';
 
 // ─────────────────────────────────────────────────────────
 // 정모 출석 QR — 운영자가 띄워두면 참가자가 폰 카메라로 스캔해 출석.
@@ -28,6 +30,8 @@ export default function SessionQrScreen() {
   const { colors, shadows } = useTheme();
 
   const [qr, setQr] = useState<string | null>(null);
+  // The attend LINK (`payload`) — shareable URL the operator can paste into chat.
+  const [payload, setPayload] = useState<string | null>(null);
   const [meta, setMeta] = useState<SessionMeta | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -43,14 +47,23 @@ export default function SessionQrScreen() {
         api.get(`/club-sessions/${clubSessionId}`).catch(() => null),
       ]);
       setQr(qrRes.data?.qr ?? null);
+      setPayload(qrRes.data?.payload ?? null);
       setMeta(metaRes?.data ?? null);
     } catch (err: any) {
       setError(err?.response?.data?.error || 'QR을 불러오지 못했어요');
       setQr(null);
+      setPayload(null);
     } finally {
       setLoading(false);
     }
   }, [clubSessionId]);
+
+  const copyLink = useCallback(async () => {
+    if (!payload) return;
+    const ok = await copyToClipboard(payload);
+    if (ok) showSuccess('복사됨');
+    else showError('복사하지 못했어요');
+  }, [payload]);
 
   useEffect(() => { load(); }, [load]);
 
@@ -115,6 +128,42 @@ export default function SessionQrScreen() {
           <Text style={[styles.subCaption, { color: colors.textSecondary }]}>
             참가자가 폰 카메라(또는 앱 스캐너)로 이 코드를 스캔하면 자동으로 출석되고 현황 보드로 이동합니다
           </Text>
+
+          {/* ─── 출석 링크 (QR을 못 찍는 사람에게 공유) ─── */}
+          {!!payload && (
+            <View style={styles.linkBlock}>
+              <Text style={[styles.linkLabel, { color: colors.textSecondary }]}>
+                또는 이 링크를 공유하세요
+              </Text>
+              <View
+                style={[
+                  styles.linkField,
+                  { backgroundColor: colors.surface, borderColor: colors.border },
+                ]}
+              >
+                <Text
+                  style={[styles.linkText, { color: colors.text }]}
+                  numberOfLines={1}
+                  selectable
+                  accessibilityLabel="출석 링크"
+                >
+                  {payload}
+                </Text>
+              </View>
+              <TouchableOpacity
+                style={[styles.copyBtn, { backgroundColor: colors.primary }]}
+                onPress={copyLink}
+                activeOpacity={0.85}
+                accessibilityLabel="링크 복사"
+              >
+                <Icon name="link" size={16} color="#fff" />
+                <Text style={styles.copyBtnText}>링크 복사</Text>
+              </TouchableOpacity>
+              <Text style={[styles.linkHint, { color: colors.textSecondary }]}>
+                이 링크를 보내면, 열어서 로그인하면 바로 출석돼요.
+              </Text>
+            </View>
+          )}
         </View>
       )}
     </SafeAreaView>
@@ -164,5 +213,32 @@ const styles = StyleSheet.create({
   },
   subCaption: {
     ...typography.body2, textAlign: 'center', maxWidth: 360,
+  },
+
+  // ─── 출석 링크 (복사 가능) ───
+  linkBlock: {
+    width: '100%', maxWidth: 420, alignItems: 'center', gap: spacing.sm,
+    marginTop: spacing.sm,
+  },
+  linkLabel: {
+    ...typography.body2, textAlign: 'center',
+  },
+  linkField: {
+    width: '100%',
+    borderWidth: 1, borderRadius: radius.xl,
+    paddingHorizontal: spacing.lg, paddingVertical: spacing.mlg,
+  },
+  linkText: {
+    ...typography.body2,
+  },
+  copyBtn: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'center',
+    gap: spacing.sm,
+    paddingHorizontal: spacing.xxl, paddingVertical: spacing.mlg,
+    borderRadius: radius.pill, minWidth: 160,
+  },
+  copyBtnText: { ...typography.subtitle2, color: '#fff' },
+  linkHint: {
+    ...typography.caption, textAlign: 'center', maxWidth: 360,
   },
 });

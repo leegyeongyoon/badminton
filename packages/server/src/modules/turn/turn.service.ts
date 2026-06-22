@@ -223,9 +223,19 @@ async function startTurn(turnId: string, courtId: string, playerIds: string[], f
   await transitionCourtStatus(courtId, CourtStatus.IN_USE);
 
   const io = getIO();
-  io.to(`court:${courtId}`).emit('turn:started', { courtId, turnId });
-
   const court = await prisma.court.findUnique({ where: { id: courtId } });
+  const courtName = court?.name;
+
+  // Court-room broadcast (existing behaviour — operator boards in the court room).
+  io.to(`court:${courtId}`).emit('turn:started', { courtId, turnId, courtName, playerIds });
+
+  // ALSO emit to EACH player's user room so the "내 차례" banner fires reliably
+  // even though players aren't in the court room. Carries playerIds + courtName so
+  // the client can resolve "mine" without relying on a possibly-stale myTurns list.
+  for (const pid of playerIds) {
+    io.to(`user:${pid}`).emit('turn:started', { courtId, turnId, courtName, playerIds });
+  }
+
   if (court) {
     io.to(`facility:${court.facilityId}`).emit('court:statusChanged', {
       courtId,

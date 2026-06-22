@@ -535,7 +535,7 @@ export interface ServerToClientEvents {
   'court:statusChanged': (data: { courtId: string; status: CourtStatus }) => void;
   'turn:created': (data: CourtTurnResponse) => void;
   'turn:promoted': (data: { courtId: string; turns: CourtTurnResponse[] }) => void;
-  'turn:started': (data: { courtId: string; turnId: string }) => void;
+  'turn:started': (data: { courtId: string; turnId: string; courtName?: string; playerIds?: string[] }) => void;
   'turn:completed': (data: { courtId: string; turnId: string }) => void;
   'turn:cancelled': (data: { courtId: string; turnId: string }) => void;
   'turn:requeued': (data: CourtTurnResponse) => void;

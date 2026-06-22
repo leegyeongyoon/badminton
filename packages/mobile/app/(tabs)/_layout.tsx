@@ -7,9 +7,6 @@ import Animated, {
   withSpring,
   withSequence,
 } from 'react-native-reanimated';
-import { useAuthStore } from '../../store/authStore';
-import { useSocketToast } from '../../hooks/useSocketToast';
-import { useUserRoom } from '../../hooks/useSocket';
 import { useTheme } from '../../hooks/useTheme';
 import { Strings } from '../../constants/strings';
 import { Icon, IconName } from '../../components/ui/Icon';
@@ -91,13 +88,8 @@ const badgeStyles = StyleSheet.create({
 });
 
 export default function TabsLayout() {
-  const { user } = useAuthStore();
   const { colors } = useTheme();
   const [unreadCount, setUnreadCount] = useState(0);
-
-  // Socket toast notifications for real-time events
-  useUserRoom(user?.id);
-  useSocketToast();
 
   const loadUnreadCount = useCallback(async () => {
     try {
