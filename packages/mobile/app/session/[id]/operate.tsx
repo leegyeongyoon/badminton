@@ -55,21 +55,20 @@ interface Court {
 
 type RoleState = 'loading' | 'allowed' | 'denied';
 
-// Approx. height (px) of one queue row — used to convert a vertical drag
-// distance into a number of slot steps for drag-and-drop reordering.
-const ROW_STEP = 72;
-
 // ─── Drag-to-compose registry ───────────────────────────────
 // A tiny absolute-coordinate drop-target registry so a player tile dragged
 // out of the 미편성 pool (PanResponder, works on react-native-web) can be
 // dropped onto a game slot. Targets register their on-screen rect (measured
 // via measureInWindow); on drag release we hit-test the finger's pageX/pageY.
-type DropKind = 'tray' | 'queue';
+// 'tray'/'queue' = a player-tile drop slot (compose). 'queue-card' = a whole
+// queued game card registered as a reorder drop target (drag the card itself to
+// reorder the 다음 게임 대기열).
+type DropKind = 'tray' | 'queue' | 'queue-card';
 interface DropTarget {
   id: string;            // unique key
   kind: DropKind;
-  entryId?: string;      // queued entry id (for kind === 'queue')
-  slotIndex: number;     // 0..3
+  entryId?: string;      // queued entry id (for kind === 'queue'/'queue-card')
+  slotIndex: number;     // 0..3 for tray/queue; the queue INDEX for 'queue-card'
   rect: { x: number; y: number; w: number; h: number };
 }
 
@@ -143,9 +142,6 @@ export default function OperateScreen() {
   const [swapTarget, setSwapTarget] = useState<{ entryId: string; slotIndex: number } | null>(null);
   // Assign: entryId awaiting a court pick
   const [assignTarget, setAssignTarget] = useState<string | null>(null);
-  // Drag-and-drop reorder state (the index the dragged item currently hovers at)
-  const [dragIndex, setDragIndex] = useState<number | null>(null);
-  const dragFrom = useRef<number | null>(null);
 
   // Which queued game card is currently in EDIT mode (controls expanded).
   const [editingEntryId, setEditingEntryId] = useState<string | null>(null);
@@ -166,9 +162,31 @@ export default function OperateScreen() {
   // from a tap). Shared between the web window listeners and the card release.
   const poolMovedRef = useRef(false);
 
-  const hitTestDrop = useCallback((pageX: number, pageY: number): DropTarget | null => {
+  // ─── Queue-card reorder drag (drag a whole 다음 게임 card up/down) ───
+  // Mirrors the pool-drag system: a floating label follows the finger/cursor,
+  // each queue card is registered as a 'queue-card' drop target, and on release
+  // we hit-test to find the hovered index and call moveQueueItem(from, to).
+  const [queueDrag, setQueueDrag] = useState<
+    { entryId: string; fromIdx: number; label: string; x: number; y: number } | null
+  >(null);
+  // The index the dragged card currently hovers over (drives the drop indicator
+  // line). null = no active queue-card drag.
+  const [queueHoverIdx, setQueueHoverIdx] = useState<number | null>(null);
+  const queueDragRef = useRef<{ entryId: string; fromIdx: number } | null>(null);
+  const queueMovedRef = useRef(false);
+  // resolveQueueDrop kept in a ref so the web window listeners (bound once at
+  // drag start) always call the latest version (assigned just below).
+  const resolveQueueDropRef = useRef<(fromIdx: number, x: number, y: number) => void>(() => {});
+
+  // Hit-test the registered drop targets at a point. `kindFilter` (optional)
+  // restricts the search to one or more DropKinds. Pool drags pass
+  // ['tray','queue'] so they never match a 'queue-card' reorder target, and the
+  // queue-card reorder drag passes 'queue-card' so it only matches cards.
+  const hitTestDrop = useCallback((pageX: number, pageY: number, kindFilter?: DropKind | DropKind[]): DropTarget | null => {
+    const kinds = kindFilter == null ? null : Array.isArray(kindFilter) ? kindFilter : [kindFilter];
     let hit: DropTarget | null = null;
     for (const t of dropTargets.current.values()) {
+      if (kinds && !kinds.includes(t.kind)) continue;
       const { x, y, w, h } = t.rect;
       if (pageX >= x && pageX <= x + w && pageY >= y && pageY <= y + h) { hit = t; break; }
     }
@@ -198,7 +216,7 @@ export default function OperateScreen() {
       const x = ev.pageX; const y = ev.pageY;
       poolMovedRef.current = true;
       setPoolDrag((prev) => (prev ? { ...prev, x, y } : prev));
-      const hit = hitTestDrop(x, y);
+      const hit = hitTestDrop(x, y, ['tray', 'queue']);
       setHoverDropId(hit ? hit.id : null);
     };
     const onUp = (ev: PointerEvent) => {
@@ -212,6 +230,43 @@ export default function OperateScreen() {
       if (!dragged) return;
       // Resolve the drop at the release point (drag already confirmed on web).
       if (moved) resolveDropRef.current(dragged, ev.pageX, ev.pageY);
+    };
+    w.addEventListener('pointermove', onMove, true);
+    w.addEventListener('pointerup', onUp, true);
+  }, [hitTestDrop]);
+
+  // WEB queue-card reorder controller. Mirrors beginPoolDrag but for whole
+  // 다음 게임 cards: a CONFIRMED drag (movement already detected by the handle's
+  // pointerdown bootstrap) is driven by window pointer listeners until release,
+  // then resolves the new index via moveQueueItem. Native uses a PanResponder on
+  // the handle that claims on move and calls this on grant.
+  const beginQueueDrag = useCallback((
+    entryId: string, fromIdx: number, label: string,
+    startX: number, startY: number,
+  ) => {
+    queueDragRef.current = { entryId, fromIdx };
+    queueMovedRef.current = true;
+    setQueueHoverIdx(fromIdx);
+    setQueueDrag({ entryId, fromIdx, label, x: startX, y: startY });
+    if (Platform.OS !== 'web') return;
+    const w = window as any;
+    const onMove = (ev: PointerEvent) => {
+      const x = ev.pageX; const y = ev.pageY;
+      queueMovedRef.current = true;
+      setQueueDrag((prev) => (prev ? { ...prev, x, y } : prev));
+      const hit = hitTestDrop(x, y, 'queue-card');
+      setQueueHoverIdx(hit ? hit.slotIndex : null);
+    };
+    const onUp = (ev: PointerEvent) => {
+      w.removeEventListener('pointermove', onMove, true);
+      w.removeEventListener('pointerup', onUp, true);
+      const drag = queueDragRef.current;
+      const moved = queueMovedRef.current;
+      queueDragRef.current = null;
+      setQueueDrag(null);
+      setQueueHoverIdx(null);
+      if (!drag) return;
+      if (moved) resolveQueueDropRef.current(drag.fromIdx, ev.pageX, ev.pageY);
     };
     w.addEventListener('pointermove', onMove, true);
     w.addEventListener('pointerup', onUp, true);
@@ -745,7 +800,7 @@ export default function OperateScreen() {
 
   // ─── Resolve a drop (called on pool-drag release) ───
   const resolveDrop = useCallback((userId: string, pageX: number, pageY: number) => {
-    const hit = hitTestDrop(pageX, pageY);
+    const hit = hitTestDrop(pageX, pageY, ['tray', 'queue']);
     if (!hit) return;
     if (hit.kind === 'tray') {
       placeStagedAt(userId, hit.slotIndex);
@@ -754,6 +809,18 @@ export default function OperateScreen() {
     }
   }, [hitTestDrop, placeStagedAt, handleDropOnQueueSlot]);
   resolveDropRef.current = resolveDrop;
+
+  // ─── Resolve a queue-card reorder drop (called on queue-card drag release) ───
+  // Hit-test the release point against the registered 'queue-card' targets; if
+  // it lands on a different index, persist via moveQueueItem (→ reorderQueue →
+  // PATCH /game-boards/:id/queue/reorder), which also refreshes the board.
+  const resolveQueueDrop = useCallback((fromIdx: number, pageX: number, pageY: number) => {
+    const hit = hitTestDrop(pageX, pageY, 'queue-card');
+    if (!hit) return;
+    const toIdx = hit.slotIndex;
+    if (toIdx !== fromIdx) moveQueueItem(fromIdx, toIdx);
+  }, [hitTestDrop, moveQueueItem]);
+  resolveQueueDropRef.current = resolveQueueDrop;
 
   // ─── Permission states ───
   if (roleState === 'loading' || (roleState === 'allowed' && loading && !board)) {
@@ -942,7 +1009,7 @@ export default function OperateScreen() {
           if (Platform.OS === 'web') return;
           const { pageX, pageY } = e.nativeEvent;
           setPoolDrag((prev) => (prev ? { ...prev, x: pageX, y: pageY } : prev));
-          const hit = hitTestDrop(pageX, pageY);
+          const hit = hitTestDrop(pageX, pageY, ['tray', 'queue']);
           setHoverDropId(hit ? hit.id : null);
         },
         onPanResponderRelease: (e) => {
@@ -1325,34 +1392,106 @@ export default function OperateScreen() {
   //   reorder, swap-on-tap, drop targets, 배정 / 삭제 controls.
   const QueueItem = ({ entry, idx }: { entry: GameBoardEntry; idx: number }) => {
     const isAssigning = assignTarget === entry.id;
-    const isDragging = dragIndex === idx;
     const editing = editingEntryId === entry.id;
 
-    // Web-safe reorder drag (PanResponder → pointer events on web).
-    const pan = useRef(
+    // ── Queue-card reorder drag (drag the whole card up/down by its handle) ──
+    // This is the active, finger-following reorder used on the COLLAPSED cards.
+    // It reuses the registerDrop / hitTestDrop / moveQueueItem infrastructure
+    // (same pattern as the pool→slot drag): each card registers its rect as a
+    // 'queue-card' target, the floating label follows the cursor, and on release
+    // resolveQueueDrop persists the new order.
+    const cardRef = useRef<View>(null);
+    const cardDropId = `qcard-${entry.id}`;
+    const isCardDragSource = queueDrag?.entryId === entry.id;
+    const isCardHover = queueHoverIdx === idx && queueDrag != null;
+
+    const measureCard = useCallback(() => {
+      cardRef.current?.measureInWindow((x, y, w, h) => {
+        registerDrop({ id: cardDropId, kind: 'queue-card', entryId: entry.id, slotIndex: idx, rect: { x, y, w, h } });
+      });
+    }, [cardDropId, idx, entry.id]);
+
+    useEffect(() => {
+      const t = setTimeout(measureCard, 0);
+      return () => { clearTimeout(t); unregisterDrop(cardDropId); };
+    });
+
+    const handleLabel = `${idx + 1}번 게임`;
+
+    // NATIVE handle drag: claim the responder only on a real vertical MOVE so a
+    // plain tap on the handle never starts a stuck drag.
+    const cardPan = useRef(
       PanResponder.create({
-        onStartShouldSetPanResponder: () => true,
-        onMoveShouldSetPanResponder: (_e, g) => Math.abs(g.dy) > 4,
-        onPanResponderGrant: () => { dragFrom.current = idx; setDragIndex(idx); },
-        onPanResponderMove: (_e, g) => {
-          const from = dragFrom.current;
-          if (from == null) return;
-          const steps = Math.round(g.dy / ROW_STEP);
-          const target = Math.max(0, Math.min(queuedEntries.length - 1, from + steps));
-          if (target !== dragIndex) setDragIndex(target);
+        onStartShouldSetPanResponder: () => false,
+        onMoveShouldSetPanResponder: (_e, g) => Math.abs(g.dy) > 4 || Math.abs(g.dx) > 4,
+        onPanResponderGrant: (e) => {
+          beginQueueDrag(entry.id, idx, handleLabel, e.nativeEvent.pageX, e.nativeEvent.pageY);
         },
-        onPanResponderRelease: (_e, g) => {
-          const from = dragFrom.current;
-          dragFrom.current = null;
-          setDragIndex(null);
-          if (from == null) return;
-          const steps = Math.round(g.dy / ROW_STEP);
-          const target = Math.max(0, Math.min(queuedEntries.length - 1, from + steps));
-          if (target !== from) moveQueueItem(from, target);
+        onPanResponderMove: (e) => {
+          if (Platform.OS === 'web') return;
+          const { pageX, pageY } = e.nativeEvent;
+          setQueueDrag((prev) => (prev ? { ...prev, x: pageX, y: pageY } : prev));
+          const hit = hitTestDrop(pageX, pageY, 'queue-card');
+          setQueueHoverIdx(hit ? hit.slotIndex : null);
         },
-        onPanResponderTerminate: () => { dragFrom.current = null; setDragIndex(null); },
+        onPanResponderRelease: (e) => {
+          if (Platform.OS === 'web') return; // handled by window pointerup
+          const { pageX, pageY } = e.nativeEvent;
+          const drag = queueDragRef.current;
+          queueDragRef.current = null;
+          setQueueDrag(null);
+          setQueueHoverIdx(null);
+          if (drag) resolveQueueDrop(drag.fromIdx, pageX, pageY);
+        },
+        onPanResponderTerminate: () => {
+          if (Platform.OS === 'web') return;
+          queueDragRef.current = null;
+          setQueueDrag(null);
+          setQueueHoverIdx(null);
+        },
       }),
     ).current;
+
+    // WEB handle drag: threshold-gated pointerdown bootstrap WITHOUT claiming a
+    // responder, so the handle stays inert on a plain tap and only begins the
+    // window-pointer drag once the finger moves past the threshold.
+    const onHandlePointerDownWeb = useCallback((ev: any) => {
+      if (Platform.OS !== 'web') return;
+      if (ev.button != null && ev.button !== 0) return; // left/primary only
+      ev.stopPropagation?.();
+      const startX = ev.pageX; const startY = ev.pageY;
+      let started = false;
+      const w = window as any;
+      const onMove = (e: PointerEvent) => {
+        if (!started) {
+          if (Math.abs(e.pageX - startX) <= 4 && Math.abs(e.pageY - startY) <= 4) return;
+          started = true;
+          beginQueueDrag(entry.id, idx, handleLabel, e.pageX, e.pageY);
+        }
+        if (started) {
+          w.removeEventListener('pointermove', onMove, true);
+          w.removeEventListener('pointerup', onUp, true);
+        }
+      };
+      const onUp = () => {
+        w.removeEventListener('pointermove', onMove, true);
+        w.removeEventListener('pointerup', onUp, true);
+      };
+      w.addEventListener('pointermove', onMove, true);
+      w.addEventListener('pointerup', onUp, true);
+    }, [entry.id, idx, handleLabel]);
+
+    // The shared drag-handle button rendered on every card (collapsed + edit).
+    const QueueDragHandle = (
+      <View
+        {...cardPan.panHandlers}
+        {...(Platform.OS === 'web' ? { onPointerDown: onHandlePointerDownWeb } : {})}
+        style={[styles.dragHandle, { borderColor: colors.border, backgroundColor: colors.surfaceSecondary }]}
+        accessibilityLabel="드래그하여 순서 변경"
+      >
+        <Icon name="menu" size={14} color={colors.textLight} />
+      </View>
+    );
 
     // A queued game is court-assignable with 2–4 players (단식 2 / 복식 3–4 /
     // 부분 편성). Only a 1-player draft can't be assigned. `isFull` (=4) is kept
@@ -1370,45 +1509,66 @@ export default function OperateScreen() {
     // old single cramped line. No game-type color rail/tint — calm + uniform.
     if (!editing) {
       return (
-        <View style={[
-          styles.queueRow2,
-          {
-            backgroundColor: colors.surface,
-            borderColor: isNext ? colors.primary : colors.border,
-            borderWidth: isNext ? 1.5 : 1,
-          },
-        ]}>
-          <View style={styles.queueRow2Top}>
-            <View style={[styles.queueNumSm, { backgroundColor: isNext ? colors.primary : colors.primaryLight }]}>
-              <Text style={[styles.queueNumText, { color: isNext ? palette.white : colors.primary }]}>{idx + 1}</Text>
-            </View>
-            {isNext && (
-              <View style={[styles.nextTag, { backgroundColor: colors.primaryBg }]}>
-                <Text style={[styles.nextTagText, { color: colors.primary }]}>다음</Text>
+        <View>
+          {/* Drop indicator: a thick primary line marking where the dragged card
+              would land. Shown above the hovered card (or below the last one). */}
+          {isCardHover && (
+            <View style={[styles.queueDropLine, { backgroundColor: colors.primary }]} />
+          )}
+          <View
+            ref={cardRef}
+            onLayout={measureCard}
+            collapsable={false}
+            style={[
+              styles.queueRow2,
+              {
+                backgroundColor: colors.surface,
+                borderColor: isNext ? colors.primary : colors.border,
+                borderWidth: isNext ? 1.5 : 1,
+              },
+              // Lift the dragged card: dim + dashed primary outline so it reads as
+              // "picked up" while the floating label follows the cursor.
+              isCardDragSource && {
+                opacity: 0.45,
+                borderColor: colors.primary,
+                borderStyle: 'dashed',
+                borderWidth: 1.5,
+              },
+            ]}
+          >
+            <View style={styles.queueRow2Top}>
+              {QueueDragHandle}
+              <View style={[styles.queueNumSm, { backgroundColor: isNext ? colors.primary : colors.primaryLight }]}>
+                <Text style={[styles.queueNumText, { color: isNext ? palette.white : colors.primary }]}>{idx + 1}</Text>
               </View>
-            )}
-            <GameTypeLabel playerIds={entry.playerIds} />
-            <View style={{ flex: 1 }} />
-            <TouchableOpacity
-              style={[styles.editBtnSm, { borderColor: colors.border, backgroundColor: colors.surface }]}
-              onPress={() => setEditingEntryId(entry.id)}
-              accessibilityLabel="수정"
-              activeOpacity={0.8}
-              hitSlop={6}
-            >
-              <Icon name="edit" size={12} color={colors.textSecondary} />
-              <Text style={[styles.editBtnText, { color: colors.textSecondary }]}>수정</Text>
-            </TouchableOpacity>
-          </View>
-          {/* 4 player chips on their own line, evenly spaced so names don't blur. */}
-          <View style={styles.miniChipRow}>
-            {[0, 1, 2, 3].map((slotIdx) => (
-              <QueueMiniChip
-                key={slotIdx}
-                pId={entry.playerIds[slotIdx]}
-                name={entry.playerNames?.[slotIdx]}
-              />
-            ))}
+              {isNext && (
+                <View style={[styles.nextTag, { backgroundColor: colors.primaryBg }]}>
+                  <Text style={[styles.nextTagText, { color: colors.primary }]}>다음</Text>
+                </View>
+              )}
+              <GameTypeLabel playerIds={entry.playerIds} />
+              <View style={{ flex: 1 }} />
+              <TouchableOpacity
+                style={[styles.editBtnSm, { borderColor: colors.border, backgroundColor: colors.surface }]}
+                onPress={() => setEditingEntryId(entry.id)}
+                accessibilityLabel="수정"
+                activeOpacity={0.8}
+                hitSlop={6}
+              >
+                <Icon name="edit" size={12} color={colors.textSecondary} />
+                <Text style={[styles.editBtnText, { color: colors.textSecondary }]}>수정</Text>
+              </TouchableOpacity>
+            </View>
+            {/* 4 player chips on their own line, evenly spaced so names don't blur. */}
+            <View style={styles.miniChipRow}>
+              {[0, 1, 2, 3].map((slotIdx) => (
+                <QueueMiniChip
+                  key={slotIdx}
+                  pId={entry.playerIds[slotIdx]}
+                  name={entry.playerNames?.[slotIdx]}
+                />
+              ))}
+            </View>
           </View>
         </View>
       );
@@ -1416,21 +1576,24 @@ export default function OperateScreen() {
 
     // ── EXPANDED (editing): full editable 2×2 view + controls. ──
     return (
-      <View style={[
-        styles.queueItem,
-        { backgroundColor: isDragging ? colors.primaryBg : colors.primaryBg,
-          borderColor: colors.primary },
-        { borderWidth: 2 },
-      ]}>
+      <View>
+        {isCardHover && (
+          <View style={[styles.queueDropLine, { backgroundColor: colors.primary }]} />
+        )}
+        <View
+          ref={cardRef}
+          onLayout={measureCard}
+          collapsable={false}
+          style={[
+            styles.queueItem,
+            { backgroundColor: colors.primaryBg, borderColor: colors.primary },
+            { borderWidth: 2 },
+            isCardDragSource && { opacity: 0.45, borderStyle: 'dashed' },
+          ]}
+        >
         {/* ─── Header: drag handle + order # + (muted) type label + 완료 ─── */}
         <View style={styles.queueCardHeader}>
-          <View
-            {...pan.panHandlers}
-            style={[styles.dragHandle, { borderColor: colors.border }]}
-            accessibilityLabel="드래그하여 순서 변경"
-          >
-            <Icon name="menu" size={14} color={colors.textLight} />
-          </View>
+          {QueueDragHandle}
           <View style={[styles.queueNum, { backgroundColor: idx === 0 ? colors.primary : colors.primaryLight }]}>
             <Text style={[styles.queueNumText, { color: idx === 0 ? palette.white : colors.primary }]}>{idx + 1}</Text>
           </View>
@@ -1532,6 +1695,7 @@ export default function OperateScreen() {
             )}
           </>
         )}
+        </View>
       </View>
     );
   };
@@ -1540,7 +1704,7 @@ export default function OperateScreen() {
     <View style={[styles.queueCard, { backgroundColor: colors.surface, borderColor: colors.border }, shadows.sm]}>
       <View style={styles.queueHeaderRow}>
         <Text style={[styles.queueHeading, { color: colors.text }]}>다음 게임 ({queuedEntries.length}조)</Text>
-        <Text style={[styles.queueHint, { color: colors.textLight }]}>수정=펼쳐 편집·순서</Text>
+        <Text style={[styles.queueHint, { color: colors.textLight }]}>≡ 드래그=순서 · 수정=편집</Text>
       </View>
       {queuedEntries.length === 0 ? (
         <Text style={[styles.queueEmpty, { color: colors.textLight }]}>
@@ -1832,6 +1996,24 @@ export default function OperateScreen() {
     </View>
   ) : null;
 
+  // Floating label that follows the finger/cursor while reordering a queue card.
+  const QueueDragOverlay = queueDrag ? (
+    <View
+      pointerEvents="none"
+      style={[
+        styles.dragGhost,
+        {
+          left: queueDrag.x - 40,
+          top: queueDrag.y - 18,
+          backgroundColor: colors.primary,
+        },
+      ]}
+    >
+      <Icon name="menu" size={13} color={palette.white} />
+      <Text style={styles.dragGhostText} numberOfLines={1}>{queueDrag.label}</Text>
+    </View>
+  ) : null;
+
   // ─────────────────────────────────────────────────────────
   // Layout
   // ─────────────────────────────────────────────────────────
@@ -1885,6 +2067,7 @@ export default function OperateScreen() {
           </View>
         </View>
         {DragOverlay}
+        {QueueDragOverlay}
         {modals}
       </SafeAreaView>
     );
@@ -1933,6 +2116,7 @@ export default function OperateScreen() {
         <View style={{ height: spacing.xxxl }} />
       </ScrollView>
       {DragOverlay}
+      {QueueDragOverlay}
       {modals}
     </SafeAreaView>
   );
@@ -2720,6 +2904,8 @@ const styles = StyleSheet.create({
     gap: spacing.sm, overflow: 'hidden',
   },
   queueRow2Top: { flexDirection: 'row', alignItems: 'center', gap: spacing.xs },
+  // Drop indicator line shown above the queue card a dragged card would land on.
+  queueDropLine: { height: 3, borderRadius: 2, marginVertical: 3 },
   queueNumSm: { width: 22, height: 22, borderRadius: 11, alignItems: 'center', justifyContent: 'center' },
   nextTag: { paddingHorizontal: spacing.sm, paddingVertical: 2, borderRadius: radius.sm },
   nextTagText: { fontSize: 11, fontWeight: '800' },
