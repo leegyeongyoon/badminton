@@ -188,10 +188,15 @@ function RootLayoutInner() {
         return;
       }
 
-      // 4) Otherwise -> club-centric home. Bounce off auth/guest/onboarding-only
-      // screens (and the now-complete profile-setup / join / attend transient
-      // screens).
-      if (inAuthGroup || inGuestStatus || inProfileSetup || inJoin || inAttend) {
+      // 4) Otherwise -> club-centric home. Bounce off auth/guest/onboarding/
+      // profile-setup screens.
+      // NOTE: do NOT bounce inJoin / inAttend here. Those transient screens set
+      // their pending action (invite code / attend session) which steps 2-3 then
+      // consume and navigate away. Bouncing them races the pending-set: the gate
+      // runs once before the screen stores its pending → bounces to home →
+      // isNavigatingRef blocks the re-run that would consume it → an ALREADY
+      // logged-in user lands on home and the join/attend never runs.
+      if (inAuthGroup || inGuestStatus || inProfileSetup) {
         isNavigatingRef.current = true;
         router.replace('/(tabs)');
         setTimeout(() => { isNavigatingRef.current = false; }, 100);
