@@ -109,17 +109,41 @@ export async function registerTurn(
     }
   }
 
-  // A1 (SOFT double-booking): the former PLAYER double-booking HARD blocks here
-  // are removed so the operator can assign/promote a player who is already
-  // playing/queued elsewhere this 정모. Specifically removed:
-  //   (1) the session cross-court player guard (player in another WAITING/PLAYING
-  //       turn of this 정모), and
-  //   (2) the per-court duplicate player guard.
-  // The double-booked signal is now the non-blocking red dot (busyPlayerIds).
-  // The physical COURT-occupancy conflict (a court can't host two simultaneous
-  // WAITING/PLAYING turns) is still a HARD block — enforced by assignEntry's
-  // occupancy guard and the maxTurns check below. Maintenance / check-in /
-  // penalty checks above also remain.
+  // 코트 배정 가드: "게임 중(PLAYING)인 사람은 코트에 배정 차단" (사용자 결정).
+  // QUEUE(다음 게임 = addEntry, courtId 없음)에 올리는 건 여전히 SOFT 허용 —
+  // 이 가드는 registerTurn(실제 코트 배정/materialize) 경로에서만 동작한다. 한 사람이
+  // 동시에 두 코트에서 게임하는 물리적 모순을 막는다. WAITING(대기 줄세우기)이 아니라
+  // 지금 '진행 중(PLAYING)'인 경우만 차단 — 게임이 끝나면 배정 가능.
+  if (effectiveClubSessionId) {
+    const playingElsewhere = await prisma.courtTurn.findMany({
+      where: {
+        clubSessionId: effectiveClubSessionId,
+        status: 'PLAYING',
+        courtId: { not: courtId },
+        players: { some: { userId: { in: playerIds } } },
+      },
+      select: {
+        players: {
+          where: { userId: { in: playerIds } },
+          select: { user: { select: { name: true } } },
+        },
+      },
+    });
+    if (playingElsewhere.length > 0) {
+      const names = [
+        ...new Set(
+          playingElsewhere.flatMap((t) => t.players.map((p) => p.user?.name ?? '선수')),
+        ),
+      ];
+      throw new BadRequestError(
+        `${names.join(', ')}님이 다른 코트에서 게임 중이에요. 게임이 끝난 뒤 배정해 주세요`,
+      );
+    }
+  }
+
+  // A1 (SOFT double-booking, QUEUE only): 큐 등록(addEntry)은 게임 중/대기 중인 사람도
+  // 올릴 수 있다(빨간 점 신호만). 위 가드는 코트 '배정' 시점의 PLAYING 충돌만 막는다.
+  // 물리적 코트 점유 충돌(한 코트 동시 2턴)은 assignEntry 점유 가드 + 아래 maxTurns로 유지.
 
   // Check max turns
   const activeTurns = await prisma.courtTurn.count({
