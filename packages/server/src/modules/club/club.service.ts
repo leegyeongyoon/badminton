@@ -2,6 +2,7 @@ import crypto from 'crypto';
 import QRCode from 'qrcode';
 import { prisma } from '../../utils/prisma';
 import { NotFoundError, ConflictError, ForbiddenError } from '../../utils/errors';
+import { verifyClubStaff, deleteSessionCascade } from '../clubSession/clubSession.service';
 import type {
   CreateClubInput,
   ClubMemberResponse,
@@ -72,6 +73,53 @@ export async function joinClub(userId: string, inviteCode: string) {
   });
 
   return { success: true, clubId: club.id, clubName: club.name };
+}
+
+/**
+ * HARD-delete a 모임 (모임 삭제) and ALL of its descendants. Auth: SUPER_ADMIN
+ * (global role) OR LEADER/STAFF of the club.
+ *
+ * Cascade vs manual: the schema cascades Club→ClubMember / Club→ClubSession /
+ * Club→ClubMessage, but NOT ClubSession→CourtTurn / ClubSession→GameBoard (and
+ * GameBoardEntry's court/turn FKs have no cascade). So a single
+ * prisma.club.delete would fail on those dangling rows. We delete each session's
+ * subtree via the shared deleteSessionCascade (FK-safe bottom-up:
+ * boardEntries→board→games→turns→checkins→courts→session), THEN delete the club
+ * (which cascades the remaining ClubMember + ClubMessage rows). Everything runs in
+ * one transaction so no orphans remain.
+ */
+export async function deleteClub(
+  clubId: string,
+  requesterId: string,
+  requesterRole: string,
+): Promise<{ success: true }> {
+  const club = await prisma.club.findUnique({
+    where: { id: clubId },
+    select: { id: true },
+  });
+  if (!club) throw new NotFoundError('모임');
+
+  // SUPER_ADMIN bypasses the per-club staff check; everyone else must be
+  // LEADER/STAFF of this club.
+  if (requesterRole !== 'SUPER_ADMIN') {
+    await verifyClubStaff(clubId, requesterId);
+  }
+
+  const sessions = await prisma.clubSession.findMany({
+    where: { clubId },
+    select: { id: true },
+  });
+
+  await prisma.$transaction(async (tx) => {
+    // Delete every session's subtree first (the parts that don't cascade from
+    // the club), then the club row (cascades ClubMember + ClubMessage).
+    for (const s of sessions) {
+      await deleteSessionCascade(tx, s.id);
+    }
+    await tx.club.delete({ where: { id: clubId } });
+  });
+
+  return { success: true };
 }
 
 /**

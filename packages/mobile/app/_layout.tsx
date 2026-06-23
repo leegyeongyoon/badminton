@@ -119,8 +119,10 @@ function RootLayoutInner() {
       // A returning user whose profile has NO 급수 (skillLevel) is also routed to
       // profile-setup so 급수 is set exactly once (existing users WITH a 급수 — e.g.
       // seed leaders — are unaffected).
+      // 최고관리자(SUPER_ADMIN)는 플레이어가 아니므로 급수/프로필 온보딩을 건너뛴다.
       const needsProfile =
-        !user || user.name === PLACEHOLDER_NAME || !user.name?.trim() || !user.skillLevel;
+        user?.role !== 'SUPER_ADMIN' &&
+        (!user || user.name === PLACEHOLDER_NAME || !user.name?.trim() || !user.skillLevel);
 
       // 1) New Kakao user (placeholder name) OR a user missing 급수 → finish profile first.
       if (needsProfile) {

@@ -65,6 +65,26 @@ router.get(
   },
 );
 
+// DELETE /api/v1/club-sessions/:id - HARD-delete a 정모 + ALL descendants (courts,
+// turns, games, board, check-ins). Distinct from POST /:id/end (graceful 종료).
+// Auth in the service: SUPER_ADMIN OR LEADER/STAFF of the session's club.
+router.delete(
+  '/:id',
+  authenticate,
+  async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const result = await clubSessionService.deleteSession(
+        req.params.id as string,
+        req.user!.userId,
+        req.user!.role,
+      );
+      res.json(result);
+    } catch (err) {
+      next(err);
+    }
+  },
+);
+
 // GET /api/v1/club-sessions/:id/qr - per-정모 QR (payload "<WEB_BASE_URL>/attend?session=<id>" + PNG data URL).
 // Auth: any member of the session's club (enforced in the service).
 router.get(

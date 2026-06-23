@@ -8,6 +8,7 @@ import {
   bulkAddManagedMembersSchema,
 } from '@badminton/shared';
 import { authenticate } from '../../middleware/auth';
+import { roleGuard } from '../../middleware/roleGuard';
 import { validate } from '../../middleware/validate';
 import { BadRequestError } from '../../utils/errors';
 import * as clubService from './club.service';
@@ -26,7 +27,10 @@ function parsePeriod(raw: unknown) {
   return result.data;
 }
 
-router.post('/', authenticate, validate(createClubSchema), async (req: Request, res: Response, next: NextFunction) => {
+// POST /api/v1/clubs - create a 모임. Only operators may create clubs: a
+// SUPER_ADMIN or a CLUB_LEADER (a PLAYER must first be approved via 운영자 신청).
+// The creator becomes the new club's LEADER (see clubService.createClub).
+router.post('/', authenticate, roleGuard('SUPER_ADMIN', 'CLUB_LEADER'), validate(createClubSchema), async (req: Request, res: Response, next: NextFunction) => {
   try {
     const club = await clubService.createClub(req.user!.userId, req.body);
     res.status(201).json(club);
@@ -37,6 +41,15 @@ router.get('/', authenticate, async (req: Request, res: Response, next: NextFunc
   try {
     const clubs = await clubService.listMyClubs(req.user!.userId);
     res.json(clubs);
+  } catch (err) { next(err); }
+});
+
+// DELETE /api/v1/clubs/:id - HARD-delete a 모임 and ALL descendants. Auth in the
+// service: SUPER_ADMIN (global role) OR LEADER/STAFF of the club; PLAYER → 403.
+router.delete('/:id', authenticate, async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const result = await clubService.deleteClub(req.params.id as string, req.user!.userId, req.user!.role);
+    res.json(result);
   } catch (err) { next(err); }
 });
 

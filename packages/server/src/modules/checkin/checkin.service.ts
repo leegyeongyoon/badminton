@@ -258,6 +258,33 @@ export async function attendViaQr(clubSessionId: string, userId: string) {
     throw new BadRequestError('진행 중인 정모가 아닙니다');
   }
 
+  // First-time 정모 출석 QR scan = JOIN the 모임 + attend. A real (non-guest)
+  // user who scans the per-정모 QR and isn't yet a ClubMember is enrolled as a
+  // MEMBER of the session's club FIRST, so they appear in the roster and the
+  // monthly 출석왕 leaderboard. Idempotent: existing members keep their role and
+  // guests are never enrolled (guests have no ClubMember row). The create is
+  // guarded against a race (P2002 on the userId_clubId unique = already a member).
+  const user = await prisma.user.findUnique({
+    where: { id: userId },
+    select: { isGuest: true },
+  });
+  if (user && !user.isGuest) {
+    const existingMembership = await prisma.clubMember.findUnique({
+      where: { userId_clubId: { userId, clubId: session.clubId } },
+    });
+    if (!existingMembership) {
+      try {
+        await prisma.clubMember.create({
+          data: { userId, clubId: session.clubId, role: 'MEMBER' },
+        });
+      } catch (err: any) {
+        // P2002 = unique violation: another concurrent scan already enrolled
+        // them. Idempotent — swallow and proceed with check-in.
+        if (err?.code !== 'P2002') throw err;
+      }
+    }
+  }
+
   // BUG-4: Idempotency must key ONLY on an existing OPEN check-in scoped to THIS
   // session. A facility-only (clubSessionId null) open check-in does NOT mean the
   // member is in this 정모's pool — treating it as "already present" left them out

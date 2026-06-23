@@ -325,6 +325,46 @@ export default function ClubDetailScreen() {
     }
   };
 
+  // 모임 삭제 (운영진/최고관리자). TWO-step confirm — 모임과 모든 정모·체크인·게임이
+  // 영구 삭제되므로 한 번 더 묻는다. 성공 시 홈으로 이동하고 모임 목록을 갱신한다.
+  const isSuperAdmin = user?.role === 'SUPER_ADMIN';
+  const canDeleteClub = isLeaderOrStaff || isSuperAdmin;
+  const [deletingClub, setDeletingClub] = useState(false);
+  const { deleteClub: deleteClubInStore, fetchClubs } = useClubStore();
+  const handleDeleteClub = () => {
+    if (!clubId || deletingClub) return;
+    showConfirm(
+      '모임 삭제',
+      `'${club?.name ?? '이 모임'}'을(를) 삭제할까요? 모든 정모·출석·게임 기록이 영구 삭제됩니다.`,
+      () => {
+        // Second confirmation — this is irreversible.
+        showConfirm(
+          '정말 삭제할까요?',
+          '이 작업은 되돌릴 수 없습니다.',
+          async () => {
+            setDeletingClub(true);
+            try {
+              await deleteClubInStore(clubId);
+              showSuccess('모임을 삭제했어요');
+              await fetchClubs();
+              router.replace('/(tabs)');
+            } catch (err: any) {
+              showAlert(Strings.common.error, err?.response?.data?.error || '모임 삭제에 실패했습니다');
+            } finally {
+              setDeletingClub(false);
+            }
+          },
+          '삭제',
+          Strings.common.cancel,
+          'danger',
+        );
+      },
+      '삭제',
+      Strings.common.cancel,
+      'danger',
+    );
+  };
+
   const checkedInMembers = currentMembers.filter((m) => m.isCheckedIn);
   const notCheckedInMembers = currentMembers.filter((m) => !m.isCheckedIn);
 
@@ -662,6 +702,27 @@ export default function ClubDetailScreen() {
               </View>
             ))}
           </View>
+
+          {/* ─── Danger zone: 모임 삭제 (운영진/최고관리자) ─── */}
+          {canDeleteClub && (
+            <View style={styles.dangerZone}>
+              <Text style={styles.dangerZoneLabel}>위험 구역</Text>
+              <TouchableOpacity
+                style={[styles.deleteClubBtn, deletingClub && { opacity: 0.5 }]}
+                onPress={handleDeleteClub}
+                disabled={deletingClub}
+                activeOpacity={0.85}
+                accessibilityLabel="모임 삭제"
+              >
+                <Text style={styles.deleteClubBtnText}>
+                  {deletingClub ? '삭제 중...' : '모임 삭제'}
+                </Text>
+              </TouchableOpacity>
+              <Text style={styles.dangerZoneHint}>
+                모임과 모든 정모·출석·게임 기록이 영구 삭제됩니다.
+              </Text>
+            </View>
+          )}
         </ScrollView>
 
         {/* Start Session Modal */}
@@ -1550,5 +1611,39 @@ const styles = StyleSheet.create({
   },
   skillChipTextActive: {
     color: Colors.primary,
+  },
+
+  // 위험 구역 — 모임 삭제
+  dangerZone: {
+    marginTop: 24,
+    marginBottom: 8,
+    paddingTop: 16,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: Colors.divider,
+    gap: 8,
+  },
+  dangerZoneLabel: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: Colors.textLight,
+    letterSpacing: 0.5,
+  },
+  deleteClubBtn: {
+    paddingVertical: 14,
+    borderRadius: 12,
+    borderWidth: 1.5,
+    borderColor: Colors.danger,
+    backgroundColor: Colors.danger + '14',
+    alignItems: 'center',
+  },
+  deleteClubBtnText: {
+    fontSize: 15,
+    fontWeight: '800',
+    color: Colors.danger,
+  },
+  dangerZoneHint: {
+    fontSize: 12,
+    color: Colors.textLight,
+    textAlign: 'center',
   },
 });

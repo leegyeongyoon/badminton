@@ -25,7 +25,7 @@ import type {
   MyStatusResponse,
 } from '@badminton/shared';
 
-async function verifyClubStaff(clubId: string, userId: string) {
+export async function verifyClubStaff(clubId: string, userId: string) {
   const member = await prisma.clubMember.findUnique({
     where: { userId_clubId: { userId, clubId } },
   });
@@ -422,6 +422,108 @@ export async function endSession(
 
   return mapClubSession(updated);
 }
+
+// --- Hard delete (정모/모임 삭제) ---
+
+/**
+ * HARD-delete a 정모 (ClubSession) and ALL of its descendants, bottom-up, inside
+ * the given transaction. Distinct from endSession (a graceful end). Works for an
+ * IN_PROGRESS (ACTIVE) session too — it just deletes everything.
+ *
+ * Why a manual bottom-up delete instead of relying on cascades: the schema only
+ * cascades PARTIALLY from a ClubSession. ClubSession→Court IS Cascade, but
+ * ClubSession→CourtTurn and ClubSession→GameBoard are NOT (default Restrict), and
+ * GameBoardEntry's court/turn FKs have no onDelete. So a single
+ * prisma.clubSession.delete would fail on the dangling CourtTurn/GameBoard rows.
+ * We therefore delete in FK-safe order:
+ *   GameBoardEntry → GameBoard → Game → CourtTurn (cascades TurnPlayer) → CheckIn
+ *   → Court → ClubSession.
+ * (Game/CourtTurn each cascade their own children — GamePlayer/NoShowRecord/
+ * TurnPlayer — so those don't need explicit deletes.)
+ *
+ * Takes a Prisma transaction client so deleteClub can reuse it across many
+ * sessions atomically.
+ */
+async function deleteSessionCascade(
+  tx: Parameters<Parameters<typeof prisma.$transaction>[0]>[0],
+  sessionId: string,
+) {
+  // The board(s) for this session, to clear entries first (entries FK board with
+  // Cascade, but also FK court/turn WITHOUT cascade — clear them before courts/turns).
+  const board = await tx.gameBoard.findUnique({
+    where: { clubSessionId: sessionId },
+    select: { id: true },
+  });
+  if (board) {
+    await tx.gameBoardEntry.deleteMany({ where: { boardId: board.id } });
+    await tx.gameBoard.delete({ where: { id: board.id } });
+  }
+
+  // Games then turns of this session. Games FK turn (Cascade) + court (Cascade);
+  // delete games first so removing turns/courts can't be blocked.
+  const turns = await tx.courtTurn.findMany({
+    where: { clubSessionId: sessionId },
+    select: { id: true },
+  });
+  const turnIds = turns.map((t) => t.id);
+  if (turnIds.length > 0) {
+    await tx.game.deleteMany({ where: { turnId: { in: turnIds } } });
+    await tx.courtTurn.deleteMany({ where: { id: { in: turnIds } } });
+  }
+
+  // CheckIns of this session (clubSession FK is SetNull, so they wouldn't be
+  // removed by the session delete — remove them explicitly so none are orphaned).
+  await tx.checkIn.deleteMany({ where: { clubSessionId: sessionId } });
+
+  // This session's own courts (and any games/turns/board-entries still on them).
+  // Court→Game/CourtTurn are Cascade; GameBoardEntry.court FK has no cascade but
+  // we already cleared all entries above.
+  await tx.court.deleteMany({ where: { clubSessionId: sessionId } });
+
+  // Finally the session row itself.
+  await tx.clubSession.delete({ where: { id: sessionId } });
+}
+
+/**
+ * HARD-delete a 정모 (정모 삭제). Auth: SUPER_ADMIN (global role) OR LEADER/STAFF
+ * of the session's club. Deletes the session + all descendants (courts, turns,
+ * games, board, check-ins) bottom-up in a transaction. Works even if the session
+ * is ACTIVE/IN_PROGRESS (this is a hard delete, separate from 정모 종료/endSession).
+ */
+export async function deleteSession(
+  sessionId: string,
+  requesterId: string,
+  requesterRole: string,
+): Promise<{ success: true }> {
+  const session = await prisma.clubSession.findUnique({
+    where: { id: sessionId },
+    select: { id: true, clubId: true, facilityId: true },
+  });
+  if (!session) throw new NotFoundError('모임 세션');
+
+  // SUPER_ADMIN bypasses the per-club staff check; everyone else must be
+  // LEADER/STAFF of the session's club.
+  if (requesterRole !== 'SUPER_ADMIN') {
+    await verifyClubStaff(session.clubId, requesterId);
+  }
+
+  await prisma.$transaction(async (tx) => {
+    await deleteSessionCascade(tx, sessionId);
+  });
+
+  const io = getIO();
+  io.to(`facility:${session.facilityId}`).emit('clubSession:ended', {
+    clubSessionId: sessionId,
+    clubId: session.clubId,
+  });
+
+  return { success: true };
+}
+
+// Internal: shared session-cascade for club.service.deleteClub (deletes every
+// session of a club inside one transaction). Exported so club.service can reuse
+// the exact same FK-safe ordering without duplicating it.
+export { deleteSessionCascade };
 
 // --- Guests (게스트) ---
 

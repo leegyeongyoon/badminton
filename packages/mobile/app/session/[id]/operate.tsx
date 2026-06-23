@@ -783,6 +783,36 @@ export default function OperateScreen() {
     );
   }, [clubSessionId, router]);
 
+  // ─── 정모 삭제 (HARD delete the whole session) ───
+  // Distinct from 정모 종료 (end): this PERMANENTLY removes the 정모 and all of its
+  // courts/turns/games/board/check-ins. TWO-step confirm, then navigate back out.
+  const handleDeleteSession = useCallback(() => {
+    if (!clubSessionId) return;
+    showConfirm(
+      '정모 삭제',
+      '이 정모를 삭제할까요? 코트·게임·출석 기록이 영구 삭제됩니다.',
+      () => {
+        showConfirm(
+          '정말 삭제할까요?',
+          '이 작업은 되돌릴 수 없습니다.',
+          async () => {
+            try {
+              await clubSessionApi.deleteSession(clubSessionId);
+              setCourtModal(false);
+              showSuccess('정모를 삭제했어요');
+              if (router.canGoBack()) router.back();
+              else router.replace('/(tabs)');
+            } catch (err: any) {
+              showAlert('오류', err.response?.data?.error || '정모 삭제에 실패했어요');
+            }
+          },
+          '삭제', '취소', 'danger',
+        );
+      },
+      '삭제', '취소', 'danger',
+    );
+  }, [clubSessionId, router]);
+
   // ─── 출석 링크 복사 ───
   // QR 화면을 열지 않고도 출석 링크(payload)를 바로 클립보드에 복사해 카톡 등에
   // 붙여넣을 수 있게 한다. (GET /club-sessions/:id/qr → payload)

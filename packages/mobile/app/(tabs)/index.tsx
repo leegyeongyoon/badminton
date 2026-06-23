@@ -225,6 +225,10 @@ export default function HomeScreen() {
   const skillMeta = skillLevel ? getSkillMeta(skillLevel) : null;
   const greetingName = user?.name || '회원';
 
+  // Only operators may create a 모임 (운영자만 모임 생성). A PLAYER sees a short
+  // hint linking to 운영자 신청 (더보기) instead of the create button.
+  const canCreateClub = user?.role === 'SUPER_ADMIN' || user?.role === 'CLUB_LEADER';
+
   // ─── Loading skeleton ───
   if (loading) {
     return (
@@ -487,14 +491,16 @@ export default function HomeScreen() {
               })
             )}
             <View style={styles.clubActions}>
-              <Button
-                title="모임 만들기"
-                icon="add"
-                variant="outline"
-                size="md"
-                onPress={() => setShowCreate(true)}
-                style={{ flex: 1 }}
-              />
+              {canCreateClub && (
+                <Button
+                  title="모임 만들기"
+                  icon="add"
+                  variant="outline"
+                  size="md"
+                  onPress={() => setShowCreate(true)}
+                  style={{ flex: 1 }}
+                />
+              )}
               <Button
                 title="모임 참여"
                 icon="link"
@@ -504,6 +510,13 @@ export default function HomeScreen() {
                 style={{ flex: 1 }}
               />
             </View>
+            {!canCreateClub && (
+              <Pressable onPress={() => router.push('/(tabs)/more')} hitSlop={6}>
+                <Text style={[styles.operatorHint, { color: colors.textLight }]}>
+                  모임을 만들려면 <Text style={{ color: colors.primary, fontWeight: '700' }}>운영자 신청</Text>이 필요해요
+                </Text>
+              </Pressable>
+            )}
           </View>
         )}
 
@@ -515,8 +528,17 @@ export default function HomeScreen() {
               title="아직 참여한 모임이 없어요"
               description="모임에 참여하면 정모 일정과 체크인, 게임 배정을 한눈에 볼 수 있어요."
               action={{ label: '모임 참여하기', onPress: () => setShowJoin(true), icon: 'link' }}
-              secondaryAction={{ label: '새 모임 만들기', onPress: () => setShowCreate(true) }}
+              {...(canCreateClub
+                ? { secondaryAction: { label: '새 모임 만들기', onPress: () => setShowCreate(true) } }
+                : {})}
             />
+            {!canCreateClub && (
+              <Pressable onPress={() => router.push('/(tabs)/more')} hitSlop={6}>
+                <Text style={[styles.operatorHint, { color: colors.textLight }]}>
+                  모임을 만들려면 <Text style={{ color: colors.primary, fontWeight: '700' }}>운영자 신청</Text>이 필요해요
+                </Text>
+              </Pressable>
+            )}
           </View>
         )}
       </ScrollView>
@@ -797,6 +819,11 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     gap: spacing.md,
     marginTop: spacing.sm,
+  },
+  operatorHint: {
+    ...typography.caption,
+    textAlign: 'center',
+    marginTop: spacing.md,
   },
 
   // Empty

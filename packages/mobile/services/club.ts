@@ -59,6 +59,9 @@ export interface BulkAddManagedMembersResult {
 export const clubApi = {
   list: () => api.get('/clubs'),
   create: (name: string) => api.post('/clubs', { name }),
+  // 모임 삭제 — 모임과 모든 하위 데이터(정모/코트/체크인 등)를 영구 삭제.
+  // 서버에서 권한 확인(SUPER_ADMIN 또는 해당 모임 LEADER/STAFF).
+  deleteClub: (id: string) => api.delete<{ success: boolean }>(`/clubs/${id}`),
   join: (inviteCode: string) => api.post<JoinClubResult>('/clubs/join', { inviteCode }),
   getInviteQr: (clubId: string) => api.get<ClubInviteQr>(`/clubs/${clubId}/invite-qr`),
   getMembers: (clubId: string) => api.get(`/clubs/${clubId}/members`),

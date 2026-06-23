@@ -29,6 +29,8 @@ interface ClubState {
   createClub: (name: string) => Promise<void>;
   /** Joins the club for the given invite code and returns the joined club's id. */
   joinClub: (inviteCode: string) => Promise<string>;
+  /** Hard-deletes a club, then drops it from the local list. */
+  deleteClub: (clubId: string) => Promise<void>;
   fetchMembers: (clubId: string) => Promise<void>;
 }
 
@@ -67,6 +69,12 @@ export const useClubStore = create<ClubState>((set) => ({
       // Non-fatal — navigation can still proceed with the returned clubId.
     }
     return data.clubId;
+  },
+
+  deleteClub: async (clubId) => {
+    await clubApi.deleteClub(clubId);
+    // Drop it locally so the home list / club list reflect the deletion at once.
+    set((state) => ({ clubs: state.clubs.filter((c) => c.id !== clubId) }));
   },
 
   fetchMembers: async (clubId) => {

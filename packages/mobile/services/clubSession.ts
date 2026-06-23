@@ -128,6 +128,11 @@ export const clubSessionApi = {
     api.post(`/club-sessions/${sessionId}/courts/add`),
   end: (sessionId: string) =>
     api.post(`/club-sessions/${sessionId}/end`),
+
+  // 정모 삭제 — 정모와 모든 하위 데이터(코트/턴/게임/보드/체크인)를 영구 삭제.
+  // 정모 종료(end)와 다른 하드 삭제. 서버 권한 확인(SUPER_ADMIN 또는 LEADER/STAFF).
+  deleteSession: (sessionId: string) =>
+    api.delete<{ success: boolean }>(`/club-sessions/${sessionId}`),
   bulkRegisterTurns: (sessionId: string, turns: Array<{ courtId: string; playerIds: string[]; gameType?: string }>) =>
     api.post(`/club-sessions/${sessionId}/turns/bulk`, { turns }),
   updateMemberRole: (clubId: string, userId: string, role: string) =>
