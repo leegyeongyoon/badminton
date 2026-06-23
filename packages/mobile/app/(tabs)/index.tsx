@@ -50,18 +50,6 @@ function formatSessionDateLabel(iso?: string): string {
   return `정모 ${md}`;
 }
 
-function formatSessionTime(iso?: string): string {
-  if (!iso) return '';
-  const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return '';
-  const hh = d.getHours();
-  const mm = d.getMinutes();
-  const ampm = hh < 12 ? '오전' : '오후';
-  const h12 = hh % 12 === 0 ? 12 : hh % 12;
-  const mmStr = mm === 0 ? '' : ` ${String(mm).padStart(2, '0')}분`;
-  return `${ampm} ${h12}시${mmStr} 시작`;
-}
-
 export default function HomeScreen() {
   const router = useRouter();
   const { colors, shadows } = useTheme();
@@ -218,16 +206,6 @@ export default function HomeScreen() {
     return set;
   }, [clubs]);
 
-  const activeClubIds = useMemo(
-    () => new Set(activeSessions.map((s) => s.clubId)),
-    [activeSessions],
-  );
-
-  const clubsWithoutSession = useMemo(
-    () => (clubs as any[]).filter((c) => !activeClubIds.has(c.id)),
-    [clubs, activeClubIds],
-  );
-
   // Checked in to THIS 정모? Status carries facilityId (and sometimes clubSessionId).
   const isCheckedInToSession = useCallback(
     (s: ActiveSession) => {
@@ -316,204 +294,153 @@ export default function HomeScreen() {
           </Pressable>
         )}
 
-        {/* ─── 3. 진행 중인 정모 ─── */}
-        {activeSessions.length > 0 && (
+        {/* ─── 3. 내 모임 (centerpiece) — ONE unified list ───
+            모임마다 카드 하나. 각 카드가 그 모임의 "지금" 진행 상황(진행 중 정모 +
+            내 상태)과 맥락에 맞는 단 하나의 primary 액션을 보여준다.
+            운영판은 그 모임의 LEADER/STAFF에게만 노출(staffClubIds 게이트). */}
+        {clubs.length > 0 && (
           <View style={styles.section}>
-            <SectionHeader title="진행 중인 정모" count={activeSessions.length} />
-            {activeSessions.map((s) => {
-              const checkedIn = isCheckedInToSession(s);
-              const isStaff = staffClubIds.has(s.clubId);
+            <SectionHeader title="내 모임" count={clubs.length} />
+            {(clubs as any[]).map((c) => {
+              const isStaff = staffClubIds.has(c.id);
+              const session = activeSessions.find((s) => s.clubId === c.id) || null;
+              const checkedIn = session ? isCheckedInToSession(session) : false;
+              const mine = session && myStatus && myStatus.clubSessionId === session.id ? myStatus : null;
+              const isPlaying = mine?.status === 'PLAYING';
+              const isQueued = mine?.status === 'QUEUED';
+
+              // 상태 한 줄: 진행 중 정모면 정모(일자)+내 상태, 없으면 calm.
+              let stateTint = colors.textLight;
+              let stateText = '진행 중인 정모 없음';
+              let stateStrong = false;
+              if (session) {
+                const dateLabel = session.title || formatSessionDateLabel(session.scheduledStartAt || session.startedAt);
+                let mineLabel: string;
+                if (isPlaying) {
+                  mineLabel = mine?.courtName ? `게임 중 · ${mine.courtName}` : '게임 중';
+                  stateTint = colors.playerInTurn;
+                } else if (isQueued) {
+                  mineLabel = mine?.queueOrder && mine.queueOrder > 0 ? `대기 ${mine.queueOrder}번째` : '다음 게임 대기';
+                  stateTint = colors.primary;
+                } else if (checkedIn) {
+                  mineLabel = '참석 중';
+                  stateTint = colors.secondary;
+                } else {
+                  mineLabel = '미체크인';
+                  stateTint = colors.warning;
+                }
+                stateText = `${dateLabel} · 진행 중 · ${mineLabel}`;
+                stateStrong = true;
+              }
+
+              // 맥락별 단 하나의 primary 액션 (+ 조용한 secondary는 운영진 현황 보기뿐).
+              // member→현황 보기 / member 미체크인→체크인 / operator→운영판
+              //   / 정모 없는 operator→정모 시작 / 정모 없는 member→카드 탭(클럽).
+              const goClub = () => router.push(`/club/${c.id}`);
               return (
-                <View
-                  key={s.id}
-                  style={[styles.sessionCard, { backgroundColor: colors.surface }, shadows.md]}
+                <Pressable
+                  key={c.id}
+                  onPress={goClub}
+                  style={({ pressed }) => [
+                    styles.clubCard,
+                    { backgroundColor: colors.surface, borderColor: colors.border },
+                    session && { borderColor: colors.primaryLight },
+                    shadows.sm,
+                    pressed && { opacity: 0.92 },
+                  ]}
                 >
-                  {/* live ribbon */}
-                  <View style={styles.sessionTopRow}>
-                    <View style={[styles.livePill, { backgroundColor: colors.secondaryLight }]}>
-                      <View style={[styles.livePillDot, { backgroundColor: colors.secondary }]} />
-                      <Text style={[styles.livePillText, { color: colors.secondary }]}>진행 중</Text>
+                  {/* Title row: 모임 이름 + (운영진) 배지 */}
+                  <View style={styles.clubTitleRow}>
+                    <View style={[styles.clubIconWrap, { backgroundColor: session ? colors.secondaryLight : colors.primaryLight }]}>
+                      <Icon name="club" size={20} color={session ? colors.secondary : colors.primary} />
                     </View>
+                    <Text style={[styles.clubName, { color: colors.text, flex: 1 }]} numberOfLines={1}>
+                      {c.name}
+                    </Text>
                     {isStaff && (
                       <View style={[styles.rolePill, { backgroundColor: colors.warningLight }]}>
-                        <Icon name="leader" size={12} color={colors.warning} />
+                        <Icon name="leader" size={11} color={colors.warning} />
                         <Text style={[styles.rolePillText, { color: colors.warning }]}>운영진</Text>
                       </View>
                     )}
+                    {!session && <Icon name="chevronRight" size={18} color={colors.textLight} />}
                   </View>
 
-                  {/* 모임(클럽) 이름이 제목, 그 아래 정모(일자) 한 줄 — 2층 구조를
-                      명확히 읽히게. 커스텀 title이 있으면 그걸 우선. */}
-                  <Text style={[styles.sessionClub, { color: colors.text }]} numberOfLines={1}>
-                    {s.clubName}
-                  </Text>
-                  <View style={styles.sessionMetaRow}>
-                    <Icon name="calendar" size={14} color={colors.primary} />
-                    <Text style={[styles.sessionMeta, { color: colors.primary, fontWeight: '700' }]} numberOfLines={1}>
-                      {s.title || formatSessionDateLabel(s.scheduledStartAt || s.startedAt)}
+                  {/* Status line: 정모(일자) · 진행 중 · 내 상태  /  진행 중인 정모 없음 */}
+                  <View style={styles.clubStatusRow}>
+                    {stateStrong && <View style={[styles.statusDot, { backgroundColor: stateTint }]} />}
+                    <Text
+                      style={[
+                        styles.clubStatusText,
+                        { color: stateStrong ? stateTint : colors.textLight },
+                        stateStrong && { fontWeight: '700' },
+                      ]}
+                      numberOfLines={1}
+                    >
+                      {stateText}
                     </Text>
                   </View>
 
-                  <View style={styles.sessionMetaRow}>
-                    <Icon name="map" size={14} color={colors.textLight} />
-                    <Text style={[styles.sessionMeta, { color: colors.textSecondary }]} numberOfLines={1}>
-                      {s.facilityName}
-                    </Text>
-                  </View>
-                  {!!formatSessionTime(s.scheduledStartAt || s.startedAt) && (
-                    <View style={styles.sessionMetaRow}>
-                      <Icon name="timer" size={14} color={colors.textLight} />
-                      <Text style={[styles.sessionMeta, { color: colors.textSecondary }]}>
-                        {formatSessionTime(s.scheduledStartAt || s.startedAt)}
-                      </Text>
-                    </View>
-                  )}
-
-                  {/* player state — board-aware when this session is the one I'm in.
-                      Split into a status label + distinct 순번 / 코트 chips so it's
-                      legible at a glance rather than one crammed line. */}
-                  {checkedIn ? (
-                    (() => {
-                      const mine = myStatus && myStatus.clubSessionId === s.id ? myStatus : null;
-                      const isPlaying = mine?.status === 'PLAYING';
-                      const isQueued = mine?.status === 'QUEUED';
-                      const order = mine?.queueOrder ?? 0;
-
-                      let icon: 'success' | 'play' | 'waiting' = 'success';
-                      let label = '대기 중';
-                      let sub = '배정되면 알림이 와요';
-                      let tint = colors.secondary;
-                      let bg = colors.secondaryBg;
-                      let orderChip: string | null = null;
-                      let courtChip: string | null = null;
-
-                      if (isPlaying) {
-                        icon = 'play';
-                        tint = colors.playerInTurn;
-                        bg = colors.dangerBg;
-                        label = '게임 중';
-                        sub = '지금 코트로 가세요';
-                        courtChip = mine?.courtName ?? null;
-                      } else if (isQueued) {
-                        icon = 'waiting';
-                        tint = colors.primary;
-                        bg = colors.primaryBg;
-                        label = '다음 게임';
-                        sub = '배정되면 알림이 와요';
-                        orderChip = order > 0 ? `대기 ${order}번째` : null;
-                        courtChip = mine?.courtName ?? '코트 미정';
-                      }
-
-                      const strong = isPlaying || isQueued;
-                      return (
-                        <View style={[styles.statePanel, { backgroundColor: bg }, strong && { borderColor: tint, borderWidth: 1.5 }]}>
-                          <View style={styles.stateHeadRow}>
-                            <View style={[styles.stateIcon, { backgroundColor: tint }]}>
-                              <Icon name={icon} size={16} color={palette.white} />
-                            </View>
-                            <Text style={[styles.stateLabel, { color: tint }]}>{label}</Text>
-                          </View>
-                          {(orderChip || courtChip) && (
-                            <View style={styles.stateChipRow}>
-                              {orderChip && (
-                                <View style={[styles.stateChip, { backgroundColor: tint }]}>
-                                  <Text style={styles.stateChipText}>{orderChip}</Text>
-                                </View>
-                              )}
-                              {courtChip && (
-                                <View style={[styles.stateChipOutline, { borderColor: tint }]}>
-                                  <Icon name="court" size={13} color={tint} />
-                                  <Text style={[styles.stateChipOutlineText, { color: tint }]}>{courtChip}</Text>
-                                </View>
-                              )}
-                            </View>
-                          )}
-                          <Text style={[styles.stateSub, { color: colors.textSecondary }]}>{sub}</Text>
-                        </View>
-                      );
-                    })()
-                  ) : (
-                    <Button
-                      title="체크인"
-                      icon="checkin"
-                      size="lg"
-                      fullWidth
-                      loading={quickCheckinSid === s.id}
-                      onPress={() => handleQuickCheckin(s.id)}
-                      style={styles.checkinBtn}
-                    />
-                  )}
-
-                  {/* Actions grouped on one row so the card isn't a tall button stack.
-                      현황 보기 is always available; 운영판 sits beside it for staff. */}
-                  <View style={styles.sessionActions}>
-                    <Button
-                      title="현황 보기"
-                      icon="tv"
-                      variant={isStaff ? 'outline' : 'primary'}
-                      size="md"
-                      onPress={() => router.push(`/session/${s.id}/board`)}
-                      style={{ flex: 1 }}
-                    />
-                    {isStaff && (
+                  {/* ONE primary action by context (운영판 = 운영진만). */}
+                  {session ? (
+                    isStaff ? (
+                      <View style={styles.clubActions}>
+                        <Button
+                          title="운영판"
+                          icon="board"
+                          variant="primary"
+                          size="md"
+                          onPress={() => router.push(`/session/${session.id}/operate`)}
+                          style={{ flex: 1 }}
+                        />
+                        <Button
+                          title="현황 보기"
+                          icon="tv"
+                          variant="outline"
+                          size="md"
+                          onPress={() => router.push(`/session/${session.id}/board`)}
+                          style={{ flex: 1 }}
+                        />
+                      </View>
+                    ) : !checkedIn ? (
                       <Button
-                        title="운영판"
-                        icon="board"
+                        title="체크인"
+                        icon="checkin"
+                        size="md"
+                        fullWidth
+                        loading={quickCheckinSid === session.id}
+                        onPress={() => handleQuickCheckin(session.id)}
+                        style={styles.clubPrimaryBtn}
+                      />
+                    ) : (
+                      <Button
+                        title="현황 보기"
+                        icon="tv"
                         variant="primary"
                         size="md"
-                        onPress={() => router.push(`/session/${s.id}/operate`)}
-                        style={{ flex: 1 }}
+                        fullWidth
+                        onPress={() => router.push(`/session/${session.id}/board`)}
+                        style={styles.clubPrimaryBtn}
                       />
-                    )}
-                  </View>
-                </View>
+                    )
+                  ) : (
+                    isStaff && (
+                      <Button
+                        title="정모 시작"
+                        icon="play"
+                        variant="outline"
+                        size="md"
+                        fullWidth
+                        onPress={goClub}
+                        style={styles.clubPrimaryBtn}
+                      />
+                    )
+                  )}
+                </Pressable>
               );
             })}
-          </View>
-        )}
 
-        {/* ─── 4. 내 모임 (정모 없는 클럽) ─── */}
-        {clubs.length > 0 && (
-          <View style={styles.section}>
-            <SectionHeader
-              title="내 모임"
-              count={clubs.length}
-              action={{ label: '+ 모임', onPress: () => setShowJoin(true) }}
-            />
-            {clubsWithoutSession.length === 0 ? (
-              <Text style={[styles.allActiveNote, { color: colors.textLight }]}>
-                모든 모임이 정모 진행 중이에요
-              </Text>
-            ) : (
-              clubsWithoutSession.map((c: any) => {
-                const isStaff = staffClubIds.has(c.id);
-                return (
-                  <Pressable
-                    key={c.id}
-                    onPress={() => router.push(`/club/${c.id}`)}
-                    style={({ pressed }) => [
-                      styles.clubCard,
-                      { backgroundColor: colors.surface, borderColor: colors.border },
-                      pressed && { opacity: 0.9 },
-                    ]}
-                  >
-                    <View style={[styles.clubIconWrap, { backgroundColor: colors.primaryLight }]}>
-                      <Icon name="club" size={22} color={colors.primary} />
-                    </View>
-                    <View style={{ flex: 1 }}>
-                      <Text style={[styles.clubName, { color: colors.text }]} numberOfLines={1}>
-                        {c.name}
-                      </Text>
-                      <Text style={[styles.clubMeta, { color: colors.textLight }]}>
-                        멤버 {c.memberCount ?? 0}명
-                        {isStaff ? ' · 운영진' : ''}
-                      </Text>
-                    </View>
-                    <Icon name="chevronRight" size={20} color={colors.textLight} />
-                  </Pressable>
-                );
-              })
-            )}
+            {/* Footer actions (quiet): 모임 참여 누구나 · 모임 만들기 운영자만. */}
             <View style={styles.clubActions}>
               {canCreateClub && (
                 <Button
@@ -544,7 +471,7 @@ export default function HomeScreen() {
           </View>
         )}
 
-        {/* ─── 5. Empty state (no clubs) ─── */}
+        {/* ─── 4. Empty state (no clubs) ─── */}
         {clubs.length === 0 && (
           <View style={styles.emptyWrap}>
             <EmptyState
@@ -714,35 +641,7 @@ const styles = StyleSheet.create({
     marginBottom: spacing.xl,
   },
 
-  // 정모 card
-  sessionCard: {
-    borderRadius: radius.card,
-    padding: spacing.xl,
-    marginBottom: spacing.md,
-  },
-  sessionTopRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing.sm,
-    marginBottom: spacing.md,
-  },
-  livePill: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing.xs + 1,
-    paddingHorizontal: spacing.smd,
-    paddingVertical: spacing.xs,
-    borderRadius: radius.pill,
-  },
-  livePillDot: {
-    width: 7,
-    height: 7,
-    borderRadius: 4,
-  },
-  livePillText: {
-    fontSize: 12,
-    fontWeight: '800',
-  },
+  // 운영진 배지 (모임 카드 제목 옆)
   rolePill: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -755,89 +654,46 @@ const styles = StyleSheet.create({
     fontSize: 11,
     fontWeight: '800',
   },
-  sessionClub: {
-    ...typography.h3,
-    marginBottom: spacing.sm,
-  },
-  sessionMetaRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing.sm,
-    marginBottom: spacing.xs,
-  },
-  sessionMeta: {
-    ...typography.body2,
-    flex: 1,
-  },
-  checkinBtn: {
-    marginTop: spacing.lg,
-  },
-  sessionActions: {
-    flexDirection: 'row',
-    gap: spacing.sm,
-    marginTop: spacing.md,
-  },
 
-  // Player-state panel — split label + 순번/코트 chips (replaces the crammed pill)
-  statePanel: {
-    borderRadius: radius.xxl,
-    padding: spacing.lg,
-    marginTop: spacing.lg,
-    gap: spacing.sm,
-  },
-  stateHeadRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
-  stateIcon: {
-    width: 30, height: 30, borderRadius: 15,
-    alignItems: 'center', justifyContent: 'center',
-  },
-  stateLabel: { ...typography.h3, flex: 1 },
-  stateChipRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, flexWrap: 'wrap' },
-  stateChip: {
-    paddingHorizontal: spacing.md,
-    paddingVertical: spacing.xs + 2,
-    borderRadius: radius.pill,
-  },
-  stateChipText: { color: palette.white, ...typography.subtitle2, fontSize: 15 },
-  stateChipOutline: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing.xs,
-    paddingHorizontal: spacing.md,
-    paddingVertical: spacing.xs + 1,
-    borderRadius: radius.pill,
-    borderWidth: 2,
-  },
-  stateChipOutlineText: { ...typography.subtitle2, fontSize: 15 },
-  stateSub: { ...typography.body2 },
-
-  // Club cards
-  allActiveNote: {
-    ...typography.body2,
-    textAlign: 'center',
-    paddingVertical: spacing.lg,
-  },
+  // ─── 내 모임 — 통합 카드 (모임 + 그 모임의 현재 진행 상황) ───
   clubCard: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing.md,
     padding: spacing.lg,
     borderRadius: radius.card,
     borderWidth: 1,
-    marginBottom: spacing.sm,
+    marginBottom: spacing.md,
+    gap: spacing.md,
+  },
+  clubTitleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.md,
   },
   clubIconWrap: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
+    width: 40,
+    height: 40,
+    borderRadius: radius.xl,
     justifyContent: 'center',
     alignItems: 'center',
   },
   clubName: {
     ...typography.subtitle1,
   },
-  clubMeta: {
-    ...typography.caption,
-    marginTop: 2,
+  clubStatusRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+  },
+  statusDot: {
+    width: 7,
+    height: 7,
+    borderRadius: 4,
+  },
+  clubStatusText: {
+    ...typography.body2,
+    flex: 1,
+  },
+  clubPrimaryBtn: {
+    marginTop: spacing.xs,
   },
   clubActions: {
     flexDirection: 'row',
