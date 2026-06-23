@@ -997,6 +997,28 @@ export async function getAvailablePlayers(facilityId: string, clubSessionId?: st
   // (and not already on a court) is QUEUED, not AVAILABLE.
   const queuedUserIds = await getQueuedBoardUserIds(clubSessionId);
 
+  // PER-CLUB 급수 (모임별 급수): when this pool is scoped to a 정모, resolve each
+  // player's EFFECTIVE skill = ClubMember(userId, session.clubId).skillLevel ??
+  // PlayerProfile.skillLevel. The operator-set per-club override wins; guests
+  // (no ClubMember row) fall back to their own profile default. Facility-only
+  // pools have no single club → keep the PlayerProfile default.
+  const clubSkillOverride = new Map<string, SkillLevel | null>();
+  if (clubSessionId) {
+    const session = await prisma.clubSession.findUnique({
+      where: { id: clubSessionId },
+      select: { clubId: true },
+    });
+    if (session) {
+      const overrides = await prisma.clubMember.findMany({
+        where: { clubId: session.clubId, userId: { in: dedupedCheckins.map((c) => c.userId) } },
+        select: { userId: true, skillLevel: true },
+      });
+      for (const o of overrides) {
+        clubSkillOverride.set(o.userId, (o.skillLevel ?? null) as SkillLevel | null);
+      }
+    }
+  }
+
   return dedupedCheckins.map((c) => {
     let status: PlayerStatus;
     if (c.restingAt) {
@@ -1009,10 +1031,15 @@ export async function getAvailablePlayers(facilityId: string, clubSessionId?: st
       status = PlayerStatus.AVAILABLE;
     }
 
+    // Effective PER-CLUB 급수: ClubMember override (if any) wins, else own default.
+    const effectiveSkill = clubSkillOverride.has(c.userId)
+      ? (clubSkillOverride.get(c.userId) ?? (c.user.profile?.skillLevel ?? null))
+      : (c.user.profile?.skillLevel ?? null);
+
     return {
       userId: c.userId,
       userName: c.user.name,
-      skillLevel: (c.user.profile?.skillLevel ?? null) as SkillLevel | null,
+      skillLevel: effectiveSkill as SkillLevel | null,
       preferredGameTypes: (c.user.profile?.preferredGameTypes || ['DOUBLES']) as any[],
       gender: c.user.profile?.gender || null,
       checkedInAt: c.checkedInAt.toISOString(),

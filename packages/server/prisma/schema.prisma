@@ -262,6 +262,10 @@ model ClubMember {
   userId String
   clubId String
   role   ClubMemberRole @default(MEMBER)
+  // Per-club 급수 override set by the club's operator (LEADER/STAFF). When
+  // non-null it OVERRIDES the user's own default (PlayerProfile.skillLevel) FOR
+  // THIS CLUB ONLY. Null = no override → fall back to the user's own default.
+  skillLevel SkillLevel?
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
   club Club @relation(fields: [clubId], references: [id], onDelete: Cascade)

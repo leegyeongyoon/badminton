@@ -223,7 +223,9 @@ export async function getMembers(clubId: string, facilityId?: string): Promise<C
       userId: m.user.id,
       name: m.user.name,
       role: m.role as ClubMemberRole,
-      skillLevel: (m.user.profile?.skillLevel ?? null) as SkillLevel | null,
+      // Effective PER-CLUB 급수 (모임별 급수): the operator-set ClubMember override
+      // wins for this club, else the user's own default (PlayerProfile.skillLevel).
+      skillLevel: (m.skillLevel ?? m.user.profile?.skillLevel ?? null) as SkillLevel | null,
       gender: m.user.profile?.gender ?? null,
       isCheckedIn,
       facilityId: m.user.checkIns[0]?.facilityId ?? null,
@@ -260,6 +262,11 @@ export async function updateMemberRole(
 }
 
 // Leader/Staff assigns a member's 급수 (skill level) / gender (Korean clubs let staff set 급수).
+// 급수 is PER-CLUB (모임별 급수): it's written to this member's ClubMember.skillLevel,
+// which OVERRIDES the user's own default (PlayerProfile.skillLevel) FOR THIS CLUB
+// ONLY and is locked from the user's self-edit. The target is by definition a member
+// here, so there's always a ClubMember row to write. gender stays global on the
+// PlayerProfile (not per-club). The returned skillLevel is the effective per-club value.
 export async function updateMemberProfile(
   clubId: string,
   targetUserId: string,
@@ -280,6 +287,7 @@ export async function updateMemberProfile(
     include: {
       user: {
         include: {
+          profile: { select: { skillLevel: true, gender: true } },
           checkIns: { where: { checkedOutAt: null }, take: 1 },
           turnPlayers: {
             where: { turn: { status: { in: ['WAITING', 'PLAYING'] } } },
@@ -291,18 +299,30 @@ export async function updateMemberProfile(
   });
   if (!target) throw new NotFoundError('모임 멤버');
 
-  const profile = await prisma.playerProfile.upsert({
-    where: { userId: targetUserId },
-    create: {
-      userId: targetUserId,
-      ...(data.skillLevel !== undefined && { skillLevel: data.skillLevel as any }),
-      ...(data.gender !== undefined && { gender: data.gender }),
-    },
-    update: {
-      ...(data.skillLevel !== undefined && { skillLevel: data.skillLevel as any }),
-      ...(data.gender !== undefined && { gender: data.gender }),
-    },
-  });
+  // 급수 → PER-CLUB override on the ClubMember row (this club only).
+  let overrideSkill = (target.skillLevel ?? null) as SkillLevel | null;
+  if (data.skillLevel !== undefined) {
+    const updatedMember = await prisma.clubMember.update({
+      where: { userId_clubId: { userId: targetUserId, clubId } },
+      data: { skillLevel: data.skillLevel as any },
+      select: { skillLevel: true },
+    });
+    overrideSkill = (updatedMember.skillLevel ?? null) as SkillLevel | null;
+  }
+
+  // gender stays GLOBAL on the PlayerProfile (no per-club gender).
+  let profileSkill = (target.user.profile?.skillLevel ?? null) as SkillLevel | null;
+  let profileGender = target.user.profile?.gender ?? null;
+  if (data.gender !== undefined) {
+    const profile = await prisma.playerProfile.upsert({
+      where: { userId: targetUserId },
+      create: { userId: targetUserId, gender: data.gender },
+      update: { gender: data.gender },
+      select: { skillLevel: true, gender: true },
+    });
+    profileSkill = (profile.skillLevel ?? null) as SkillLevel | null;
+    profileGender = profile.gender ?? null;
+  }
 
   const isCheckedIn = target.user.checkIns.length > 0;
   const isInTurn = target.user.turnPlayers.length > 0;
@@ -322,8 +342,9 @@ export async function updateMemberProfile(
     userId: target.user.id,
     name: target.user.name,
     role: target.role as ClubMemberRole,
-    skillLevel: (profile.skillLevel ?? null) as SkillLevel | null,
-    gender: profile.gender ?? null,
+    // Effective per-club 급수: ClubMember override wins, else the user's own default.
+    skillLevel: overrideSkill ?? profileSkill,
+    gender: profileGender,
     isCheckedIn,
     facilityId: target.user.checkIns[0]?.facilityId ?? null,
     playerStatus,
@@ -489,10 +510,12 @@ export async function getAttendanceLeaderboard(
   }
 
   // Build per-member rows (members with 0 attendance still appear with count 0).
+  // Effective PER-CLUB 급수: the operator-set ClubMember override wins, else the
+  // user's own default (PlayerProfile.skillLevel).
   const rows = members.map((m) => ({
     userId: m.userId,
     name: m.user.name,
-    skillLevel: (m.user.profile?.skillLevel ?? null) as SkillLevel | null,
+    skillLevel: (m.skillLevel ?? m.user.profile?.skillLevel ?? null) as SkillLevel | null,
     attendanceCount: distinctSessions.get(m.userId)?.size ?? 0,
   }));
 

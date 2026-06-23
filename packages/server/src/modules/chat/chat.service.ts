@@ -15,6 +15,9 @@ async function verifyClubMember(clubId: string, userId: string) {
 }
 
 // DB row(+author/profile include) → API 응답. 지목한 모임원 이름을 함께 해석한다.
+// authorSkillLevel 은 모임별 급수(per-club): 작성자의 이 모임 ClubMember.skillLevel
+// 오버라이드가 있으면 그 값, 없으면 작성자 본인 기본값(PlayerProfile.skillLevel).
+// skillOverrideByUser 에 이 모임의 작성자별 오버라이드(있을 때만)가 담긴다.
 function mapMessage(
   msg: {
     id: string;
@@ -27,13 +30,16 @@ function mapMessage(
     user: { name: string; profile: { skillLevel: string | null } | null };
   },
   nameById: Map<string, string>,
+  skillOverrideByUser: Map<string, string | null>,
 ): ClubMessageResponse {
   return {
     id: msg.id,
     clubId: msg.clubId,
     userId: msg.userId,
     authorName: msg.user.name,
-    authorSkillLevel: (msg.user.profile?.skillLevel ?? null) as SkillLevel | null,
+    authorSkillLevel: (skillOverrideByUser.get(msg.userId) ??
+      msg.user.profile?.skillLevel ??
+      null) as SkillLevel | null,
     text: msg.text,
     type: msg.type as 'CHAT' | 'REQUEST',
     // 지목 순서를 유지하되, 더 이상 모임에 없는(이름 미해석) id 는 제외.
@@ -47,6 +53,22 @@ function mapMessage(
 const messageInclude = {
   user: { select: { name: true, profile: { select: { skillLevel: true } } } },
 } as const;
+
+// 모임별 급수(per-club): 주어진 작성자들의 이 모임 ClubMember.skillLevel 오버라이드를
+// 한 번에 조회. 행이 없으면(예: 더 이상 멤버가 아닌 작성자) 맵에 키 자체가 없어 본인
+// 기본값으로 폴백된다. skillLevel 이 null(미설정)인 멤버는 null 로 담긴다.
+async function resolveSkillOverrides(
+  clubId: string,
+  userIds: string[],
+): Promise<Map<string, string | null>> {
+  const unique = Array.from(new Set(userIds));
+  if (unique.length === 0) return new Map();
+  const members = await prisma.clubMember.findMany({
+    where: { clubId, userId: { in: unique } },
+    select: { userId: true, skillLevel: true },
+  });
+  return new Map(members.map((m) => [m.userId, (m.skillLevel ?? null) as string | null]));
+}
 
 // 여러 메시지에서 등장하는 모든 지목 userId 의 이름을 한 번에 해석.
 async function resolveMentionNames(userIds: string[]): Promise<Map<string, string>> {
@@ -98,7 +120,8 @@ export async function createMessage(
   });
 
   const nameById = await resolveMentionNames(created.mentionedUserIds);
-  const response = mapMessage(created, nameById);
+  const skillOverrideByUser = await resolveSkillOverrides(clubId, [created.userId]);
+  const response = mapMessage(created, nameById, skillOverrideByUser);
 
   getIO().to(`club:${clubId}`).emit('clubMessage:new', response);
 
@@ -135,5 +158,9 @@ export async function listMessages(
   const nameById = await resolveMentionNames(
     ascending.flatMap((m) => m.mentionedUserIds),
   );
-  return ascending.map((m) => mapMessage(m, nameById));
+  const skillOverrideByUser = await resolveSkillOverrides(
+    clubId,
+    ascending.map((m) => m.userId),
+  );
+  return ascending.map((m) => mapMessage(m, nameById, skillOverrideByUser));
 }

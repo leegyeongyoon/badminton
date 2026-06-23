@@ -514,12 +514,22 @@ export async function suggestNextFoursome(
   });
   const profileMap = new Map(profiles.map((p) => [p.userId, p]));
 
+  // PER-CLUB 급수 (모임별 급수): auto-match must use the EFFECTIVE per-club skill,
+  // i.e. ClubMember(userId, clubSession.clubId).skillLevel overrides the user's own
+  // default. Build an override map for this 정모's club; guests have no row → default.
+  const skillOverrides = await prisma.clubMember.findMany({
+    where: { clubId: clubSession.clubId, userId: { in: poolIds } },
+    select: { userId: true, skillLevel: true },
+  });
+  const skillOverrideMap = new Map(skillOverrides.map((m) => [m.userId, m.skillLevel]));
+
   const modePool: ModePlayer[] = poolIds.map((id) => {
     const prof = profileMap.get(id);
     const g = prof?.gender;
+    const effectiveSkill = skillOverrideMap.get(id) ?? prof?.skillLevel;
     return {
       id,
-      skill: skillToNum(prof?.skillLevel),
+      skill: skillToNum(effectiveSkill),
       games: initialGamesCount[id] ?? 0,
       gender: g === 'M' || g === 'F' ? g : null,
       waitSeconds: waitSecondsFor(id),

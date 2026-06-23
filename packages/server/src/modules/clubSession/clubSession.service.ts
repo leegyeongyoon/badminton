@@ -783,14 +783,20 @@ export async function updateCheckInFee(
 
 /**
  * Operator edits a participant's 이름·급수 from the operate board (a "name-tag"
- * edit — the user does nothing). Updates User.name (if given) and upserts the
- * PlayerProfile.skillLevel (if given; null clears it = 미설정). Works for guests
- * and members alike (both are User rows).
+ * edit — the user does nothing). Updates User.name (global, if given) and the
+ * PER-CLUB 급수 (모임별 급수): the operator-set value is written to the target's
+ * ClubMember.skillLevel FOR THIS SESSION'S CLUB — it OVERRIDES the user's own
+ * default for this club only and is locked from the user's self-edit. null clears
+ * the override (미설정 → falls back to the user's own default).
+ *
+ * EDGE — guests: a session guest is NOT a ClubMember (no row), so there's nothing
+ * to override per-club. For a guest we fall back to writing PlayerProfile.skillLevel
+ * (their ephemeral own profile) so the edit still reflects on the board.
  *
  * Auth: LEADER/STAFF of the session's club (same guard as the operator checkout).
  * The target MUST be currently checked into THIS 정모 — you can't edit across
  * clubs or edit a non-participant. Emits players-updated so every operator board
- * refreshes with the new name/급수. Returns the updated player.
+ * refreshes with the new name/급수. Returns the updated player (effective 급수).
  */
 export async function editPlayer(
   sessionId: string,
@@ -824,34 +830,71 @@ export async function editPlayer(
     }));
   if (!active) throw new NotFoundError('체크인된 참가자');
 
-  // Update name on the User (if provided). Upsert the PlayerProfile skillLevel
-  // (if provided) — null clears it (미설정). Note `skillLevel` may be explicitly
+  // Name edit stays on the User (global). Note `skillLevel` may be explicitly
   // null, so distinguish "key present" from undefined.
-  const updated = await prisma.user.update({
-    where: { id: targetUserId },
-    data: {
-      ...(input.name !== undefined ? { name: input.name } : {}),
-      ...(input.skillLevel !== undefined
-        ? {
-            profile: {
-              upsert: {
-                create: { skillLevel: input.skillLevel },
-                update: { skillLevel: input.skillLevel },
-              },
+  if (input.name !== undefined) {
+    await prisma.user.update({
+      where: { id: targetUserId },
+      data: { name: input.name },
+    });
+  }
+
+  // 급수 edit → PER-CLUB. Write the operator value to the target's ClubMember
+  // row for THIS session's club (the per-club override). If the target is NOT a
+  // member of this club (a session guest — guests have no ClubMember row), fall
+  // back to writing their PlayerProfile.skillLevel (ephemeral own default).
+  if (input.skillLevel !== undefined) {
+    const membership = await prisma.clubMember.findUnique({
+      where: { userId_clubId: { userId: targetUserId, clubId: session.clubId } },
+      select: { id: true },
+    });
+    if (membership) {
+      await prisma.clubMember.update({
+        where: { id: membership.id },
+        data: { skillLevel: input.skillLevel },
+      });
+    } else {
+      // Guest fallback: write their own ephemeral PlayerProfile.
+      await prisma.user.update({
+        where: { id: targetUserId },
+        data: {
+          profile: {
+            upsert: {
+              create: { skillLevel: input.skillLevel },
+              update: { skillLevel: input.skillLevel },
             },
-          }
-        : {}),
+          },
+        },
+      });
+    }
+  }
+
+  // Re-read the target with name + effective per-club 급수 for the response.
+  const updated = await prisma.user.findUniqueOrThrow({
+    where: { id: targetUserId },
+    select: {
+      id: true,
+      name: true,
+      isGuest: true,
+      profile: { select: { skillLevel: true } },
+      clubMembers: {
+        where: { clubId: session.clubId },
+        select: { skillLevel: true },
+        take: 1,
+      },
     },
-    select: { id: true, name: true, isGuest: true, profile: { select: { skillLevel: true } } },
   });
 
   // Refresh every operator board (same event the checkout / addGuest emit).
   await emitPlayersUpdated(session.facilityId, sessionId);
 
+  const effectiveSkill =
+    (updated.clubMembers[0]?.skillLevel ?? updated.profile?.skillLevel ?? null) as SkillLevel | null;
+
   return {
     userId: updated.id,
     name: updated.name,
-    skillLevel: (updated.profile?.skillLevel ?? null) as SkillLevel | null,
+    skillLevel: effectiveSkill,
     isGuest: updated.isGuest,
   };
 }
@@ -907,13 +950,24 @@ export async function getPlayerMatchups(
     : [];
   const userMap = new Map(users.map((u) => [u.id, u]));
 
+  // PER-CLUB 급수 (모임별 급수): show the EFFECTIVE per-club skill in the matchup
+  // modal — ClubMember(userId, session.clubId).skillLevel overrides the user's own
+  // default. Guests (no ClubMember row) fall back to their own profile default.
+  const skillOverrides = partnerIds.length
+    ? await prisma.clubMember.findMany({
+        where: { clubId: session.clubId, userId: { in: partnerIds } },
+        select: { userId: true, skillLevel: true },
+      })
+    : [];
+  const skillOverrideMap = new Map(skillOverrides.map((m) => [m.userId, m.skillLevel]));
+
   const partners: MatchupPartner[] = partnerIds
     .map((id) => {
       const u = userMap.get(id);
       return {
         userId: id,
         name: u?.name ?? '',
-        skillLevel: (u?.profile?.skillLevel ?? null) as SkillLevel | null,
+        skillLevel: (skillOverrideMap.get(id) ?? u?.profile?.skillLevel ?? null) as SkillLevel | null,
         gender: u?.profile?.gender ?? null,
         count: partnerCounts.get(id) ?? 0,
       };
