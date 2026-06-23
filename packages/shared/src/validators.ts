@@ -145,6 +145,19 @@ export const updateFeeSchema = z.object({
   feePaid: z.boolean().optional(),
 });
 
+// Operator edits a participant's 이름·급수 right from the operate board
+// ("name-tag" edit). At least one field must be present. `skillLevel: null`
+// clears the 급수 (미설정). Auth (LEADER/STAFF of the session's club) is enforced
+// server-side. Used by PATCH /club-sessions/:sessionId/players/:userId.
+export const editPlayerSchema = z
+  .object({
+    name: z.string().min(1, '이름을 입력하세요').max(20).optional(),
+    skillLevel: z.nativeEnum(SkillLevel).nullable().optional(),
+  })
+  .refine((d) => d.name !== undefined || d.skillLevel !== undefined, {
+    message: '이름 또는 급수 중 하나는 입력해야 합니다',
+  });
+
 // Operator generates N random sample guests for quick testing/demo (LEADER/STAFF).
 // EPHEMERAL — same as normal guests, they vanish on 정모 종료. The server picks
 // the random names / skill / gender, so the body is just a count (1–50).
@@ -155,6 +168,7 @@ export const bulkRandomGuestsSchema = z.object({
 export type GuestCheckInInput = z.infer<typeof guestCheckInSchema>;
 export type AddGuestInput = z.infer<typeof addGuestSchema>;
 export type UpdateFeeInput = z.infer<typeof updateFeeSchema>;
+export type EditPlayerInput = z.infer<typeof editPlayerSchema>;
 export type BulkRandomGuestsInput = z.infer<typeof bulkRandomGuestsSchema>;
 
 // --- Managed members (운영자 관리 멤버) ---

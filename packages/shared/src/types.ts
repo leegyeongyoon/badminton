@@ -375,6 +375,15 @@ export interface AddGuestResponse {
   checkIn: GuestCheckInResponse;
 }
 
+/** Result of an operator editing a participant's 이름·급수 from the operate board.
+ *  `skillLevel` is null when 미설정 (unset/cleared). */
+export interface EditPlayerResponse {
+  userId: string;
+  name: string;
+  skillLevel: SkillLevel | null;
+  isGuest: boolean;
+}
+
 /** Result of generating N random sample guests (테스트용 게스트). EPHEMERAL —
  *  they vanish on 정모 종료, same as any guest. */
 export interface BulkRandomGuestsResponse {

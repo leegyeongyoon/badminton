@@ -159,7 +159,7 @@ export default function OperateScreen() {
   // 테스트/데모용 랜덤 게스트 일괄 추가 진행 상태 (실제 출석 아님).
   const [addingTestGuests, setAddingTestGuests] = useState(false);
   // Matchup popup: the player whose "오늘 함께 친 사람" sheet is open (null = closed).
-  const [matchupTarget, setMatchupTarget] = useState<{ userId: string; name: string; isGuest?: boolean } | null>(null);
+  const [matchupTarget, setMatchupTarget] = useState<{ userId: string; name: string; skillLevel?: string | null; isGuest?: boolean } | null>(null);
 
   // Swap: { entryId, slotIndex } of the queued-game slot being replaced
   const [swapTarget, setSwapTarget] = useState<{ entryId: string; slotIndex: number } | null>(null);
@@ -1223,7 +1223,7 @@ export default function OperateScreen() {
     const infoButton = (
       <TouchableOpacity
         style={[styles.infoBtn, { borderColor: colors.border, backgroundColor: colors.surface }]}
-        onPress={() => setMatchupTarget({ userId: m.userId, name: m.userName, isGuest: m.isGuest })}
+        onPress={() => setMatchupTarget({ userId: m.userId, name: m.userName, skillLevel: m.skillLevel, isGuest: m.isGuest })}
         hitSlop={6}
         accessibilityLabel={`${m.userName} 매치업 보기`}
         {...(Platform.OS === 'web'
@@ -2272,7 +2272,14 @@ export default function OperateScreen() {
           clubSessionId={clubSessionId}
           userId={matchupTarget.userId}
           name={matchupTarget.name}
+          skillLevel={matchupTarget.skillLevel ?? null}
+          isGuest={!!matchupTarget.isGuest}
           onCheckout={() => handleOperatorCheckout(matchupTarget.userId, matchupTarget.name)}
+          onSaved={(updatedName) => {
+            // Keep the open modal's header/edit form in sync, then refresh pool.
+            setMatchupTarget((t) => (t ? { ...t, name: updatedName } : t));
+            loadPool();
+          }}
           onClose={() => setMatchupTarget(null)}
         />
       )}
@@ -2521,17 +2528,30 @@ function SwapPlayerModal({
 // count desc) on open. Read-only, calm. Shows "기록 없음" when no partners yet.
 // ─────────────────────────────────────────────────────────
 function MatchupModal({
-  colors, clubSessionId, userId, name, onCheckout, onClose,
+  colors, clubSessionId, userId, name, skillLevel, isGuest, onCheckout, onSaved, onClose,
 }: {
   colors: any;
   clubSessionId: string;
   userId: string;
   name: string;
+  /** 현재 급수 (null = 미설정). 수정 폼 초기값으로 사용. */
+  skillLevel: string | null;
+  /** 게스트면 헤더에 게스트 배지 표시. */
+  isGuest: boolean;
   onCheckout: () => void;
+  /** 저장 성공 후 부모가 풀을 갱신하도록 콜백 (갱신된 이름 전달). */
+  onSaved: (name: string) => void;
   onClose: () => void;
 }) {
   const [data, setData] = useState<PlayerMatchups | null>(null);
   const [loading, setLoading] = useState(true);
+
+  // ─── 운영자: 이름·급수 수정 폼 (체크아웃 옆 토글) ───
+  const [editing, setEditing] = useState(false);
+  const [editName, setEditName] = useState(name);
+  // '' = 미설정. 급수 칩 토글로 설정/해제.
+  const [editSkill, setEditSkill] = useState<string>(skillLevel ?? '');
+  const [saving, setSaving] = useState(false);
 
   useEffect(() => {
     let alive = true;
@@ -2543,6 +2563,32 @@ function MatchupModal({
     return () => { alive = false; };
   }, [clubSessionId, userId]);
 
+  const openEdit = useCallback(() => {
+    setEditName(name);
+    setEditSkill(skillLevel ?? '');
+    setEditing(true);
+  }, [name, skillLevel]);
+
+  const saveEdit = useCallback(async () => {
+    const trimmed = editName.trim();
+    if (!trimmed) { showAlert('알림', '이름을 입력해주세요'); return; }
+    setSaving(true);
+    try {
+      const { data: updated } = await clubSessionApi.editPlayer(clubSessionId, userId, {
+        name: trimmed,
+        // null 이면 미설정으로 초기화, 값이 있으면 그 급수로 설정.
+        skillLevel: editSkill ? editSkill : null,
+      });
+      showSuccess(`${updated.name}님 정보 수정됨`);
+      setEditing(false);
+      onSaved(updated.name);
+    } catch (err: any) {
+      showAlert('오류', err?.response?.data?.error || err?.response?.data?.message || '수정에 실패했어요');
+    } finally {
+      setSaving(false);
+    }
+  }, [clubSessionId, userId, editName, editSkill, onSaved]);
+
   const partners = data?.partners ?? [];
 
   return (
@@ -2551,14 +2597,19 @@ function MatchupModal({
         <View style={[modalStyles.sheet, modalStyles.matchupSheet, { backgroundColor: colors.surface }]}>
           <View style={modalStyles.sheetHeader}>
             <View style={{ flex: 1 }}>
-              <Text style={[modalStyles.sheetTitle, { color: colors.text }]} numberOfLines={1}>
-                {name} · 오늘 함께 친 사람
-              </Text>
-              {data != null && (
-                <Text style={[modalStyles.matchupSub, { color: colors.textSecondary }]}>
-                  오늘 {data.totalGames}게임
+              <View style={modalStyles.matchupTitleRow}>
+                <Text style={[modalStyles.sheetTitle, { color: colors.text }]} numberOfLines={1}>
+                  {name}
                 </Text>
-              )}
+                {isGuest && (
+                  <View style={[modalStyles.guestBadge, { backgroundColor: colors.warningLight }]}>
+                    <Text style={[modalStyles.guestBadgeText, { color: colors.warning }]}>게스트</Text>
+                  </View>
+                )}
+              </View>
+              <Text style={[modalStyles.matchupSub, { color: colors.textSecondary }]}>
+                오늘 함께 친 사람{data != null ? ` · 오늘 ${data.totalGames}게임` : ''}
+              </Text>
             </View>
             <TouchableOpacity onPress={onClose} hitSlop={10}>
               <Icon name="close" size={22} color={colors.textSecondary} />
@@ -2601,19 +2652,98 @@ function MatchupModal({
             </ScrollView>
           )}
 
-          {/* 운영자 액션: 이 참가자를 정모에서 체크아웃 (danger). 매치업 탭은
-              건드리지 않고 여기 detail 모달에만 둠. 확인 단계를 거침. */}
-          <TouchableOpacity
-            style={[modalStyles.checkoutBtn, { borderColor: colors.danger }]}
-            onPress={onCheckout}
-            activeOpacity={0.85}
-            accessibilityLabel={`${name} 체크아웃 시키기`}
-          >
-            <Icon name="close" size={16} color={colors.danger} />
-            <Text style={[modalStyles.checkoutBtnText, { color: colors.danger }]}>
-              체크아웃 시키기
-            </Text>
-          </TouchableOpacity>
+          {/* 운영자 인라인 수정 폼: 이름표를 고치듯 이름/급수 수정. '이름·급수 수정'
+              버튼을 누르면 펼쳐진다. '' = 미설정. */}
+          {editing && (
+            <View style={[modalStyles.editForm, { borderColor: colors.border, backgroundColor: colors.background }]}>
+              <Text style={[modalStyles.label, { color: colors.textSecondary }]}>이름</Text>
+              <TextInput
+                style={[modalStyles.input, { color: colors.text, borderColor: colors.border, backgroundColor: colors.surface }]}
+                value={editName}
+                onChangeText={setEditName}
+                placeholder="이름"
+                placeholderTextColor={colors.textLight}
+                maxLength={20}
+                accessibilityLabel="이름 입력"
+              />
+
+              <Text style={[modalStyles.label, { color: colors.textSecondary }]}>급수</Text>
+              <View style={modalStyles.skillRow}>
+                {SKILL_LEVELS.map((lv) => {
+                  const meta = getSkillMeta(lv);
+                  const active = editSkill === lv;
+                  return (
+                    <TouchableOpacity
+                      key={lv}
+                      style={[
+                        modalStyles.skillChip,
+                        { borderColor: active ? meta.color : colors.border, backgroundColor: active ? meta.color : colors.surface },
+                      ]}
+                      onPress={() => setEditSkill(lv)}
+                      activeOpacity={0.8}
+                      accessibilityLabel={`급수 ${lv}`}
+                    >
+                      <Text style={[modalStyles.skillChipText, { color: active ? palette.white : colors.textSecondary }]}>{lv}</Text>
+                    </TouchableOpacity>
+                  );
+                })}
+                {/* 미설정(급수 없음) */}
+                <TouchableOpacity
+                  style={[
+                    modalStyles.skillChipWide,
+                    { borderColor: !editSkill ? colors.textSecondary : colors.border, backgroundColor: !editSkill ? colors.surfaceSecondary : colors.surface },
+                  ]}
+                  onPress={() => setEditSkill('')}
+                  activeOpacity={0.8}
+                  accessibilityLabel="급수 미설정"
+                >
+                  <Text style={[modalStyles.skillChipText, { color: colors.textSecondary }]}>미설정</Text>
+                </TouchableOpacity>
+              </View>
+
+              <TouchableOpacity
+                style={[modalStyles.submitBtn, { backgroundColor: colors.primary, opacity: saving ? 0.6 : 1 }]}
+                onPress={saveEdit}
+                disabled={saving}
+                activeOpacity={0.85}
+                accessibilityLabel="이름·급수 저장"
+              >
+                {saving ? (
+                  <ActivityIndicator size="small" color={palette.white} />
+                ) : (
+                  <Text style={modalStyles.submitBtnText}>저장</Text>
+                )}
+              </TouchableOpacity>
+            </View>
+          )}
+
+          {/* 운영자 액션 행: [이름·급수 수정] [체크아웃] — 사용자가 한 것 없이
+              운영자가 이름표를 고치고/내보낼 수 있다. 매치업 탭은 안 건드림. */}
+          <View style={modalStyles.matchupActions}>
+            <TouchableOpacity
+              style={[modalStyles.editBtn, { borderColor: colors.primary, backgroundColor: editing ? colors.primaryBg : 'transparent' }]}
+              onPress={() => (editing ? setEditing(false) : openEdit())}
+              activeOpacity={0.85}
+              accessibilityLabel={`${name} 이름·급수 수정`}
+            >
+              <Icon name="edit" size={15} color={colors.primary} />
+              <Text style={[modalStyles.checkoutBtnText, { color: colors.primary }]}>
+                {editing ? '수정 닫기' : '이름·급수 수정'}
+              </Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={[modalStyles.checkoutBtn, modalStyles.actionFlex, { borderColor: colors.danger }]}
+              onPress={onCheckout}
+              activeOpacity={0.85}
+              accessibilityLabel={`${name} 체크아웃 시키기`}
+            >
+              <Icon name="close" size={16} color={colors.danger} />
+              <Text style={[modalStyles.checkoutBtnText, { color: colors.danger }]}>
+                체크아웃
+              </Text>
+            </TouchableOpacity>
+          </View>
         </View>
       </View>
     </Modal>
@@ -3470,6 +3600,25 @@ const modalStyles = StyleSheet.create({
   matchupGender: { fontSize: 15, fontWeight: '900', lineHeight: 17 },
   matchupCount: { paddingHorizontal: spacing.sm, paddingVertical: 3, borderRadius: radius.pill },
   matchupCountText: { fontSize: 12, fontWeight: '800' },
+  // 헤더: 이름 + 게스트 배지
+  matchupTitleRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
+  guestBadge: { paddingHorizontal: spacing.sm, paddingVertical: 2, borderRadius: radius.sm },
+  guestBadgeText: { fontSize: 11, fontWeight: '800' },
+  // 운영자 액션 행: [이름·급수 수정][체크아웃]
+  matchupActions: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, marginTop: spacing.md },
+  actionFlex: { flex: 1, marginTop: 0 },
+  editBtn: {
+    flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: spacing.xs,
+    paddingVertical: spacing.md, borderRadius: radius.lg, borderWidth: 1.5,
+  },
+  // 운영자 인라인 이름·급수 수정 폼
+  editForm: {
+    marginTop: spacing.md, padding: spacing.md, borderRadius: radius.lg, borderWidth: 1, gap: 2,
+  },
+  skillChipWide: {
+    height: 38, paddingHorizontal: spacing.md, borderRadius: radius.md, borderWidth: 1.5,
+    alignItems: 'center', justifyContent: 'center',
+  },
   // 운영자 체크아웃 버튼 (danger, outline)
   checkoutBtn: {
     flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: spacing.xs,

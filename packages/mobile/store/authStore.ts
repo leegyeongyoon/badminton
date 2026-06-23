@@ -46,8 +46,13 @@ interface AuthState {
    * never on the client), and stores the resulting JWTs exactly like a normal
    * login. Throws KakaoNotConfiguredError when no real Kakao key is configured
    * (so the UI can show a friendly "키 필요" message).
+   *
+   * On WEB the full-page redirect flow already holds the `{code, redirectUri}`
+   * from Kakao's return URL, so it passes them in directly and this skips the
+   * (popup-based) `getKakaoAuthCode` authorize step. Native passes nothing and
+   * runs the authorize step as before.
    */
-  kakaoLogin: () => Promise<{ isNew: boolean }>;
+  kakaoLogin: (auth?: { code: string; redirectUri: string }) => Promise<{ isNew: boolean }>;
   register: (phone: string, password: string, name: string) => Promise<void>;
   /**
    * New-user profile completion (신규 카카오 가입자). Sets name + 급수/성별 on the
@@ -76,8 +81,11 @@ export const useAuthStore = create<AuthState>((set) => ({
     set({ user: data.user, isAuthenticated: true, isGuest: !!data.user?.isGuest });
   },
 
-  kakaoLogin: async () => {
-    const auth = await getKakaoAuthCode();
+  kakaoLogin: async (preauth) => {
+    // WEB full-page redirect already obtained { code, redirectUri } from Kakao's
+    // return URL → use them directly and skip the popup-based authorize step.
+    // NATIVE passes nothing → run Kakao's authorize step via getKakaoAuthCode.
+    const auth = preauth ?? (await getKakaoAuthCode());
     // null → either no real key (placeholder) or the user cancelled. We can't
     // distinguish a cancel from a missing key here, so surface the "키 필요"
     // path; with a real key configured a genuine cancel is a no-op for the user.

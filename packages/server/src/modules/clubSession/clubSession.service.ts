@@ -12,6 +12,8 @@ import type {
   AddGuestResponse,
   GuestFeeSettlementResponse,
   UpdateFeeInput,
+  EditPlayerInput,
+  EditPlayerResponse,
   GuestFeeItem,
   PlayerMatchupsResponse,
   MatchupPartner,
@@ -674,6 +676,81 @@ export async function updateCheckInFee(
     guestName: updated.user.name,
     feeAmount: updated.feeAmount,
     feePaid: updated.feePaid,
+  };
+}
+
+/**
+ * Operator edits a participant's 이름·급수 from the operate board (a "name-tag"
+ * edit — the user does nothing). Updates User.name (if given) and upserts the
+ * PlayerProfile.skillLevel (if given; null clears it = 미설정). Works for guests
+ * and members alike (both are User rows).
+ *
+ * Auth: LEADER/STAFF of the session's club (same guard as the operator checkout).
+ * The target MUST be currently checked into THIS 정모 — you can't edit across
+ * clubs or edit a non-participant. Emits players-updated so every operator board
+ * refreshes with the new name/급수. Returns the updated player.
+ */
+export async function editPlayer(
+  sessionId: string,
+  targetUserId: string,
+  operatorUserId: string,
+  input: EditPlayerInput,
+): Promise<EditPlayerResponse> {
+  const session = await prisma.clubSession.findUnique({
+    where: { id: sessionId },
+    select: { id: true, clubId: true, facilityId: true },
+  });
+  if (!session) throw new NotFoundError('모임 세션');
+
+  // LEADER/STAFF of the session's club only.
+  await verifyClubStaff(session.clubId, operatorUserId);
+
+  // The target must be an ACTIVE participant of THIS 정모 (session-scoped, or a
+  // facility-scoped open check-in at this session's facility — same resolution
+  // as operatorCheckOut). This blocks editing across clubs / non-participants.
+  const active =
+    (await prisma.checkIn.findFirst({
+      where: { userId: targetUserId, clubSessionId: sessionId, checkedOutAt: null },
+    })) ??
+    (await prisma.checkIn.findFirst({
+      where: {
+        userId: targetUserId,
+        facilityId: session.facilityId,
+        clubSessionId: null,
+        checkedOutAt: null,
+      },
+    }));
+  if (!active) throw new NotFoundError('체크인된 참가자');
+
+  // Update name on the User (if provided). Upsert the PlayerProfile skillLevel
+  // (if provided) — null clears it (미설정). Note `skillLevel` may be explicitly
+  // null, so distinguish "key present" from undefined.
+  const updated = await prisma.user.update({
+    where: { id: targetUserId },
+    data: {
+      ...(input.name !== undefined ? { name: input.name } : {}),
+      ...(input.skillLevel !== undefined
+        ? {
+            profile: {
+              upsert: {
+                create: { skillLevel: input.skillLevel },
+                update: { skillLevel: input.skillLevel },
+              },
+            },
+          }
+        : {}),
+    },
+    select: { id: true, name: true, isGuest: true, profile: { select: { skillLevel: true } } },
+  });
+
+  // Refresh every operator board (same event the checkout / addGuest emit).
+  await emitPlayersUpdated(session.facilityId, sessionId);
+
+  return {
+    userId: updated.id,
+    name: updated.name,
+    skillLevel: (updated.profile?.skillLevel ?? null) as SkillLevel | null,
+    isGuest: updated.isGuest,
   };
 }
 

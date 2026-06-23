@@ -1,3 +1,4 @@
+import { Platform } from 'react-native';
 import Constants from 'expo-constants';
 import * as WebBrowser from 'expo-web-browser';
 import {
@@ -104,4 +105,144 @@ export async function getKakaoAuthCode(): Promise<{ code: string; redirectUri: s
   // No client-side token exchange (no client_secret here). Hand the raw code +
   // the redirectUri to the backend.
   return { code: result.params.code, redirectUri };
+}
+
+// ───────────────────────────────────────────────────────────────────────────
+// WEB full-page redirect flow
+//
+// Mobile browsers (iOS Safari etc.) block/break the popup window that
+// expo-auth-session's promptAsync opens (window.open), which is why Kakao login
+// "flickers then fails" on mobile web. On WEB we therefore drive OAuth with a
+// FULL-PAGE redirect: tap → navigate the whole tab to Kakao's authorize URL →
+// Kakao redirects back to our origin with ?code&state → we detect it on startup
+// and finish login. NATIVE keeps using getKakaoAuthCode() (expo-auth-session).
+// ───────────────────────────────────────────────────────────────────────────
+
+// sessionStorage key holding the CSRF `state` (+ a timestamp) across the
+// full-page redirect. sessionStorage survives the redirect within the same tab
+// and is cleared when the tab closes — exactly the lifetime we want.
+const KAKAO_WEB_STATE_KEY = 'kakao_oauth_state';
+
+/** Generate a random, URL-safe state token for CSRF protection. */
+function generateState(): string {
+  const bytes = new Uint8Array(16);
+  if (typeof crypto !== 'undefined' && crypto.getRandomValues) {
+    crypto.getRandomValues(bytes);
+  } else {
+    for (let i = 0; i < bytes.length; i++) bytes[i] = Math.floor(Math.random() * 256);
+  }
+  return Array.from(bytes, (b) => b.toString(16).padStart(2, '0')).join('');
+}
+
+/**
+ * Starts the WEB Kakao login via a FULL-PAGE redirect (no popup). Persists a
+ * fresh `state` to sessionStorage, then navigates the whole tab to Kakao's
+ * authorize endpoint. The redirect_uri is the bare origin (NO trailing slash),
+ * identical to what `makeRedirectUri` produces on web today and what the server
+ * reuses at the token exchange — Kakao validates an exact match.
+ *
+ * Throws KakaoNotConfiguredError-able null signal by returning `false` when no
+ * real key is configured so the caller can show the friendly "키 필요" notice.
+ * Returns `true` once navigation has been kicked off (the page is leaving).
+ */
+export function startKakaoWebLogin(): boolean {
+  const clientId = getKakaoKey();
+  if (!clientId) return false;
+
+  const origin = window.location.origin;
+  const state = generateState();
+
+  try {
+    sessionStorage.setItem(KAKAO_WEB_STATE_KEY, JSON.stringify({ state, ts: Date.now() }));
+  } catch {
+    // sessionStorage unavailable (private mode quirks) — proceed anyway; the
+    // callback will simply skip strict state verification if it can't read back.
+  }
+
+  const authorizeUrl =
+    'https://kauth.kakao.com/oauth/authorize' +
+    `?client_id=${encodeURIComponent(clientId)}` +
+    `&redirect_uri=${encodeURIComponent(origin)}` +
+    '&response_type=code' +
+    `&state=${encodeURIComponent(state)}`;
+
+  // Full-page navigation — replaces the popup. Mobile-browser safe.
+  window.location.assign(authorizeUrl);
+  return true;
+}
+
+/** Result of inspecting the current URL for a Kakao OAuth return. */
+export type KakaoWebCallback =
+  | { kind: 'none' }
+  | { kind: 'success'; code: string; redirectUri: string }
+  | { kind: 'state_mismatch' }
+  | { kind: 'error'; message: string };
+
+/**
+ * Inspects the current web URL for a Kakao OAuth return and, on a valid
+ * `?code&state`, returns the `{code, redirectUri}` to finish login. ALSO strips
+ * the OAuth params from the URL (history.replaceState) so a refresh doesn't
+ * re-run the flow and the gate sees a clean URL, and clears the stored state.
+ *
+ * - success: `code` present and `state` matches the stored one.
+ * - state_mismatch: `code` present but `state` missing/wrong → ignored (no login).
+ * - error: `?error`/`?error_description` present (user denied / Kakao error).
+ * - none: nothing OAuth-related in the URL.
+ *
+ * Web-only; on native (or when there's no window) returns { kind: 'none' }.
+ */
+export function consumeKakaoWebCallback(): KakaoWebCallback {
+  if (Platform.OS !== 'web' || typeof window === 'undefined') return { kind: 'none' };
+
+  const params = new URLSearchParams(window.location.search);
+  const code = params.get('code');
+  const state = params.get('state');
+  const error = params.get('error');
+  const errorDescription = params.get('error_description');
+
+  // Nothing OAuth-related → leave the URL untouched.
+  if (!code && !error) return { kind: 'none' };
+
+  // Read + clear the stored state regardless of outcome (single-use).
+  let storedState: string | null = null;
+  try {
+    const raw = sessionStorage.getItem(KAKAO_WEB_STATE_KEY);
+    if (raw) storedState = (JSON.parse(raw) as { state?: string }).state ?? null;
+    sessionStorage.removeItem(KAKAO_WEB_STATE_KEY);
+  } catch {
+    /* sessionStorage unreadable — treat as no stored state. */
+  }
+
+  // Strip ?code/state/error/... from the URL so a refresh can't replay it and
+  // the gate sees a clean path. Keep the pathname + hash, drop the query.
+  cleanOAuthUrl();
+
+  if (error) {
+    return {
+      kind: 'error',
+      message: errorDescription || error || '카카오 로그인이 취소되었어요',
+    };
+  }
+
+  // code present — verify state. A missing/mismatched state means this isn't a
+  // request we started (CSRF / stale tab) → ignore, do NOT log in. (`code` is
+  // guaranteed truthy here: no `error` and the early guard handled neither.)
+  if (!code || !state || !storedState || state !== storedState) {
+    return { kind: 'state_mismatch' };
+  }
+
+  // A fresh, verified code → log in the returned Kakao identity. redirectUri
+  // MUST equal what we sent at authorize (the bare origin) so the server's
+  // exchange matches.
+  return { kind: 'success', code, redirectUri: window.location.origin };
+}
+
+/** Remove the query string (OAuth params) from the URL without reloading. */
+function cleanOAuthUrl(): void {
+  try {
+    const cleanUrl = window.location.pathname + window.location.hash;
+    window.history.replaceState({}, document.title, cleanUrl);
+  } catch {
+    /* history API unavailable — best effort. */
+  }
 }

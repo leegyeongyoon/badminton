@@ -17,6 +17,7 @@ import { NetworkStatusBar } from '../components/shared/NetworkStatusBar';
 import { ThemeProvider, useThemeContext } from '../contexts/ThemeContext';
 import { useNetworkStatus } from '../hooks/useNetworkStatus';
 import { useDeepLinking } from '../hooks/useDeepLinking';
+import { useKakaoWebCallback } from '../hooks/useKakaoWebCallback';
 import { useNotifications } from '../hooks/useNotifications';
 import { useSocketToast } from '../hooks/useSocketToast';
 import { useSocket, useUserRoom } from '../hooks/useSocket';
@@ -56,6 +57,9 @@ function RootLayoutInner() {
   const { isConnected, isSocketConnected } = useNetworkStatus();
   const isNavigatingRef = useRef(false);
   useDeepLinking();
+  // WEB-only: detect the Kakao full-page-redirect return (?code&state) on
+  // startup and finish login. Runs independently of the gate; native no-op.
+  useKakaoWebCallback();
   useNotifications();
   // Establish the websocket app-wide on load (before any screen mounts), so
   // real-time sync + the network status are accurate everywhere.

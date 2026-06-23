@@ -6,6 +6,7 @@ import {
   addGuestSchema,
   updateFeeSchema,
   bulkRandomGuestsSchema,
+  editPlayerSchema,
 } from '@badminton/shared';
 import { authenticate } from '../../middleware/auth';
 import { validate } from '../../middleware/validate';
@@ -237,6 +238,29 @@ router.post(
         req.body.count,
       );
       res.status(201).json(result);
+    } catch (err) {
+      next(err);
+    }
+  },
+);
+
+// PATCH /api/v1/club-sessions/:sessionId/players/:userId - operator edits a
+// participant's 이름·급수 from the operate board (LEADER/STAFF of the session's
+// club only; enforced in the service). Body { name?, skillLevel? } (≥1 field;
+// skillLevel null clears it). Returns the updated player.
+router.patch(
+  '/:id/players/:userId',
+  authenticate,
+  validate(editPlayerSchema),
+  async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const result = await clubSessionService.editPlayer(
+        req.params.id as string,
+        req.params.userId as string,
+        req.user!.userId,
+        req.body,
+      );
+      res.json(result);
     } catch (err) {
       next(err);
     }

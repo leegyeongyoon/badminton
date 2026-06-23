@@ -9,6 +9,7 @@ import {
 } from 'react-native';
 import { Link, useRouter } from 'expo-router';
 import { useAuthStore, KakaoNotConfiguredError } from '../../store/authStore';
+import { startKakaoWebLogin } from '../../services/kakao';
 import { useTheme } from '../../hooks/useTheme';
 import { useFormValidation } from '../../hooks/useFormValidation';
 import { compose, required, phone as phoneRule, password as passwordRule } from '../../utils/validation';
@@ -58,6 +59,24 @@ export default function LoginScreen() {
   const handleKakaoLogin = async () => {
     setKakaoNotice(null);
     setKakaoLoading(true);
+
+    // WEB: drive OAuth via a FULL-PAGE redirect (no popup — mobile browsers
+    // block/break window.open). startKakaoWebLogin navigates the whole tab to
+    // Kakao; the return (?code&state) is handled on startup by
+    // useKakaoWebCallback. Native keeps the expo-auth-session flow below.
+    if (Platform.OS === 'web') {
+      const started = startKakaoWebLogin();
+      if (!started) {
+        // No real Kakao key yet — friendly inline message, no crash, no nav.
+        const msg = '카카오 로그인 설정이 준비 중이에요 (키 필요)';
+        setKakaoNotice(msg);
+        showInfo(msg);
+        setKakaoLoading(false);
+      }
+      // On success the page is leaving (location.assign) — leave the spinner up.
+      return;
+    }
+
     try {
       await kakaoLogin();
       // Navigation handled by root layout gating

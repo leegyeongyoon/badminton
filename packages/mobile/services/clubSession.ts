@@ -167,6 +167,19 @@ export const clubSessionApi = {
   checkoutPlayer: (clubSessionId: string, userId: string) =>
     api.post(`/club-sessions/${clubSessionId}/checkout/${userId}`),
 
+  // ─── 운영자: 참가자 이름·급수 수정 (LEADER/STAFF) ───
+  // 운영판에서 바로 이름표를 고치듯 참가자(게스트 포함)의 이름/급수를 수정.
+  // name·skillLevel 중 하나 이상 필요. skillLevel: null 이면 미설정으로 초기화.
+  editPlayer: (
+    sessionId: string,
+    userId: string,
+    body: { name?: string; skillLevel?: string | null },
+  ) =>
+    api.patch<{ userId: string; name: string; skillLevel: string | null; isGuest: boolean }>(
+      `/club-sessions/${sessionId}/players/${userId}`,
+      body,
+    ),
+
   // ─── 운영자: 정모 출석 체크 (관리 멤버 포함, LEADER/STAFF) ───
   // 특정 모임원을 진행 중인 정모에 체크인(출석). 멱등 — 이미 체크인이면 created=false.
   checkInMember: (clubSessionId: string, userId: string) =>
