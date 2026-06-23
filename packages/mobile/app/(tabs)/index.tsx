@@ -223,28 +223,32 @@ export default function HomeScreen() {
   // hint linking to 운영자 신청 (더보기) instead of the create button.
   const canCreateClub = user?.role === 'SUPER_ADMIN' || user?.role === 'CLUB_LEADER';
 
+  // Page background: a soft neutral so white cards have definition by contrast
+  // (Toss/당근 style structure) without leaning on drop-shadows.
+  const pageBg = colors.surfaceSecondary;
+
   // ─── Loading skeleton ───
   if (loading) {
     return (
-      <View style={[styles.container, { backgroundColor: colors.background }]}>
+      <View style={[styles.container, { backgroundColor: pageBg }]}>
         <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
           <View style={styles.greetingRow}>
             <SkeletonGroup>
-              <Skeleton width={160} height={26} borderRadius={radius.sm} />
+              <Skeleton width={160} height={28} borderRadius={radius.sm} />
               <Skeleton width={220} height={16} borderRadius={radius.sm} style={{ marginTop: spacing.sm }} />
             </SkeletonGroup>
           </View>
           <View style={{ height: spacing.xl }} />
-          <Skeleton width="100%" height={140} borderRadius={radius.card} />
+          <Skeleton width="100%" height={150} borderRadius={radius.card} />
           <View style={{ height: spacing.lg }} />
-          <Skeleton width="100%" height={120} borderRadius={radius.card} />
+          <Skeleton width="100%" height={130} borderRadius={radius.card} />
         </ScrollView>
       </View>
     );
   }
 
   return (
-    <View style={[styles.container, { backgroundColor: colors.background }]}>
+    <View style={[styles.container, { backgroundColor: pageBg }]}>
       <ScrollView
         contentContainerStyle={styles.content}
         showsVerticalScrollIndicator={false}
@@ -263,7 +267,7 @@ export default function HomeScreen() {
           {skillMeta ? (
             <View style={[styles.skillBadge, { backgroundColor: skillMeta.color }]}>
               <Text style={styles.skillBadgeLevel}>{skillMeta.level}</Text>
-              <Text style={styles.skillBadgeLabel}>{skillMeta.description}</Text>
+              <Text style={styles.skillBadgeLabel} numberOfLines={1}>{skillMeta.description}</Text>
             </View>
           ) : null}
         </View>
@@ -275,17 +279,17 @@ export default function HomeScreen() {
             style={({ pressed }) => [
               styles.heroCard,
               { backgroundColor: colors.secondary },
-              shadows.colored(colors.secondary),
-              pressed && { opacity: 0.92 },
+              shadows.sm,
+              pressed && { opacity: 0.94 },
             ]}
           >
             <View style={styles.heroBadge}>
               <View style={styles.heroLiveDot} />
-              <Text style={styles.heroBadgeText}>내 차례</Text>
+              <Text style={styles.heroBadgeText}>지금 내 차례</Text>
             </View>
             <Text style={styles.heroTitle}>{playingTurn.courtName} · 게임 시작</Text>
             <Text style={styles.heroSub}>
-              지금 바로 코트로 가세요! 탭하면 게임 화면이 열려요.
+              지금 바로 코트로 가세요. 탭하면 게임 화면이 열려요.
             </Text>
             <View style={styles.heroCta}>
               <Text style={styles.heroCtaText}>게임 보기</Text>
@@ -300,7 +304,18 @@ export default function HomeScreen() {
             운영판은 그 모임의 LEADER/STAFF에게만 노출(staffClubIds 게이트). */}
         {clubs.length > 0 && (
           <View style={styles.section}>
-            <SectionHeader title="내 모임" count={clubs.length} />
+            {/* Section header: 내 모임 + count badge + quiet subtitle */}
+            <View style={styles.sectionHead}>
+              <View style={styles.sectionHeadRow}>
+                <Text style={[styles.sectionTitle, { color: colors.text }]}>내 모임</Text>
+                <View style={[styles.sectionCount, { backgroundColor: colors.primaryLight }]}>
+                  <Text style={[styles.sectionCountText, { color: colors.primary }]}>{clubs.length}</Text>
+                </View>
+              </View>
+              <Text style={[styles.sectionSub, { color: colors.textSecondary }]}>
+                정모 진행 상황과 내 상태를 한눈에 확인하세요
+              </Text>
+            </View>
             {(clubs as any[]).map((c) => {
               const isStaff = staffClubIds.has(c.id);
               const session = activeSessions.find((s) => s.clubId === c.id) || null;
@@ -344,12 +359,11 @@ export default function HomeScreen() {
                   style={({ pressed }) => [
                     styles.clubCard,
                     { backgroundColor: colors.surface, borderColor: colors.border },
-                    session && { borderColor: colors.primaryLight },
-                    shadows.sm,
-                    pressed && { opacity: 0.92 },
+                    session && { borderColor: colors.secondaryLight, backgroundColor: colors.surface },
+                    pressed && { opacity: 0.96 },
                   ]}
                 >
-                  {/* Title row: 모임 이름 + (운영진) 배지 */}
+                  {/* Header row: avatar + 모임 이름 + (운영진) 배지 */}
                   <View style={styles.clubTitleRow}>
                     <View style={[styles.clubIconWrap, { backgroundColor: session ? colors.secondaryLight : colors.primaryLight }]}>
                       <Icon name="club" size={20} color={session ? colors.secondary : colors.primary} />
@@ -363,23 +377,26 @@ export default function HomeScreen() {
                         <Text style={[styles.rolePillText, { color: colors.warning }]}>운영진</Text>
                       </View>
                     )}
-                    {!session && <Icon name="chevronRight" size={18} color={colors.textLight} />}
+                    {!session && !isStaff && <Icon name="chevronRight" size={18} color={colors.textLight} />}
                   </View>
 
-                  {/* Status line: 정모(일자) · 진행 중 · 내 상태  /  진행 중인 정모 없음 */}
+                  {/* Status row: full-width 정모(일자) · 진행 중 · 내 상태  /  진행 중인 정모 없음 */}
                   <View style={styles.clubStatusRow}>
                     {stateStrong && <View style={[styles.statusDot, { backgroundColor: stateTint }]} />}
                     <Text
                       style={[
                         styles.clubStatusText,
                         { color: stateStrong ? stateTint : colors.textLight },
-                        stateStrong && { fontWeight: '700' },
+                        stateStrong && { fontWeight: '600' },
                       ]}
                       numberOfLines={1}
                     >
                       {stateText}
                     </Text>
                   </View>
+
+                  {/* hairline divider — gives the action row structure without a shadow */}
+                  {(session || isStaff) && <View style={[styles.clubDivider, { backgroundColor: colors.divider }]} />}
 
                   {/* ONE primary action by context (운영판 = 운영진만). */}
                   {session ? (
@@ -440,34 +457,39 @@ export default function HomeScreen() {
               );
             })}
 
-            {/* Footer actions (quiet): 모임 참여 누구나 · 모임 만들기 운영자만. */}
-            <View style={styles.clubActions}>
-              {canCreateClub && (
+            {/* Footer actions — anchored as a tidy section, not floating buttons. */}
+            <View style={[styles.footerCard, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+              <Text style={[styles.footerLabel, { color: colors.textSecondary }]}>
+                다른 모임도 함께 운영해보세요
+              </Text>
+              <View style={styles.footerActions}>
+                {canCreateClub && (
+                  <Button
+                    title="모임 만들기"
+                    icon="add"
+                    variant="outline"
+                    size="md"
+                    onPress={() => setShowCreate(true)}
+                    style={{ flex: 1 }}
+                  />
+                )}
                 <Button
-                  title="모임 만들기"
-                  icon="add"
-                  variant="outline"
+                  title="모임 참여"
+                  icon="link"
+                  variant="ghost"
                   size="md"
-                  onPress={() => setShowCreate(true)}
+                  onPress={() => setShowJoin(true)}
                   style={{ flex: 1 }}
                 />
+              </View>
+              {!canCreateClub && (
+                <Pressable onPress={() => router.push('/(tabs)/more')} hitSlop={6}>
+                  <Text style={[styles.operatorHint, { color: colors.textLight }]}>
+                    모임을 만들려면 <Text style={{ color: colors.primary, fontWeight: '700' }}>운영자 신청</Text>이 필요해요
+                  </Text>
+                </Pressable>
               )}
-              <Button
-                title="모임 참여"
-                icon="link"
-                variant="ghost"
-                size="md"
-                onPress={() => setShowJoin(true)}
-                style={{ flex: 1 }}
-              />
             </View>
-            {!canCreateClub && (
-              <Pressable onPress={() => router.push('/(tabs)/more')} hitSlop={6}>
-                <Text style={[styles.operatorHint, { color: colors.textLight }]}>
-                  모임을 만들려면 <Text style={{ color: colors.primary, fontWeight: '700' }}>운영자 신청</Text>이 필요해요
-                </Text>
-              </Pressable>
-            )}
           </View>
         )}
 
@@ -548,45 +570,57 @@ const styles = StyleSheet.create({
     paddingBottom: spacing.xxxxl,
   },
 
-  // Greeting
+  // Greeting — large, confident, tight line-height with a muted sub-line.
   greetingRow: {
     flexDirection: 'row',
     alignItems: 'center',
     marginTop: spacing.sm,
-    marginBottom: spacing.lg,
+    marginBottom: spacing.xl,
     gap: spacing.md,
   },
   greeting: {
-    ...typography.h2,
+    fontSize: 24,
+    fontWeight: '800',
+    lineHeight: 30,
+    letterSpacing: -0.3,
+    fontFamily: typography.h2.fontFamily,
   },
   greetingSub: {
-    ...typography.body2,
-    marginTop: 2,
+    fontSize: 14,
+    fontWeight: '500',
+    lineHeight: 18,
+    marginTop: 3,
+    fontFamily: typography.body2.fontFamily,
   },
   skillBadge: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: spacing.xs,
-    paddingHorizontal: spacing.md,
-    paddingVertical: spacing.sm,
+    gap: spacing.xs + 2,
+    paddingLeft: spacing.sm,
+    paddingRight: spacing.md,
+    paddingVertical: 7,
     borderRadius: radius.pill,
+    maxWidth: 168,
   },
   skillBadgeLevel: {
     color: palette.white,
     fontSize: 13,
     fontWeight: '900',
+    lineHeight: 16,
   },
   skillBadgeLabel: {
     color: palette.white,
     fontSize: 12,
     fontWeight: '700',
+    lineHeight: 16,
+    flexShrink: 1,
   },
 
   // Hero (내 차례)
   heroCard: {
     borderRadius: radius.card,
     padding: spacing.xl,
-    marginBottom: spacing.xl,
+    marginBottom: spacing.xxl,
   },
   heroBadge: {
     flexDirection: 'row',
@@ -595,9 +629,9 @@ const styles = StyleSheet.create({
     alignSelf: 'flex-start',
     backgroundColor: 'rgba(255,255,255,0.22)',
     paddingHorizontal: spacing.md,
-    paddingVertical: spacing.xs,
+    paddingVertical: spacing.xs + 1,
     borderRadius: radius.pill,
-    marginBottom: spacing.md,
+    marginBottom: spacing.mlg,
   },
   heroLiveDot: {
     width: 8,
@@ -609,17 +643,24 @@ const styles = StyleSheet.create({
     color: palette.white,
     fontSize: 12,
     fontWeight: '800',
-    letterSpacing: 0.5,
+    letterSpacing: 0.4,
   },
   heroTitle: {
     color: palette.white,
-    ...typography.h1,
-    marginBottom: spacing.xs,
+    fontSize: 26,
+    fontWeight: '800',
+    lineHeight: 32,
+    letterSpacing: -0.4,
+    marginBottom: spacing.xs + 1,
+    fontFamily: typography.h1.fontFamily,
   },
   heroSub: {
     color: 'rgba(255,255,255,0.92)',
-    ...typography.body2,
+    fontSize: 14,
+    fontWeight: '500',
+    lineHeight: 20,
     marginBottom: spacing.lg,
+    fontFamily: typography.body2.fontFamily,
   },
   heroCta: {
     flexDirection: 'row',
@@ -640,15 +681,50 @@ const styles = StyleSheet.create({
   section: {
     marginBottom: spacing.xl,
   },
+  sectionHead: {
+    marginBottom: spacing.md,
+  },
+  sectionHeadRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+  },
+  sectionTitle: {
+    fontSize: 18,
+    fontWeight: '800',
+    lineHeight: 24,
+    letterSpacing: -0.2,
+    fontFamily: typography.h3.fontFamily,
+  },
+  sectionCount: {
+    minWidth: 22,
+    height: 22,
+    borderRadius: 11,
+    paddingHorizontal: 7,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  sectionCountText: {
+    fontSize: 12,
+    fontWeight: '800',
+  },
+  sectionSub: {
+    fontSize: 13,
+    fontWeight: '500',
+    lineHeight: 18,
+    marginTop: 4,
+    fontFamily: typography.body2.fontFamily,
+  },
 
   // 운영진 배지 (모임 카드 제목 옆)
   rolePill: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: spacing.xs,
-    paddingHorizontal: spacing.smd,
+    paddingHorizontal: spacing.sm,
     paddingVertical: spacing.xs,
-    borderRadius: radius.pill,
+    borderRadius: radius.md,
+    alignSelf: 'flex-start',
   },
   rolePillText: {
     fontSize: 11,
@@ -661,7 +737,6 @@ const styles = StyleSheet.create({
     borderRadius: radius.card,
     borderWidth: 1,
     marginBottom: spacing.md,
-    gap: spacing.md,
   },
   clubTitleRow: {
     flexDirection: 'row',
@@ -669,19 +744,24 @@ const styles = StyleSheet.create({
     gap: spacing.md,
   },
   clubIconWrap: {
-    width: 40,
-    height: 40,
+    width: 42,
+    height: 42,
     borderRadius: radius.xl,
     justifyContent: 'center',
     alignItems: 'center',
   },
   clubName: {
-    ...typography.subtitle1,
+    fontSize: 17,
+    fontWeight: '700',
+    lineHeight: 22,
+    letterSpacing: -0.2,
+    fontFamily: typography.subtitle1.fontFamily,
   },
   clubStatusRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: spacing.sm,
+    gap: spacing.xs + 2,
+    marginTop: spacing.md,
   },
   statusDot: {
     width: 7,
@@ -689,21 +769,46 @@ const styles = StyleSheet.create({
     borderRadius: 4,
   },
   clubStatusText: {
-    ...typography.body2,
+    fontSize: 13,
+    fontWeight: '500',
+    lineHeight: 18,
     flex: 1,
+    fontFamily: typography.body2.fontFamily,
   },
-  clubPrimaryBtn: {
-    marginTop: spacing.xs,
+  clubDivider: {
+    height: 1,
+    marginTop: spacing.lg,
+    marginBottom: spacing.lg,
+    marginHorizontal: -spacing.lg,
   },
+  clubPrimaryBtn: {},
   clubActions: {
     flexDirection: 'row',
+    gap: spacing.sm + 2,
+  },
+
+  // Footer — tidy anchored section for 모임 만들기 / 참여
+  footerCard: {
+    marginTop: spacing.xs,
+    padding: spacing.lg,
+    borderRadius: radius.card,
+    borderWidth: 1,
     gap: spacing.md,
-    marginTop: spacing.sm,
+  },
+  footerLabel: {
+    fontSize: 13,
+    fontWeight: '600',
+    lineHeight: 18,
+    fontFamily: typography.body2.fontFamily,
+  },
+  footerActions: {
+    flexDirection: 'row',
+    gap: spacing.sm + 2,
   },
   operatorHint: {
     ...typography.caption,
     textAlign: 'center',
-    marginTop: spacing.md,
+    marginTop: spacing.xs,
   },
 
   // Empty
