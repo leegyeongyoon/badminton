@@ -26,6 +26,8 @@ const ICON_MAP = {
   delete: 'trash-can-outline',
   add: 'plus',
   search: 'magnify',
+  chat: 'chat-outline',
+  tools: 'tune-variant',
 
   // Status
   live: 'circle',

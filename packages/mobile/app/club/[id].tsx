@@ -20,11 +20,13 @@ import { clubSessionApi, ClubSessionListItem } from '../../services/clubSession'
 import { clubApi } from '../../services/club';
 import { facilityApi } from '../../services/facility';
 import { Colors } from '../../constants/colors';
+import { createShadow } from '../../constants/theme';
 import { Strings } from '../../constants/strings';
 import { showAlert, showConfirm } from '../../utils/alert';
 import { showSuccess } from '../../utils/feedback';
 import { getItem, setItem } from '../../services/storage';
 import { AttendanceLeaderboard } from '../../components/club/AttendanceLeaderboard';
+import { Icon } from '../../components/ui/Icon';
 
 interface ClubMember {
   userId: string;
@@ -88,6 +90,9 @@ export default function ClubDetailScreen() {
   const [sessions, setSessions] = useState<ClubSessionListItem[]>([]);
   // 지난 정모 더보기: 처음엔 ~10개만, 누르면 전체.
   const [showAllPast, setShowAllPast] = useState(false);
+  // 운영 도구(운영진) 접이식 — 평소 닫힘. 멤버 목록 섹션도 접이식.
+  const [showTools, setShowTools] = useState(false);
+  const [showMembers, setShowMembers] = useState(false);
   const [showStartModal, setShowStartModal] = useState(false);
   const [showRoleModal, setShowRoleModal] = useState(false);
   const [selectedMember, setSelectedMember] = useState<ClubMember | null>(null);
@@ -521,195 +526,246 @@ export default function ClubDetailScreen() {
           contentContainerStyle={styles.scrollContent}
           refreshControl={Platform.OS === 'web' ? undefined : <RefreshControl refreshing={loadingSession} onRefresh={onRefresh} />}
         >
-          {/* Club info card */}
+          {/* ─── 모임 정체성 (quiet, compact) ───
+              avatar + 이름 + 멤버수 + 초대코드. 채팅/건의·QR은 작은 아이콘 액션으로
+              demote (full-width 보라 버튼 stack 제거). */}
           {club && (
             <View style={styles.infoCard}>
-              <View style={styles.infoLeft}>
-                <View style={styles.clubAvatarLarge}>
-                  <Text style={styles.clubAvatarText}>{club.name[0]}</Text>
+              <View style={styles.infoTopRow}>
+                <View style={styles.infoLeft}>
+                  <View style={styles.clubAvatarLarge}>
+                    <Text style={styles.clubAvatarText}>{club.name[0]}</Text>
+                  </View>
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.clubName} numberOfLines={1}>{club.name}</Text>
+                    <Text style={styles.clubMeta}>멤버 {currentMembers.length}명</Text>
+                  </View>
                 </View>
-                <View>
-                  <Text style={styles.clubName}>{club.name}</Text>
-                  <Text style={styles.clubMeta}>{currentMembers.length}명</Text>
+                {/* 작은 아이콘 액션: 채팅/건의 + 모임 참여 QR(운영진만) */}
+                <View style={styles.headerActions}>
+                  <TouchableOpacity
+                    style={styles.iconAction}
+                    onPress={() => router.push(`/club/${clubId}/chat`)}
+                    activeOpacity={0.7}
+                    accessibilityLabel="채팅 / 건의 (짝 요청)"
+                  >
+                    <Icon name="chat" size={20} color={Colors.textSecondary} />
+                    <Text style={styles.iconActionLabel}>채팅</Text>
+                  </TouchableOpacity>
+                  {isLeaderOrStaff && (
+                    <TouchableOpacity
+                      style={styles.iconAction}
+                      onPress={() => router.push(`/club/${clubId}/qr`)}
+                      activeOpacity={0.7}
+                      accessibilityLabel="모임 참여 QR"
+                    >
+                      <Icon name="qr" size={20} color={Colors.textSecondary} />
+                      <Text style={styles.iconActionLabel}>QR</Text>
+                    </TouchableOpacity>
+                  )}
                 </View>
               </View>
-              <TouchableOpacity
-                style={styles.inviteBox}
-                onPress={() => router.push(`/club/${clubId}/qr`)}
-                activeOpacity={0.7}
-                accessibilityLabel="모임 참여 QR 보기"
-              >
+              <View style={styles.inviteRow}>
                 <Text style={styles.inviteLabel}>초대코드</Text>
                 <Text style={styles.inviteCode}>{club.inviteCode}</Text>
-              </TouchableOpacity>
+              </View>
             </View>
           )}
 
-          {/* 채팅 / 건의 — 모든 모임원이 사용. 짝 요청(○○랑 같이 치고 싶어요)도 여기서. */}
-          <View style={styles.chatButtonWrap}>
-            <TouchableOpacity
-              style={styles.chatButton}
-              onPress={() => router.push(`/club/${clubId}/chat`)}
-              activeOpacity={0.85}
-              accessibilityLabel="채팅 건의"
-            >
-              <Text style={styles.chatButtonText}>💬 채팅 / 건의 (짝 요청)</Text>
-            </TouchableOpacity>
-          </View>
-
-          {/* 모임 참여 QR — 스캔하면 모임에 참여. 관리자(리더/운영진)만 노출. */}
-          {isLeaderOrStaff && (
-            <View style={styles.qrButtonWrap}>
-              <TouchableOpacity
-                style={styles.qrButton}
-                onPress={() => router.push(`/club/${clubId}/qr`)}
-                activeOpacity={0.85}
-                accessibilityLabel="모임 참여 QR"
-              >
-                <Text style={styles.qrButtonText}>모임 참여 QR</Text>
-              </TouchableOpacity>
-            </View>
-          )}
-
-          {/* Active session banner.
-              • LEADER/STAFF: the management banner (→ 턴 관리) + quick actions
-                (운영판 / 턴 관리).
-              • Regular player: a clean, prominent block — 체크인 (if not yet
-                checked in) + 게임 현황 보기 (read-only board). No 관리 UI. */}
-          {activeSession && (
-            isLeaderOrStaff ? (
-              <View style={styles.sessionBannerWrap}>
-                <TouchableOpacity
-                  style={styles.sessionBanner}
-                  onPress={() => router.push(`/club/${clubId}/session`)}
-                  activeOpacity={0.7}
-                >
-                  <View style={styles.sessionBannerLeft}>
-                    <View style={styles.sessionDot} />
-                    <View>
-                      <View style={styles.sessionTitleRow}>
-                        <Text style={styles.sessionBannerTitle}>
-                          오늘 정모 · {fmtShortDate(activeSession.startedAt)}
-                        </Text>
-                        <View style={styles.liveBadge}>
-                          <Text style={styles.liveBadgeText}>진행 중</Text>
-                        </View>
-                      </View>
-                      <Text style={styles.sessionBannerSub}>
-                        {activeSession.facilityName} · 코트 {activeSession.courtIds?.length || 0}개
-                      </Text>
-                    </View>
-                  </View>
-                  <View style={styles.sessionBannerBtn}>
-                    <Text style={styles.sessionBannerBtnText}>정모 관리</Text>
-                  </View>
-                </TouchableOpacity>
-
-                {/* Quick actions (operator only) */}
-                <View style={styles.quickActions}>
-                  <TouchableOpacity
-                    style={styles.quickActionBtn}
-                    onPress={() => router.push(`/session/${activeSession.id}/operate`)}
-                  >
-                    <Text style={styles.quickActionText}>운영판</Text>
-                  </TouchableOpacity>
-                  <TouchableOpacity
-                    style={styles.quickActionBtn}
-                    onPress={() => router.push(`/club/${clubId}/session`)}
-                  >
-                    <Text style={styles.quickActionText}>턴 관리</Text>
-                  </TouchableOpacity>
+          {/* ═══ 정모 HERO — 화면의 주인공 ═══
+              진행 중이면 dated hero 카드 + ONE primary action
+                (운영진 → 운영판 들어가기 / 멤버 → 현황 보기).
+              없으면 운영진 → "오늘 정모 시작" CTA, 멤버 → calm empty. */}
+          {activeSession ? (
+            <View style={styles.heroCard}>
+              {/* 헤더: 오늘 정모 · M/D + 진행 중 배지 */}
+              <View style={styles.heroHeader}>
+                <View style={styles.heroDot} />
+                <Text style={styles.heroTitle}>
+                  오늘 정모 · {fmtShortDate(activeSession.startedAt)}
+                </Text>
+                <View style={styles.liveBadge}>
+                  <Text style={styles.liveBadgeText}>진행 중</Text>
                 </View>
               </View>
-            ) : (
-              <View style={styles.playerSessionWrap}>
-                <View style={styles.playerSessionHeader}>
-                  <View style={styles.sessionDot} />
-                  <Text style={styles.playerSessionTitle}>
-                    오늘 정모 · {fmtShortDate(activeSession.startedAt)}
-                  </Text>
-                  <View style={styles.liveBadge}>
-                    <Text style={styles.liveBadgeText}>진행 중</Text>
-                  </View>
-                </View>
-                <Text style={styles.playerSessionSub}>
-                  {activeSession.facilityName} · 코트 {activeSession.courtIds?.length || 0}개
-                </Text>
+              {/* 장소 · 코트 */}
+              <Text style={styles.heroMeta}>
+                {activeSession.facilityName} · 코트 {activeSession.courtIds?.length || 0}개
+              </Text>
 
-                {/* 체크인 — 아직 체크인 안 했을 때만 (가장 눈에 띄게).
-                    네이티브에서는 GPS 지오펜스(100m)가 적용됨. 웹은 GPS가 없어
-                    위치 오류가 날 수 있음(기존 동작 유지). */}
-                {!isCheckedIn && (
-                  <>
-                    <TouchableOpacity
-                      style={styles.playerCheckinBtn}
-                      onPress={() => router.push(`/checkin-modal?clubSessionId=${activeSession.id}`)}
-                      activeOpacity={0.85}
-                      accessibilityLabel="체크인"
-                    >
-                      <Text style={styles.playerCheckinText}>체크인</Text>
-                    </TouchableOpacity>
-                    {!!autoCheckMsg && (
-                      <Text style={styles.autoCheckHint}>📍 {autoCheckMsg}</Text>
-                    )}
-                  </>
-                )}
-
-                {/* 체크인 됨 → "✓ 참석 중" 표시 + 체크아웃 버튼 */}
-                {isCheckedIn && (
+              {/* 멤버: 참석 상태 (체크인 / 참석 중 + 체크아웃) — quiet, 카드 안에서. */}
+              {!isLeaderOrStaff && (
+                !isCheckedIn ? (
+                  <TouchableOpacity
+                    style={styles.heroSecondaryBtn}
+                    onPress={() => router.push(`/checkin-modal?clubSessionId=${activeSession.id}`)}
+                    activeOpacity={0.85}
+                    accessibilityLabel="체크인"
+                  >
+                    <Text style={styles.heroSecondaryText}>체크인</Text>
+                  </TouchableOpacity>
+                ) : (
                   <View style={styles.attendingRow}>
                     <View style={styles.attendingBadge}>
                       <Text style={styles.attendingText}>✓ 참석 중</Text>
                     </View>
                     <TouchableOpacity
-                      style={[styles.playerCheckoutBtn, checkingOut && { opacity: 0.6 }]}
+                      style={[styles.heroCheckoutBtn, checkingOut && { opacity: 0.6 }]}
                       onPress={handleCheckOut}
                       disabled={checkingOut}
                       activeOpacity={0.85}
                       accessibilityLabel="체크아웃"
                     >
-                      <Text style={styles.playerCheckoutText}>
+                      <Text style={styles.heroCheckoutText}>
                         {checkingOut ? '처리 중...' : '체크아웃'}
                       </Text>
                     </TouchableOpacity>
                   </View>
-                )}
+                )
+              )}
+              {!!autoCheckMsg && !isLeaderOrStaff && !isCheckedIn && (
+                <Text style={styles.autoCheckHint}>📍 {autoCheckMsg}</Text>
+              )}
 
-                {/* 게임 현황 보기 — 읽기 전용 보드. 체크인 여부와 무관하게 항상
-                    노출(정모가 진행 중이면 모임원 누구나 볼 수 있어야 함). */}
+              {/* ONE PRIMARY ACTION — 운영진: 운영판 들어가기 / 멤버: 현황 보기 */}
+              {isLeaderOrStaff ? (
                 <TouchableOpacity
-                  style={[styles.playerBoardBtn, isCheckedIn && styles.playerBoardBtnPrimary]}
+                  style={styles.heroPrimaryBtn}
+                  onPress={() => router.push(`/session/${activeSession.id}/operate`)}
+                  activeOpacity={0.85}
+                  accessibilityLabel="운영판 들어가기"
+                >
+                  <Text style={styles.heroPrimaryText}>운영판 들어가기</Text>
+                </TouchableOpacity>
+              ) : (
+                <TouchableOpacity
+                  style={styles.heroPrimaryBtn}
                   onPress={() => router.push(`/session/${activeSession.id}/board`)}
                   activeOpacity={0.85}
-                  accessibilityLabel="게임 현황 보기"
+                  accessibilityLabel="현황 보기"
                 >
-                  <Text style={[styles.playerBoardText, isCheckedIn && styles.playerBoardTextPrimary]}>
-                    게임 현황 보기
+                  <Text style={styles.heroPrimaryText}>현황 보기</Text>
+                </TouchableOpacity>
+              )}
+            </View>
+          ) : (
+            isLeaderOrStaff ? (
+              <View style={styles.heroCard}>
+                <View style={styles.heroHeader}>
+                  <Text style={styles.heroTitleQuiet}>진행 중인 정모가 없어요</Text>
+                </View>
+                <Text style={styles.heroMeta}>
+                  {startFacilityName ? `${startFacilityName}에서 ` : ''}바로 시작하고 출석을 받으세요 (체크인 불필요)
+                </Text>
+                <TouchableOpacity
+                  style={[styles.heroPrimaryBtn, isStarting && { opacity: 0.6 }]}
+                  onPress={handleQuickStartSession}
+                  disabled={isStarting}
+                  activeOpacity={0.85}
+                  accessibilityLabel="오늘 정모 시작"
+                >
+                  <Text style={styles.heroPrimaryText}>
+                    {isStarting ? '시작 중...' : '▶  오늘 정모 시작'}
                   </Text>
                 </TouchableOpacity>
+                <TouchableOpacity
+                  style={styles.heroTextLink}
+                  onPress={handleOpenStartModal}
+                  disabled={isStarting}
+                >
+                  <Text style={styles.heroTextLinkText}>시설·코트 선택해서 시작</Text>
+                </TouchableOpacity>
+              </View>
+            ) : (
+              <View style={[styles.heroCard, styles.heroCardEmpty]}>
+                <Text style={styles.heroEmptyText}>진행 중인 정모가 없어요</Text>
+                <Text style={styles.heroEmptySub}>정모가 시작되면 여기에서 바로 확인할 수 있어요</Text>
               </View>
             )
           )}
 
-          {/* Leader actions — one-tap 정모 start (no scheduling required) */}
-          {isLeaderOrStaff && !activeSession && (
-            <View style={styles.leaderActions}>
+          {/* ═══ 운영 도구 (운영진만) — 한 줄 접이식. 평소엔 닫혀 있어 화면이 조용함. ═══
+              턴 관리 · 전체 체크인 · 멤버 추가 + (quiet) 모임 삭제. */}
+          {isLeaderOrStaff && (
+            <View style={styles.toolsWrap}>
               <TouchableOpacity
-                style={[styles.startSessionBtn, isStarting && { opacity: 0.6 }]}
-                onPress={handleQuickStartSession}
-                disabled={isStarting}
+                style={styles.toolsHeader}
+                onPress={() => setShowTools((v) => !v)}
+                activeOpacity={0.7}
+                accessibilityLabel="운영 도구 열기/닫기"
               >
-                <Text style={styles.startSessionIcon}>{isStarting ? '' : '▶'}</Text>
-                <Text style={styles.startSessionText}>
-                  {isStarting ? '시작 중...' : '오늘 정모 시작'}
-                </Text>
+                <View style={styles.toolsHeaderLeft}>
+                  <Icon name="tools" size={18} color={Colors.textSecondary} />
+                  <Text style={styles.toolsHeaderText}>운영 도구</Text>
+                </View>
+                <Icon
+                  name={showTools ? 'chevronUp' : 'chevronDown'}
+                  size={18}
+                  color={Colors.textLight}
+                />
               </TouchableOpacity>
-              <Text style={styles.startSessionHint}>
-                {startFacilityName ? `${startFacilityName}에서 ` : ''}바로 정모를 시작하고 출석을 받습니다 (체크인 불필요)
-              </Text>
-              <TouchableOpacity onPress={handleOpenStartModal} disabled={isStarting}>
-                <Text style={styles.courtPickLink}>시설·코트 선택해서 시작</Text>
-              </TouchableOpacity>
+
+              {showTools && (
+                <View style={styles.toolsBody}>
+                  <View style={styles.toolsGrid}>
+                    {!!activeSession && (
+                      <TouchableOpacity
+                        style={styles.toolBtn}
+                        onPress={() => router.push(`/club/${clubId}/session`)}
+                        activeOpacity={0.8}
+                        accessibilityLabel="턴 관리"
+                      >
+                        <Text style={styles.toolBtnText}>턴 관리</Text>
+                      </TouchableOpacity>
+                    )}
+                    {!!activeSession && (
+                      <TouchableOpacity
+                        style={[styles.toolBtn, checkingInAll && { opacity: 0.5 }]}
+                        onPress={handleCheckInAll}
+                        disabled={checkingInAll}
+                        activeOpacity={0.8}
+                        accessibilityLabel="전체 체크인"
+                      >
+                        <Text style={styles.toolBtnText}>
+                          {checkingInAll ? '체크인 중...' : '전체 체크인'}
+                        </Text>
+                      </TouchableOpacity>
+                    )}
+                    <TouchableOpacity
+                      style={styles.toolBtn}
+                      onPress={() => setShowAddMemberModal(true)}
+                      activeOpacity={0.8}
+                      accessibilityLabel="멤버 추가"
+                    >
+                      <Text style={styles.toolBtnText}>＋ 멤버 추가</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                      style={styles.toolBtn}
+                      onPress={() => router.push(`/club/${clubId}/qr`)}
+                      activeOpacity={0.8}
+                      accessibilityLabel="모임 참여 QR"
+                    >
+                      <Text style={styles.toolBtnText}>모임 참여 QR</Text>
+                    </TouchableOpacity>
+                  </View>
+
+                  {/* 위험 — 모임 삭제 (조용하게, 텍스트 링크) */}
+                  {canDeleteClub && (
+                    <TouchableOpacity
+                      style={[styles.deleteClubLink, deletingClub && { opacity: 0.5 }]}
+                      onPress={handleDeleteClub}
+                      disabled={deletingClub}
+                      activeOpacity={0.7}
+                      accessibilityLabel="모임 삭제"
+                    >
+                      <Icon name="delete" size={15} color={Colors.danger} />
+                      <Text style={styles.deleteClubLinkText}>
+                        {deletingClub ? '삭제 중...' : '모임 삭제'}
+                      </Text>
+                    </TouchableOpacity>
+                  )}
+                </View>
+              )}
             </View>
           )}
 
@@ -764,82 +820,47 @@ export default function ClubDetailScreen() {
             );
           })()}
 
-          {/* 출석왕 leaderboard (visible to every club member) */}
-          {clubId && <AttendanceLeaderboard clubId={clubId} />}
+          {/* ═══ 출석왕 — TOP 3로 접고, 전체 보기로 펼침 (내 순위 pill은 항상) ═══ */}
+          {clubId && <AttendanceLeaderboard clubId={clubId} maxRows={3} />}
 
-          {/* 운영진 멤버 관리: 멤버 추가 + (정모 진행 중이면) 전체 체크인 */}
-          {isLeaderOrStaff && (
-            <View style={styles.memberAdminBar}>
-              <TouchableOpacity
-                style={styles.addMemberBtn}
-                onPress={() => setShowAddMemberModal(true)}
-                activeOpacity={0.85}
-                accessibilityLabel="멤버 추가"
-              >
-                <Text style={styles.addMemberBtnText}>＋ 멤버 추가</Text>
-              </TouchableOpacity>
-              {!!activeSession && (
-                <TouchableOpacity
-                  style={[styles.checkInAllBtn, checkingInAll && { opacity: 0.5 }]}
-                  onPress={handleCheckInAll}
-                  disabled={checkingInAll}
-                  activeOpacity={0.85}
-                  accessibilityLabel="전체 체크인"
-                >
-                  <Text style={styles.checkInAllBtnText}>
-                    {checkingInAll ? '체크인 중...' : '✓ 전체 체크인'}
-                  </Text>
-                </TouchableOpacity>
-              )}
-            </View>
-          )}
+          {/* ═══ 멤버 — secondary. "멤버 N명" 접이식 섹션 뒤로. ═══
+              열면 체크인됨/오프라인으로 그룹. 진행 중 정모면 운영진은 출석 토글 가능. */}
+          <View style={styles.membersSection}>
+            <TouchableOpacity
+              style={styles.membersHeader}
+              onPress={() => setShowMembers((v) => !v)}
+              activeOpacity={0.7}
+              accessibilityLabel="멤버 목록 열기/닫기"
+            >
+              <Text style={styles.membersHeaderText}>멤버 {currentMembers.length}명</Text>
+              <Icon
+                name={showMembers ? 'chevronUp' : 'chevronDown'}
+                size={18}
+                color={Colors.textLight}
+              />
+            </TouchableOpacity>
 
-          {/* Checked-in members section */}
-          {checkedInMembers.length > 0 && (
-            <View style={styles.section}>
-              <Text style={styles.sectionTitle}>
-                체크인됨 ({checkedInMembers.length})
-              </Text>
-              {checkedInMembers.map((m) => (
-                <View key={m.userId}>
-                  {renderMember({ item: m })}
-                </View>
-              ))}
-            </View>
-          )}
-
-          {/* Offline members section */}
-          <View style={styles.section}>
-            <Text style={styles.sectionTitle}>
-              {checkedInMembers.length > 0 ? '오프라인' : '전체 멤버'} ({notCheckedInMembers.length})
-            </Text>
-            {notCheckedInMembers.map((m) => (
-              <View key={m.userId}>
-                {renderMember({ item: m })}
-              </View>
-            ))}
-          </View>
-
-          {/* ─── Danger zone: 모임 삭제 (운영진/최고관리자) ─── */}
-          {canDeleteClub && (
-            <View style={styles.dangerZone}>
-              <Text style={styles.dangerZoneLabel}>위험 구역</Text>
-              <TouchableOpacity
-                style={[styles.deleteClubBtn, deletingClub && { opacity: 0.5 }]}
-                onPress={handleDeleteClub}
-                disabled={deletingClub}
-                activeOpacity={0.85}
-                accessibilityLabel="모임 삭제"
-              >
-                <Text style={styles.deleteClubBtnText}>
-                  {deletingClub ? '삭제 중...' : '모임 삭제'}
+            {showMembers && (
+              <View style={styles.membersBody}>
+                {checkedInMembers.length > 0 && (
+                  <>
+                    <Text style={styles.membersGroupLabel}>
+                      체크인됨 ({checkedInMembers.length})
+                    </Text>
+                    {checkedInMembers.map((m) => (
+                      <View key={m.userId}>{renderMember({ item: m })}</View>
+                    ))}
+                  </>
+                )}
+                <Text style={styles.membersGroupLabel}>
+                  {checkedInMembers.length > 0 ? '오프라인' : '전체 멤버'} ({notCheckedInMembers.length})
                 </Text>
-              </TouchableOpacity>
-              <Text style={styles.dangerZoneHint}>
-                모임과 모든 정모·출석·게임 기록이 영구 삭제됩니다.
-              </Text>
-            </View>
-          )}
+                {notCheckedInMembers.map((m) => (
+                  <View key={m.userId}>{renderMember({ item: m })}</View>
+                ))}
+              </View>
+            )}
+          </View>
         </ScrollView>
 
         {/* Start Session Modal */}
@@ -1057,13 +1078,17 @@ const styles = StyleSheet.create({
   scrollContent: {
     paddingBottom: 40,
   },
-  // Info card
+  // ─── 모임 정체성 카드 (quiet, compact) ───
   infoCard: {
     backgroundColor: Colors.surface,
     margin: 16,
     marginBottom: 0,
-    borderRadius: 14,
-    padding: 16,
+    borderRadius: 16,
+    padding: 14,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: Colors.border,
+  },
+  infoTopRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
@@ -1071,203 +1096,190 @@ const styles = StyleSheet.create({
   infoLeft: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 12,
+    gap: 10,
+    flex: 1,
   },
   clubAvatarLarge: {
-    width: 48,
-    height: 48,
-    borderRadius: 14,
+    width: 42,
+    height: 42,
+    borderRadius: 12,
     backgroundColor: Colors.primaryLight,
     justifyContent: 'center',
     alignItems: 'center',
   },
   clubAvatarText: {
-    fontSize: 20,
+    fontSize: 18,
     fontWeight: '800',
     color: Colors.primary,
   },
   clubName: {
-    fontSize: 18,
-    fontWeight: '700',
+    fontSize: 17,
+    fontWeight: '800',
     color: Colors.text,
   },
   clubMeta: {
-    fontSize: 13,
+    fontSize: 12.5,
     color: Colors.textSecondary,
+    marginTop: 1,
+  },
+  // 작은 아이콘 액션 (채팅 / QR) — full-width 버튼 stack 제거
+  headerActions: {
+    flexDirection: 'row',
+    gap: 6,
+  },
+  iconAction: {
+    width: 48,
+    paddingVertical: 6,
+    borderRadius: 12,
+    alignItems: 'center',
+    backgroundColor: Colors.surfaceSecondary,
+  },
+  iconActionLabel: {
+    fontSize: 10.5,
+    color: Colors.textSecondary,
+    fontWeight: '600',
     marginTop: 2,
   },
-  inviteBox: {
+  // 초대코드 (작게, 카드 하단)
+  inviteRow: {
+    flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: Colors.divider,
-    borderRadius: 10,
-    paddingHorizontal: 12,
-    paddingVertical: 6,
+    gap: 8,
+    marginTop: 12,
+    paddingTop: 10,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: Colors.divider,
   },
   inviteLabel: {
-    fontSize: 10,
+    fontSize: 11,
     color: Colors.textLight,
+    fontWeight: '600',
   },
   inviteCode: {
-    fontSize: 15,
-    fontWeight: '700',
+    fontSize: 14,
+    fontWeight: '800',
     color: Colors.text,
     letterSpacing: 1.5,
   },
-  // Session banner
-  sessionBannerWrap: {
+  // ═══ 정모 HERO 카드 (화면의 주인공) ═══
+  heroCard: {
     margin: 16,
     marginBottom: 0,
-    gap: 8,
-  },
-  sessionBanner: {
-    backgroundColor: '#EDE9FE',
-    borderRadius: 14,
-    padding: 14,
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
+    backgroundColor: Colors.surface,
+    borderRadius: 18,
     borderWidth: 1,
-    borderColor: '#7C3AED30',
+    borderColor: Colors.primaryLight,
+    padding: 18,
+    gap: 14,
+    ...createShadow(2, 10, 0.06, 3),
   },
-  quickActions: {
+  heroCardEmpty: {
+    borderColor: Colors.border,
+    alignItems: 'center',
+    paddingVertical: 28,
+    gap: 6,
+  },
+  heroHeader: {
     flexDirection: 'row',
+    alignItems: 'center',
     gap: 8,
   },
-  quickActionBtn: {
-    flex: 1,
-    backgroundColor: '#7C3AED',
-    borderRadius: 10,
-    paddingVertical: 10,
-    alignItems: 'center',
-  },
-  quickActionText: {
-    color: '#fff',
-    fontSize: 14,
-    fontWeight: '600',
-  },
-  sessionBannerLeft: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 10,
-    flex: 1,
-  },
-  sessionDot: {
-    width: 10,
-    height: 10,
+  heroDot: {
+    width: 9,
+    height: 9,
     borderRadius: 5,
-    backgroundColor: '#7C3AED',
+    backgroundColor: Colors.info,
   },
-  sessionTitleRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-  },
-  sessionBannerTitle: {
-    fontSize: 15,
-    fontWeight: '700',
-    color: '#7C3AED',
-  },
-  // 진행 중 배지 (정모 카드 제목 옆)
-  liveBadge: {
-    backgroundColor: '#7C3AED',
-    borderRadius: 999,
-    paddingHorizontal: 8,
-    paddingVertical: 2,
-  },
-  liveBadgeText: {
-    color: '#fff',
-    fontSize: 10,
-    fontWeight: '800',
-  },
-  sessionBannerSub: {
-    fontSize: 12,
-    color: '#6D28D9',
-    marginTop: 1,
-  },
-  sessionBannerBtn: {
-    backgroundColor: '#7C3AED',
-    borderRadius: 8,
-    paddingHorizontal: 14,
-    paddingVertical: 8,
-  },
-  sessionBannerBtnText: {
-    color: '#fff',
-    fontSize: 13,
-    fontWeight: '600',
-  },
-  // 채팅 / 건의 버튼 (모든 모임원)
-  chatButtonWrap: {
-    marginHorizontal: 16,
-    marginTop: 12,
-  },
-  chatButton: {
-    borderRadius: 12,
-    paddingVertical: 14,
-    alignItems: 'center',
-    backgroundColor: '#7C3AED',
-  },
-  chatButtonText: {
-    color: '#fff',
-    fontSize: 15,
-    fontWeight: '700',
-  },
-  // 모임 참여 QR 버튼
-  qrButtonWrap: {
-    marginHorizontal: 16,
-    marginTop: 12,
-  },
-  qrButton: {
-    borderWidth: 1.5,
-    borderColor: '#7C3AED',
-    borderRadius: 12,
-    paddingVertical: 12,
-    alignItems: 'center',
-    backgroundColor: '#EDE9FE',
-  },
-  qrButtonText: {
-    color: '#7C3AED',
-    fontSize: 15,
-    fontWeight: '700',
-  },
-  // Player active-session block (clean, no management UI)
-  playerSessionWrap: {
-    margin: 16,
-    marginBottom: 0,
-    backgroundColor: '#EDE9FE',
-    borderRadius: 16,
-    borderWidth: 1,
-    borderColor: '#7C3AED30',
-    padding: 16,
-    gap: 12,
-  },
-  playerSessionHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-  },
-  playerSessionTitle: {
-    fontSize: 15,
-    fontWeight: '800',
-    color: '#7C3AED',
-  },
-  playerSessionSub: {
-    fontSize: 12,
-    color: '#6D28D9',
-    flex: 1,
-  },
-  playerCheckinBtn: {
-    backgroundColor: '#7C3AED',
-    borderRadius: 14,
-    paddingVertical: 16,
-    alignItems: 'center',
-  },
-  playerCheckinText: {
-    color: '#fff',
+  heroTitle: {
     fontSize: 17,
     fontWeight: '800',
+    color: Colors.text,
+    flexShrink: 1,
+  },
+  heroTitleQuiet: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: Colors.textSecondary,
+  },
+  heroMeta: {
+    fontSize: 13,
+    color: Colors.textSecondary,
+    marginTop: -6,
+  },
+  // 진행 중 배지 (정모 카드 제목 옆) — calm info violet
+  liveBadge: {
+    backgroundColor: Colors.infoBg,
+    borderRadius: 999,
+    paddingHorizontal: 9,
+    paddingVertical: 3,
+  },
+  liveBadgeText: {
+    color: Colors.info,
+    fontSize: 10.5,
+    fontWeight: '800',
+  },
+  // ONE primary action — teal (앱의 primary, 화면에서 유일한 강조)
+  heroPrimaryBtn: {
+    backgroundColor: Colors.primary,
+    borderRadius: 14,
+    paddingVertical: 15,
+    alignItems: 'center',
+    ...createShadow(2, 8, 0.18, 3, Colors.primary),
+  },
+  heroPrimaryText: {
+    color: Colors.textInverse,
+    fontSize: 16,
+    fontWeight: '800',
+  },
+  // 멤버 체크인 (secondary, 카드 안 — outline)
+  heroSecondaryBtn: {
+    borderRadius: 14,
+    paddingVertical: 13,
+    alignItems: 'center',
+    borderWidth: 1.5,
+    borderColor: Colors.primary,
+    backgroundColor: Colors.surface,
+  },
+  heroSecondaryText: {
+    color: Colors.primary,
+    fontSize: 15,
+    fontWeight: '700',
+  },
+  heroCheckoutBtn: {
+    borderRadius: 14,
+    paddingVertical: 12,
+    paddingHorizontal: 18,
+    alignItems: 'center',
+    borderWidth: 1.5,
+    borderColor: Colors.border,
+    backgroundColor: Colors.surface,
+  },
+  heroCheckoutText: {
+    color: Colors.textSecondary,
+    fontSize: 14,
+    fontWeight: '700',
+  },
+  heroTextLink: {
+    alignSelf: 'center',
+    paddingVertical: 2,
+  },
+  heroTextLinkText: {
+    fontSize: 13,
+    color: Colors.primary,
+    fontWeight: '600',
+  },
+  heroEmptyText: {
+    fontSize: 15,
+    fontWeight: '700',
+    color: Colors.textSecondary,
+  },
+  heroEmptySub: {
+    fontSize: 12.5,
+    color: Colors.textLight,
+    textAlign: 'center',
   },
   autoCheckHint: {
-    marginTop: 8,
+    marginTop: -4,
     textAlign: 'center',
     color: Colors.textSecondary,
     fontSize: 12.5,
@@ -1280,91 +1292,80 @@ const styles = StyleSheet.create({
   },
   attendingBadge: {
     flex: 1,
-    backgroundColor: Colors.surface,
+    backgroundColor: Colors.secondaryBg,
     borderRadius: 14,
-    paddingVertical: 14,
+    paddingVertical: 12,
     alignItems: 'center',
     borderWidth: 1.5,
     borderColor: Colors.secondary,
   },
   attendingText: {
     color: Colors.secondary,
-    fontSize: 16,
+    fontSize: 15,
     fontWeight: '800',
   },
-  playerCheckoutBtn: {
-    borderRadius: 14,
-    paddingVertical: 14,
-    paddingHorizontal: 20,
-    alignItems: 'center',
-    borderWidth: 1.5,
-    borderColor: Colors.danger,
+  // ═══ 운영 도구 (접이식) ═══
+  toolsWrap: {
+    marginHorizontal: 16,
+    marginTop: 12,
     backgroundColor: Colors.surface,
-  },
-  playerCheckoutText: {
-    color: Colors.danger,
-    fontSize: 15,
-    fontWeight: '700',
-  },
-  playerBoardBtn: {
     borderRadius: 14,
-    paddingVertical: 14,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: Colors.border,
+    overflow: 'hidden',
+  },
+  toolsHeader: {
+    flexDirection: 'row',
     alignItems: 'center',
-    borderWidth: 1.5,
-    borderColor: '#7C3AED',
-    backgroundColor: Colors.surface,
+    justifyContent: 'space-between',
+    paddingHorizontal: 14,
+    paddingVertical: 13,
   },
-  // When already checked in, the board button becomes the primary CTA.
-  playerBoardBtnPrimary: {
-    backgroundColor: '#7C3AED',
-    borderColor: '#7C3AED',
-  },
-  playerBoardText: {
-    color: '#7C3AED',
-    fontSize: 16,
-    fontWeight: '700',
-  },
-  playerBoardTextPrimary: {
-    color: '#fff',
-  },
-  // Leader actions
-  leaderActions: {
-    margin: 16,
-    marginBottom: 0,
-    alignItems: 'center',
-  },
-  startSessionBtn: {
-    backgroundColor: '#7C3AED',
-    borderRadius: 14,
-    paddingVertical: 16,
-    paddingHorizontal: 32,
+  toolsHeaderLeft: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 8,
-    width: '100%',
+  },
+  toolsHeaderText: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: Colors.textSecondary,
+  },
+  toolsBody: {
+    paddingHorizontal: 14,
+    paddingBottom: 14,
+    gap: 12,
+  },
+  toolsGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+  },
+  toolBtn: {
+    flexGrow: 1,
+    flexBasis: '46%',
+    borderRadius: 10,
+    paddingVertical: 11,
+    alignItems: 'center',
+    backgroundColor: Colors.surfaceSecondary,
+  },
+  toolBtnText: {
+    color: Colors.text,
+    fontSize: 13.5,
+    fontWeight: '700',
+  },
+  // 모임 삭제 — 조용한 텍스트 링크 (큰 보라 버튼 X)
+  deleteClubLink: {
+    flexDirection: 'row',
+    alignItems: 'center',
     justifyContent: 'center',
+    gap: 5,
+    paddingVertical: 8,
   },
-  startSessionIcon: {
-    color: '#fff',
-    fontSize: 20,
-    fontWeight: '700',
-  },
-  startSessionText: {
-    color: '#fff',
-    fontSize: 17,
-    fontWeight: '700',
-  },
-  startSessionHint: {
-    fontSize: 12,
-    color: Colors.textLight,
-    marginTop: 6,
-  },
-  courtPickLink: {
+  deleteClubLinkText: {
     fontSize: 13,
-    color: '#7C3AED',
+    color: Colors.danger,
     fontWeight: '600',
-    marginTop: 10,
-    textDecorationLine: 'underline',
   },
   // Section
   section: {
@@ -1692,38 +1693,39 @@ const styles = StyleSheet.create({
     color: Colors.textSecondary,
     fontWeight: '500',
   },
-  // 운영진 멤버 관리 바 (멤버 추가 / 전체 체크인)
-  memberAdminBar: {
-    flexDirection: 'row',
-    gap: 8,
-    marginTop: 16,
-    paddingHorizontal: 16,
-  },
-  addMemberBtn: {
-    flex: 1,
-    borderRadius: 12,
-    paddingVertical: 12,
-    alignItems: 'center',
-    borderWidth: 1.5,
-    borderColor: Colors.primary,
+  // ═══ 멤버 — 접이식 섹션 (secondary) ═══
+  membersSection: {
+    marginTop: 20,
+    marginHorizontal: 16,
     backgroundColor: Colors.surface,
+    borderRadius: 14,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: Colors.border,
+    overflow: 'hidden',
   },
-  addMemberBtnText: {
-    color: Colors.primary,
-    fontSize: 14,
-    fontWeight: '700',
-  },
-  checkInAllBtn: {
-    flex: 1,
-    borderRadius: 12,
-    paddingVertical: 12,
+  membersHeader: {
+    flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: Colors.primary,
+    justifyContent: 'space-between',
+    paddingHorizontal: 14,
+    paddingVertical: 14,
   },
-  checkInAllBtnText: {
-    color: '#fff',
-    fontSize: 14,
+  membersHeaderText: {
+    fontSize: 15,
+    fontWeight: '800',
+    color: Colors.text,
+  },
+  membersBody: {
+    paddingHorizontal: 12,
+    paddingBottom: 12,
+  },
+  membersGroupLabel: {
+    fontSize: 12,
     fontWeight: '700',
+    color: Colors.textSecondary,
+    marginTop: 8,
+    marginBottom: 6,
+    paddingHorizontal: 2,
   },
   // 출석 토글 (멤버 카드 우측)
   attendToggle: {
@@ -1799,39 +1801,5 @@ const styles = StyleSheet.create({
   },
   skillChipTextActive: {
     color: Colors.primary,
-  },
-
-  // 위험 구역 — 모임 삭제
-  dangerZone: {
-    marginTop: 24,
-    marginBottom: 8,
-    paddingTop: 16,
-    borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: Colors.divider,
-    gap: 8,
-  },
-  dangerZoneLabel: {
-    fontSize: 12,
-    fontWeight: '700',
-    color: Colors.textLight,
-    letterSpacing: 0.5,
-  },
-  deleteClubBtn: {
-    paddingVertical: 14,
-    borderRadius: 12,
-    borderWidth: 1.5,
-    borderColor: Colors.danger,
-    backgroundColor: Colors.danger + '14',
-    alignItems: 'center',
-  },
-  deleteClubBtnText: {
-    fontSize: 15,
-    fontWeight: '800',
-    color: Colors.danger,
-  },
-  dangerZoneHint: {
-    fontSize: 12,
-    color: Colors.textLight,
-    textAlign: 'center',
   },
 });

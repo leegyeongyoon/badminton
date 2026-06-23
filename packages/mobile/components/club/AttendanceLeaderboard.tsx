@@ -16,6 +16,12 @@ import { SectionHeader } from '../ui/SectionHeader';
 
 interface AttendanceLeaderboardProps {
   clubId: string;
+  /**
+   * When set, the list is collapsed to this many rows (e.g. top-3) with a
+   * "전체 보기 / 접기" toggle. The "내 출석" pill is always shown so a member
+   * outside the top rows can still see their rank. Omit to render every row.
+   */
+  maxRows?: number;
 }
 
 const PERIODS: { key: AttendancePeriod; label: string }[] = [
@@ -33,7 +39,7 @@ const RANK_COLORS: Record<number, string> = {
   3: palette.amber700,
 };
 
-export function AttendanceLeaderboard({ clubId }: AttendanceLeaderboardProps) {
+export function AttendanceLeaderboard({ clubId, maxRows }: AttendanceLeaderboardProps) {
   const { colors, shadows } = useTheme();
   const { user } = useAuthStore();
 
@@ -41,6 +47,8 @@ export function AttendanceLeaderboard({ clubId }: AttendanceLeaderboardProps) {
   const [data, setData] = useState<Leaderboard | null>(null);
   const [loading, setLoading] = useState(true);
   const [errored, setErrored] = useState(false);
+  // Collapsed (top-N) vs expanded (all rows) when `maxRows` is set.
+  const [expanded, setExpanded] = useState(false);
 
   const load = useCallback(
     async (p: AttendancePeriod) => {
@@ -63,10 +71,14 @@ export function AttendanceLeaderboard({ clubId }: AttendanceLeaderboardProps) {
   // Refetch whenever the club or the selected period changes.
   useEffect(() => {
     load(period);
+    setExpanded(false); // collapse back to top-N when switching period
   }, [load, period]);
 
   const me = data?.me ?? null;
   const entries = data?.entries ?? [];
+  // Collapse to top-N rows unless expanded (only when maxRows is provided).
+  const collapsible = maxRows != null && entries.length > maxRows;
+  const visibleEntries = collapsible && !expanded ? entries.slice(0, maxRows) : entries;
 
   return (
     <View style={styles.container}>
@@ -143,14 +155,29 @@ export function AttendanceLeaderboard({ clubId }: AttendanceLeaderboardProps) {
         </View>
       ) : (
         <View style={[styles.card, { backgroundColor: colors.surface }, shadows.md]}>
-          {entries.map((entry, idx) => (
+          {visibleEntries.map((entry, idx) => (
             <AttendanceRow
               key={entry.userId}
               entry={entry}
               isMe={entry.userId === user?.id}
-              isLast={idx === entries.length - 1}
+              isLast={idx === visibleEntries.length - 1 && !collapsible}
             />
           ))}
+          {collapsible && (
+            <Pressable
+              onPress={() => setExpanded((v) => !v)}
+              style={({ pressed }) => [
+                styles.seeAll,
+                { borderTopColor: colors.divider },
+                pressed && { opacity: 0.6 },
+              ]}
+              accessibilityLabel={expanded ? '출석왕 접기' : '출석왕 전체 보기'}
+            >
+              <Text style={[styles.seeAllText, { color: colors.primary }]}>
+                {expanded ? '접기' : `전체 보기 (${entries.length})`}
+              </Text>
+            </Pressable>
+          )}
         </View>
       )}
     </View>
@@ -279,6 +306,16 @@ const styles = StyleSheet.create({
     borderRadius: radius.card,
     overflow: 'hidden',
     paddingHorizontal: spacing.lg,
+  },
+
+  // 전체 보기 / 접기 toggle (collapsed top-N mode)
+  seeAll: {
+    paddingVertical: spacing.md,
+    alignItems: 'center',
+    borderTopWidth: StyleSheet.hairlineWidth,
+  },
+  seeAllText: {
+    ...typography.subtitle2,
   },
 
   // Skeleton
