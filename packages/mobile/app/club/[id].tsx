@@ -9,7 +9,6 @@ import {
   Modal,
   ScrollView,
   TextInput,
-  Alert,
   Platform,
 } from 'react-native';
 import { useLocalSearchParams, useRouter, Stack, useFocusEffect } from 'expo-router';
@@ -17,7 +16,6 @@ import { useClubStore } from '../../store/clubStore';
 import { useCheckinStore } from '../../store/checkinStore';
 import { useAuthStore } from '../../store/authStore';
 import { clubSessionApi, ClubSessionListItem } from '../../services/clubSession';
-import { clubApi } from '../../services/club';
 import { facilityApi } from '../../services/facility';
 import { Colors } from '../../constants/colors';
 import { createShadow } from '../../constants/theme';
@@ -55,9 +53,6 @@ const roleLabels: Record<string, string> = {
   MEMBER: '회원',
 };
 
-// 급수(skill level) 선택지 — 관리 멤버 추가 시 사용.
-const SKILL_LEVELS = ['S', 'A', 'B', 'C', 'D', 'E', 'F'] as const;
-
 // 날짜 헬퍼 (web-safe — Intl/Date만 사용, native 전용 API 없음).
 // "6/19" 짧은 형태 (진행 중 정모 카드 제목용).
 function fmtShortDate(iso?: string | null): string {
@@ -90,8 +85,7 @@ export default function ClubDetailScreen() {
   const [sessions, setSessions] = useState<ClubSessionListItem[]>([]);
   // 지난 정모 더보기: 처음엔 ~10개만, 누르면 전체.
   const [showAllPast, setShowAllPast] = useState(false);
-  // 운영 도구(운영진) 접이식 — 평소 닫힘. 멤버 목록 섹션도 접이식.
-  const [showTools, setShowTools] = useState(false);
+  // 멤버 목록 섹션 접이식 — 평소 닫힘.
   const [showMembers, setShowMembers] = useState(false);
   const [showStartModal, setShowStartModal] = useState(false);
   const [showRoleModal, setShowRoleModal] = useState(false);
@@ -102,17 +96,6 @@ export default function ClubDetailScreen() {
   // 정모를 열 시설. 체크인 없이도 시작할 수 있도록 시설을 직접 고른다.
   const [facilities, setFacilities] = useState<any[]>([]);
   const [selectedFacilityId, setSelectedFacilityId] = useState<string | null>(null);
-
-  // 운영자 관리 멤버 추가 모달 (이름 + 급수 + 성별) — 단건 추가.
-  const [showAddMemberModal, setShowAddMemberModal] = useState(false);
-  const [newMemberName, setNewMemberName] = useState('');
-  const [newMemberSkill, setNewMemberSkill] = useState<string | null>(null);
-  const [newMemberGender, setNewMemberGender] = useState<'M' | 'F' | null>(null);
-  const [addingMember, setAddingMember] = useState(false);
-
-  // 출석 체크: 전체 체크인 / 개별 토글 진행 상태.
-  const [checkingInAll, setCheckingInAll] = useState(false);
-  const [togglingUserId, setTogglingUserId] = useState<string | null>(null);
 
   const club = clubs.find((c) => c.id === clubId);
   const myMembership = currentMembers.find((m) => m.userId === user?.id);
@@ -314,116 +297,6 @@ export default function ClubDetailScreen() {
     }
   };
 
-  // 운영자 관리 멤버 추가 (단건). 이름 필수, 급수/성별 선택. 추가 후 명단 갱신.
-  const handleAddMember = async () => {
-    const name = newMemberName.trim();
-    if (!clubId || !name) {
-      showAlert('알림', '이름을 입력하세요');
-      return;
-    }
-    setAddingMember(true);
-    try {
-      const { data } = await clubApi.bulkAddMembers(clubId, [
-        {
-          name,
-          ...(newMemberSkill ? { skillLevel: newMemberSkill } : {}),
-          ...(newMemberGender ? { gender: newMemberGender } : {}),
-        },
-      ]);
-      if (data.created.length === 0 && data.skipped.length > 0) {
-        showAlert('알림', '이미 등록된 멤버예요');
-      } else {
-        showSuccess(`${name} 멤버를 추가했어요`);
-      }
-      setShowAddMemberModal(false);
-      setNewMemberName('');
-      setNewMemberSkill(null);
-      setNewMemberGender(null);
-      await fetchMembers(clubId);
-    } catch (err: any) {
-      showAlert(Strings.common.error, err?.response?.data?.error || '멤버 추가에 실패했습니다');
-    } finally {
-      setAddingMember(false);
-    }
-  };
-
-  // 출석: 진행 중인 정모에 아직 체크인 안 된 모든 멤버를 한 번에 체크인.
-  const handleCheckInAll = async () => {
-    if (!clubId || !activeSession?.id) return;
-    setCheckingInAll(true);
-    try {
-      const { data } = await clubSessionApi.checkInAllMembers(activeSession.id);
-      showSuccess(
-        data.checkedInCount > 0
-          ? `${data.checkedInCount}명 체크인했어요`
-          : '이미 모두 체크인되어 있어요',
-      );
-      await fetchMembers(clubId);
-    } catch (err: any) {
-      showAlert(Strings.common.error, err?.response?.data?.error || '전체 체크인에 실패했습니다');
-    } finally {
-      setCheckingInAll(false);
-    }
-  };
-
-  // 출석: 개별 멤버 체크인/체크아웃 토글 (진행 중인 정모 대상).
-  const handleToggleAttendance = async (member: ClubMember) => {
-    if (!clubId || !activeSession?.id) return;
-    setTogglingUserId(member.userId);
-    try {
-      if (member.isCheckedIn) {
-        await clubSessionApi.checkoutPlayer(activeSession.id, member.userId);
-      } else {
-        await clubSessionApi.checkInMember(activeSession.id, member.userId);
-      }
-      await fetchMembers(clubId);
-    } catch (err: any) {
-      showAlert(Strings.common.error, err?.response?.data?.error || '출석 변경에 실패했습니다');
-    } finally {
-      setTogglingUserId(null);
-    }
-  };
-
-  // 모임 삭제 (운영진/최고관리자). TWO-step confirm — 모임과 모든 정모·체크인·게임이
-  // 영구 삭제되므로 한 번 더 묻는다. 성공 시 홈으로 이동하고 모임 목록을 갱신한다.
-  const isSuperAdmin = user?.role === 'SUPER_ADMIN';
-  const canDeleteClub = isLeaderOrStaff || isSuperAdmin;
-  const [deletingClub, setDeletingClub] = useState(false);
-  const { deleteClub: deleteClubInStore } = useClubStore();
-  const handleDeleteClub = () => {
-    if (!clubId || deletingClub) return;
-    showConfirm(
-      '모임 삭제',
-      `'${club?.name ?? '이 모임'}'을(를) 삭제할까요? 모든 정모·출석·게임 기록이 영구 삭제됩니다.`,
-      () => {
-        // Second confirmation — this is irreversible.
-        showConfirm(
-          '정말 삭제할까요?',
-          '이 작업은 되돌릴 수 없습니다.',
-          async () => {
-            setDeletingClub(true);
-            try {
-              await deleteClubInStore(clubId);
-              showSuccess('모임을 삭제했어요');
-              await fetchClubs();
-              router.replace('/(tabs)');
-            } catch (err: any) {
-              showAlert(Strings.common.error, err?.response?.data?.error || '모임 삭제에 실패했습니다');
-            } finally {
-              setDeletingClub(false);
-            }
-          },
-          '삭제',
-          Strings.common.cancel,
-          'danger',
-        );
-      },
-      '삭제',
-      Strings.common.cancel,
-      'danger',
-    );
-  };
-
   const checkedInMembers = currentMembers.filter((m) => m.isCheckedIn);
   const notCheckedInMembers = currentMembers.filter((m) => !m.isCheckedIn);
 
@@ -480,40 +353,11 @@ export default function ClubDetailScreen() {
           )}
         </View>
       </View>
-      {/* 출석 토글 — 진행 중인 정모가 있을 때 운영진에게만 노출. 본인은 제외
-          (운영자는 입장 시 자동 체크인되며 별도 체크아웃 UI 사용). */}
-      {isLeaderOrStaff && !!activeSession && item.userId !== user?.id ? (
-        <TouchableOpacity
-          style={[
-            styles.attendToggle,
-            item.isCheckedIn ? styles.attendToggleOn : styles.attendToggleOff,
-            togglingUserId === item.userId && { opacity: 0.5 },
-          ]}
-          onPress={() => handleToggleAttendance(item)}
-          disabled={togglingUserId === item.userId}
-          activeOpacity={0.8}
-          accessibilityLabel={item.isCheckedIn ? '체크아웃' : '체크인'}
-        >
-          <Text
-            style={[
-              styles.attendToggleText,
-              item.isCheckedIn ? styles.attendToggleTextOn : styles.attendToggleTextOff,
-            ]}
-          >
-            {togglingUserId === item.userId
-              ? '...'
-              : item.isCheckedIn
-              ? '✓ 출석'
-              : '체크인'}
-          </Text>
-        </TouchableOpacity>
-      ) : (
-        <>
-          {!item.isCheckedIn && <Text style={styles.offlineText}>오프라인</Text>}
-          {isLeader && item.userId !== user?.id && (
-            <Text style={styles.editHint}>...</Text>
-          )}
-        </>
+      {/* 출석은 QR 스캔으로 자동 처리 — 명단은 읽기 전용. 운영진(LEADER)은
+          멤버를 탭해 역할만 변경할 수 있다(체크인 토글 없음). */}
+      {!item.isCheckedIn && <Text style={styles.offlineText}>오프라인</Text>}
+      {isLeader && item.userId !== user?.id && (
+        <Text style={styles.editHint}>...</Text>
       )}
     </TouchableOpacity>
   );
@@ -647,6 +491,18 @@ export default function ClubDetailScreen() {
                   <Text style={styles.heroPrimaryText}>현황 보기</Text>
                 </TouchableOpacity>
               )}
+
+              {/* 턴 관리 — 운영진 전용 quiet 보조 액션 (운영판 아래 작은 텍스트 링크). */}
+              {isLeaderOrStaff && (
+                <TouchableOpacity
+                  style={styles.heroTextLink}
+                  onPress={() => router.push(`/club/${clubId}/session`)}
+                  activeOpacity={0.7}
+                  accessibilityLabel="턴 관리"
+                >
+                  <Text style={styles.heroTextLinkText}>턴 관리</Text>
+                </TouchableOpacity>
+              )}
             </View>
           ) : (
             isLeaderOrStaff ? (
@@ -682,91 +538,6 @@ export default function ClubDetailScreen() {
                 <Text style={styles.heroEmptySub}>정모가 시작되면 여기에서 바로 확인할 수 있어요</Text>
               </View>
             )
-          )}
-
-          {/* ═══ 운영 도구 (운영진만) — 한 줄 접이식. 평소엔 닫혀 있어 화면이 조용함. ═══
-              턴 관리 · 전체 체크인 · 멤버 추가 + (quiet) 모임 삭제. */}
-          {isLeaderOrStaff && (
-            <View style={styles.toolsWrap}>
-              <TouchableOpacity
-                style={styles.toolsHeader}
-                onPress={() => setShowTools((v) => !v)}
-                activeOpacity={0.7}
-                accessibilityLabel="운영 도구 열기/닫기"
-              >
-                <View style={styles.toolsHeaderLeft}>
-                  <Icon name="tools" size={18} color={Colors.textSecondary} />
-                  <Text style={styles.toolsHeaderText}>운영 도구</Text>
-                </View>
-                <Icon
-                  name={showTools ? 'chevronUp' : 'chevronDown'}
-                  size={18}
-                  color={Colors.textLight}
-                />
-              </TouchableOpacity>
-
-              {showTools && (
-                <View style={styles.toolsBody}>
-                  <View style={styles.toolsGrid}>
-                    {!!activeSession && (
-                      <TouchableOpacity
-                        style={styles.toolBtn}
-                        onPress={() => router.push(`/club/${clubId}/session`)}
-                        activeOpacity={0.8}
-                        accessibilityLabel="턴 관리"
-                      >
-                        <Text style={styles.toolBtnText}>턴 관리</Text>
-                      </TouchableOpacity>
-                    )}
-                    {!!activeSession && (
-                      <TouchableOpacity
-                        style={[styles.toolBtn, checkingInAll && { opacity: 0.5 }]}
-                        onPress={handleCheckInAll}
-                        disabled={checkingInAll}
-                        activeOpacity={0.8}
-                        accessibilityLabel="전체 체크인"
-                      >
-                        <Text style={styles.toolBtnText}>
-                          {checkingInAll ? '체크인 중...' : '전체 체크인'}
-                        </Text>
-                      </TouchableOpacity>
-                    )}
-                    <TouchableOpacity
-                      style={styles.toolBtn}
-                      onPress={() => setShowAddMemberModal(true)}
-                      activeOpacity={0.8}
-                      accessibilityLabel="멤버 추가"
-                    >
-                      <Text style={styles.toolBtnText}>＋ 멤버 추가</Text>
-                    </TouchableOpacity>
-                    <TouchableOpacity
-                      style={styles.toolBtn}
-                      onPress={() => router.push(`/club/${clubId}/qr`)}
-                      activeOpacity={0.8}
-                      accessibilityLabel="모임 참여 QR"
-                    >
-                      <Text style={styles.toolBtnText}>모임 참여 QR</Text>
-                    </TouchableOpacity>
-                  </View>
-
-                  {/* 위험 — 모임 삭제 (조용하게, 텍스트 링크) */}
-                  {canDeleteClub && (
-                    <TouchableOpacity
-                      style={[styles.deleteClubLink, deletingClub && { opacity: 0.5 }]}
-                      onPress={handleDeleteClub}
-                      disabled={deletingClub}
-                      activeOpacity={0.7}
-                      accessibilityLabel="모임 삭제"
-                    >
-                      <Icon name="delete" size={15} color={Colors.danger} />
-                      <Text style={styles.deleteClubLinkText}>
-                        {deletingClub ? '삭제 중...' : '모임 삭제'}
-                      </Text>
-                    </TouchableOpacity>
-                  )}
-                </View>
-              )}
-            </View>
           )}
 
           {/* ─── 지난 정모 (정모 이력) ───
@@ -938,83 +709,6 @@ export default function ClubDetailScreen() {
               >
                 <Text style={styles.confirmBtnText}>
                   {isStarting ? '시작 중...' : '정모 시작'}
-                </Text>
-              </TouchableOpacity>
-            </View>
-          </View>
-        </Modal>
-
-        {/* 운영자 관리 멤버 추가 모달 (이름 + 급수 + 성별) */}
-        <Modal visible={showAddMemberModal} transparent animationType="slide">
-          <View style={styles.modalOverlay}>
-            <View style={styles.modalContent}>
-              <View style={styles.modalHeader}>
-                <Text style={styles.modalTitle}>멤버 추가</Text>
-                <TouchableOpacity onPress={() => setShowAddMemberModal(false)}>
-                  <Text style={styles.modalClose}>✕</Text>
-                </TouchableOpacity>
-              </View>
-
-              <Text style={styles.modalDesc}>
-                앱을 쓰지 않는 회원을 등록해요. 정모마다 출석만 체크하면 됩니다.
-              </Text>
-
-              <Text style={styles.modalSubtitle}>이름</Text>
-              <TextInput
-                style={styles.memberNameInput}
-                value={newMemberName}
-                onChangeText={setNewMemberName}
-                placeholder="회원 이름"
-                placeholderTextColor={Colors.textLight}
-                maxLength={20}
-                accessibilityLabel="멤버 이름"
-              />
-
-              <Text style={styles.modalSubtitle}>급수 (선택)</Text>
-              <View style={styles.chipRow}>
-                {SKILL_LEVELS.map((lvl) => {
-                  const active = newMemberSkill === lvl;
-                  return (
-                    <TouchableOpacity
-                      key={lvl}
-                      style={[styles.skillChip, active && styles.skillChipActive]}
-                      onPress={() => setNewMemberSkill(active ? null : lvl)}
-                      accessibilityLabel={`급수 ${lvl}`}
-                    >
-                      <Text style={[styles.skillChipText, active && styles.skillChipTextActive]}>
-                        {lvl}
-                      </Text>
-                    </TouchableOpacity>
-                  );
-                })}
-              </View>
-
-              <Text style={styles.modalSubtitle}>성별 (선택)</Text>
-              <View style={styles.chipRow}>
-                {([['M', '남'], ['F', '여']] as const).map(([val, label]) => {
-                  const active = newMemberGender === val;
-                  return (
-                    <TouchableOpacity
-                      key={val}
-                      style={[styles.genderChip, active && styles.skillChipActive]}
-                      onPress={() => setNewMemberGender(active ? null : val)}
-                      accessibilityLabel={`성별 ${label}`}
-                    >
-                      <Text style={[styles.skillChipText, active && styles.skillChipTextActive]}>
-                        {label}
-                      </Text>
-                    </TouchableOpacity>
-                  );
-                })}
-              </View>
-
-              <TouchableOpacity
-                style={[styles.confirmBtn, (addingMember || !newMemberName.trim()) && { opacity: 0.5 }]}
-                onPress={handleAddMember}
-                disabled={addingMember || !newMemberName.trim()}
-              >
-                <Text style={styles.confirmBtnText}>
-                  {addingMember ? '추가 중...' : '멤버 추가'}
                 </Text>
               </TouchableOpacity>
             </View>
@@ -1303,69 +997,6 @@ const styles = StyleSheet.create({
     color: Colors.secondary,
     fontSize: 15,
     fontWeight: '800',
-  },
-  // ═══ 운영 도구 (접이식) ═══
-  toolsWrap: {
-    marginHorizontal: 16,
-    marginTop: 12,
-    backgroundColor: Colors.surface,
-    borderRadius: 14,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: Colors.border,
-    overflow: 'hidden',
-  },
-  toolsHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: 14,
-    paddingVertical: 13,
-  },
-  toolsHeaderLeft: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-  },
-  toolsHeaderText: {
-    fontSize: 14,
-    fontWeight: '700',
-    color: Colors.textSecondary,
-  },
-  toolsBody: {
-    paddingHorizontal: 14,
-    paddingBottom: 14,
-    gap: 12,
-  },
-  toolsGrid: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 8,
-  },
-  toolBtn: {
-    flexGrow: 1,
-    flexBasis: '46%',
-    borderRadius: 10,
-    paddingVertical: 11,
-    alignItems: 'center',
-    backgroundColor: Colors.surfaceSecondary,
-  },
-  toolBtnText: {
-    color: Colors.text,
-    fontSize: 13.5,
-    fontWeight: '700',
-  },
-  // 모임 삭제 — 조용한 텍스트 링크 (큰 보라 버튼 X)
-  deleteClubLink: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 5,
-    paddingVertical: 8,
-  },
-  deleteClubLinkText: {
-    fontSize: 13,
-    color: Colors.danger,
-    fontWeight: '600',
   },
   // Section
   section: {
@@ -1726,80 +1357,5 @@ const styles = StyleSheet.create({
     marginTop: 8,
     marginBottom: 6,
     paddingHorizontal: 2,
-  },
-  // 출석 토글 (멤버 카드 우측)
-  attendToggle: {
-    borderRadius: 999,
-    paddingHorizontal: 14,
-    paddingVertical: 7,
-    borderWidth: 1.5,
-  },
-  attendToggleOn: {
-    backgroundColor: Colors.secondary + '18',
-    borderColor: Colors.secondary,
-  },
-  attendToggleOff: {
-    backgroundColor: Colors.surface,
-    borderColor: Colors.primary,
-  },
-  attendToggleText: {
-    fontSize: 13,
-    fontWeight: '700',
-  },
-  attendToggleTextOn: {
-    color: Colors.secondary,
-  },
-  attendToggleTextOff: {
-    color: Colors.primary,
-  },
-  // 멤버 추가 모달 입력
-  memberNameInput: {
-    borderWidth: 1.5,
-    borderColor: Colors.border,
-    borderRadius: 12,
-    paddingHorizontal: 14,
-    paddingVertical: 12,
-    fontSize: 16,
-    color: Colors.text,
-    backgroundColor: Colors.background,
-    marginBottom: 16,
-  },
-  chipRow: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 8,
-    marginBottom: 16,
-  },
-  skillChip: {
-    minWidth: 40,
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    borderRadius: 999,
-    borderWidth: 1.5,
-    borderColor: Colors.border,
-    backgroundColor: Colors.surface,
-    alignItems: 'center',
-  },
-  genderChip: {
-    minWidth: 56,
-    paddingHorizontal: 16,
-    paddingVertical: 8,
-    borderRadius: 999,
-    borderWidth: 1.5,
-    borderColor: Colors.border,
-    backgroundColor: Colors.surface,
-    alignItems: 'center',
-  },
-  skillChipActive: {
-    borderColor: Colors.primary,
-    backgroundColor: Colors.primary + '14',
-  },
-  skillChipText: {
-    fontSize: 14,
-    fontWeight: '700',
-    color: Colors.textSecondary,
-  },
-  skillChipTextActive: {
-    color: Colors.primary,
   },
 });
