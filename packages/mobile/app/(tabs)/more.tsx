@@ -38,7 +38,7 @@ export default function MoreScreen() {
   const { status: checkinStatus, fetchStatus } = useCheckinStore();
   const { user, logout, loadUser } = useAuthStore();
   const { selectedFacility, clearSelectedFacility } = useFacilityStore();
-  const { clubs, fetchClubs, createClub, joinClub } = useClubStore();
+  const { clubs, fetchClubs, createClub, joinClub, deleteClub } = useClubStore();
   const [unreadCount, setUnreadCount] = useState(0);
   const [isAdmin, setIsAdmin] = useState(false);
   const [profileData, setProfileData] = useState<any>(null);
@@ -57,6 +57,36 @@ export default function MoreScreen() {
 
   const isSuperAdmin = user?.role === 'SUPER_ADMIN';
   const isPlayer = user?.role === 'PLAYER';
+
+  // 내가 모임장(LEADER)인 — 또는 최고관리자면 전체 — 모임. 여기서 모임 삭제 가능.
+  const managedClubs = clubs.filter(
+    (c) => isSuperAdmin || c.isLeader || c.role === 'LEADER',
+  );
+
+  // 모임 삭제 (모임장/최고관리자). 2단계 확인 — 되돌릴 수 없음.
+  const handleDeleteClub = (clubId: string, name: string) => {
+    showConfirm(
+      '모임 삭제',
+      `'${name}'을(를) 삭제할까요? 모든 정모·출석·게임 기록이 영구 삭제됩니다.`,
+      () => {
+        showConfirm(
+          '정말 삭제할까요?',
+          '이 작업은 되돌릴 수 없습니다.',
+          async () => {
+            try {
+              await deleteClub(clubId);
+              showSuccess('모임을 삭제했어요');
+              await fetchClubs();
+            } catch (err: any) {
+              showAlert(Strings.common.error, err?.response?.data?.error || '모임 삭제에 실패했습니다');
+            }
+          },
+          '삭제', '취소', 'danger',
+        );
+      },
+      '삭제', '취소', 'danger',
+    );
+  };
 
   useEffect(() => {
     Promise.all([
@@ -205,6 +235,29 @@ export default function MoreScreen() {
         onClubPress={(clubId) => router.push(`/club/${clubId}`)}
         onShareInvite={handleShareInvite}
       />
+
+      {/* 모임 관리 — 모임장(또는 최고관리자)이 자기 모임을 삭제. 운영 도구에 묻혀
+          안 보인다는 피드백 → 설정에서 바로 접근 가능하게. */}
+      {managedClubs.length > 0 && (
+        <View style={[styles.section, { backgroundColor: colors.surface }, shadows.sm]}>
+          <Text style={[styles.sectionTitle, { color: colors.text }]}>모임 관리</Text>
+          {managedClubs.map((c) => (
+            <View key={c.id} style={styles.menuItem}>
+              <Icon name="court" size={18} color={colors.textSecondary} />
+              <Text style={[styles.menuItemText, { color: colors.text, flex: 1 }]} numberOfLines={1}>
+                {c.name}
+              </Text>
+              <TouchableOpacity
+                onPress={() => handleDeleteClub(c.id, c.name)}
+                accessibilityLabel={`${c.name} 삭제`}
+                hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+              >
+                <Text style={{ color: colors.danger, fontWeight: '600', fontSize: 14 }}>삭제</Text>
+              </TouchableOpacity>
+            </View>
+          ))}
+        </View>
+      )}
 
       {/* Facility management */}
       <View style={[styles.section, { backgroundColor: colors.surface }, shadows.sm]}>
