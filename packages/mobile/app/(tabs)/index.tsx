@@ -34,6 +34,22 @@ interface ActiveSession {
   scheduledStartAt?: string;
 }
 
+// 정모 날짜 "오늘 정모 6/19" — 모임(클럽)과 정모(일자)를 한눈에 구분하기 위함.
+// web-safe (Date만 사용). 오늘이면 "오늘", 어제면 "어제", 그 외 "M/D".
+function formatSessionDateLabel(iso?: string): string {
+  if (!iso) return '정모';
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return '정모';
+  const now = new Date();
+  const startOf = (x: Date) => new Date(x.getFullYear(), x.getMonth(), x.getDate()).getTime();
+  const dayMs = 86400000;
+  const diff = Math.round((startOf(now) - startOf(d)) / dayMs);
+  const md = `${d.getMonth() + 1}/${d.getDate()}`;
+  if (diff === 0) return `오늘 정모 ${md}`;
+  if (diff === 1) return `어제 정모 ${md}`;
+  return `정모 ${md}`;
+}
+
 function formatSessionTime(iso?: string): string {
   if (!iso) return '';
   const d = new Date(iso);
@@ -326,9 +342,17 @@ export default function HomeScreen() {
                     )}
                   </View>
 
+                  {/* 모임(클럽) 이름이 제목, 그 아래 정모(일자) 한 줄 — 2층 구조를
+                      명확히 읽히게. 커스텀 title이 있으면 그걸 우선. */}
                   <Text style={[styles.sessionClub, { color: colors.text }]} numberOfLines={1}>
-                    {s.title || `${s.clubName} 정모`}
+                    {s.clubName}
                   </Text>
+                  <View style={styles.sessionMetaRow}>
+                    <Icon name="calendar" size={14} color={colors.primary} />
+                    <Text style={[styles.sessionMeta, { color: colors.primary, fontWeight: '700' }]} numberOfLines={1}>
+                      {s.title || formatSessionDateLabel(s.scheduledStartAt || s.startedAt)}
+                    </Text>
+                  </View>
 
                   <View style={styles.sessionMetaRow}>
                     <Icon name="map" size={14} color={colors.textLight} />

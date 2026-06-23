@@ -12,11 +12,11 @@ import {
   Alert,
   Platform,
 } from 'react-native';
-import { useLocalSearchParams, useRouter, Stack } from 'expo-router';
+import { useLocalSearchParams, useRouter, Stack, useFocusEffect } from 'expo-router';
 import { useClubStore } from '../../store/clubStore';
 import { useCheckinStore } from '../../store/checkinStore';
 import { useAuthStore } from '../../store/authStore';
-import { clubSessionApi } from '../../services/clubSession';
+import { clubSessionApi, ClubSessionListItem } from '../../services/clubSession';
 import { clubApi } from '../../services/club';
 import { facilityApi } from '../../services/facility';
 import { Colors } from '../../constants/colors';
@@ -56,10 +56,27 @@ const roleLabels: Record<string, string> = {
 // 급수(skill level) 선택지 — 관리 멤버 추가 시 사용.
 const SKILL_LEVELS = ['S', 'A', 'B', 'C', 'D', 'E', 'F'] as const;
 
+// 날짜 헬퍼 (web-safe — Intl/Date만 사용, native 전용 API 없음).
+// "6/19" 짧은 형태 (진행 중 정모 카드 제목용).
+function fmtShortDate(iso?: string | null): string {
+  if (!iso) return '';
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return '';
+  return `${d.getMonth() + 1}/${d.getDate()}`;
+}
+// "6월 19일 (목)" 형태 (지난 정모 목록용).
+function fmtKoreanDate(iso?: string | null): string {
+  if (!iso) return '';
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return '';
+  const wd = ['일', '월', '화', '수', '목', '금', '토'][d.getDay()];
+  return `${d.getMonth() + 1}월 ${d.getDate()}일 (${wd})`;
+}
+
 export default function ClubDetailScreen() {
   const { id: clubId } = useLocalSearchParams<{ id: string }>();
   const router = useRouter();
-  const { currentMembers, fetchMembers, clubs } = useClubStore();
+  const { currentMembers, fetchMembers, clubs, fetchClubs } = useClubStore();
   const { status: checkinStatus, checkOut, fetchStatus, checkIn } = useCheckinStore();
   const { user, isGuest } = useAuthStore();
 
@@ -67,6 +84,10 @@ export default function ClubDetailScreen() {
 
   const [activeSession, setActiveSession] = useState<any>(null);
   const [loadingSession, setLoadingSession] = useState(false);
+  // 이 모임의 정모 목록(최신순) — 진행 중 정모 + 지난 정모 이력.
+  const [sessions, setSessions] = useState<ClubSessionListItem[]>([]);
+  // 지난 정모 더보기: 처음엔 ~10개만, 누르면 전체.
+  const [showAllPast, setShowAllPast] = useState(false);
   const [showStartModal, setShowStartModal] = useState(false);
   const [showRoleModal, setShowRoleModal] = useState(false);
   const [selectedMember, setSelectedMember] = useState<ClubMember | null>(null);
@@ -122,12 +143,44 @@ export default function ClubDetailScreen() {
     }
   }, [clubId]);
 
+  // 이 모임의 정모 목록(최신순)을 불러온다 — 진행 중 + 지난 정모 이력.
+  const loadSessions = useCallback(async () => {
+    if (!clubId) return;
+    try {
+      const { data } = await clubSessionApi.listSessions(clubId);
+      setSessions(Array.isArray(data) ? data : []);
+    } catch {
+      setSessions([]);
+    }
+  }, [clubId]);
+
   useEffect(() => {
     if (clubId) {
       fetchMembers(clubId);
       loadActiveSession();
+      loadSessions();
     }
   }, [clubId]);
+
+  // Deep-link / web reload: the club roster (clubStore.clubs) is normally loaded
+  // by the home screen. If we land here directly and this club isn't in the store,
+  // fetch the list so the header + info card show the real 모임 NAME (not "모임").
+  useEffect(() => {
+    if (clubId && !clubs.find((c) => c.id === clubId)) {
+      fetchClubs();
+    }
+  }, [clubId, clubs, fetchClubs]);
+
+  // 운영판/요약에서 돌아오면 정모(진행 중·이력)를 새로고침 — 종료된 정모가 바로
+  // 지난 정모 목록에 반영되도록. (멤버 목록은 기존 흐름 유지.)
+  useFocusEffect(
+    useCallback(() => {
+      if (clubId) {
+        loadActiveSession();
+        loadSessions();
+      }
+    }, [clubId, loadActiveSession, loadSessions]),
+  );
 
   // Facilities for the 정모 start (so a leader can start without checking in).
   useEffect(() => {
@@ -168,6 +221,7 @@ export default function ClubDetailScreen() {
       await Promise.all([
         fetchMembers(clubId),
         loadActiveSession(),
+        loadSessions(),
       ]);
     }
   }, [clubId]);
@@ -330,7 +384,7 @@ export default function ClubDetailScreen() {
   const isSuperAdmin = user?.role === 'SUPER_ADMIN';
   const canDeleteClub = isLeaderOrStaff || isSuperAdmin;
   const [deletingClub, setDeletingClub] = useState(false);
-  const { deleteClub: deleteClubInStore, fetchClubs } = useClubStore();
+  const { deleteClub: deleteClubInStore } = useClubStore();
   const handleDeleteClub = () => {
     if (!clubId || deletingClub) return;
     showConfirm(
@@ -533,14 +587,21 @@ export default function ClubDetailScreen() {
                   <View style={styles.sessionBannerLeft}>
                     <View style={styles.sessionDot} />
                     <View>
-                      <Text style={styles.sessionBannerTitle}>모임 진행중</Text>
+                      <View style={styles.sessionTitleRow}>
+                        <Text style={styles.sessionBannerTitle}>
+                          오늘 정모 · {fmtShortDate(activeSession.startedAt)}
+                        </Text>
+                        <View style={styles.liveBadge}>
+                          <Text style={styles.liveBadgeText}>진행 중</Text>
+                        </View>
+                      </View>
                       <Text style={styles.sessionBannerSub}>
-                        {activeSession.facilityName} - 코트 {activeSession.courtIds?.length || 0}개
+                        {activeSession.facilityName} · 코트 {activeSession.courtIds?.length || 0}개
                       </Text>
                     </View>
                   </View>
                   <View style={styles.sessionBannerBtn}>
-                    <Text style={styles.sessionBannerBtnText}>모임 관리</Text>
+                    <Text style={styles.sessionBannerBtnText}>정모 관리</Text>
                   </View>
                 </TouchableOpacity>
 
@@ -564,11 +625,16 @@ export default function ClubDetailScreen() {
               <View style={styles.playerSessionWrap}>
                 <View style={styles.playerSessionHeader}>
                   <View style={styles.sessionDot} />
-                  <Text style={styles.playerSessionTitle}>모임 진행중</Text>
-                  <Text style={styles.playerSessionSub}>
-                    {activeSession.facilityName} · 코트 {activeSession.courtIds?.length || 0}개
+                  <Text style={styles.playerSessionTitle}>
+                    오늘 정모 · {fmtShortDate(activeSession.startedAt)}
                   </Text>
+                  <View style={styles.liveBadge}>
+                    <Text style={styles.liveBadgeText}>진행 중</Text>
+                  </View>
                 </View>
+                <Text style={styles.playerSessionSub}>
+                  {activeSession.facilityName} · 코트 {activeSession.courtIds?.length || 0}개
+                </Text>
 
                 {/* 체크인 — 아직 체크인 안 했을 때만 (가장 눈에 띄게).
                     네이티브에서는 GPS 지오펜스(100m)가 적용됨. 웹은 GPS가 없어
@@ -646,6 +712,57 @@ export default function ClubDetailScreen() {
               </TouchableOpacity>
             </View>
           )}
+
+          {/* ─── 지난 정모 (정모 이력) ───
+              이 모임의 종료된 정모들을 날짜별로. 탭하면 그 정모의 요약(읽기 전용)으로.
+              진행 중 정모는 위 배너에서 이미 보여주므로 여기선 제외(ENDED만). */}
+          {(() => {
+            const past = sessions.filter((s) => s.status !== 'ACTIVE');
+            const visible = showAllPast ? past : past.slice(0, 10);
+            return (
+              <View style={styles.section}>
+                <Text style={styles.sectionTitle}>지난 정모</Text>
+                {past.length === 0 ? (
+                  <View style={styles.pastEmpty}>
+                    <Text style={styles.pastEmptyText}>아직 지난 정모가 없어요</Text>
+                  </View>
+                ) : (
+                  <>
+                    {visible.map((s) => (
+                      <TouchableOpacity
+                        key={s.id}
+                        style={styles.pastRow}
+                        onPress={() => router.push(`/session/${s.id}/summary`)}
+                        activeOpacity={0.7}
+                        accessibilityLabel={`${fmtKoreanDate(s.startedAt)} 정모 요약 보기`}
+                      >
+                        <View style={styles.pastRowLeft}>
+                          <Text style={styles.pastDate}>{fmtKoreanDate(s.startedAt)}</Text>
+                          <Text style={styles.pastMeta}>
+                            출석 {s.attendanceCount}명 · 게임 {s.gameCount}개
+                          </Text>
+                        </View>
+                        <View style={styles.pastEndedBadge}>
+                          <Text style={styles.pastEndedText}>종료</Text>
+                        </View>
+                      </TouchableOpacity>
+                    ))}
+                    {!showAllPast && past.length > visible.length && (
+                      <TouchableOpacity
+                        style={styles.pastMoreBtn}
+                        onPress={() => setShowAllPast(true)}
+                        activeOpacity={0.7}
+                      >
+                        <Text style={styles.pastMoreText}>
+                          더보기 ({past.length - visible.length})
+                        </Text>
+                      </TouchableOpacity>
+                    )}
+                  </>
+                )}
+              </View>
+            );
+          })()}
 
           {/* 출석왕 leaderboard (visible to every club member) */}
           {clubId && <AttendanceLeaderboard clubId={clubId} />}
@@ -1040,10 +1157,27 @@ const styles = StyleSheet.create({
     borderRadius: 5,
     backgroundColor: '#7C3AED',
   },
+  sessionTitleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
   sessionBannerTitle: {
     fontSize: 15,
     fontWeight: '700',
     color: '#7C3AED',
+  },
+  // 진행 중 배지 (정모 카드 제목 옆)
+  liveBadge: {
+    backgroundColor: '#7C3AED',
+    borderRadius: 999,
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+  },
+  liveBadgeText: {
+    color: '#fff',
+    fontSize: 10,
+    fontWeight: '800',
   },
   sessionBannerSub: {
     fontSize: 12,
@@ -1242,6 +1376,60 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     color: Colors.textSecondary,
     marginBottom: 8,
+  },
+  // 지난 정모 행 (날짜 + 출석/게임 수 + 종료 배지)
+  pastRow: {
+    backgroundColor: Colors.surface,
+    borderRadius: 12,
+    padding: 14,
+    marginBottom: 6,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  pastRowLeft: {
+    flex: 1,
+  },
+  pastDate: {
+    fontSize: 15,
+    fontWeight: '700',
+    color: Colors.text,
+  },
+  pastMeta: {
+    fontSize: 13,
+    color: Colors.textSecondary,
+    marginTop: 3,
+  },
+  pastEndedBadge: {
+    backgroundColor: Colors.divider,
+    borderRadius: 999,
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    marginLeft: 8,
+  },
+  pastEndedText: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: Colors.textLight,
+  },
+  pastEmpty: {
+    backgroundColor: Colors.surface,
+    borderRadius: 12,
+    paddingVertical: 20,
+    alignItems: 'center',
+  },
+  pastEmptyText: {
+    fontSize: 13,
+    color: Colors.textLight,
+  },
+  pastMoreBtn: {
+    paddingVertical: 12,
+    alignItems: 'center',
+  },
+  pastMoreText: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: Colors.primary,
   },
   // Member card
   memberCard: {

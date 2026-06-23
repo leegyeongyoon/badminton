@@ -23,6 +23,7 @@ import type {
   SessionSummaryPerPlayer,
   SessionQrResponse,
   MyStatusResponse,
+  ClubSessionListItem,
 } from '@badminton/shared';
 
 export async function verifyClubStaff(clubId: string, userId: string) {
@@ -262,6 +263,77 @@ export async function getActiveSession(clubId: string): Promise<ClubSessionRespo
 
   if (!session) return null;
   return mapClubSession(session);
+}
+
+/**
+ * List THIS 모임's 정모들 (one per day), most-recent first, so the club screen can
+ * surface the 모임 ↔ 정모 two-level structure (today's 진행 중 정모 + 지난 정모 이력).
+ * Each row carries the date/status plus two derived counts:
+ *   - attendanceCount: DISTINCT users with a CheckIn for that 정모 (members+guests).
+ *   - gameCount: games (IN_PROGRESS|COMPLETED) whose CourtTurn belongs to that 정모.
+ * Auth: any member of the club (verified here). Efficient — three queries total
+ * (sessions + one CheckIn scan + one Game scan), tallied in memory; no N+1.
+ */
+export async function listSessions(
+  clubId: string,
+  requesterId: string,
+): Promise<ClubSessionListItem[]> {
+  await verifyClubMember(clubId, requesterId);
+
+  const sessions = await prisma.clubSession.findMany({
+    where: { clubId },
+    orderBy: { startedAt: 'desc' },
+    select: {
+      id: true,
+      title: true,
+      status: true,
+      startedAt: true,
+      endedAt: true,
+    },
+  });
+  if (sessions.length === 0) return [];
+
+  const sessionIds = sessions.map((s) => s.id);
+
+  // Attendance: distinct (clubSessionId, userId) pairs across all these 정모, in
+  // one scan. Prisma `distinct` dedupes a user with multiple check-in rows in the
+  // same 정모, so each tally is a distinct-user count.
+  const checkIns = await prisma.checkIn.findMany({
+    where: { clubSessionId: { in: sessionIds } },
+    select: { clubSessionId: true, userId: true },
+    distinct: ['clubSessionId', 'userId'],
+  });
+  const attendanceBySession = new Map<string, number>();
+  for (const c of checkIns) {
+    if (!c.clubSessionId) continue;
+    attendanceBySession.set(c.clubSessionId, (attendanceBySession.get(c.clubSessionId) ?? 0) + 1);
+  }
+
+  // Games per 정모: every IN_PROGRESS|COMPLETED game whose turn belongs to one of
+  // these 정모, tallied by the turn's clubSessionId. One scan, grouped in memory.
+  const games = await prisma.game.findMany({
+    where: {
+      status: { in: ['IN_PROGRESS', 'COMPLETED'] },
+      turn: { clubSessionId: { in: sessionIds } },
+    },
+    select: { turn: { select: { clubSessionId: true } } },
+  });
+  const gamesBySession = new Map<string, number>();
+  for (const g of games) {
+    const sid = g.turn?.clubSessionId;
+    if (!sid) continue;
+    gamesBySession.set(sid, (gamesBySession.get(sid) ?? 0) + 1);
+  }
+
+  return sessions.map((s) => ({
+    id: s.id,
+    title: s.title ?? null,
+    status: s.status as ClubSessionStatus,
+    startedAt: s.startedAt.toISOString(),
+    endedAt: s.endedAt?.toISOString() ?? null,
+    attendanceCount: attendanceBySession.get(s.id) ?? 0,
+    gameCount: gamesBySession.get(s.id) ?? 0,
+  }));
 }
 
 export async function updateCourts(

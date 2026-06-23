@@ -51,6 +51,27 @@ router.get(
   },
 );
 
+// GET /api/v1/clubs/:clubId/sessions - LIST this 모임's 정모들 (one per day),
+// most-recent first, each with date/status + attendanceCount/gameCount. Surfaces
+// the 모임 ↔ 정모 two-level structure (today's 진행 중 정모 + 지난 정모 이력).
+// Auth: any member of the club (enforced in the service). Declared BEFORE the
+// bare `GET /:id` so "/<clubId>/sessions" is never captured as a single-session id.
+router.get(
+  '/:clubId/sessions',
+  authenticate,
+  async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const sessions = await clubSessionService.listSessions(
+        req.params.clubId as string,
+        req.user!.userId,
+      );
+      res.json(sessions);
+    } catch (err) {
+      next(err);
+    }
+  },
+);
+
 // GET /api/v1/club-sessions/:id - get a single club session
 router.get(
   '/:id',

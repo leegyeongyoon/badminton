@@ -64,6 +64,18 @@ export interface SessionSummary {
   };
 }
 
+// ─── 정모 목록 (모임 ↔ 정모 2층 구조) ───
+// 한 모임의 정모들(하루 1개)을 최신순으로. 각 행에 날짜/상태 + 출석/게임 수.
+export interface ClubSessionListItem {
+  id: string;
+  title: string | null;
+  status: string; // ACTIVE | ENDED
+  startedAt: string;
+  endedAt: string | null;
+  attendanceCount: number;
+  gameCount: number;
+}
+
 // ─── Per-정모 출석 QR ───
 export interface SessionQr {
   clubSessionId: string;
@@ -106,6 +118,11 @@ export const clubSessionApi = {
     api.post<AttendResponse>(`/club-sessions/${clubSessionId}/attend`),
   getActive: (clubId: string) =>
     api.get(`/clubs/${clubId}/sessions/active`),
+
+  // 이 모임의 정모 목록 (최신순) — 진행 중 정모 + 지난 정모 이력. 각 행에 날짜/상태
+  // + 출석/게임 수. 클럽 화면의 "정모" 섹션에서 사용.
+  listSessions: (clubId: string) =>
+    api.get<ClubSessionListItem[]>(`/clubs/${clubId}/sessions`),
 
   // 이 정모가 소유한 코트(session.courtIds)만 — 운영판 코트 그리드용.
   getCourts: (sessionId: string) =>

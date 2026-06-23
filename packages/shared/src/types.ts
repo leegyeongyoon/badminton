@@ -231,6 +231,22 @@ export interface ClubSessionResponse {
   endedAt: string | null;
 }
 
+/**
+ * One 정모(ClubSession) in a 모임's 정모 history list. A 모임 has many 정모 (one
+ * per day); this is the per-정모 row surfaced in the club screen's 정모 section.
+ * `attendanceCount` = distinct users with a CheckIn for this 정모; `gameCount` =
+ * games played in this 정모. Ordered by date desc by the list endpoint.
+ */
+export interface ClubSessionListItem {
+  id: string;
+  title: string | null;
+  status: ClubSessionStatus;
+  startedAt: string;
+  endedAt: string | null;
+  attendanceCount: number;
+  gameCount: number;
+}
+
 // --- Per-정모 QR (모임 전용 QR) ---
 
 /**
