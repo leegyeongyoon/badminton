@@ -28,6 +28,35 @@ export interface AuthResponse {
   tokens: AuthTokens;
 }
 
+// 운영자 신청(Operator request) ─────────────────────────────
+export type OperatorRequestStatusValue = 'PENDING' | 'APPROVED' | 'REJECTED';
+
+export interface OperatorRequestResponse {
+  id: string;
+  userId: string;
+  status: OperatorRequestStatusValue;
+  message: string | null;
+  reviewedById: string | null;
+  reviewedAt: string | null;
+  createdAt: string;
+}
+
+// 신청자(requester) 요약 — SUPER_ADMIN 의 목록 화면에서 사용.
+export interface OperatorRequestWithRequester extends OperatorRequestResponse {
+  requester: {
+    id: string;
+    name: string;
+    phone: string | null;
+    createdAt: string;
+  };
+}
+
+// GET /operator-requests/me — 본인의 최신 신청(없으면 null) + 현재 권한.
+export interface OperatorRequestMeResponse {
+  request: OperatorRequestResponse | null;
+  role: UserRole;
+}
+
 export interface FacilityResponse {
   id: string;
   name: string;

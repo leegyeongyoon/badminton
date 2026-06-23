@@ -8,9 +8,16 @@ datasource db {
 }
 
 enum UserRole {
+  SUPER_ADMIN
   FACILITY_ADMIN
   CLUB_LEADER
   PLAYER
+}
+
+enum OperatorRequestStatus {
+  PENDING
+  APPROVED
+  REJECTED
 }
 
 enum CourtStatus {
@@ -105,6 +112,25 @@ model User {
   startedClubSessions ClubSession[]       @relation("ClubSessionStarter")
   createdGameBoards   GameBoard[]         @relation("GameBoardCreator")
   clubMessages        ClubMessage[]
+  operatorRequests    OperatorRequest[]   @relation("OperatorRequester")
+}
+
+// 운영자(모임 생성 권한) 신청. PLAYER 가 운영자 권한을 신청하면 SUPER_ADMIN 이
+// 승인/거절한다. 승인 시 해당 User.role 이 CLUB_LEADER 로 바뀐다. 한 유저는
+// 동시에 PENDING 신청을 하나만 가질 수 있다(코드에서 enforce).
+model OperatorRequest {
+  id           String                @id @default(uuid())
+  userId       String
+  status       OperatorRequestStatus @default(PENDING)
+  message      String?
+  reviewedById String?
+  reviewedAt   DateTime?
+  createdAt    DateTime              @default(now())
+
+  user User @relation("OperatorRequester", fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([status])
+  @@index([userId])
 }
 
 model PlayerProfile {

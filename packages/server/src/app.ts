@@ -16,6 +16,7 @@ import notificationRouter from './modules/notification/notification.router';
 import clubSessionRouter from './modules/clubSession/clubSession.router';
 import gameBoardRouter from './modules/gameBoard/gameBoard.router';
 import chatRouter from './modules/chat/chat.router';
+import operatorRequestRouter from './modules/operatorRequest/operatorRequest.router';
 
 const app = express();
 
@@ -50,6 +51,7 @@ app.use('/api/v1/clubs', chatRouter);                  // /clubs/:clubId/message
 app.use('/api/v1/club-sessions', clubSessionRouter);   // /club-sessions/:id/*
 app.use('/api/v1/club-sessions', gameBoardRouter);     // /club-sessions/:id/game-board
 app.use('/api/v1/game-boards', gameBoardRouter);       // /game-boards/:id/entries/*
+app.use('/api/v1/operator-requests', operatorRequestRouter);
 
 app.use(errorHandler);
 

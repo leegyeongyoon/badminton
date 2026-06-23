@@ -1,7 +1,14 @@
 export enum UserRole {
+  SUPER_ADMIN = 'SUPER_ADMIN',
   FACILITY_ADMIN = 'FACILITY_ADMIN',
   CLUB_LEADER = 'CLUB_LEADER',
   PLAYER = 'PLAYER',
+}
+
+export enum OperatorRequestStatus {
+  PENDING = 'PENDING',
+  APPROVED = 'APPROVED',
+  REJECTED = 'REJECTED',
 }
 
 export enum CourtStatus {

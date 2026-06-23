@@ -13,18 +13,30 @@ import { Icon } from '../../components/ui/Icon';
 import api from '../../services/api';
 import { checkinApi } from '../../services/checkin';
 import { profileApi } from '../../services/profile';
+import { operatorRequestApi } from '../../services/operatorRequest';
+import type { OperatorRequestResponse } from '@badminton/shared';
 import { typography, radius, spacing, opacity } from '../../constants/theme';
 import { alpha } from '../../utils/color';
 
 import { UserProfileCard } from '../../components/settings/UserProfileCard';
 import { ClubsSection } from '../../components/settings/ClubsSection';
 import { ClubModal } from '../../components/settings/ClubModal';
+import { Modal } from '../../components/ui/Modal';
+import { Input } from '../../components/ui/Input';
+import { Button } from '../../components/ui/Button';
+
+// 운영자 신청 상태 → 사용자에게 보여줄 한 줄 라벨.
+const OPERATOR_STATUS_LABEL: Record<string, string> = {
+  PENDING: '신청 대기중',
+  APPROVED: '승인됨',
+  REJECTED: '거절됨',
+};
 
 export default function MoreScreen() {
   const router = useRouter();
   const { colors, shadows } = useTheme();
   const { status: checkinStatus, fetchStatus } = useCheckinStore();
-  const { user, logout } = useAuthStore();
+  const { user, logout, loadUser } = useAuthStore();
   const { selectedFacility, clearSelectedFacility } = useFacilityStore();
   const { clubs, fetchClubs, createClub, joinClub } = useClubStore();
   const [unreadCount, setUnreadCount] = useState(0);
@@ -35,7 +47,16 @@ export default function MoreScreen() {
   const [clubName, setClubName] = useState('');
   const [inviteCode, setInviteCode] = useState('');
 
+  // 운영자 신청 (PLAYER 만 해당)
+  const [operatorRequest, setOperatorRequest] = useState<OperatorRequestResponse | null>(null);
+  const [showOperatorModal, setShowOperatorModal] = useState(false);
+  const [operatorReason, setOperatorReason] = useState('');
+  const [submittingOperator, setSubmittingOperator] = useState(false);
+
   const facilityId = checkinStatus?.facilityId;
+
+  const isSuperAdmin = user?.role === 'SUPER_ADMIN';
+  const isPlayer = user?.role === 'PLAYER';
 
   useEffect(() => {
     Promise.all([
@@ -43,8 +64,42 @@ export default function MoreScreen() {
       checkAdminStatus(),
       fetchClubs(),
       loadProfile(),
+      loadOperatorRequest(),
     ]);
   }, [facilityId]);
+
+  const loadOperatorRequest = async () => {
+    // PLAYER 만 신청 상태가 의미 있음. 그 외 권한은 조회하지 않음.
+    if (!user || user.role !== 'PLAYER') {
+      setOperatorRequest(null);
+      return;
+    }
+    try {
+      const { data } = await operatorRequestApi.me();
+      setOperatorRequest(data.request);
+      // 승인되어 서버 role 이 바뀐 경우 로컬 user 도 갱신해 운영자 메뉴가 보이게.
+      if (data.role !== user.role) {
+        await loadUser();
+      }
+    } catch {
+      /* silent */
+    }
+  };
+
+  const handleSubmitOperatorRequest = async () => {
+    setSubmittingOperator(true);
+    try {
+      const { data } = await operatorRequestApi.create(operatorReason.trim() || undefined);
+      setOperatorRequest(data);
+      setShowOperatorModal(false);
+      setOperatorReason('');
+      showSuccess('운영자 신청이 접수되었어요');
+    } catch (err: any) {
+      showAlert(Strings.common.error, err?.response?.data?.error || '운영자 신청에 실패했습니다');
+    } finally {
+      setSubmittingOperator(false);
+    }
+  };
 
   const loadProfile = async () => {
     try {
@@ -197,6 +252,49 @@ export default function MoreScreen() {
             <Text style={[styles.menuItemText, { color: colors.text }]}>{Strings.admin.dashboard}</Text>
           </TouchableOpacity>
         )}
+
+        {/* PLAYER → 운영자 신청. 신청 이력이 있으면 현재 상태를 함께 표시. */}
+        {isPlayer && (
+          <TouchableOpacity
+            style={styles.menuItem}
+            onPress={() => {
+              // PENDING 중이면 다시 신청할 수 없음(서버 409) → 모달 대신 안내만.
+              if (operatorRequest?.status === 'PENDING') {
+                showAlert('운영자 신청', '신청이 접수되어 검토 중이에요');
+                return;
+              }
+              setShowOperatorModal(true);
+            }}
+          >
+            <Icon name="people" size={18} color={colors.primary} />
+            <Text style={[styles.menuItemText, { color: colors.text }]}>운영자 신청</Text>
+            {operatorRequest && (
+              <Text
+                style={[
+                  styles.statusBadgeText,
+                  {
+                    color:
+                      operatorRequest.status === 'PENDING'
+                        ? colors.warning
+                        : operatorRequest.status === 'REJECTED'
+                        ? colors.danger
+                        : colors.primary,
+                  },
+                ]}
+              >
+                {OPERATOR_STATUS_LABEL[operatorRequest.status]}
+              </Text>
+            )}
+          </TouchableOpacity>
+        )}
+
+        {/* SUPER_ADMIN → 운영자 신청 관리 화면. */}
+        {isSuperAdmin && (
+          <TouchableOpacity style={styles.menuItem} onPress={() => router.push('/admin/operator-requests')}>
+            <Icon name="people" size={18} color={colors.primary} />
+            <Text style={[styles.menuItemText, { color: colors.text }]}>운영자 신청 관리</Text>
+          </TouchableOpacity>
+        )}
       </View>
 
       {/* App settings */}
@@ -242,6 +340,41 @@ export default function MoreScreen() {
         onConfirm={handleJoinClub}
         onCancel={() => { setShowJoinModal(false); setInviteCode(''); }}
       />
+
+      {/* 운영자 신청 모달 (사유 선택) */}
+      <Modal
+        visible={showOperatorModal}
+        onClose={() => { setShowOperatorModal(false); setOperatorReason(''); }}
+        title="운영자 신청"
+        actions={
+          <View style={styles.modalActions}>
+            <Button
+              title={Strings.common.cancel}
+              onPress={() => { setShowOperatorModal(false); setOperatorReason(''); }}
+              variant="outline"
+              size="md"
+            />
+            <Button
+              title="신청하기"
+              onPress={handleSubmitOperatorRequest}
+              variant="primary"
+              size="md"
+              loading={submittingOperator}
+            />
+          </View>
+        }
+      >
+        <Text style={[styles.modalDesc, { color: colors.textSecondary }]}>
+          운영자가 되면 모임을 만들고 운영할 수 있어요. 최고관리자 승인 후 권한이 부여됩니다.
+        </Text>
+        <Input
+          label="신청 사유 (선택)"
+          placeholder="예: 우리 동호회 모임을 운영하고 싶어요"
+          value={operatorReason}
+          onChangeText={setOperatorReason}
+          maxLength={300}
+        />
+      </Modal>
     </ScrollView>
   );
 }
@@ -272,6 +405,19 @@ const styles = StyleSheet.create({
   menuItemText: {
     ...typography.body1,
     flex: 1,
+  },
+  statusBadgeText: {
+    ...typography.caption,
+    fontWeight: '600',
+  },
+  modalActions: {
+    flexDirection: 'row',
+    gap: spacing.md,
+    justifyContent: 'flex-end',
+  },
+  modalDesc: {
+    ...typography.body2,
+    marginBottom: spacing.md,
   },
   badge: {
     borderRadius: 10,

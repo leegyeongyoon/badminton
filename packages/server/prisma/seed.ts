@@ -49,6 +49,26 @@ async function main() {
 
   const password = await bcrypt.hash('password123', 10);
 
+  // 최고관리자(SUPER_ADMIN) — the single dedicated account that approves 운영자
+  // requests. Upsert by phone (idempotent). The REAL production password is set
+  // only by the data migration (as a bcrypt hash); we never commit it as
+  // plaintext. For LOCAL dev the seed uses SUPER_ADMIN_SEED_PASSWORD or a
+  // harmless default — prod is unaffected (migrate deploy, not seed, runs there).
+  const superAdminPassword = await bcrypt.hash(
+    process.env.SUPER_ADMIN_SEED_PASSWORD ?? 'superadmin123',
+    10,
+  );
+  const superAdmin = await prisma.user.upsert({
+    where: { phone: '01067340017' },
+    update: {},
+    create: { phone: '01067340017', password: superAdminPassword, name: '최고관리자', role: 'SUPER_ADMIN' },
+  });
+  await prisma.playerProfile.upsert({
+    where: { userId: superAdmin.id },
+    update: {},
+    create: { userId: superAdmin.id, preferredGameTypes: ['DOUBLES'] },
+  });
+
   // Create facility admin
   const admin = await prisma.user.create({
     data: { phone: '01000000001', password, name: '관리자', role: 'FACILITY_ADMIN' },

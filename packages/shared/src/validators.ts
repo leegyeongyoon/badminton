@@ -230,6 +230,21 @@ export const openSessionSchema = z.object({
   note: z.string().max(200).optional(),
 });
 
+// 운영자 신청(Operator request)
+// PLAYER 가 운영자(모임 생성 권한)를 신청. 사유(message)는 선택.
+export const operatorRequestCreateSchema = z.object({
+  message: z.string().max(300).optional(),
+});
+
+// SUPER_ADMIN 의 승인/거절. note 는 선택(거절 사유 등).
+export const operatorRequestReviewSchema = z.object({
+  decision: z.enum(['approve', 'reject']),
+  note: z.string().max(300).optional(),
+});
+
+export type OperatorRequestCreateInput = z.infer<typeof operatorRequestCreateSchema>;
+export type OperatorRequestReviewInput = z.infer<typeof operatorRequestReviewSchema>;
+
 export type RegisterInput = z.infer<typeof registerSchema>;
 export type LoginInput = z.infer<typeof loginSchema>;
 export type KakaoLoginInput = z.infer<typeof kakaoLoginSchema>;
