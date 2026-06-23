@@ -13,6 +13,7 @@ import { useRouter } from 'expo-router';
 import { Colors } from '../constants/colors';
 import { createShadow } from '../constants/theme';
 import { Strings } from '../constants/strings';
+import { BackButton } from '../components/ui/BackButton';
 import api from '../services/api';
 
 interface Notification {
@@ -168,14 +169,26 @@ export default function NotificationsScreen() {
 
   if (isLoading) {
     return (
-      <View style={styles.loadingContainer}>
-        <ActivityIndicator size="large" color={Colors.primary} />
+      <View style={styles.container}>
+        <View style={styles.topHeader}>
+          <BackButton />
+          <Text style={styles.topHeaderTitle}>{Strings.notification.title}</Text>
+        </View>
+        <View style={styles.loadingContainer}>
+          <ActivityIndicator size="large" color={Colors.primary} />
+        </View>
       </View>
     );
   }
 
   return (
     <View style={styles.container}>
+      {/* Top header with back affordance (root Stack header is off) */}
+      <View style={styles.topHeader}>
+        <BackButton />
+        <Text style={styles.topHeaderTitle}>{Strings.notification.title}</Text>
+      </View>
+
       {/* Mark all read header */}
       {unreadCount > 0 && (
         <View style={styles.headerBar}>
@@ -221,6 +234,22 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: Colors.background,
+  },
+  topHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    paddingRight: 16,
+    paddingTop: Platform.OS === 'ios' ? 56 : 40,
+    paddingBottom: 10,
+    backgroundColor: Colors.surface,
+    borderBottomWidth: 1,
+    borderBottomColor: Colors.divider,
+  },
+  topHeaderTitle: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: Colors.text,
   },
   loadingContainer: {
     flex: 1,

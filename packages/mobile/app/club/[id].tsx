@@ -364,7 +364,26 @@ export default function ClubDetailScreen() {
 
   return (
     <>
-      <Stack.Screen options={{ headerShown: true, title: club?.name || '모임' }} />
+      <Stack.Screen
+        options={{
+          headerShown: true,
+          title: club?.name || '모임',
+          // Always render our own back so it survives a deep-link / web reload
+          // (the Stack's auto back button disappears when there's no history).
+          headerBackVisible: false,
+          headerLeft: () => (
+            <TouchableOpacity
+              onPress={() => (router.canGoBack() ? router.back() : router.replace('/(tabs)'))}
+              hitSlop={10}
+              style={styles.headerBack}
+              accessibilityLabel="뒤로가기"
+              accessibilityRole="button"
+            >
+              <Icon name="chevronLeft" size={24} color={Colors.text} />
+            </TouchableOpacity>
+          ),
+        }}
+      />
       <View style={styles.container}>
         <ScrollView
           contentContainerStyle={styles.scrollContent}
@@ -771,6 +790,11 @@ const styles = StyleSheet.create({
   },
   scrollContent: {
     paddingBottom: 40,
+  },
+  headerBack: {
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    marginLeft: Platform.OS === 'web' ? 8 : 0,
   },
   // ─── 모임 정체성 카드 (quiet, compact) ───
   infoCard: {

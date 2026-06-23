@@ -18,6 +18,7 @@ import { useClubStore } from '../../../store/clubStore';
 import { useAuthStore } from '../../../store/authStore';
 import { useClubRoom, useSocketEvent } from '../../../hooks/useSocket';
 import { useTheme } from '../../../hooks/useTheme';
+import { BackButton } from '../../../components/ui/BackButton';
 import { getSkillMeta } from '../../../constants/skill';
 import { ClubMessage } from '../../../services/chat';
 import { typography, spacing, radius } from '../../../constants/theme';
@@ -229,12 +230,24 @@ export default function ClubChatScreen() {
 
   return (
     <>
-      <Stack.Screen options={{ headerShown: true, title: `${club?.name || '모임'} 채팅/건의` }} />
+      <Stack.Screen options={{ headerShown: false }} />
       <KeyboardAvoidingView
         style={[styles.container, { backgroundColor: colors.background }]}
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
         keyboardVerticalOffset={Platform.OS === 'ios' ? 90 : 0}
       >
+        {/* Custom header: BackButton always present (falls back to this club on
+            deep-link/reload where the Stack auto-back would vanish). */}
+        <View style={[styles.topHeader, { backgroundColor: colors.surface, borderBottomColor: colors.border }]}>
+          <BackButton
+            onPress={() =>
+              router.canGoBack() ? router.back() : router.replace(`/club/${clubId}`)
+            }
+          />
+          <Text style={[styles.topHeaderTitle, { color: colors.text }]} numberOfLines={1}>
+            {`${club?.name || '모임'} 채팅/건의`}
+          </Text>
+        </View>
         {loading && messages.length === 0 ? (
           <View style={styles.center}>
             <ActivityIndicator color={colors.primary} />
@@ -371,6 +384,19 @@ export default function ClubChatScreen() {
 
 const styles = StyleSheet.create({
   container: { flex: 1 },
+  topHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    paddingRight: spacing.lg,
+    paddingTop: Platform.OS === 'ios' ? 56 : 40,
+    paddingBottom: spacing.smd,
+    borderBottomWidth: 1,
+  },
+  topHeaderTitle: {
+    ...typography.subtitle1,
+    flex: 1,
+  },
   center: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: spacing.xl },
   emptyTitle: { ...typography.subtitle1 },
   emptySub: { ...typography.body2, textAlign: 'center', marginTop: spacing.sm },

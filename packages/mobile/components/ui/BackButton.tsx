@@ -21,8 +21,13 @@ export function BackButton({ onPress }: BackButtonProps) {
   const handlePress = () => {
     if (onPress) {
       onPress();
-    } else {
+    } else if (router.canGoBack()) {
+      // Normal push: pop back to the previous screen.
       router.back();
+    } else {
+      // Deep-link / web reload with no history → fall back to home instead of
+      // doing nothing (which would leave the user stuck).
+      router.replace('/(tabs)');
     }
   };
 

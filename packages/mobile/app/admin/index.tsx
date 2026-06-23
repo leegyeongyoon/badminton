@@ -10,6 +10,7 @@ import { useFadeIn } from '../../utils/animations';
 import { Strings } from '../../constants/strings';
 import { showAlert, showConfirm } from '../../utils/alert';
 import { Icon } from '../../components/ui/Icon';
+import { BackButton } from '../../components/ui/BackButton';
 import { AnimatedPressable } from '../../components/ui/AnimatedPressable';
 import { SectionHeader } from '../../components/ui/SectionHeader';
 import { AnimatedRefreshControl } from '../../components/ui/AnimatedRefreshControl';
@@ -153,27 +154,47 @@ export default function AdminDashboard() {
     );
   };
 
+  // Shared top bar with a back affordance (root Stack header is off, so this
+  // pushed screen must provide its own — robust to deep-link/reload via BackButton).
+  const topBar = (
+    <View
+      style={[
+        styles.topBar,
+        { backgroundColor: colors.surface, borderBottomColor: colors.border },
+      ]}
+    >
+      <BackButton />
+      <Text style={[styles.topBarTitle, { color: colors.text }]}>{Strings.admin.dashboard}</Text>
+    </View>
+  );
+
   if (!selectedFacilityLoaded || checkinLoading) {
     return (
-      <View style={[styles.emptyContainer, { backgroundColor: colors.background }]}>
-        <ActivityIndicator size="large" color={colors.primary} />
+      <View style={{ flex: 1, backgroundColor: colors.background }}>
+        {topBar}
+        <View style={styles.emptyContainer}>
+          <ActivityIndicator size="large" color={colors.primary} />
+        </View>
       </View>
     );
   }
 
   if (!facilityId) {
     return (
-      <View style={[styles.emptyContainer, { backgroundColor: colors.background }]}>
-        <Icon name="facility" size={48} color={colors.textLight} />
-        <Text style={[styles.emptyText, { color: colors.textSecondary, ...typography.body1 }]}>
-          시설을 선택한 후 관리자 메뉴를 사용할 수 있습니다
-        </Text>
-        <AnimatedPressable
-          onPress={() => router.push('/facility-select')}
-          style={[styles.facilitySelectBtn, { backgroundColor: colors.primary }]}
-        >
-          <Text style={[styles.facilitySelectBtnText, { color: palette.white }]}>시설 선택하기</Text>
-        </AnimatedPressable>
+      <View style={{ flex: 1, backgroundColor: colors.background }}>
+        {topBar}
+        <View style={styles.emptyContainer}>
+          <Icon name="facility" size={48} color={colors.textLight} />
+          <Text style={[styles.emptyText, { color: colors.textSecondary, ...typography.body1 }]}>
+            시설을 선택한 후 관리자 메뉴를 사용할 수 있습니다
+          </Text>
+          <AnimatedPressable
+            onPress={() => router.push('/facility-select')}
+            style={[styles.facilitySelectBtn, { backgroundColor: colors.primary }]}
+          >
+            <Text style={[styles.facilitySelectBtnText, { color: palette.white }]}>시설 선택하기</Text>
+          </AnimatedPressable>
+        </View>
       </View>
     );
   }
@@ -181,23 +202,28 @@ export default function AdminDashboard() {
   // Show skeleton while admin data is loading for the first time
   if (capacity === null && todayStats === null && courts.length === 0) {
     return (
-      <ScrollView
-        style={[styles.container, { backgroundColor: colors.background }]}
-        contentContainerStyle={{ padding: spacing.lg, paddingBottom: spacing.xxxxl }}
-      >
-        <AdminSkeleton />
-      </ScrollView>
+      <View style={{ flex: 1, backgroundColor: colors.background }}>
+        {topBar}
+        <ScrollView
+          style={[styles.container, { backgroundColor: colors.background }]}
+          contentContainerStyle={{ padding: spacing.lg, paddingBottom: spacing.xxxxl }}
+        >
+          <AdminSkeleton />
+        </ScrollView>
+      </View>
     );
   }
 
   return (
-    <Animated.ScrollView
-      style={[styles.container, { backgroundColor: colors.background }]}
-      contentContainerStyle={{ padding: spacing.lg, paddingBottom: spacing.xxxxl }}
-      onScroll={scrollHandler}
-      scrollEventThrottle={16}
-      refreshControl={Platform.OS === 'web' ? undefined : <AnimatedRefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
-    >
+    <View style={{ flex: 1, backgroundColor: colors.background }}>
+      {topBar}
+      <Animated.ScrollView
+        style={[styles.container, { backgroundColor: colors.background }]}
+        contentContainerStyle={{ padding: spacing.lg, paddingBottom: spacing.xxxxl }}
+        onScroll={scrollHandler}
+        scrollEventThrottle={16}
+        refreshControl={Platform.OS === 'web' ? undefined : <AnimatedRefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
+      >
       {/* Header + Quick Actions */}
       <Animated.View style={[fadeHeader, headerStyle]}>
         <AdminHeader
@@ -272,12 +298,26 @@ export default function AdminDashboard() {
           onForceCancel={handleForceCancel}
         />
       </Animated.View>
-    </Animated.ScrollView>
+      </Animated.ScrollView>
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
   container: { flex: 1 },
+  topBar: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    paddingRight: 16,
+    paddingTop: Platform.OS === 'ios' ? 56 : 40,
+    paddingBottom: 10,
+    borderBottomWidth: 1,
+  },
+  topBarTitle: {
+    fontSize: 18,
+    fontWeight: '700',
+  },
   emptyContainer: {
     flex: 1,
     justifyContent: 'center',

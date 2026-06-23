@@ -16,6 +16,7 @@ import KakaoMap from '../components/KakaoMap';
 import { Colors } from '../constants/colors';
 import { createShadow } from '../constants/theme';
 import { Strings } from '../constants/strings';
+import { BackButton } from '../components/ui/BackButton';
 import { getDistanceKm } from '../utils/geo';
 
 type ViewMode = 'list' | 'map';
@@ -160,7 +161,10 @@ export default function FacilitySelectScreen() {
     <View style={styles.container}>
       {/* Header */}
       <View style={styles.header}>
-        <Text style={styles.headerTitle}>{Strings.facility.select}</Text>
+        <View style={styles.headerTopRow}>
+          <BackButton />
+          <Text style={styles.headerTitle}>{Strings.facility.select}</Text>
+        </View>
         <Text style={styles.headerSubtitle}>
           {Strings.facility.selectDescription}
         </Text>
@@ -261,11 +265,16 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1,
     borderBottomColor: Colors.border,
   },
+  headerTopRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginBottom: 4,
+  },
   headerTitle: {
     fontSize: 26,
     fontWeight: '800',
     color: Colors.text,
-    marginBottom: 4,
   },
   headerSubtitle: {
     fontSize: 15,
