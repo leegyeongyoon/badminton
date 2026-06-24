@@ -513,6 +513,52 @@ export interface GuestFeeSettlementResponse {
   };
 }
 
+// --- Member attendance history (멤버별 출석 이력) ---
+
+/** One 정모 a member attended in a club (distinct ClubSession). */
+export interface MemberAttendanceSession {
+  sessionId: string;
+  title: string | null;
+  startedAt: string;
+}
+
+/** GET /clubs/:clubId/members/:userId/attendance — the 정모s a member attended
+ *  in THIS club, most-recent first, plus the distinct count. */
+export interface MemberAttendanceResponse {
+  sessions: MemberAttendanceSession[];
+  count: number;
+}
+
+// --- Monthly dues (월 회비) ---
+
+/** One member's dues status for a period (YYYY-MM). `paid` = a DuesPayment row
+ *  exists; `amount` = that payment's amount, else the club's monthlyDuesAmount. */
+export interface DuesMemberItem {
+  userId: string;
+  name: string;
+  paid: boolean;
+  amount: number;
+}
+
+/** GET /clubs/:clubId/dues?period=YYYY-MM — per-member dues + totals. */
+export interface DuesSettlementResponse {
+  clubId: string;
+  period: string;
+  /** The club's standard monthly dues (null = 회비 미사용). */
+  monthlyDuesAmount: number | null;
+  items: DuesMemberItem[];
+  totals: {
+    /** memberCount × monthlyDuesAmount (0 when amount unset). */
+    expected: number;
+    /** Sum of paid members' amounts. */
+    paid: number;
+    /** expected − paid. */
+    unpaid: number;
+    paidCount: number;
+    unpaidCount: number;
+  };
+}
+
 export interface FacilityCapacityResponse {
   totalCheckedIn: number;
   availableCount: number;

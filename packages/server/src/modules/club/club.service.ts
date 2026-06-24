@@ -15,6 +15,9 @@ import type {
   ManagedMemberInput,
   BulkAddManagedMembersResponse,
   ManagedMemberResponse,
+  MemberAttendanceResponse,
+  DuesSettlementResponse,
+  DuesMemberItem,
 } from '@badminton/shared';
 import type { ClubMemberRole, SkillLevel } from '@badminton/shared';
 import { PlayerStatus } from '@badminton/shared';
@@ -39,6 +42,7 @@ export async function createClub(userId: string, input: CreateClubInput) {
     description: club.description,
     inviteCode: club.inviteCode,
     homeFacilityId: club.homeFacilityId,
+    monthlyDuesAmount: club.monthlyDuesAmount,
     memberCount: club._count.members,
     createdAt: club.createdAt.toISOString(),
   };
@@ -94,7 +98,12 @@ export async function updateClub(
 
   // Build a partial update only from the fields actually present in the body so
   // unspecified fields are left untouched (and explicit null clears them).
-  const data: { name?: string; homeFacilityId?: string | null; description?: string | null } = {};
+  const data: {
+    name?: string;
+    homeFacilityId?: string | null;
+    description?: string | null;
+    monthlyDuesAmount?: number | null;
+  } = {};
   if (input.name !== undefined) data.name = input.name;
   if (input.homeFacilityId !== undefined) data.homeFacilityId = input.homeFacilityId;
   if (input.description !== undefined) {
@@ -102,6 +111,8 @@ export async function updateClub(
     const trimmed = input.description?.trim();
     data.description = trimmed ? trimmed : null;
   }
+  // 월 회비 표준 금액: null 로 회비 기능 해제, 숫자로 설정.
+  if (input.monthlyDuesAmount !== undefined) data.monthlyDuesAmount = input.monthlyDuesAmount;
 
   const club = await prisma.club.update({
     where: { id: clubId },
@@ -115,6 +126,7 @@ export async function updateClub(
     description: club.description,
     inviteCode: club.inviteCode,
     homeFacilityId: club.homeFacilityId,
+    monthlyDuesAmount: club.monthlyDuesAmount,
     memberCount: club._count.members,
     createdAt: club.createdAt.toISOString(),
   };
@@ -161,6 +173,7 @@ export async function listMyClubs(userId: string) {
     description: m.club.description,
     inviteCode: m.club.inviteCode,
     homeFacilityId: m.club.homeFacilityId,
+    monthlyDuesAmount: m.club.monthlyDuesAmount,
     memberCount: m.club._count.members,
     role: m.role,
     createdAt: m.club.createdAt.toISOString(),
@@ -758,4 +771,210 @@ export async function getMyAttendance(
 ): Promise<AttendanceLeaderboardEntry | null> {
   const { me } = await getAttendanceLeaderboard(clubId, period, userId);
   return me;
+}
+
+// --- Member attendance history (멤버별 출석 이력) ---
+
+/**
+ * The 정모s a member attended in THIS club, most-recent first. Attendance =
+ * DISTINCT ClubSession the member checked into (CheckIn.clubSessionId scoped to
+ * ClubSession.clubId === clubId), the same scoping the leaderboard uses.
+ *
+ * Auth: the club's LEADER/STAFF, OR the user themselves (a member may view their
+ * own history). Anyone else (non-staff, not self) → 403.
+ */
+export async function getMemberAttendance(
+  clubId: string,
+  targetUserId: string,
+  requesterId: string,
+): Promise<MemberAttendanceResponse> {
+  const club = await prisma.club.findUnique({ where: { id: clubId }, select: { id: true } });
+  if (!club) throw new NotFoundError('모임');
+
+  // LEADER/STAFF of this club, or the requester asking for their own history.
+  if (requesterId !== targetUserId) {
+    const requester = await prisma.clubMember.findUnique({
+      where: { userId_clubId: { userId: requesterId, clubId } },
+    });
+    if (!requester || (requester.role !== 'LEADER' && requester.role !== 'STAFF')) {
+      throw new ForbiddenError('운영진만 다른 멤버의 출석을 볼 수 있습니다');
+    }
+  }
+
+  // The target must be a member of this club.
+  const target = await prisma.clubMember.findUnique({
+    where: { userId_clubId: { userId: targetUserId, clubId } },
+  });
+  if (!target) throw new NotFoundError('모임 멤버');
+
+  // All check-ins of this member into THIS club's 정모s. Pull the session so we
+  // can return title/startedAt; dedupe by clubSessionId (one row per 정모).
+  const checkIns = await prisma.checkIn.findMany({
+    where: {
+      userId: targetUserId,
+      clubSessionId: { not: null },
+      clubSession: { clubId },
+    },
+    select: {
+      clubSessionId: true,
+      clubSession: { select: { title: true, startedAt: true } },
+    },
+  });
+
+  const seen = new Map<string, { sessionId: string; title: string | null; startedAt: Date }>();
+  for (const c of checkIns) {
+    if (!c.clubSessionId || !c.clubSession) continue;
+    if (seen.has(c.clubSessionId)) continue;
+    seen.set(c.clubSessionId, {
+      sessionId: c.clubSessionId,
+      title: c.clubSession.title ?? null,
+      startedAt: c.clubSession.startedAt,
+    });
+  }
+
+  // Most-recent first.
+  const sessions = [...seen.values()]
+    .sort((a, b) => b.startedAt.getTime() - a.startedAt.getTime())
+    .map((s) => ({
+      sessionId: s.sessionId,
+      title: s.title,
+      startedAt: s.startedAt.toISOString(),
+    }));
+
+  return { sessions, count: sessions.length };
+}
+
+// --- Monthly dues (월 회비) ---
+
+/** Current calendar month as "YYYY-MM" (server-side default period). */
+function currentPeriod(): string {
+  const now = new Date();
+  const y = now.getFullYear();
+  const m = String(now.getMonth() + 1).padStart(2, '0');
+  return `${y}-${m}`;
+}
+
+/**
+ * Per-member monthly dues for a period (LEADER/STAFF). For each non-guest member:
+ * paid (a DuesPayment row exists for (clubId,userId,period)) + amount (that
+ * payment's amount, else the club's monthlyDuesAmount). Plus totals.
+ *
+ * `expected` = memberCount × monthlyDuesAmount (0 when the amount is unset);
+ * `paid` = sum of the paid members' amounts.
+ */
+export async function getDues(
+  clubId: string,
+  period: string,
+  requesterId: string,
+): Promise<DuesSettlementResponse> {
+  const club = await prisma.club.findUnique({
+    where: { id: clubId },
+    select: { id: true, monthlyDuesAmount: true },
+  });
+  if (!club) throw new NotFoundError('모임');
+  await verifyClubStaff(clubId, requesterId);
+
+  // Non-guest members of this club.
+  const members = await prisma.clubMember.findMany({
+    where: { clubId, user: { isGuest: false } },
+    include: { user: { select: { id: true, name: true } } },
+  });
+
+  // Payments for this period, keyed by userId.
+  const payments = await prisma.duesPayment.findMany({
+    where: { clubId, period },
+    select: { userId: true, amount: true },
+  });
+  const paidByUser = new Map<string, number>();
+  for (const p of payments) paidByUser.set(p.userId, p.amount);
+
+  const standard = club.monthlyDuesAmount ?? 0;
+
+  const items: DuesMemberItem[] = members.map((m) => {
+    const paidAmount = paidByUser.get(m.userId);
+    const paid = paidAmount !== undefined;
+    return {
+      userId: m.userId,
+      name: m.user.name,
+      paid,
+      // Paid → the recorded amount; unpaid → the club's standard expected amount.
+      amount: paid ? paidAmount! : standard,
+    };
+  });
+
+  // Stable ordering by name.
+  items.sort((a, b) => a.name.localeCompare(b.name));
+
+  const expected = members.length * standard;
+  let paidTotal = 0;
+  let paidCount = 0;
+  for (const it of items) {
+    if (it.paid) {
+      paidTotal += it.amount;
+      paidCount += 1;
+    }
+  }
+
+  return {
+    clubId,
+    period,
+    monthlyDuesAmount: club.monthlyDuesAmount,
+    items,
+    totals: {
+      expected,
+      paid: paidTotal,
+      unpaid: expected - paidTotal,
+      paidCount,
+      unpaidCount: members.length - paidCount,
+    },
+  };
+}
+
+/**
+ * Mark a member paid / unpaid for a period (LEADER/STAFF).
+ *  - paid=true  → upsert a DuesPayment (amount = amount ?? club.monthlyDuesAmount
+ *                 ?? 0; recordedById = requester).
+ *  - paid=false → delete the DuesPayment for (clubId,userId,period).
+ * Returns the refreshed settlement summary for the period.
+ */
+export async function setDues(
+  clubId: string,
+  requesterId: string,
+  input: { userId: string; period: string; paid: boolean; amount?: number },
+): Promise<DuesSettlementResponse> {
+  const club = await prisma.club.findUnique({
+    where: { id: clubId },
+    select: { id: true, monthlyDuesAmount: true },
+  });
+  if (!club) throw new NotFoundError('모임');
+  await verifyClubStaff(clubId, requesterId);
+
+  // The target must be a (non-guest) member of this club.
+  const target = await prisma.clubMember.findUnique({
+    where: { userId_clubId: { userId: input.userId, clubId } },
+    include: { user: { select: { isGuest: true } } },
+  });
+  if (!target || target.user.isGuest) throw new NotFoundError('모임 멤버');
+
+  if (input.paid) {
+    const amount = input.amount ?? club.monthlyDuesAmount ?? 0;
+    await prisma.duesPayment.upsert({
+      where: { clubId_userId_period: { clubId, userId: input.userId, period: input.period } },
+      create: {
+        clubId,
+        userId: input.userId,
+        period: input.period,
+        amount,
+        recordedById: requesterId,
+      },
+      update: { amount, recordedById: requesterId, paidAt: new Date() },
+    });
+  } else {
+    // deleteMany so reverting an already-unpaid member is a harmless no-op.
+    await prisma.duesPayment.deleteMany({
+      where: { clubId, userId: input.userId, period: input.period },
+    });
+  }
+
+  return getDues(clubId, input.period, requesterId);
 }

@@ -201,19 +201,43 @@ export const joinClubSchema = z.object({
 });
 
 // 모임 정보 수정 (LEADER 또는 SUPER_ADMIN). 최소 한 필드 이상 — 빈 PATCH 거부.
-//  • name           모임 이름 (1~50자)
-//  • homeFacilityId 홈 시설 id (null 로 해제 가능; 서버에서 실존 검증)
-//  • description    소개글 (최대 500자; null/빈문자 → 소개 제거)
+//  • name              모임 이름 (1~50자)
+//  • homeFacilityId    홈 시설 id (null 로 해제 가능; 서버에서 실존 검증)
+//  • description       소개글 (최대 500자; null/빈문자 → 소개 제거)
+//  • monthlyDuesAmount 월 회비 표준 금액 (0~10,000,000; null 로 회비 기능 해제)
 export const updateClubSchema = z
   .object({
     name: z.string().min(1).max(50).optional(),
     homeFacilityId: z.string().uuid().nullable().optional(),
     description: z.string().max(500).nullable().optional(),
+    monthlyDuesAmount: z.number().int().min(0).max(10000000).nullable().optional(),
   })
   .refine(
-    (v) => v.name !== undefined || v.homeFacilityId !== undefined || v.description !== undefined,
+    (v) =>
+      v.name !== undefined ||
+      v.homeFacilityId !== undefined ||
+      v.description !== undefined ||
+      v.monthlyDuesAmount !== undefined,
     { message: '수정할 항목이 없습니다' },
   );
+
+// 월 회비 (monthly dues) — "YYYY-MM" 형식 검증. 월은 01~12.
+export const duesPeriodSchema = z
+  .string()
+  .regex(/^\d{4}-(0[1-9]|1[0-2])$/, '기간 형식이 올바르지 않습니다 (YYYY-MM)');
+
+// POST /clubs/:clubId/dues body — 한 회원의 한 달 납부/미납 토글 (LEADER/STAFF).
+//  • paid=true  → 납부 처리 (amount 미지정 시 Club.monthlyDuesAmount 사용)
+//  • paid=false → 해당 달 납부 기록 삭제 (미납으로 되돌림)
+export const setDuesSchema = z.object({
+  userId: z.string().uuid(),
+  period: duesPeriodSchema,
+  paid: z.boolean(),
+  amount: z.number().int().min(0).max(10000000).optional(),
+});
+
+export type DuesPeriodInput = z.infer<typeof duesPeriodSchema>;
+export type SetDuesInput = z.infer<typeof setDuesSchema>;
 
 // Turn (순번)
 export const registerTurnSchema = z.object({

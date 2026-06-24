@@ -61,6 +61,52 @@ export interface UpdateClubBody {
   name?: string;
   homeFacilityId?: string | null;
   description?: string | null;
+  // 월 회비 표준 금액 (0~10,000,000). null 로 회비 기능 해제.
+  monthlyDuesAmount?: number | null;
+}
+
+// ─── 멤버별 출석 이력 (GET /clubs/:id/members/:userId/attendance) ───────────
+export interface MemberAttendanceSession {
+  sessionId: string;
+  title: string | null;
+  startedAt: string;
+}
+export interface MemberAttendance {
+  sessions: MemberAttendanceSession[];
+  count: number;
+}
+
+// ─── 월 회비 (월별 회비 정산) ──────────────────────────────────────────────
+export interface DuesMemberItem {
+  userId: string;
+  name: string;
+  paid: boolean;
+  amount: number;
+}
+export interface DuesSettlement {
+  clubId: string;
+  period: string; // "YYYY-MM"
+  monthlyDuesAmount: number | null;
+  items: DuesMemberItem[];
+  totals: {
+    expected: number;
+    paid: number;
+    unpaid: number;
+    paidCount: number;
+    unpaidCount: number;
+  };
+}
+// POST /clubs/:id/dues body — 한 회원의 한 달 납부/미납 토글.
+export interface SetDuesBody {
+  userId: string;
+  period: string; // "YYYY-MM"
+  paid: boolean;
+  amount?: number;
+}
+
+/** KRW 콤마 포맷 ("30,000원"). null/undefined → "0원". */
+export function formatKRW(n: number | null | undefined): string {
+  return `${(n ?? 0).toLocaleString('ko-KR')}원`;
 }
 
 // 모임원 한 명 (GET /clubs/:id/members 의 한 항목 / 멤버 수정 응답).
@@ -83,6 +129,7 @@ export interface ClubInfo {
   description: string | null;
   inviteCode: string;
   homeFacilityId: string | null;
+  monthlyDuesAmount: number | null;
   memberCount: number;
   role?: string;
   createdAt: string;
@@ -132,4 +179,18 @@ export const clubApi = {
     api.get<AttendanceEntry | null>(`/clubs/${clubId}/attendance/me`, {
       params: { period },
     }),
+
+  // 멤버별 출석 이력 — 이 모임에서 그 회원이 참여한 정모들 (최신순) + 횟수.
+  // 서버 권한: 이 모임 LEADER/STAFF 또는 본인.
+  getMemberAttendance: (clubId: string, userId: string) =>
+    api.get<MemberAttendance>(`/clubs/${clubId}/members/${userId}/attendance`),
+
+  // 월 회비 정산 조회 (LEADER/STAFF). period 미지정 시 서버가 이번 달 사용.
+  getDues: (clubId: string, period?: string) =>
+    api.get<DuesSettlement>(`/clubs/${clubId}/dues`, {
+      params: period ? { period } : undefined,
+    }),
+  // 한 회원의 한 달 납부/미납 처리 (LEADER/STAFF). 갱신된 정산 요약 반환.
+  setDues: (clubId: string, body: SetDuesBody) =>
+    api.post<DuesSettlement>(`/clubs/${clubId}/dues`, body),
 };

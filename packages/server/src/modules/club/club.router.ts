@@ -7,6 +7,8 @@ import {
   updateMemberProfileSchema,
   attendancePeriodSchema,
   bulkAddManagedMembersSchema,
+  duesPeriodSchema,
+  setDuesSchema,
 } from '@badminton/shared';
 import { authenticate } from '../../middleware/auth';
 import { roleGuard } from '../../middleware/roleGuard';
@@ -24,6 +26,20 @@ function parsePeriod(raw: unknown) {
   const result = attendancePeriodSchema.safeParse(raw);
   if (!result.success) {
     throw new BadRequestError('지원하지 않는 기간입니다 (month, year, all)');
+  }
+  return result.data;
+}
+
+// Parse the dues ?period query. Absent/empty → current month (server-side).
+// A present-but-invalid value is rejected with 400 (format "YYYY-MM").
+function parseDuesPeriod(raw: unknown): string {
+  if (raw === undefined || raw === '') {
+    const now = new Date();
+    return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+  }
+  const result = duesPeriodSchema.safeParse(raw);
+  if (!result.success) {
+    throw new BadRequestError('기간 형식이 올바르지 않습니다 (YYYY-MM)');
   }
   return result.data;
 }
@@ -144,6 +160,47 @@ router.get('/:clubId/attendance/me', authenticate, async (req: Request, res: Res
       req.user!.userId,
     );
     res.json(me);
+  } catch (err) { next(err); }
+});
+
+// GET /api/v1/clubs/:clubId/members/:userId/attendance - the 정모s a member
+// attended in THIS club (distinct ClubSession, most-recent first) + count. Auth
+// in the service: the club's LEADER/STAFF, OR the user themselves.
+router.get('/:clubId/members/:userId/attendance', authenticate, async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const result = await clubService.getMemberAttendance(
+      req.params.clubId as string,
+      req.params.userId as string,
+      req.user!.userId,
+    );
+    res.json(result);
+  } catch (err) { next(err); }
+});
+
+// GET /api/v1/clubs/:clubId/dues?period=YYYY-MM - per-member monthly dues +
+// totals (LEADER/STAFF). Default period = current month (server-side).
+router.get('/:clubId/dues', authenticate, async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const period = parseDuesPeriod(req.query.period);
+    const result = await clubService.getDues(
+      req.params.clubId as string,
+      period,
+      req.user!.userId,
+    );
+    res.json(result);
+  } catch (err) { next(err); }
+});
+
+// POST /api/v1/clubs/:clubId/dues - mark a member paid/unpaid for a period
+// (LEADER/STAFF). Returns the refreshed settlement summary.
+router.post('/:clubId/dues', authenticate, validate(setDuesSchema), async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const result = await clubService.setDues(
+      req.params.clubId as string,
+      req.user!.userId,
+      req.body,
+    );
+    res.json(result);
   } catch (err) { next(err); }
 });
 

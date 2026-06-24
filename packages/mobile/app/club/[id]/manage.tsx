@@ -17,7 +17,14 @@ import { useAuthStore } from '../../../store/authStore';
 import { Icon } from '../../../components/ui/Icon';
 import { BackButton } from '../../../components/ui/BackButton';
 import { Button } from '../../../components/ui/Button';
-import { clubApi, ClubMemberResponse } from '../../../services/club';
+import {
+  clubApi,
+  ClubMemberResponse,
+  MemberAttendance,
+  DuesSettlement,
+  formatKRW,
+} from '../../../services/club';
+import { AttendanceLeaderboard } from '../../../components/club/AttendanceLeaderboard';
 import { facilityApi } from '../../../services/facility';
 import { showAlert, showConfirm } from '../../../utils/alert';
 import { showSuccess } from '../../../utils/feedback';
@@ -78,6 +85,26 @@ export default function ClubManageScreen() {
   // 'role' | 'skill' | null — 액션 시트 안에서 어떤 편집 패널을 보여줄지.
   const [editMode, setEditMode] = useState<'role' | 'skill' | null>(null);
   const [memberBusy, setMemberBusy] = useState(false);
+
+  // ── 출석 이력 모달 상태 (멤버별 정모 이력) ──
+  // 어떤 멤버의 이력을 보는지 (null = 닫힘) + 로드된 이력.
+  const [historyMember, setHistoryMember] = useState<{ userId: string; name: string } | null>(null);
+  const [history, setHistory] = useState<MemberAttendance | null>(null);
+  const [historyLoading, setHistoryLoading] = useState(false);
+
+  // ── 회비 섹션 상태 ──
+  // 현재 보고 있는 월 (YYYY-MM). 초기값은 이번 달 (로컬 기준).
+  const [duesPeriod, setDuesPeriod] = useState<string>(() => {
+    const d = new Date();
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+  });
+  const [dues, setDues] = useState<DuesSettlement | null>(null);
+  const [duesLoading, setDuesLoading] = useState(false);
+  // 회비 금액 미설정 시 인라인 입력값.
+  const [duesAmountInput, setDuesAmountInput] = useState('');
+  const [duesAmountSaving, setDuesAmountSaving] = useState(false);
+  // 토글 진행 중인 회원 id (optimistic 중복 탭 방지).
+  const [duesBusyUserId, setDuesBusyUserId] = useState<string | null>(null);
 
   // 멤버 목록 로드 (운영진만 접근하므로 진입 시 한 번).
   const loadMembers = useCallback(async () => {
@@ -275,6 +302,128 @@ export default function ClubManageScreen() {
       'danger',
     );
   }, [clubId, actionMember, loadMembers, closeMemberSheet]);
+
+  // ── 출석 이력 열기 (멤버 탭) ──
+  const openHistory = useCallback(
+    async (member: { userId: string; name: string }) => {
+      if (!clubId) return;
+      setHistoryMember(member);
+      setHistory(null);
+      setHistoryLoading(true);
+      try {
+        const { data } = await clubApi.getMemberAttendance(clubId, member.userId);
+        setHistory(data);
+      } catch (err: any) {
+        showAlert(Strings.common.error, err?.response?.data?.error || '출석 이력을 불러오지 못했어요');
+        setHistoryMember(null);
+      } finally {
+        setHistoryLoading(false);
+      }
+    },
+    [clubId],
+  );
+
+  // ── 회비: 정산 로드 (월이 바뀔 때마다) ──
+  const loadDues = useCallback(
+    async (period: string) => {
+      if (!clubId) return;
+      setDuesLoading(true);
+      try {
+        const { data } = await clubApi.getDues(clubId, period);
+        setDues(data);
+      } catch {
+        setDues(null);
+      } finally {
+        setDuesLoading(false);
+      }
+    },
+    [clubId],
+  );
+
+  useEffect(() => {
+    loadDues(duesPeriod);
+  }, [loadDues, duesPeriod]);
+
+  // ── 회비: 월 회비 표준 금액 설정/수정 (클럽 PATCH) ──
+  const handleSaveDuesAmount = useCallback(async () => {
+    if (!clubId) return;
+    const amount = Number(duesAmountInput.replace(/[^0-9]/g, ''));
+    if (!amount || amount <= 0) {
+      showAlert('알림', '회비 금액을 입력해 주세요');
+      return;
+    }
+    setDuesAmountSaving(true);
+    try {
+      await clubApi.updateClub(clubId, { monthlyDuesAmount: amount });
+      await fetchClubs();
+      await loadDues(duesPeriod);
+      setDuesAmountInput('');
+      showSuccess('월 회비 금액을 설정했어요');
+    } catch (err: any) {
+      showAlert(Strings.common.error, err?.response?.data?.error || '저장에 실패했습니다');
+    } finally {
+      setDuesAmountSaving(false);
+    }
+  }, [clubId, duesAmountInput, fetchClubs, loadDues, duesPeriod]);
+
+  // ── 회비: 월 이동 (이전/다음 달) ──
+  const shiftMonth = useCallback((delta: number) => {
+    setDuesPeriod((prev) => {
+      const [y, m] = prev.split('-').map(Number);
+      const d = new Date(y, m - 1 + delta, 1);
+      return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+    });
+  }, []);
+
+  // ── 회비: 한 회원 납부/미납 토글 (optimistic + 서버 반영) ──
+  const toggleDuesPaid = useCallback(
+    async (item: { userId: string; paid: boolean }) => {
+      if (!clubId || duesBusyUserId) return;
+      setDuesBusyUserId(item.userId);
+      const nextPaid = !item.paid;
+      // Optimistic: 즉시 토글 + totals 추정 갱신.
+      setDues((prev) => {
+        if (!prev) return prev;
+        const standard = prev.monthlyDuesAmount ?? 0;
+        const items = prev.items.map((it) =>
+          it.userId === item.userId ? { ...it, paid: nextPaid, amount: nextPaid ? standard : standard } : it,
+        );
+        const paid = items.filter((i) => i.paid).reduce((s, i) => s + i.amount, 0);
+        const paidCount = items.filter((i) => i.paid).length;
+        return {
+          ...prev,
+          items,
+          totals: {
+            ...prev.totals,
+            paid,
+            unpaid: prev.totals.expected - paid,
+            paidCount,
+            unpaidCount: items.length - paidCount,
+          },
+        };
+      });
+      try {
+        const { data } = await clubApi.setDues(clubId, {
+          userId: item.userId,
+          period: duesPeriod,
+          paid: nextPaid,
+        });
+        setDues(data); // 서버 권위값으로 동기화.
+      } catch (err: any) {
+        showAlert(Strings.common.error, err?.response?.data?.error || '회비 처리에 실패했습니다');
+        await loadDues(duesPeriod); // 롤백.
+      } finally {
+        setDuesBusyUserId(null);
+      }
+    },
+    [clubId, duesBusyUserId, duesPeriod, loadDues],
+  );
+
+  // 회비 월 라벨 ("2026년 6월").
+  const duesMonthLabel = useMemo(() => {
+    const [y, m] = duesPeriod.split('-').map(Number);
+    return `${y}년 ${m}월`;
+  }, [duesPeriod]);
 
   // 검색 필터 + 운영진/회원 그룹핑 (운영진이 위로).
   const filteredMembers = useMemo(() => {
@@ -552,11 +701,187 @@ export default function ClubManageScreen() {
           )}
         </View>
 
-        {/* ── 출석 (다음 Part) ──────────────────────── */}
-        <PlaceholderSection icon="checkin" title="출석" colors={colors} shadows={shadows} />
+        {/* ── 출석 ──────────────────────────────────── */}
+        <View style={[styles.card, { backgroundColor: colors.surface }, shadows.sm]}>
+          <View style={styles.cardHeader}>
+            <Icon name="checkin" size={18} color={colors.primary} />
+            <Text style={[styles.cardTitle, { color: colors.text }]}>출석</Text>
+          </View>
+          <Text style={[styles.fieldHint, { color: colors.textLight }]}>
+            출석왕 순위예요. 아래 멤버를 누르면 참여한 정모 이력을 볼 수 있어요
+          </Text>
 
-        {/* ── 회비 (다음 Part) ──────────────────────── */}
-        <PlaceholderSection icon="medal" title="회비" colors={colors} shadows={shadows} />
+          {/* 출석왕 리더보드 (이번 달/올해/전체) */}
+          {clubId && <AttendanceLeaderboard clubId={clubId} maxRows={5} />}
+
+          {/* 멤버별 이력 — 멤버를 눌러 그 회원이 참여한 정모 목록을 본다 */}
+          <Text style={[styles.fieldLabel, { color: colors.textSecondary, marginTop: spacing.lg }]}>
+            멤버별 출석 이력
+          </Text>
+          {membersLoading ? (
+            <View style={{ paddingVertical: spacing.lg, alignItems: 'center' }}>
+              <ActivityIndicator size="small" color={colors.primary} />
+            </View>
+          ) : members.length === 0 ? (
+            <Text style={[styles.placeholder, { color: colors.textLight }]}>아직 멤버가 없어요</Text>
+          ) : (
+            <View style={{ marginTop: spacing.xs }}>
+              {filteredMembers.map((m) => (
+                <TouchableOpacity
+                  key={m.userId}
+                  style={[styles.memberRow, { borderBottomColor: colors.border }]}
+                  onPress={() => openHistory({ userId: m.userId, name: m.name })}
+                  activeOpacity={0.6}
+                  accessibilityLabel={`${m.name} 출석 이력 보기`}
+                >
+                  <View style={[styles.memberAvatar, { backgroundColor: colors.background, borderColor: colors.border }]}>
+                    <Text style={[styles.memberAvatarText, { color: colors.textSecondary }]}>{m.name[0]}</Text>
+                  </View>
+                  <Text style={[styles.memberName, { color: colors.text, flex: 1 }]} numberOfLines={1}>
+                    {m.name}
+                  </Text>
+                  <Text style={[styles.historyCue, { color: colors.textLight }]}>이력</Text>
+                  <Icon name="chevronRight" size={18} color={colors.textLight} />
+                </TouchableOpacity>
+              ))}
+            </View>
+          )}
+        </View>
+
+        {/* ── 회비 (월 회비) ─────────────────────────── */}
+        <View style={[styles.card, { backgroundColor: colors.surface }, shadows.sm]}>
+          <View style={styles.cardHeader}>
+            <Icon name="medal" size={18} color={colors.primary} />
+            <Text style={[styles.cardTitle, { color: colors.text }]}>회비</Text>
+          </View>
+
+          {club?.monthlyDuesAmount == null ? (
+            // 회비 미설정 — 인라인으로 월 회비 금액을 입력해 PATCH.
+            <>
+              <Text style={[styles.fieldHint, { color: colors.textLight }]}>
+                월 회비 금액을 정하면 매달 회원별 납부 현황을 관리할 수 있어요
+              </Text>
+              <Text style={[styles.fieldLabel, { color: colors.textSecondary, marginTop: spacing.md }]}>
+                월 회비 금액 (원)
+              </Text>
+              <View style={styles.duesAmountRow}>
+                <TextInput
+                  style={[
+                    styles.input,
+                    { flex: 1, backgroundColor: colors.background, color: colors.text, borderColor: colors.border },
+                  ]}
+                  value={duesAmountInput}
+                  onChangeText={(v) => setDuesAmountInput(v.replace(/[^0-9]/g, ''))}
+                  placeholder="예: 30000"
+                  placeholderTextColor={colors.textLight}
+                  keyboardType="number-pad"
+                  accessibilityLabel="월 회비 금액"
+                />
+                <Button
+                  title="설정"
+                  onPress={handleSaveDuesAmount}
+                  variant="primary"
+                  size="md"
+                  loading={duesAmountSaving}
+                />
+              </View>
+            </>
+          ) : (
+            <>
+              {/* 월 선택 + 표준 금액 */}
+              <View style={styles.monthRow}>
+                <TouchableOpacity
+                  style={[styles.monthBtn, { borderColor: colors.border }]}
+                  onPress={() => shiftMonth(-1)}
+                  activeOpacity={0.7}
+                  accessibilityLabel="이전 달"
+                >
+                  <Icon name="chevronLeft" size={18} color={colors.textSecondary} />
+                </TouchableOpacity>
+                <Text style={[styles.monthLabel, { color: colors.text }]}>{duesMonthLabel}</Text>
+                <TouchableOpacity
+                  style={[styles.monthBtn, { borderColor: colors.border }]}
+                  onPress={() => shiftMonth(1)}
+                  activeOpacity={0.7}
+                  accessibilityLabel="다음 달"
+                >
+                  <Icon name="chevronRight" size={18} color={colors.textSecondary} />
+                </TouchableOpacity>
+              </View>
+              <Text style={[styles.fieldHint, { color: colors.textLight, textAlign: 'center' }]}>
+                월 회비 {formatKRW(club.monthlyDuesAmount)} · 멤버를 눌러 회비 금액을 바꿀 수 있어요
+              </Text>
+
+              {/* 합계 (기대 / 납부 / 미납) */}
+              <View style={[styles.duesTotals, { backgroundColor: colors.background }]}>
+                <View style={styles.duesTotalItem}>
+                  <Text style={[styles.duesTotalLabel, { color: colors.textSecondary }]}>기대</Text>
+                  <Text style={[styles.duesTotalValue, { color: colors.text }]}>
+                    {formatKRW(dues?.totals.expected)}
+                  </Text>
+                </View>
+                <View style={styles.duesTotalItem}>
+                  <Text style={[styles.duesTotalLabel, { color: colors.textSecondary }]}>납부</Text>
+                  <Text style={[styles.duesTotalValue, { color: colors.secondary }]}>
+                    {formatKRW(dues?.totals.paid)}
+                  </Text>
+                </View>
+                <View style={styles.duesTotalItem}>
+                  <Text style={[styles.duesTotalLabel, { color: colors.textSecondary }]}>미납</Text>
+                  <Text style={[styles.duesTotalValue, { color: colors.danger }]}>
+                    {formatKRW(dues?.totals.unpaid)}
+                  </Text>
+                </View>
+              </View>
+
+              {/* 회원별 납부/미납 토글 */}
+              {duesLoading && !dues ? (
+                <View style={{ paddingVertical: spacing.lg, alignItems: 'center' }}>
+                  <ActivityIndicator size="small" color={colors.primary} />
+                </View>
+              ) : !dues || dues.items.length === 0 ? (
+                <Text style={[styles.placeholder, { color: colors.textLight }]}>아직 멤버가 없어요</Text>
+              ) : (
+                <View style={{ marginTop: spacing.sm }}>
+                  {dues.items.map((item) => (
+                    <View
+                      key={item.userId}
+                      style={[styles.duesRow, { borderBottomColor: colors.border }]}
+                    >
+                      <Text style={[styles.memberName, { color: colors.text, flex: 1 }]} numberOfLines={1}>
+                        {item.name}
+                      </Text>
+                      <Text style={[styles.duesAmount, { color: colors.textSecondary }]}>
+                        {formatKRW(item.amount)}
+                      </Text>
+                      <TouchableOpacity
+                        style={[
+                          styles.paidToggle,
+                          item.paid
+                            ? { backgroundColor: colors.secondary }
+                            : { backgroundColor: colors.background, borderColor: colors.border, borderWidth: 1 },
+                        ]}
+                        onPress={() => toggleDuesPaid(item)}
+                        disabled={duesBusyUserId === item.userId}
+                        activeOpacity={0.8}
+                        accessibilityLabel={`${item.name} ${item.paid ? '납부 취소' : '납부 처리'}`}
+                      >
+                        <Text
+                          style={[
+                            styles.paidToggleText,
+                            { color: item.paid ? '#fff' : colors.textSecondary },
+                          ]}
+                        >
+                          {item.paid ? '납부 완료' : '미납'}
+                        </Text>
+                      </TouchableOpacity>
+                    </View>
+                  ))}
+                </View>
+              )}
+            </>
+          )}
+        </View>
 
         {/* ── 모임 삭제 (danger, 맨 아래) ───────────── */}
         <View style={[styles.card, { backgroundColor: colors.surface }, shadows.sm]}>
@@ -724,8 +1049,81 @@ export default function ClubManageScreen() {
           </TouchableOpacity>
         </TouchableOpacity>
       </Modal>
+
+      {/* ── 출석 이력 모달 (멤버가 참여한 정모 목록) ─────────────── */}
+      <Modal
+        visible={!!historyMember}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setHistoryMember(null)}
+      >
+        <TouchableOpacity
+          style={styles.sheetOverlay}
+          activeOpacity={1}
+          onPress={() => setHistoryMember(null)}
+        >
+          <TouchableOpacity
+            activeOpacity={1}
+            style={[styles.sheet, { backgroundColor: colors.surface }]}
+            onPress={() => {}}
+          >
+            <View style={styles.sheetHeader}>
+              <Text style={[styles.sheetName, { color: colors.text }]} numberOfLines={1}>
+                {historyMember?.name} 출석 이력
+              </Text>
+              <TouchableOpacity onPress={() => setHistoryMember(null)} hitSlop={10}>
+                <Icon name="close" size={22} color={colors.textSecondary} />
+              </TouchableOpacity>
+            </View>
+            <Text style={[styles.sheetSub, { color: colors.textSecondary }]}>
+              이 모임에서 참여한 정모 {history?.count ?? 0}회
+            </Text>
+
+            {historyLoading ? (
+              <View style={{ paddingVertical: spacing.xl, alignItems: 'center' }}>
+                <ActivityIndicator size="small" color={colors.primary} />
+              </View>
+            ) : !history || history.sessions.length === 0 ? (
+              <Text style={[styles.placeholder, { color: colors.textLight }]}>
+                아직 참여한 정모가 없어요
+              </Text>
+            ) : (
+              <ScrollView style={{ maxHeight: 360 }} showsVerticalScrollIndicator={false}>
+                {history.sessions.map((s) => (
+                  <View key={s.sessionId} style={[styles.historyRow, { borderBottomColor: colors.border }]}>
+                    <Icon name="calendar" size={16} color={colors.textSecondary} />
+                    <View style={{ flex: 1 }}>
+                      <Text style={[styles.historyTitle, { color: colors.text }]} numberOfLines={1}>
+                        {s.title || '정모'}
+                      </Text>
+                      <Text style={[styles.historyDate, { color: colors.textSecondary }]}>
+                        {formatSessionDate(s.startedAt)}
+                      </Text>
+                    </View>
+                  </View>
+                ))}
+              </ScrollView>
+            )}
+
+            <TouchableOpacity
+              style={[styles.sheetClose, { borderColor: colors.border }]}
+              onPress={() => setHistoryMember(null)}
+              activeOpacity={0.7}
+            >
+              <Text style={[styles.sheetCloseText, { color: colors.textSecondary }]}>닫기</Text>
+            </TouchableOpacity>
+          </TouchableOpacity>
+        </TouchableOpacity>
+      </Modal>
     </View>
   );
+}
+
+// 정모 날짜 포맷 ("2026. 6. 24. (수)").
+function formatSessionDate(iso: string): string {
+  const d = new Date(iso);
+  const days = ['일', '월', '화', '수', '목', '금', '토'];
+  return `${d.getFullYear()}. ${d.getMonth() + 1}. ${d.getDate()}. (${days[d.getDay()]})`;
 }
 
 // 역할 배지 (대표/운영진/회원).
@@ -802,29 +1200,6 @@ function FacilityChip({
         {label}
       </Text>
     </TouchableOpacity>
-  );
-}
-
-// 다음 Part 에서 채울 섹션 자리표시자.
-function PlaceholderSection({
-  icon,
-  title,
-  colors,
-  shadows,
-}: {
-  icon: any;
-  title: string;
-  colors: any;
-  shadows: any;
-}) {
-  return (
-    <View style={[styles.card, { backgroundColor: colors.surface }, shadows.sm]}>
-      <View style={styles.cardHeader}>
-        <Icon name={icon} size={18} color={colors.textSecondary} />
-        <Text style={[styles.cardTitle, { color: colors.text }]}>{title}</Text>
-      </View>
-      <Text style={[styles.placeholder, { color: colors.textLight }]}>곧 추가됩니다</Text>
-    </View>
   );
 }
 
@@ -1005,4 +1380,60 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   sheetCloseText: { ...typography.subtitle2 },
+
+  // ── 출석 이력 ──
+  historyCue: { ...typography.caption, fontWeight: '600' },
+  historyRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+    paddingVertical: spacing.md,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+  },
+  historyTitle: { ...typography.body1, fontWeight: '600' },
+  historyDate: { ...typography.caption, marginTop: 1 },
+
+  // ── 회비 ──
+  duesAmountRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, marginTop: spacing.xs },
+  monthRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: spacing.lg,
+    marginBottom: spacing.xs,
+  },
+  monthBtn: {
+    width: 36,
+    height: 36,
+    borderRadius: radius.md,
+    borderWidth: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  monthLabel: { ...typography.subtitle1, fontWeight: '700', minWidth: 110, textAlign: 'center' },
+  duesTotals: {
+    flexDirection: 'row',
+    borderRadius: radius.lg,
+    paddingVertical: spacing.md,
+    marginTop: spacing.md,
+  },
+  duesTotalItem: { flex: 1, alignItems: 'center', gap: 2 },
+  duesTotalLabel: { ...typography.caption },
+  duesTotalValue: { ...typography.subtitle2, fontWeight: '800' },
+  duesRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+    paddingVertical: spacing.md,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+  },
+  duesAmount: { ...typography.caption, fontWeight: '600' },
+  paidToggle: {
+    borderRadius: radius.pill,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.xs,
+    minWidth: 72,
+    alignItems: 'center',
+  },
+  paidToggleText: { ...typography.caption, fontWeight: '800' },
 });
