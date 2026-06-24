@@ -59,21 +59,50 @@ export async function createGameBoard(clubSessionId: string, userId: string) {
 }
 
 export async function getGameBoard(clubSessionId: string) {
-  const board = await prisma.gameBoard.findUnique({
-    where: { clubSessionId },
-    include: {
-      // Court-less QUEUED entries ordered by the global queueOrder (다음 게임 순서);
-      // on-court / materialized entries keep their createdAt order. formatBoard
-      // re-sorts so QUEUED come first by queueOrder, then the rest by createdAt.
-      // Only ACTIVE entries belong on the board. COMPLETED/CANCELLED entries
-      // (their turn finished or was cancelled) must be excluded, otherwise the
-      // operator board keeps showing the court/players as 게임중 forever.
-      entries: {
-        where: { status: { in: ['QUEUED', 'MATERIALIZED', 'PLAYING'] } },
-        orderBy: [{ queueOrder: 'asc' }, { position: 'asc' }],
+  const fetchBoard = () =>
+    prisma.gameBoard.findUnique({
+      where: { clubSessionId },
+      include: {
+        // Court-less QUEUED entries ordered by the global queueOrder (다음 게임 순서);
+        // on-court / materialized entries keep their createdAt order. formatBoard
+        // re-sorts so QUEUED come first by queueOrder, then the rest by createdAt.
+        // Only ACTIVE entries belong on the board. COMPLETED/CANCELLED entries
+        // (their turn finished or was cancelled) must be excluded, otherwise the
+        // operator board keeps showing the court/players as 게임중 forever.
+        entries: {
+          where: { status: { in: ['QUEUED', 'MATERIALIZED', 'PLAYING'] } },
+          orderBy: [{ queueOrder: 'asc' }, { position: 'asc' }],
+        },
       },
-    },
-  });
+    });
+
+  let board = await fetchBoard();
+
+  // No board yet → the operator hasn't opened the operate board. Returning a 404
+  // here surfaced as "요청한 정보를 찾을 수 없습니다": on the 현황 보드 when a viewer
+  // opened it before the operator, and as a transient loadBoard(GET)-vs-
+  // createBoard(POST) race on the operate board itself. For an ACTIVE 정모, lazily
+  // create an empty board so this GET never 404s — viewers and the operator both
+  // always get a valid (possibly empty) board.
+  if (!board) {
+    const clubSession = await prisma.clubSession.findUnique({ where: { id: clubSessionId } });
+    if (!clubSession) throw new NotFoundError('정모');
+    if (clubSession.status === 'ACTIVE') {
+      try {
+        await prisma.gameBoard.create({
+          data: {
+            clubSessionId,
+            facilityId: clubSession.facilityId,
+            createdById: clubSession.startedById,
+          },
+        });
+      } catch {
+        // Unique-constraint race: a concurrent request created it first — fine.
+      }
+      board = await fetchBoard();
+    }
+  }
+
   if (!board) throw new NotFoundError('모임판');
   return formatBoard(board);
 }
