@@ -95,26 +95,9 @@ router.get('/:id/stats/peak-hours', authenticate, async (req: Request, res: Resp
   } catch (err) { next(err); }
 });
 
-// Court endpoints nested under facility.
-// Allowed for FACILITY_ADMIN of this facility OR any club LEADER/STAFF.
-router.post('/:id/courts', authenticate, async (req: Request, res: Response, next: NextFunction) => {
-  try {
-    const { createCourtSchema } = await import('@badminton/shared');
-    const body = createCourtSchema.parse(req.body);
-    const { createCourt, verifyCourtManager } = await import('../court/court.service');
-    await verifyCourtManager(req.user!.userId, req.params.id as string);
-    const court = await createCourt(req.params.id as string, body);
-    res.status(201).json(court);
-  } catch (err) { next(err); }
-});
-
-router.get('/:id/courts', async (req: Request, res: Response, next: NextFunction) => {
-  try {
-    const { listCourts } = await import('../court/court.service');
-    const courts = await listCourts(req.params.id as string);
-    res.json(courts);
-  } catch (err) { next(err); }
-});
+// NOTE: Facility-LEVEL court CRUD (POST/GET /:id/courts, clubSessionId=null)
+// was retired with the old facility-admin dashboard. Per-정모 court logic lives
+// under the club session, not here.
 
 // GET /facilities/:id/players - get available players with status
 router.get('/:id/players', async (req: Request, res: Response, next: NextFunction) => {

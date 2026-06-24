@@ -1,7 +1,7 @@
 import { prisma } from '../../utils/prisma';
 import { NotFoundError, BadRequestError, ForbiddenError } from '../../utils/errors';
 import { CourtStatus, CourtGameType } from '@badminton/shared';
-import type { CreateCourtInput, UpdateCourtInput } from '@badminton/shared';
+import type { UpdateCourtInput } from '@badminton/shared';
 
 /**
  * Court-management permission for a club operator.
@@ -43,37 +43,9 @@ export function getPlayersRequired(gameType: CourtGameType): number {
   }
 }
 
-// Facility-admin dashboard court creation: a facility-level court
-// (clubSessionId = null). Clash is checked only among other facility-level
-// courts — 정모-owned courts (clubSessionId != null) live in their own namespace.
-export async function createCourt(facilityId: string, input: CreateCourtInput) {
-  const gameType = input.gameType || CourtGameType.DOUBLES;
-  const clash = await prisma.court.findFirst({
-    where: { facilityId, clubSessionId: null, name: input.name },
-  });
-  if (clash) throw new BadRequestError('같은 이름의 코트가 이미 있습니다');
-  return prisma.court.create({
-    data: { name: input.name, facilityId, gameType },
-  });
-}
-
-// Facility-admin dashboard court list: facility-level courts only
-// (clubSessionId = null). 정모-owned courts are managed inside their own 정모.
-export async function listCourts(facilityId: string) {
-  return prisma.court.findMany({
-    where: { facilityId, clubSessionId: null },
-    orderBy: { name: 'asc' },
-    include: {
-      turns: {
-        where: { status: { in: ['WAITING', 'PLAYING'] } },
-        orderBy: { position: 'asc' },
-        include: {
-          players: { include: { user: true } },
-        },
-      },
-    },
-  });
-}
+// NOTE: Facility-LEVEL court createCourt/listCourts (clubSessionId = null) were
+// retired with the old facility-admin dashboard. Per-정모 courts are created and
+// listed via the club session (getSessionCourts), not here.
 
 export async function updateCourt(courtId: string, input: UpdateCourtInput) {
   const court = await prisma.court.findUnique({ where: { id: courtId } });

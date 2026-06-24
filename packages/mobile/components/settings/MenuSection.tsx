@@ -55,15 +55,7 @@ export function MenuSection({ isAdmin, unreadCount, onNavigate }: MenuSectionPro
       ) : undefined,
       visible: true,
     },
-    {
-      key: 'admin',
-      icon: 'admin',
-      iconColor: colors.warning,
-      label: Strings.settings.admin,
-      desc: Strings.settings.adminDesc,
-      route: '/admin',
-      visible: isAdmin,
-    },
+    // 시설 관리자 대시보드(/admin) 진입은 은퇴됨 — 모임→정모 흐름으로 이전.
   ];
 
   const visibleItems = items.filter((item) => item.visible);

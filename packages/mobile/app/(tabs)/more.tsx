@@ -1,9 +1,7 @@
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState } from 'react';
 import { View, Text, TouchableOpacity, StyleSheet, ScrollView, Share } from 'react-native';
 import { useRouter } from 'expo-router';
-import { useCheckinStore } from '../../store/checkinStore';
 import { useAuthStore } from '../../store/authStore';
-import { useFacilityStore } from '../../store/facilityStore';
 import { useClubStore } from '../../store/clubStore';
 import { useTheme } from '../../hooks/useTheme';
 import { Strings } from '../../constants/strings';
@@ -11,7 +9,6 @@ import { showAlert, showConfirm } from '../../utils/alert';
 import { showSuccess } from '../../utils/feedback';
 import { Icon } from '../../components/ui/Icon';
 import api from '../../services/api';
-import { checkinApi } from '../../services/checkin';
 import { profileApi } from '../../services/profile';
 import { operatorRequestApi } from '../../services/operatorRequest';
 import type { OperatorRequestResponse } from '@badminton/shared';
@@ -35,12 +32,9 @@ const OPERATOR_STATUS_LABEL: Record<string, string> = {
 export default function MoreScreen() {
   const router = useRouter();
   const { colors, shadows } = useTheme();
-  const { status: checkinStatus, fetchStatus } = useCheckinStore();
   const { user, logout, loadUser } = useAuthStore();
-  const { selectedFacility, clearSelectedFacility } = useFacilityStore();
   const { clubs, fetchClubs, createClub, joinClub } = useClubStore();
   const [unreadCount, setUnreadCount] = useState(0);
-  const [isAdmin, setIsAdmin] = useState(false);
   const [profileData, setProfileData] = useState<any>(null);
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [showJoinModal, setShowJoinModal] = useState(false);
@@ -52,8 +46,6 @@ export default function MoreScreen() {
   const [showOperatorModal, setShowOperatorModal] = useState(false);
   const [operatorReason, setOperatorReason] = useState('');
   const [submittingOperator, setSubmittingOperator] = useState(false);
-
-  const facilityId = checkinStatus?.facilityId;
 
   const isSuperAdmin = user?.role === 'SUPER_ADMIN';
   const isPlayer = user?.role === 'PLAYER';
@@ -68,12 +60,12 @@ export default function MoreScreen() {
   useEffect(() => {
     Promise.all([
       loadUnreadCount(),
-      checkAdminStatus(),
       fetchClubs(),
       loadProfile(),
       loadOperatorRequest(),
     ]);
-  }, [facilityId]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const loadOperatorRequest = async () => {
     // PLAYER 만 신청 상태가 의미 있음. 그 외 권한은 조회하지 않음.
@@ -124,34 +116,6 @@ export default function MoreScreen() {
     } catch {
       /* silent */
     }
-  };
-
-  const checkAdminStatus = async () => {
-    if (!user) return;
-    if (user.role === 'FACILITY_ADMIN') {
-      setIsAdmin(true);
-      return;
-    }
-    if (facilityId) {
-      try {
-        const { data } = await api.get('/users/me/admin-facilities');
-        setIsAdmin(Array.isArray(data) && data.some((f: any) => f.id === facilityId));
-      } catch {
-        setIsAdmin(user.role === 'FACILITY_ADMIN');
-      }
-    }
-  };
-
-  const handleCheckout = () => {
-    showConfirm('체크아웃', '체크아웃 하시겠습니까?', async () => {
-      try {
-        await checkinApi.checkOut();
-        await fetchStatus();
-        showSuccess('체크아웃 되었습니다');
-      } catch (err: any) {
-        showAlert('오류', err.response?.data?.error || '체크아웃에 실패했습니다');
-      }
-    });
   };
 
   const handleLogout = () => {
@@ -236,34 +200,6 @@ export default function MoreScreen() {
         </View>
       )}
 
-      {/* Facility management */}
-      <View style={[styles.section, { backgroundColor: colors.surface }, shadows.sm]}>
-        <Text style={[styles.sectionTitle, { color: colors.text }]}>시설 관리</Text>
-        {selectedFacility && (
-          <View style={styles.facilityInfo}>
-            <Text style={[styles.facilityName, { color: colors.textSecondary }]}>
-              {selectedFacility.name}
-            </Text>
-          </View>
-        )}
-        <TouchableOpacity
-          style={styles.menuItem}
-          onPress={async () => {
-            await clearSelectedFacility();
-            router.push('/facility-select');
-          }}
-        >
-          <Icon name="court" size={18} color={colors.textSecondary} />
-          <Text style={[styles.menuItemText, { color: colors.text }]}>{Strings.facility.change}</Text>
-        </TouchableOpacity>
-        {checkinStatus && (
-          <TouchableOpacity style={styles.menuItem} onPress={handleCheckout}>
-            <Icon name="logout" size={18} color={colors.danger} />
-            <Text style={[styles.menuItemText, { color: colors.danger }]}>{Strings.checkin.checkout}</Text>
-          </TouchableOpacity>
-        )}
-      </View>
-
       {/* Menu items */}
       <View style={[styles.section, { backgroundColor: colors.surface }, shadows.sm]}>
         <TouchableOpacity style={styles.menuItem} onPress={() => router.push('/notifications')}>
@@ -275,13 +211,6 @@ export default function MoreScreen() {
             </View>
           )}
         </TouchableOpacity>
-
-        {isAdmin && (
-          <TouchableOpacity style={styles.menuItem} onPress={() => router.push('/admin')}>
-            <Icon name="settings" size={18} color={colors.primary} />
-            <Text style={[styles.menuItemText, { color: colors.text }]}>{Strings.admin.dashboard}</Text>
-          </TouchableOpacity>
-        )}
 
         {/* PLAYER → 운영자 신청. 신청 이력이 있으면 현재 상태를 함께 표시. */}
         {isPlayer && (
@@ -419,12 +348,6 @@ const styles = StyleSheet.create({
   sectionTitle: {
     ...typography.subtitle2,
     marginBottom: spacing.md,
-  },
-  facilityInfo: {
-    marginBottom: spacing.sm,
-  },
-  facilityName: {
-    ...typography.caption,
   },
   menuItem: {
     flexDirection: 'row',

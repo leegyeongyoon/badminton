@@ -163,15 +163,17 @@ export async function getHistory(
 }
 
 export async function getAdminFacilities(userId: string) {
+  // The facility-LEVEL court include (clubSessionId=null) was retired with the
+  // old facility-admin dashboard. Consumers only need id/name/address (e.g. the
+  // /users/me/admin-facilities isAdmin check), so no court include is needed.
   const adminRecords = await prisma.facilityAdmin.findMany({
     where: { userId },
-    include: { facility: { include: { courts: { where: { clubSessionId: null } } } } },
+    include: { facility: true },
   });
   return adminRecords.map((a) => ({
     id: a.facility.id,
     name: a.facility.name,
     address: a.facility.address,
-    courtCount: a.facility.courts.length,
   }));
 }
 
