@@ -712,7 +712,7 @@ export async function memberCheckInAll(
  *  - PLAYING turns are intentionally left intact (the game finishes naturally);
  *    we only log it.
  */
-async function cleanupTurnsOnCheckout(
+export async function cleanupTurnsOnCheckout(
   userId: string,
   facilityId: string,
   clubSessionId?: string,

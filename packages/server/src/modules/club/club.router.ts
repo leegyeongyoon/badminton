@@ -173,4 +173,21 @@ router.patch('/:clubId/members/:userId/profile', authenticate, validate(updateMe
   } catch (err) { next(err); }
 });
 
+// DELETE /api/v1/clubs/:id/members/:userId - remove a member from the club
+// (내보내기). Auth in the service: the club's LEADER OR SUPER_ADMIN. Guards there:
+// can't remove self-as-LEADER, can't remove another LEADER, target must be a
+// member. If the member is checked into an ACTIVE 정모 they're checked out +
+// their turns/board entries cleaned first. Returns { success: true }.
+router.delete('/:id/members/:userId', authenticate, async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const result = await clubService.removeMember(
+      req.params.id as string,
+      req.params.userId as string,
+      req.user!.userId,
+      req.user!.role,
+    );
+    res.json(result);
+  } catch (err) { next(err); }
+});
+
 export default router;

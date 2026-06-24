@@ -63,6 +63,19 @@ export interface UpdateClubBody {
   description?: string | null;
 }
 
+// 모임원 한 명 (GET /clubs/:id/members 의 한 항목 / 멤버 수정 응답).
+// 서버 ClubMemberResponse 의 로컬 복사본 (server-only @badminton/shared 미번들).
+export interface ClubMemberResponse {
+  userId: string;
+  name: string;
+  role: string; // LEADER | STAFF | MEMBER
+  skillLevel: string | null; // 모임별 effective 급수
+  gender: string | null; // M | F | null
+  isCheckedIn: boolean;
+  facilityId: string | null;
+  playerStatus: string | null;
+}
+
 // 모임 정보 응답 (create/list/update 공통).
 export interface ClubInfo {
   id: string;
@@ -90,6 +103,23 @@ export const clubApi = {
   join: (inviteCode: string) => api.post<JoinClubResult>('/clubs/join', { inviteCode }),
   getInviteQr: (clubId: string) => api.get<ClubInviteQr>(`/clubs/${clubId}/invite-qr`),
   getMembers: (clubId: string) => api.get(`/clubs/${clubId}/members`),
+
+  // 멤버 역할 변경 (LEADER 전용) — 대표↔운영진↔회원. 서버에서 LEADER 권한 확인.
+  updateMemberRole: (clubId: string, userId: string, role: string) =>
+    api.patch<{ success: boolean }>(`/clubs/${clubId}/members/${userId}/role`, { role }),
+
+  // 멤버 급수(모임별)·성별 수정 (LEADER/STAFF). 급수는 이 모임 전용 override.
+  // 갱신된 멤버 정보(effective 급수 포함)를 반환.
+  updateMemberProfile: (
+    clubId: string,
+    userId: string,
+    body: { skillLevel?: string; gender?: 'M' | 'F' | null },
+  ) => api.patch<ClubMemberResponse>(`/clubs/${clubId}/members/${userId}/profile`, body),
+
+  // 멤버 내보내기 (LEADER 또는 SUPER_ADMIN). 진행 중 정모에 체크인돼 있으면
+  // 서버가 자동 체크아웃 + 대기 턴/보드 정리 후 멤버십 삭제. { success } 반환.
+  removeMember: (clubId: string, userId: string) =>
+    api.delete<{ success: boolean }>(`/clubs/${clubId}/members/${userId}`),
 
   // 운영자 관리 멤버 일괄 등록 (LEADER/STAFF) — 앱 로그인 없는 영구 멤버 생성.
   bulkAddMembers: (clubId: string, members: ManagedMemberInput[]) =>

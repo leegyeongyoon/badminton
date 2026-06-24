@@ -7,20 +7,30 @@ import {
   StyleSheet,
   TouchableOpacity,
   ActivityIndicator,
+  Modal,
   Platform,
 } from 'react-native';
 import { useLocalSearchParams, useRouter, Stack } from 'expo-router';
 import { useTheme } from '../../../hooks/useTheme';
 import { useClubStore } from '../../../store/clubStore';
+import { useAuthStore } from '../../../store/authStore';
 import { Icon } from '../../../components/ui/Icon';
 import { BackButton } from '../../../components/ui/BackButton';
 import { Button } from '../../../components/ui/Button';
-import { clubApi } from '../../../services/club';
+import { clubApi, ClubMemberResponse } from '../../../services/club';
 import { facilityApi } from '../../../services/facility';
 import { showAlert, showConfirm } from '../../../utils/alert';
 import { showSuccess } from '../../../utils/feedback';
 import { Strings } from '../../../constants/strings';
 import { typography, spacing, radius } from '../../../constants/theme';
+
+// 역할/급수 라벨 + 선택지 (멤버·운영진 섹션 전용).
+const ROLE_LABELS: Record<string, string> = { LEADER: '대표', STAFF: '운영진', MEMBER: '회원' };
+const ROLE_OPTIONS: { value: string; label: string; desc: string }[] = [
+  { value: 'STAFF', label: '운영진', desc: '정모 운영·순번 관리 권한' },
+  { value: 'MEMBER', label: '회원', desc: '일반 회원' },
+];
+const SKILL_OPTIONS = ['S', 'A', 'B', 'C', 'D', 'E', 'F'];
 
 // ─────────────────────────────────────────────────────────
 // 모임 관리 허브 (운영진 전용) — 한 모임의 운영 도구를 모은 화면.
@@ -41,10 +51,13 @@ export default function ClubManageScreen() {
   const { id: clubId } = useLocalSearchParams<{ id: string }>();
   const { colors, shadows } = useTheme();
   const { clubs, fetchClubs, deleteClub } = useClubStore();
+  const myUserId = useAuthStore((s) => s.user?.id);
 
   const club = useMemo(() => clubs.find((c) => c.id === clubId), [clubs, clubId]);
   // 운영진(LEADER/STAFF)만 접근. clubs 의 role 로 판정 (목록에 내 역할이 담겨 있음).
   const isStaff = club?.role === 'LEADER' || club?.role === 'STAFF' || !!club?.isLeader;
+  // 역할 변경·내보내기는 LEADER 만 (STAFF 는 급수 편집만).
+  const isLeader = club?.role === 'LEADER' || !!club?.isLeader;
 
   // 클럽 정보 폼 상태
   const [name, setName] = useState('');
@@ -55,6 +68,34 @@ export default function ClubManageScreen() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [regenerating, setRegenerating] = useState(false);
+
+  // 멤버·운영진 섹션 상태.
+  const [members, setMembers] = useState<ClubMemberResponse[]>([]);
+  const [membersLoading, setMembersLoading] = useState(true);
+  const [memberSearch, setMemberSearch] = useState('');
+  // 선택된 멤버의 액션 시트(역할/급수/내보내기). null 이면 닫힘.
+  const [actionMember, setActionMember] = useState<ClubMemberResponse | null>(null);
+  // 'role' | 'skill' | null — 액션 시트 안에서 어떤 편집 패널을 보여줄지.
+  const [editMode, setEditMode] = useState<'role' | 'skill' | null>(null);
+  const [memberBusy, setMemberBusy] = useState(false);
+
+  // 멤버 목록 로드 (운영진만 접근하므로 진입 시 한 번).
+  const loadMembers = useCallback(async () => {
+    if (!clubId) return;
+    setMembersLoading(true);
+    try {
+      const { data } = await clubApi.getMembers(clubId);
+      setMembers(Array.isArray(data) ? data : []);
+    } catch {
+      /* silent — 빈 목록으로 둠 */
+    } finally {
+      setMembersLoading(false);
+    }
+  }, [clubId]);
+
+  useEffect(() => {
+    loadMembers();
+  }, [loadMembers]);
 
   // 모임 목록을 아직 안 받았을 수도 있어 진입 시 한 번 보장.
   useEffect(() => {
@@ -165,6 +206,88 @@ export default function ClubManageScreen() {
       'danger',
     );
   }, [clubId, club, deleteClub, router]);
+
+  // 액션 시트 닫기.
+  const closeMemberSheet = useCallback(() => {
+    setActionMember(null);
+    setEditMode(null);
+    setMemberBusy(false);
+  }, []);
+
+  // 역할 변경 (LEADER 전용) — 운영진 지정/해제. LEADER 로의 승격은 별도 위임 흐름이므로
+  // 여기선 STAFF↔MEMBER 만 다룬다 (현재 LEADER 자신은 멤버 목록에서 편집 불가).
+  const handleChangeRole = useCallback(
+    async (newRole: string) => {
+      if (!clubId || !actionMember || actionMember.role === newRole) return;
+      setMemberBusy(true);
+      try {
+        await clubApi.updateMemberRole(clubId, actionMember.userId, newRole);
+        showSuccess(newRole === 'STAFF' ? '운영진으로 지정했어요' : '회원으로 변경했어요');
+        closeMemberSheet();
+        await loadMembers();
+      } catch (err: any) {
+        setMemberBusy(false);
+        showAlert(Strings.common.error, err?.response?.data?.error || '역할 변경에 실패했습니다');
+      }
+    },
+    [clubId, actionMember, loadMembers, closeMemberSheet],
+  );
+
+  // 급수 편집 (LEADER/STAFF) — 모임별 급수 override.
+  const handleChangeSkill = useCallback(
+    async (skill: string) => {
+      if (!clubId || !actionMember || actionMember.skillLevel === skill) return;
+      setMemberBusy(true);
+      try {
+        await clubApi.updateMemberProfile(clubId, actionMember.userId, { skillLevel: skill });
+        showSuccess(`급수를 ${skill}로 변경했어요`);
+        closeMemberSheet();
+        await loadMembers();
+      } catch (err: any) {
+        setMemberBusy(false);
+        showAlert(Strings.common.error, err?.response?.data?.error || '급수 변경에 실패했습니다');
+      }
+    },
+    [clubId, actionMember, loadMembers, closeMemberSheet],
+  );
+
+  // 내보내기 (LEADER 전용) — 확인 후 멤버십 삭제.
+  const handleRemoveMember = useCallback(() => {
+    if (!clubId || !actionMember) return;
+    const target = actionMember;
+    showConfirm(
+      '멤버 내보내기',
+      `'${target.name}'님을 모임에서 내보낼까요? 진행 중인 정모에 참여 중이면 자동으로 체크아웃돼요.`,
+      async () => {
+        setMemberBusy(true);
+        try {
+          await clubApi.removeMember(clubId, target.userId);
+          showSuccess(`${target.name}님을 내보냈어요`);
+          closeMemberSheet();
+          await loadMembers();
+        } catch (err: any) {
+          setMemberBusy(false);
+          showAlert(Strings.common.error, err?.response?.data?.error || '내보내기에 실패했습니다');
+        }
+      },
+      '내보내기',
+      '취소',
+      'danger',
+    );
+  }, [clubId, actionMember, loadMembers, closeMemberSheet]);
+
+  // 검색 필터 + 운영진/회원 그룹핑 (운영진이 위로).
+  const filteredMembers = useMemo(() => {
+    const q = memberSearch.trim().toLowerCase();
+    const base = q ? members.filter((m) => m.name.toLowerCase().includes(q)) : members;
+    const rank = (r: string) => (r === 'LEADER' ? 0 : r === 'STAFF' ? 1 : 2);
+    return [...base].sort((a, b) => rank(a.role) - rank(b.role) || a.name.localeCompare(b.name));
+  }, [members, memberSearch]);
+
+  const staffCount = useMemo(
+    () => members.filter((m) => m.role === 'LEADER' || m.role === 'STAFF').length,
+    [members],
+  );
 
   const Header = (
     <View style={[styles.header, { backgroundColor: colors.surface, borderBottomColor: colors.border }]}>
@@ -341,13 +464,93 @@ export default function ClubManageScreen() {
           </Text>
         </View>
 
-        {/* ── 멤버·운영진 (다음 Part) ───────────────── */}
-        <PlaceholderSection
-          icon="people"
-          title="멤버·운영진"
-          colors={colors}
-          shadows={shadows}
-        />
+        {/* ── 멤버·운영진 ───────────────────────────── */}
+        <View style={[styles.card, { backgroundColor: colors.surface }, shadows.sm]}>
+          <View style={styles.cardHeader}>
+            <Icon name="people" size={18} color={colors.primary} />
+            <Text style={[styles.cardTitle, { color: colors.text }]}>멤버·운영진</Text>
+            <View style={{ flex: 1 }} />
+            <Text style={[styles.memberCount, { color: colors.textSecondary }]}>
+              운영진 {staffCount} · 전체 {members.length}
+            </Text>
+          </View>
+          <Text style={[styles.fieldHint, { color: colors.textLight }]}>
+            {isLeader
+              ? '멤버를 눌러 역할·급수를 바꾸거나 내보낼 수 있어요'
+              : '멤버를 눌러 급수를 바꿀 수 있어요'}
+          </Text>
+
+          {/* 검색 */}
+          {members.length > 5 && (
+            <TextInput
+              style={[
+                styles.input,
+                { backgroundColor: colors.background, color: colors.text, borderColor: colors.border, marginTop: spacing.sm },
+              ]}
+              value={memberSearch}
+              onChangeText={setMemberSearch}
+              placeholder="이름으로 검색"
+              placeholderTextColor={colors.textLight}
+              accessibilityLabel="멤버 검색"
+            />
+          )}
+
+          {membersLoading ? (
+            <View style={{ paddingVertical: spacing.xl, alignItems: 'center' }}>
+              <ActivityIndicator size="small" color={colors.primary} />
+            </View>
+          ) : filteredMembers.length === 0 ? (
+            <Text style={[styles.placeholder, { color: colors.textLight }]}>
+              {memberSearch.trim() ? '검색 결과가 없어요' : '아직 멤버가 없어요'}
+            </Text>
+          ) : (
+            <View style={{ marginTop: spacing.sm }}>
+              {filteredMembers.map((m) => {
+                const isMe = m.userId === myUserId;
+                // LEADER(역할/내보내기) 또는 STAFF(급수)면 탭 가능. LEADER 행은 탭해도
+                // 역할/내보내기 불가하지만 LEADER/STAFF 가 급수는 편집 가능.
+                const canTap = isStaff;
+                return (
+                  <TouchableOpacity
+                    key={m.userId}
+                    style={[styles.memberRow, { borderBottomColor: colors.border }]}
+                    onPress={() => {
+                      if (!canTap) return;
+                      setActionMember(m);
+                      setEditMode(null);
+                    }}
+                    activeOpacity={canTap ? 0.6 : 1}
+                    accessibilityLabel={`${m.name} 멤버 관리`}
+                  >
+                    <View
+                      style={[
+                        styles.memberAvatar,
+                        { backgroundColor: m.isCheckedIn ? colors.primary : colors.background, borderColor: colors.border },
+                      ]}
+                    >
+                      <Text style={[styles.memberAvatarText, { color: m.isCheckedIn ? '#fff' : colors.textSecondary }]}>
+                        {m.name[0]}
+                      </Text>
+                    </View>
+                    <View style={{ flex: 1 }}>
+                      <View style={styles.memberNameRow}>
+                        <Text style={[styles.memberName, { color: colors.text }]} numberOfLines={1}>
+                          {m.name}
+                        </Text>
+                        {isMe && <Text style={[styles.meBadge, { color: colors.textLight }]}>(나)</Text>}
+                      </View>
+                      <Text style={[styles.memberSub, { color: colors.textSecondary }]}>
+                        급수 {m.skillLevel ?? '미설정'}
+                      </Text>
+                    </View>
+                    <RoleBadge role={m.role} colors={colors} />
+                    {canTap && <Icon name="chevronRight" size={18} color={colors.textLight} />}
+                  </TouchableOpacity>
+                );
+              })}
+            </View>
+          )}
+        </View>
 
         {/* ── 출석 (다음 Part) ──────────────────────── */}
         <PlaceholderSection icon="checkin" title="출석" colors={colors} shadows={shadows} />
@@ -375,7 +578,195 @@ export default function ClubManageScreen() {
           </TouchableOpacity>
         </View>
       </ScrollView>
+
+      {/* ── 멤버 액션 시트 (역할 / 급수 / 내보내기) ───────────── */}
+      <Modal
+        visible={!!actionMember}
+        transparent
+        animationType="fade"
+        onRequestClose={closeMemberSheet}
+      >
+        <TouchableOpacity style={styles.sheetOverlay} activeOpacity={1} onPress={closeMemberSheet}>
+          <TouchableOpacity
+            activeOpacity={1}
+            style={[styles.sheet, { backgroundColor: colors.surface }]}
+            onPress={() => {}}
+          >
+            {actionMember && (
+              <>
+                {/* 헤더 — 멤버 요약 */}
+                <View style={styles.sheetHeader}>
+                  <Text style={[styles.sheetName, { color: colors.text }]} numberOfLines={1}>
+                    {actionMember.name}
+                  </Text>
+                  <RoleBadge role={actionMember.role} colors={colors} />
+                </View>
+                <Text style={[styles.sheetSub, { color: colors.textSecondary }]}>
+                  현재 급수 {actionMember.skillLevel ?? '미설정'}
+                </Text>
+
+                {/* 역할 변경 패널 (LEADER 전용, 본인·다른 LEADER 제외) */}
+                {editMode === 'role' ? (
+                  <View style={styles.sheetPanel}>
+                    <Text style={[styles.sheetPanelTitle, { color: colors.textSecondary }]}>역할 변경</Text>
+                    {ROLE_OPTIONS.map((opt) => {
+                      const active = actionMember.role === opt.value;
+                      return (
+                        <TouchableOpacity
+                          key={opt.value}
+                          style={[
+                            styles.optionRow,
+                            { borderColor: active ? colors.primary : colors.border },
+                            active && { backgroundColor: colors.primary + '14' },
+                          ]}
+                          onPress={() => handleChangeRole(opt.value)}
+                          disabled={active || memberBusy}
+                          activeOpacity={0.7}
+                        >
+                          <View style={{ flex: 1 }}>
+                            <Text style={[styles.optionLabel, { color: active ? colors.primary : colors.text }]}>
+                              {opt.label}
+                            </Text>
+                            <Text style={[styles.optionDesc, { color: colors.textLight }]}>{opt.desc}</Text>
+                          </View>
+                          {active && <Icon name="success" size={18} color={colors.primary} />}
+                        </TouchableOpacity>
+                      );
+                    })}
+                  </View>
+                ) : editMode === 'skill' ? (
+                  <View style={styles.sheetPanel}>
+                    <Text style={[styles.sheetPanelTitle, { color: colors.textSecondary }]}>
+                      급수 편집 (이 모임 전용)
+                    </Text>
+                    <View style={styles.skillGrid}>
+                      {SKILL_OPTIONS.map((s) => {
+                        const active = actionMember.skillLevel === s;
+                        return (
+                          <TouchableOpacity
+                            key={s}
+                            style={[
+                              styles.skillChip,
+                              {
+                                backgroundColor: active ? colors.primary : colors.background,
+                                borderColor: active ? colors.primary : colors.border,
+                              },
+                            ]}
+                            onPress={() => handleChangeSkill(s)}
+                            disabled={active || memberBusy}
+                            activeOpacity={0.7}
+                            accessibilityLabel={`급수 ${s}`}
+                          >
+                            <Text style={[styles.skillChipText, { color: active ? '#fff' : colors.textSecondary }]}>
+                              {s}
+                            </Text>
+                          </TouchableOpacity>
+                        );
+                      })}
+                    </View>
+                  </View>
+                ) : (
+                  // 액션 메뉴 (기본)
+                  <View style={styles.sheetActions}>
+                    {/* 역할 변경 — LEADER 만, 본인/다른 LEADER 는 불가 */}
+                    {isLeader && actionMember.role !== 'LEADER' && (
+                      <SheetAction
+                        icon="admin"
+                        label="역할 변경"
+                        sub={actionMember.role === 'STAFF' ? '운영진 → 회원으로' : '운영진으로 지정'}
+                        colors={colors}
+                        onPress={() => setEditMode('role')}
+                      />
+                    )}
+                    {/* 급수 편집 — LEADER/STAFF */}
+                    <SheetAction
+                      icon="star"
+                      label="급수 편집"
+                      sub="이 모임에서만 적용돼요"
+                      colors={colors}
+                      onPress={() => setEditMode('skill')}
+                    />
+                    {/* 내보내기 — LEADER 만, 본인/다른 LEADER 는 불가 */}
+                    {isLeader &&
+                      actionMember.role !== 'LEADER' &&
+                      actionMember.userId !== myUserId && (
+                        <SheetAction
+                          icon="delete"
+                          label="내보내기"
+                          sub="모임에서 제외해요"
+                          danger
+                          colors={colors}
+                          onPress={handleRemoveMember}
+                        />
+                      )}
+                  </View>
+                )}
+
+                {memberBusy && (
+                  <ActivityIndicator
+                    size="small"
+                    color={colors.primary}
+                    style={{ marginTop: spacing.sm }}
+                  />
+                )}
+
+                <TouchableOpacity
+                  style={[styles.sheetClose, { borderColor: colors.border }]}
+                  onPress={editMode ? () => setEditMode(null) : closeMemberSheet}
+                  activeOpacity={0.7}
+                >
+                  <Text style={[styles.sheetCloseText, { color: colors.textSecondary }]}>
+                    {editMode ? '뒤로' : Strings.common.cancel}
+                  </Text>
+                </TouchableOpacity>
+              </>
+            )}
+          </TouchableOpacity>
+        </TouchableOpacity>
+      </Modal>
     </View>
+  );
+}
+
+// 역할 배지 (대표/운영진/회원).
+function RoleBadge({ role, colors }: { role: string; colors: any }) {
+  const isLeader = role === 'LEADER';
+  const isStaff = role === 'STAFF';
+  const bg = isLeader ? colors.primary + '1A' : isStaff ? colors.warning + '1A' : colors.border;
+  const fg = isLeader ? colors.primary : isStaff ? colors.warning : colors.textSecondary;
+  return (
+    <View style={[styles.roleBadge, { backgroundColor: bg }]}>
+      <Text style={[styles.roleBadgeText, { color: fg }]}>{ROLE_LABELS[role] ?? role}</Text>
+    </View>
+  );
+}
+
+// 액션 시트 메뉴 항목.
+function SheetAction({
+  icon,
+  label,
+  sub,
+  onPress,
+  colors,
+  danger,
+}: {
+  icon: any;
+  label: string;
+  sub: string;
+  onPress: () => void;
+  colors: any;
+  danger?: boolean;
+}) {
+  const tint = danger ? colors.danger : colors.text;
+  return (
+    <TouchableOpacity style={styles.sheetActionRow} onPress={onPress} activeOpacity={0.6}>
+      <Icon name={icon} size={20} color={danger ? colors.danger : colors.textSecondary} />
+      <View style={{ flex: 1 }}>
+        <Text style={[styles.sheetActionLabel, { color: tint }]}>{label}</Text>
+        <Text style={[styles.sheetActionSub, { color: colors.textLight }]}>{sub}</Text>
+      </View>
+      <Icon name="chevronRight" size={18} color={colors.textLight} />
+    </TouchableOpacity>
   );
 }
 
@@ -534,4 +925,84 @@ const styles = StyleSheet.create({
     paddingVertical: spacing.md,
   },
   deleteBtnText: { ...typography.subtitle2 },
+
+  // ── 멤버·운영진 ──
+  memberCount: { ...typography.caption },
+  memberRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+    paddingVertical: spacing.md,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+  },
+  memberAvatar: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    borderWidth: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  memberAvatarText: { ...typography.subtitle2, fontWeight: '700' },
+  memberNameRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.xs },
+  memberName: { ...typography.body1, fontWeight: '600', flexShrink: 1 },
+  meBadge: { ...typography.caption },
+  memberSub: { ...typography.caption, marginTop: 1 },
+  roleBadge: { borderRadius: radius.pill, paddingHorizontal: spacing.sm, paddingVertical: 3 },
+  roleBadgeText: { ...typography.caption, fontWeight: '700' },
+
+  // ── 액션 시트 ──
+  sheetOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.45)',
+    justifyContent: 'flex-end',
+  },
+  sheet: {
+    borderTopLeftRadius: radius.xl,
+    borderTopRightRadius: radius.xl,
+    padding: spacing.lg,
+    paddingBottom: spacing.xxl,
+  },
+  sheetHeader: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
+  sheetName: { ...typography.h3, flexShrink: 1 },
+  sheetSub: { ...typography.body2, marginTop: spacing.xs, marginBottom: spacing.md },
+  sheetActions: { gap: spacing.xs },
+  sheetActionRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.md,
+    paddingVertical: spacing.md,
+  },
+  sheetActionLabel: { ...typography.body1, fontWeight: '600' },
+  sheetActionSub: { ...typography.caption, marginTop: 1 },
+  sheetPanel: { marginTop: spacing.xs, gap: spacing.sm },
+  sheetPanelTitle: { ...typography.caption, fontWeight: '700' },
+  optionRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    borderWidth: 1.5,
+    borderRadius: radius.md,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.md,
+  },
+  optionLabel: { ...typography.subtitle2 },
+  optionDesc: { ...typography.caption, marginTop: 1 },
+  skillGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm },
+  skillChip: {
+    width: 44,
+    height: 44,
+    borderRadius: radius.md,
+    borderWidth: 1.5,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  skillChipText: { ...typography.subtitle1, fontWeight: '800' },
+  sheetClose: {
+    marginTop: spacing.lg,
+    borderWidth: 1.5,
+    borderRadius: radius.pill,
+    paddingVertical: spacing.md,
+    alignItems: 'center',
+  },
+  sheetCloseText: { ...typography.subtitle2 },
 });

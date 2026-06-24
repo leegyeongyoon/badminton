@@ -1,8 +1,10 @@
 import crypto from 'crypto';
 import QRCode from 'qrcode';
 import { prisma } from '../../utils/prisma';
-import { NotFoundError, ConflictError, ForbiddenError } from '../../utils/errors';
+import { NotFoundError, ConflictError, ForbiddenError, BadRequestError } from '../../utils/errors';
 import { verifyClubStaff, deleteSessionCascade } from '../clubSession/clubSession.service';
+import { cleanupTurnsOnCheckout } from '../checkin/checkin.service';
+import { getIO } from '../../socket';
 import type {
   CreateClubInput,
   UpdateClubInput,
@@ -455,6 +457,103 @@ export async function updateMemberProfile(
     facilityId: target.user.checkIns[0]?.facilityId ?? null,
     playerStatus,
   };
+}
+
+/**
+ * Remove a member from a club (모임에서 내보내기). Auth: the club's LEADER OR a
+ * global SUPER_ADMIN (reuses verifyClubLeaderOrSuperAdmin). Guards:
+ *  - the target must be a member of this club (404 otherwise);
+ *  - a LEADER cannot remove themselves (they must transfer leadership / demote
+ *    first — otherwise the club would be left leaderless);
+ *  - another LEADER cannot be removed (demote them to STAFF/MEMBER first), so we
+ *    never silently drop a co-leader.
+ *
+ * Effect (one transaction): if the member has an OPEN check-in in any of this
+ * club's ACTIVE 정모 sessions (or a facility-only check-in at one of those
+ * facilities), they're checked out and their WAITING turns / QUEUED board entries
+ * are cleaned up first (reusing cleanupTurnsOnCheckout — the same logic as
+ * self/operator checkout). Then the ClubMember row is deleted. Managed-member
+ * users (isManaged) are left as harmless orphan users — only the membership goes.
+ * Socket events (checkin:left + players refresh) are emitted so operator/member
+ * boards react immediately. Returns { success: true }.
+ */
+export async function removeMember(
+  clubId: string,
+  targetUserId: string,
+  requesterId: string,
+  requesterRole: string,
+): Promise<{ success: true }> {
+  await verifyClubLeaderOrSuperAdmin(clubId, requesterId, requesterRole);
+
+  const target = await prisma.clubMember.findUnique({
+    where: { userId_clubId: { userId: targetUserId, clubId } },
+  });
+  if (!target) throw new NotFoundError('모임 멤버');
+
+  // A LEADER can't remove themselves — they'd leave the club leaderless.
+  if (targetUserId === requesterId && target.role === 'LEADER') {
+    throw new BadRequestError('대표는 자신을 내보낼 수 없습니다. 먼저 대표를 위임하세요');
+  }
+
+  // Another LEADER can't be removed directly — demote to 운영진/회원 first.
+  if (target.role === 'LEADER' && targetUserId !== requesterId) {
+    throw new BadRequestError('다른 대표는 내보낼 수 없습니다. 먼저 역할을 변경하세요');
+  }
+
+  // OPEN check-ins for this user that belong to THIS club's ACTIVE sessions —
+  // either session-scoped rows or facility-only rows at those sessions' facilities.
+  const activeSessions = await prisma.clubSession.findMany({
+    where: { clubId, status: 'ACTIVE' },
+    select: { id: true, facilityId: true },
+  });
+  const activeSessionIds = activeSessions.map((s) => s.id);
+  const activeFacilityIds = [...new Set(activeSessions.map((s) => s.facilityId))];
+
+  const openCheckIns =
+    activeSessions.length > 0
+      ? await prisma.checkIn.findMany({
+          where: {
+            userId: targetUserId,
+            checkedOutAt: null,
+            OR: [
+              { clubSessionId: { in: activeSessionIds } },
+              { clubSessionId: null, facilityId: { in: activeFacilityIds } },
+            ],
+          },
+          select: { id: true, facilityId: true, clubSessionId: true },
+        })
+      : [];
+
+  // Close the check-ins + delete the membership atomically.
+  await prisma.$transaction(async (tx) => {
+    if (openCheckIns.length > 0) {
+      await tx.checkIn.updateMany({
+        where: { id: { in: openCheckIns.map((c) => c.id) } },
+        data: { checkedOutAt: new Date() },
+      });
+    }
+    await tx.clubMember.delete({
+      where: { userId_clubId: { userId: targetUserId, clubId } },
+    });
+  });
+
+  // Post-commit: clean turns/board for each closed check-in (cancels WAITING
+  // turns, strips QUEUED board entries, leaves PLAYING intact) and emit the
+  // standard left/refresh socket events so boards update. Resolve the session id
+  // for board cleanup — prefer the row's own, else the lone active session at that
+  // facility (handled inside cleanupTurnsOnCheckout when undefined).
+  const io = getIO();
+  for (const ci of openCheckIns) {
+    const sessionId =
+      ci.clubSessionId ??
+      activeSessions.find((s) => s.facilityId === ci.facilityId)?.id;
+    await cleanupTurnsOnCheckout(targetUserId, ci.facilityId, sessionId ?? undefined);
+    const leftPayload = { userId: targetUserId, facilityId: ci.facilityId };
+    io.to(`facility:${ci.facilityId}`).emit('checkin:left', leftPayload);
+    if (sessionId) io.to(`clubSession:${sessionId}`).emit('checkin:left', leftPayload);
+  }
+
+  return { success: true };
 }
 
 // --- Managed members (운영자 관리 멤버) ---
