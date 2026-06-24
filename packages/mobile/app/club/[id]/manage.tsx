@@ -26,6 +26,7 @@ import {
 } from '../../../services/club';
 import { AttendanceLeaderboard } from '../../../components/club/AttendanceLeaderboard';
 import { facilityApi } from '../../../services/facility';
+import { AddFacilityModal } from '../../../components/AddFacilityModal';
 import { showAlert, showConfirm } from '../../../utils/alert';
 import { showSuccess } from '../../../utils/feedback';
 import { Strings } from '../../../constants/strings';
@@ -72,6 +73,7 @@ export default function ClubManageScreen() {
   const [homeFacilityId, setHomeFacilityId] = useState<string | null>(null);
   const [inviteCode, setInviteCode] = useState('');
   const [facilities, setFacilities] = useState<Facility[]>([]);
+  const [showAddFacility, setShowAddFacility] = useState(false);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [regenerating, setRegenerating] = useState(false);
@@ -139,23 +141,33 @@ export default function ClubManageScreen() {
   }, [club?.id, club?.name, club?.description, club?.homeFacilityId, club?.inviteCode]);
 
   // 시설 목록 (홈 시설 선택용).
+  const loadFacilities = useCallback(async () => {
+    try {
+      const { data } = await facilityApi.list();
+      setFacilities(Array.isArray(data) ? data : []);
+    } catch {
+      /* silent — 시설 목록 없어도 나머지는 동작 */
+    }
+  }, []);
+
   useEffect(() => {
     let alive = true;
-    facilityApi
-      .list()
-      .then(({ data }) => {
-        if (alive) setFacilities(Array.isArray(data) ? data : []);
-      })
-      .catch(() => {
-        /* silent — 시설 목록 없어도 나머지는 동작 */
-      })
-      .finally(() => {
-        if (alive) setLoading(false);
-      });
+    loadFacilities().finally(() => {
+      if (alive) setLoading(false);
+    });
     return () => {
       alive = false;
     };
-  }, []);
+  }, [loadFacilities]);
+
+  // 장소 추가 성공 → 목록 새로고침 + 새 장소를 홈 시설로 선택.
+  const handleFacilityCreated = useCallback(
+    async (facilityId: string) => {
+      await loadFacilities();
+      setHomeFacilityId(facilityId);
+    },
+    [loadFacilities],
+  );
 
   const handleSave = useCallback(async () => {
     if (!clubId) return;
@@ -543,7 +555,24 @@ export default function ClubManageScreen() {
                 colors={colors}
               />
             ))}
+            {/* 운영자: 새 장소(체육관) 추가 */}
+            <TouchableOpacity
+              style={[styles.chip, styles.chipAdd, { borderColor: colors.primary }]}
+              onPress={() => setShowAddFacility(true)}
+              activeOpacity={0.7}
+              accessibilityLabel="장소 추가"
+            >
+              <Text style={[styles.chipText, { color: colors.primary }]} numberOfLines={1}>
+                + 장소 추가
+              </Text>
+            </TouchableOpacity>
           </ScrollView>
+
+          <AddFacilityModal
+            visible={showAddFacility}
+            onClose={() => setShowAddFacility(false)}
+            onCreated={handleFacilityCreated}
+          />
 
           {/* 소개 / description */}
           <Text style={[styles.fieldLabel, { color: colors.textSecondary, marginTop: spacing.lg }]}>
@@ -1255,6 +1284,7 @@ const styles = StyleSheet.create({
     maxWidth: 180,
   },
   chipText: { ...typography.body2, fontWeight: '600' },
+  chipAdd: { borderStyle: 'dashed' },
 
   saveRow: { marginTop: spacing.lg, alignItems: 'flex-end' },
 

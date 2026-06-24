@@ -6,10 +6,14 @@ import { getPlayersRequired } from '../court/court.service';
 import QRCode from 'qrcode';
 
 export async function createFacility(userId: string, input: CreateFacilityInput) {
+  // 좌표/주소는 선택. 이름만으로 만들 수 있고(좌표 null), 나중에 GPS 핀을 찍는다.
   const facility = await prisma.facility.create({
     data: {
       name: input.name,
-      address: input.address,
+      // address 는 non-nullable. 이름만 추가하는 경우 빈 문자열로 둔다(좌표는 nullable).
+      address: input.address ?? '',
+      latitude: input.latitude ?? null,
+      longitude: input.longitude ?? null,
       admins: { create: { userId } },
       policy: { create: {} },
     },
@@ -24,10 +28,12 @@ export async function createFacility(userId: string, input: CreateFacilityInput)
     }
   }
 
-  return prisma.facility.findUnique({
+  const created = await prisma.facility.findUnique({
     where: { id: facility.id },
     include: { courts: { where: { clubSessionId: null } } },
   });
+
+  return created;
 }
 
 export async function listFacilities() {

@@ -7,7 +7,8 @@ import * as facilityService from './facility.service';
 
 const router = Router();
 
-router.post('/', authenticate, roleGuard('FACILITY_ADMIN'), validate(createFacilitySchema), async (req: Request, res: Response, next: NextFunction) => {
+// 장소(체육관) 추가: 승인된 운영자(슈퍼관리자/모임장/시설관리자)가 새 장소를 만들 수 있다.
+router.post('/', authenticate, roleGuard('SUPER_ADMIN', 'CLUB_LEADER', 'FACILITY_ADMIN'), validate(createFacilitySchema), async (req: Request, res: Response, next: NextFunction) => {
   try {
     const facility = await facilityService.createFacility(req.user!.userId, req.body);
     res.status(201).json(facility);
@@ -49,7 +50,9 @@ router.put('/:id/policy', authenticate, validate(updatePolicySchema), async (req
   } catch (err) { next(err); }
 });
 
-router.put('/:id/coordinates', authenticate, roleGuard('FACILITY_ADMIN'), validate(updateCoordinatesSchema), async (req: Request, res: Response, next: NextFunction) => {
+// 운영자가 자기 장소의 핀(좌표)을 나중에 고칠 수 있도록 CLUB_LEADER/SUPER_ADMIN 도 허용.
+// (서비스단에서 facilityAdmin 멤버십을 추가로 검증한다.)
+router.put('/:id/coordinates', authenticate, roleGuard('SUPER_ADMIN', 'CLUB_LEADER', 'FACILITY_ADMIN'), validate(updateCoordinatesSchema), async (req: Request, res: Response, next: NextFunction) => {
   try {
     const facility = await facilityService.updateCoordinates(req.params.id as string, req.user!.userId, req.body);
     res.json(facility);

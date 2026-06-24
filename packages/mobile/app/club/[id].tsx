@@ -25,6 +25,7 @@ import { showSuccess } from '../../utils/feedback';
 import { getItem, setItem } from '../../services/storage';
 import { AttendanceLeaderboard } from '../../components/club/AttendanceLeaderboard';
 import { Icon } from '../../components/ui/Icon';
+import { AddFacilityModal } from '../../components/AddFacilityModal';
 
 interface ClubMember {
   userId: string;
@@ -96,6 +97,8 @@ export default function ClubDetailScreen() {
   // 정모를 열 시설. 체크인 없이도 시작할 수 있도록 시설을 직접 고른다.
   const [facilities, setFacilities] = useState<any[]>([]);
   const [selectedFacilityId, setSelectedFacilityId] = useState<string | null>(null);
+  // "장소 추가" 모달.
+  const [showAddFacility, setShowAddFacility] = useState(false);
 
   const club = clubs.find((c) => c.id === clubId);
   const myMembership = currentMembers.find((m) => m.userId === user?.id);
@@ -171,12 +174,27 @@ export default function ClubDetailScreen() {
   );
 
   // Facilities for the 정모 start (so a leader can start without checking in).
-  useEffect(() => {
-    facilityApi
-      .list()
-      .then(({ data }) => setFacilities(Array.isArray(data) ? data : []))
-      .catch(() => {});
+  const loadFacilities = useCallback(async () => {
+    try {
+      const { data } = await facilityApi.list();
+      setFacilities(Array.isArray(data) ? data : []);
+    } catch {
+      /* silent */
+    }
   }, []);
+
+  useEffect(() => {
+    loadFacilities();
+  }, [loadFacilities]);
+
+  // 장소 추가 성공 → 목록 새로고침 + 새 장소 자동 선택.
+  const handleFacilityCreated = useCallback(
+    async (facilityId: string) => {
+      await loadFacilities();
+      setSelectedFacilityId(facilityId);
+    },
+    [loadFacilities],
+  );
 
   // Auto check-in on entering an ACTIVE 정모: a club member who opens the 정모 is
   // checked in automatically (NO geofence — per product decision). Done at most
@@ -668,28 +686,31 @@ export default function ClubDetailScreen() {
                 {startFacilityName || '시설'}에서 정모를 시작합니다 (체크인 불필요)
               </Text>
 
-              {/* 시설 선택 — 여러 곳이 있을 때만. 체크인 없이도 고를 수 있다. */}
-              {facilities.length > 1 && (
-                <>
-                  <Text style={styles.modalSubtitle}>시설</Text>
-                  <View style={styles.facilityPickRow}>
-                    {facilities.map((f) => {
-                      const active = (selectedFacilityId || startFacilityId) === f.id;
-                      return (
-                        <TouchableOpacity
-                          key={f.id}
-                          style={[styles.facilityChip, active && styles.facilityChipActive]}
-                          onPress={() => setSelectedFacilityId(f.id)}
-                        >
-                          <Text style={[styles.facilityChipText, active && styles.facilityChipTextActive]}>
-                            {f.name}
-                          </Text>
-                        </TouchableOpacity>
-                      );
-                    })}
-                  </View>
-                </>
-              )}
+              {/* 시설 선택 — 체크인 없이도 고를 수 있다. 운영자는 "+ 장소 추가"로 새 장소를 만들 수 있다. */}
+              <Text style={styles.modalSubtitle}>시설</Text>
+              <View style={styles.facilityPickRow}>
+                {facilities.map((f) => {
+                  const active = (selectedFacilityId || startFacilityId) === f.id;
+                  return (
+                    <TouchableOpacity
+                      key={f.id}
+                      style={[styles.facilityChip, active && styles.facilityChipActive]}
+                      onPress={() => setSelectedFacilityId(f.id)}
+                    >
+                      <Text style={[styles.facilityChipText, active && styles.facilityChipTextActive]}>
+                        {f.name}
+                      </Text>
+                    </TouchableOpacity>
+                  );
+                })}
+                <TouchableOpacity
+                  style={[styles.facilityChip, styles.facilityChipAdd]}
+                  onPress={() => setShowAddFacility(true)}
+                  accessibilityLabel="장소 추가"
+                >
+                  <Text style={[styles.facilityChipText, styles.facilityChipAddText]}>+ 장소 추가</Text>
+                </TouchableOpacity>
+              </View>
 
               {/* 코트 수 — 이 정모 전용 코트 1..N을 만든다 (다른 모임과 독립). */}
               <Text style={styles.modalSubtitle}>코트 수</Text>
@@ -733,6 +754,13 @@ export default function ClubDetailScreen() {
             </View>
           </View>
         </Modal>
+
+        {/* 장소(체육관) 추가 모달 */}
+        <AddFacilityModal
+          visible={showAddFacility}
+          onClose={() => setShowAddFacility(false)}
+          onCreated={handleFacilityCreated}
+        />
 
         {/* Role change modal */}
         <Modal visible={showRoleModal} transparent animationType="fade">
@@ -1240,6 +1268,13 @@ const styles = StyleSheet.create({
     fontWeight: '600',
   },
   facilityChipTextActive: {
+    color: Colors.primary,
+  },
+  facilityChipAdd: {
+    borderStyle: 'dashed',
+    borderColor: Colors.primary,
+  },
+  facilityChipAddText: {
     color: Colors.primary,
   },
   // 코트 수 입력 (스테퍼)

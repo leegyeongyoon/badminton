@@ -61,9 +61,13 @@ export const changePasswordSchema = z.object({
 });
 
 // Facility
+// 운영자가 장소(체육관)를 추가할 때 사용. 이름만 필수이고 좌표/주소는 선택
+// (이름만으로 먼저 만들고 나중에 GPS 핀을 찍을 수 있다).
 export const createFacilitySchema = z.object({
   name: z.string().min(1).max(50),
-  address: z.string().min(1).max(200),
+  address: z.string().max(200).optional(),
+  latitude: z.number().min(-90).max(90).optional(),
+  longitude: z.number().min(-180).max(180).optional(),
   totalCourts: z.number().int().min(1).max(30).optional(),
 });
 
