@@ -8,7 +8,7 @@ import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useGameBoard, GameBoardEntry } from '../../../hooks/useGameBoard';
 import type { SuggestMode } from '../../../services/gameBoard';
 import { useTheme } from '../../../hooks/useTheme';
-import { useResponsiveLayout, courtColumnsFor } from '../../../hooks/useResponsiveLayout';
+import { useResponsiveLayout, courtColumnsFor, poolColumnsFor } from '../../../hooks/useResponsiveLayout';
 import type { LayoutChangeEvent } from 'react-native';
 import { useAuthStore } from '../../../store/authStore';
 import { useFacilityRoom, useClubRoom, useSocketEvent } from '../../../hooks/useSocket';
@@ -125,6 +125,33 @@ export default function OperateScreen() {
     if (!courtAreaWidth || courtColumns <= 1) return undefined;
     return Math.floor((courtAreaWidth - COURT_GAP * (courtColumns - 1)) / courtColumns);
   }, [courtAreaWidth, courtColumns, COURT_GAP]);
+
+  // Measured width of a player-pool grid (the inner wrap row inside a pool box,
+  // padding already subtracted) → drives the pool-grid column count so each pool
+  // card stays wide enough that 2–4 char Korean names never clip. Mirrors the
+  // court measurement above. All pool grids are the same width, so one measure
+  // (the latest) sizes them all.
+  const [poolAreaWidth, setPoolAreaWidth] = useState(0);
+  const onPoolAreaLayout = useCallback((e: LayoutChangeEvent) => {
+    const w = e.nativeEvent.layout.width;
+    setPoolAreaWidth((prev) => (Math.abs(prev - w) > 1 ? w : prev));
+  }, []);
+  const POOL_GAP = spacing.xs; // must match styles.poolGrid gap
+  const poolColumns = poolColumnsFor(poolAreaWidth || (twoPane ? 320 : layout.width));
+  // Exact px width per pool card from the measured grid width + column count.
+  // 1-col → full width (undefined → falls back to the flex cell). Memoized.
+  const poolCellWidth = useMemo(() => {
+    if (!poolAreaWidth || poolColumns <= 1) return undefined;
+    return Math.floor((poolAreaWidth - POOL_GAP * (poolColumns - 1)) / poolColumns);
+  }, [poolAreaWidth, poolColumns, POOL_GAP]);
+  // Per-card override applied on top of styles.poolCell. When we have a measured
+  // pixel width use it (exact columns, no rounding gaps); at 1-col stretch full
+  // width; before first measure fall back to the static 48.5% in styles.poolCell.
+  const poolCellStyle = useMemo<{ width: number } | { width: '100%' } | null>(() => {
+    if (poolCellWidth) return { width: poolCellWidth };
+    if (poolAreaWidth && poolColumns <= 1) return { width: '100%' };
+    return null;
+  }, [poolCellWidth, poolAreaWidth, poolColumns]);
 
   const {
     board, loading, error,
@@ -1268,7 +1295,7 @@ export default function OperateScreen() {
     // Double-booking is allowed → no red "중복" badge / conflict tint.
     if (!draggable) {
       return (
-        <View style={styles.poolCell}>
+        <View style={[styles.poolCell, poolCellStyle]}>
           <PlayerCard
             player={m}
             onPress={tap}
@@ -1283,7 +1310,7 @@ export default function OperateScreen() {
     }
 
     return (
-      <View style={styles.poolCell} {...pan.panHandlers} {...(Platform.OS === 'web' ? { onPointerDown: onPointerDownWeb } : {})}>
+      <View style={[styles.poolCell, poolCellStyle]} {...pan.panHandlers} {...(Platform.OS === 'web' ? { onPointerDown: onPointerDownWeb } : {})}>
         <PlayerCard
           player={m}
           onPress={tap}
@@ -1313,7 +1340,7 @@ export default function OperateScreen() {
       {list.length === 0 ? (
         <Text style={[styles.poolBoxEmpty, { color: colors.textLight }]}>{emptyText}</Text>
       ) : (
-        <View style={styles.poolGrid}>
+        <View style={styles.poolGrid} onLayout={onPoolAreaLayout}>
           {list.map((m) => <PoolCard key={m.userId} m={m} stageable={stageable} />)}
         </View>
       )}
@@ -2109,11 +2136,14 @@ export default function OperateScreen() {
   // then a horizontally-scrollable button row (web-safe). Wide screens (≥ the
   // tablet breakpoint) keep the original single inline row.
   const narrowHeader = layout.width < 768;
+  // On tablet+ (wide inline header) bump the header pills to a comfortable
+  // touch target; phones keep the compact narrow-header sizing untouched.
+  const headerLinkTouch = narrowHeader ? null : styles.headerLinkTablet;
 
   const headerActions = (
     <>
       <TouchableOpacity
-        style={[styles.headerLink, { borderColor: colors.border }]}
+        style={[styles.headerLink, headerLinkTouch, { borderColor: colors.border }]}
         onPress={() => setCourtModal(true)}
         activeOpacity={0.8}
       >
@@ -2122,7 +2152,7 @@ export default function OperateScreen() {
       </TouchableOpacity>
       {!!clubId && (
         <TouchableOpacity
-          style={[styles.headerLink, { borderColor: colors.border }]}
+          style={[styles.headerLink, headerLinkTouch, { borderColor: colors.border }]}
           onPress={() => {
             setUnreadChat(0);
             router.push(`/club/${clubId}/chat`);
@@ -2140,7 +2170,7 @@ export default function OperateScreen() {
         </TouchableOpacity>
       )}
       <TouchableOpacity
-        style={[styles.headerLink, { borderColor: colors.border }]}
+        style={[styles.headerLink, headerLinkTouch, { borderColor: colors.border }]}
         onPress={() => router.push(`/session/${clubSessionId}/board`)}
         activeOpacity={0.8}
       >
@@ -2148,7 +2178,7 @@ export default function OperateScreen() {
         <Text style={[styles.headerLinkText, { color: colors.primary }]}>현황 보드</Text>
       </TouchableOpacity>
       <TouchableOpacity
-        style={[styles.headerLink, { borderColor: colors.border }]}
+        style={[styles.headerLink, headerLinkTouch, { borderColor: colors.border }]}
         onPress={() => router.push(`/session/${clubSessionId}/qr`)}
         activeOpacity={0.8}
         accessibilityLabel="출석 QR"
@@ -2157,7 +2187,7 @@ export default function OperateScreen() {
         <Text style={[styles.headerLinkText, { color: colors.primary }]}>출석 QR</Text>
       </TouchableOpacity>
       <TouchableOpacity
-        style={[styles.headerLink, { borderColor: colors.border }]}
+        style={[styles.headerLink, headerLinkTouch, { borderColor: colors.border }]}
         onPress={copyAttendLink}
         activeOpacity={0.8}
         disabled={copyingLink}
@@ -2171,7 +2201,7 @@ export default function OperateScreen() {
         <Text style={[styles.headerLinkText, { color: colors.primary }]}>출석 링크 복사</Text>
       </TouchableOpacity>
       <TouchableOpacity
-        style={[styles.headerLink, { borderColor: colors.danger, backgroundColor: colors.dangerBg }]}
+        style={[styles.headerLink, headerLinkTouch, { borderColor: colors.danger, backgroundColor: colors.dangerBg }]}
         onPress={handleEndSession}
         activeOpacity={0.8}
         accessibilityLabel="정모 종료"
@@ -3275,6 +3305,11 @@ const styles = StyleSheet.create({
     borderRadius: radius.pill, borderWidth: 1,
     flexShrink: 0,
   },
+  // Tablet+ comfortable touch target for the wide inline header pills (a 44pt
+  // min hit area). Phones keep the compact narrow-header sizing above.
+  headerLinkTablet: {
+    paddingVertical: spacing.smd, paddingHorizontal: spacing.lg, minHeight: 44,
+  },
   headerLinkText: { ...typography.buttonSm },
   headerChatIcon: { fontSize: 14 },
   unreadDot: {
@@ -3324,10 +3359,11 @@ const styles = StyleSheet.create({
   poolBoxEmpty: { ...typography.caption, paddingVertical: spacing.sm, textAlign: 'center' },
 
   poolGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.xs },
-  // 2 columns. In the full-width single-column layout each card is ~340px wide,
-  // and even in the narrow (>=1200) two-pane left column it's ~220px → the name
-  // area stays >= ~150px so 2–4 char Korean names (and short guest names) never
-  // clip; only a very long guest name ellipsizes, in that one card.
+  // FALLBACK width only — the real column count is responsive: poolCellStyle
+  // overrides this with an exact px width derived from the MEASURED grid width
+  // (poolColumnsFor → 1 col narrow phone, 2 col tablet portrait, 3–4 col wide
+  // tablet-landscape/desktop). This 48.5% applies for the first frame before
+  // onLayout fires, keeping the old 2-col look as a graceful default.
   poolCell: { width: '48.5%' },
   // Small ⓘ info button overlaid on a pool tile's right edge (vertically
   // centered, away from the top-right conflict dot). A SEPARATE touch target so

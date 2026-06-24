@@ -17,7 +17,7 @@ import { getSkillMeta } from '../../../constants/skill';
 import { getGenderMeta } from '../../../constants/gender';
 import { PlayerCard } from '../../../components/game-board/PlayerCard';
 import api from '../../../services/api';
-import { typography, spacing, radius, palette } from '../../../constants/theme';
+import { typography, spacing, radius, palette, breakpoints } from '../../../constants/theme';
 
 const POLL_INTERVAL_MS = 7000;
 
@@ -43,6 +43,13 @@ export default function ViewBoardScreen() {
   const { user } = useAuthStore();
   const layout = useResponsiveLayout();
   const cols = layout.columns; // 1 / 2 / 3
+  // On tablet/desktop, center the content and cap its width so the courts grid
+  // + waiting line aren't stretched edge-to-edge on a wide monitor. The 1100 cap
+  // matches the 3-column court threshold, so 3 generous courts fit per row.
+  // Phone (< tablet) keeps the original full-bleed layout — no regression.
+  const contentWidthStyle = layout.width >= breakpoints.tablet
+    ? { maxWidth: 1100, alignSelf: 'center' as const, width: '100%' as const }
+    : null;
 
   const { board, loadBoard } = useGameBoard(clubSessionId);
 
@@ -302,26 +309,29 @@ export default function ViewBoardScreen() {
 
   return (
     <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]}>
-      {/* Header */}
+      {/* Header — full-bleed app bar; its inner row is width-capped + centered on
+          tablet/desktop so it lines up with the centered content below. */}
       <View style={[styles.header, { backgroundColor: colors.surface, borderBottomColor: colors.border }]}>
-        <TouchableOpacity onPress={() => (router.canGoBack() ? router.back() : router.replace('/(tabs)'))} hitSlop={10} style={styles.headerBack}>
-          <Icon name="back" size={22} color={colors.text} />
-        </TouchableOpacity>
-        <View style={{ flex: 1 }}>
-          <Text style={[styles.headerTitle, { color: colors.text }]} numberOfLines={1}>
-            {clubName ? `${clubName} 현황 보드` : '게임 현황 보드'}
-          </Text>
-          <Text style={[styles.headerSub, { color: colors.textSecondary }]}>
-            코트 {displayCourts.length}개 · 대기 {waiting.length}명
-          </Text>
-        </View>
-        <View style={[styles.liveDotWrap, { backgroundColor: colors.secondaryLight }]}>
-          <View style={[styles.liveDot, { backgroundColor: colors.secondary }]} />
-          <Text style={[styles.liveText, { color: colors.secondary }]}>LIVE</Text>
+        <View style={[styles.headerInner, contentWidthStyle]}>
+          <TouchableOpacity onPress={() => (router.canGoBack() ? router.back() : router.replace('/(tabs)'))} hitSlop={10} style={styles.headerBack}>
+            <Icon name="back" size={22} color={colors.text} />
+          </TouchableOpacity>
+          <View style={{ flex: 1 }}>
+            <Text style={[styles.headerTitle, { color: colors.text }]} numberOfLines={1}>
+              {clubName ? `${clubName} 현황 보드` : '게임 현황 보드'}
+            </Text>
+            <Text style={[styles.headerSub, { color: colors.textSecondary }]}>
+              코트 {displayCourts.length}개 · 대기 {waiting.length}명
+            </Text>
+          </View>
+          <View style={[styles.liveDotWrap, { backgroundColor: colors.secondaryLight }]}>
+            <View style={[styles.liveDot, { backgroundColor: colors.secondary }]} />
+            <Text style={[styles.liveText, { color: colors.secondary }]}>LIVE</Text>
+          </View>
         </View>
       </View>
 
-      <ScrollView style={{ flex: 1 }} contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
+      <ScrollView style={{ flex: 1 }} contentContainerStyle={[styles.content, contentWidthStyle]} showsVerticalScrollIndicator={false}>
         {/* Viewer banner */}
         {myCourtId ? (
           <View style={[styles.myBanner, { backgroundColor: colors.primary }, shadows.lg]}>
@@ -470,11 +480,17 @@ export default function ViewBoardScreen() {
 const styles = StyleSheet.create({
   container: { flex: 1 },
 
-  // Header
+  // Header — outer is the full-bleed app bar (border + bg); the inner row holds
+  // the actual layout so it can be width-capped + centered on tablet/desktop.
   header: {
+    borderBottomWidth: 1,
+    alignItems: 'center',
+  },
+  headerInner: {
+    width: '100%',
     flexDirection: 'row', alignItems: 'center',
     paddingHorizontal: spacing.lg, paddingVertical: spacing.md,
-    borderBottomWidth: 1, gap: spacing.md,
+    gap: spacing.md,
   },
   headerBack: { padding: spacing.xs },
   headerTitle: { ...typography.subtitle1 },
