@@ -68,18 +68,22 @@ export default function ViewBoardScreen() {
 
   // ─── Load courts + players ───
   const loadPool = useCallback(() => {
-    if (!facilityId) return;
+    if (!clubSessionId) return;
     Promise.all([
       // This 정모's OWN courts (per-정모 court model) + their current game —
       // NOT the facility's courts, whose ids won't match this session's games.
       api.get(`/club-sessions/${clubSessionId}/courts`).then(({ data }) =>
         setCourts((data || []).filter((c: any) => c.status !== 'MAINTENANCE')),
       ),
-      api.get(`/facilities/${facilityId}/players`).then(({ data }) =>
+      // Session-scoped players — ONLY this 정모's checked-in attendees, the SAME
+      // source the operate board uses. The old facility-wide /facilities/:id/players
+      // leaked EVERY checked-in person at the gym (other 모임s included) into the
+      // 대기 count, so 현황 showed e.g. 74 명 while the operate board correctly showed 0.
+      api.get(`/club-sessions/${clubSessionId}/players`).then(({ data }) =>
         setPlayers(data || []),
       ),
     ]).catch(() => {}).finally(() => setLoaded(true));
-  }, [facilityId]);
+  }, [clubSessionId]);
 
   useEffect(() => { loadPool(); }, [loadPool]);
 
