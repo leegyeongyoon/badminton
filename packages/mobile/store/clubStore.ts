@@ -4,6 +4,8 @@ import { clubApi } from '../services/club';
 interface Club {
   id: string;
   name: string;
+  description?: string | null;
+  homeFacilityId?: string | null;
   inviteCode: string;
   memberCount: number;
   role?: string;

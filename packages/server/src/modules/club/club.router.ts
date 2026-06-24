@@ -1,6 +1,7 @@
 import { Router, Request, Response, NextFunction } from 'express';
 import {
   createClubSchema,
+  updateClubSchema,
   joinClubSchema,
   updateMemberRoleSchema,
   updateMemberProfileSchema,
@@ -49,6 +50,35 @@ router.get('/', authenticate, async (req: Request, res: Response, next: NextFunc
 router.delete('/:id', authenticate, async (req: Request, res: Response, next: NextFunction) => {
   try {
     const result = await clubService.deleteClub(req.params.id as string, req.user!.userId, req.user!.role);
+    res.json(result);
+  } catch (err) { next(err); }
+});
+
+// PATCH /api/v1/clubs/:id - update a 모임's info (name / homeFacilityId /
+// description). Auth in the service: the club's LEADER OR SUPER_ADMIN; STAFF or a
+// regular member → 403. At least one field required (updateClubSchema).
+router.patch('/:id', authenticate, validate(updateClubSchema), async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const club = await clubService.updateClub(
+      req.params.id as string,
+      req.user!.userId,
+      req.user!.role,
+      req.body,
+    );
+    res.json(club);
+  } catch (err) { next(err); }
+});
+
+// POST /api/v1/clubs/:id/invite-code/regenerate - issue a fresh unique invite
+// code (LEADER or SUPER_ADMIN). The old code/QR/link is invalidated. Returns
+// { inviteCode }.
+router.post('/:id/invite-code/regenerate', authenticate, async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const result = await clubService.regenerateInviteCode(
+      req.params.id as string,
+      req.user!.userId,
+      req.user!.role,
+    );
     res.json(result);
   } catch (err) { next(err); }
 });

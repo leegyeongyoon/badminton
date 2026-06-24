@@ -200,6 +200,21 @@ export const joinClubSchema = z.object({
   inviteCode: z.string().length(8),
 });
 
+// 모임 정보 수정 (LEADER 또는 SUPER_ADMIN). 최소 한 필드 이상 — 빈 PATCH 거부.
+//  • name           모임 이름 (1~50자)
+//  • homeFacilityId 홈 시설 id (null 로 해제 가능; 서버에서 실존 검증)
+//  • description    소개글 (최대 500자; null/빈문자 → 소개 제거)
+export const updateClubSchema = z
+  .object({
+    name: z.string().min(1).max(50).optional(),
+    homeFacilityId: z.string().uuid().nullable().optional(),
+    description: z.string().max(500).nullable().optional(),
+  })
+  .refine(
+    (v) => v.name !== undefined || v.homeFacilityId !== undefined || v.description !== undefined,
+    { message: '수정할 항목이 없습니다' },
+  );
+
 // Turn (순번)
 export const registerTurnSchema = z.object({
   playerIds: z.array(z.string().uuid()).min(2).max(8),
@@ -257,6 +272,7 @@ export type CreateCourtInput = z.infer<typeof createCourtSchema>;
 export type UpdateCourtInput = z.infer<typeof updateCourtSchema>;
 export type CheckInInput = z.infer<typeof checkInSchema>;
 export type CreateClubInput = z.infer<typeof createClubSchema>;
+export type UpdateClubInput = z.infer<typeof updateClubSchema>;
 export type JoinClubInput = z.infer<typeof joinClubSchema>;
 export type RegisterTurnInput = z.infer<typeof registerTurnSchema>;
 export type ExtendTurnInput = z.infer<typeof extendTurnSchema>;

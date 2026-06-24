@@ -56,9 +56,34 @@ export interface BulkAddManagedMembersResult {
   skipped: string[];
 }
 
+// PATCH /clubs/:id body — 모임 정보 수정 (LEADER/SUPER_ADMIN). 최소 한 필드.
+export interface UpdateClubBody {
+  name?: string;
+  homeFacilityId?: string | null;
+  description?: string | null;
+}
+
+// 모임 정보 응답 (create/list/update 공통).
+export interface ClubInfo {
+  id: string;
+  name: string;
+  description: string | null;
+  inviteCode: string;
+  homeFacilityId: string | null;
+  memberCount: number;
+  role?: string;
+  createdAt: string;
+}
+
 export const clubApi = {
   list: () => api.get('/clubs'),
   create: (name: string) => api.post('/clubs', { name }),
+  // 모임 정보 수정 (이름/홈시설/소개). 서버 권한: 해당 모임 LEADER 또는 SUPER_ADMIN.
+  updateClub: (id: string, body: UpdateClubBody) =>
+    api.patch<ClubInfo>(`/clubs/${id}`, body),
+  // 초대코드 재발급 — 기존 코드/QR/링크는 즉시 무효화됨.
+  regenerateInvite: (id: string) =>
+    api.post<{ inviteCode: string }>(`/clubs/${id}/invite-code/regenerate`),
   // 모임 삭제 — 모임과 모든 하위 데이터(정모/코트/체크인 등)를 영구 삭제.
   // 서버에서 권한 확인(SUPER_ADMIN 또는 해당 모임 LEADER/STAFF).
   deleteClub: (id: string) => api.delete<{ success: boolean }>(`/clubs/${id}`),

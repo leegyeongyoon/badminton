@@ -246,6 +246,7 @@ model CheckIn {
 model Club {
   id             String   @id @default(uuid())
   name           String
+  description    String?
   inviteCode     String   @unique
   homeFacilityId String?
   createdAt      DateTime @default(now())

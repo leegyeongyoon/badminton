@@ -5,6 +5,7 @@ import { NotFoundError, ConflictError, ForbiddenError } from '../../utils/errors
 import { verifyClubStaff, deleteSessionCascade } from '../clubSession/clubSession.service';
 import type {
   CreateClubInput,
+  UpdateClubInput,
   ClubMemberResponse,
   AttendancePeriod,
   AttendanceLeaderboardEntry,
@@ -33,11 +34,115 @@ export async function createClub(userId: string, input: CreateClubInput) {
   return {
     id: club.id,
     name: club.name,
+    description: club.description,
     inviteCode: club.inviteCode,
     homeFacilityId: club.homeFacilityId,
     memberCount: club._count.members,
     createdAt: club.createdAt.toISOString(),
   };
+}
+
+/**
+ * Verify the requester may operate on this club's settings: SUPER_ADMIN (global
+ * role) bypasses; otherwise the requester must be this club's LEADER. Returns the
+ * club row. Used by updateClub / regenerateInviteCode. (Distinct from
+ * verifyClubStaff, which also allows STAFF — settings edits are LEADER-only.)
+ */
+async function verifyClubLeaderOrSuperAdmin(
+  clubId: string,
+  requesterId: string,
+  requesterRole: string,
+) {
+  const club = await prisma.club.findUnique({ where: { id: clubId } });
+  if (!club) throw new NotFoundError('모임');
+
+  if (requesterRole !== 'SUPER_ADMIN') {
+    const member = await prisma.clubMember.findUnique({
+      where: { userId_clubId: { userId: requesterId, clubId } },
+    });
+    if (!member || member.role !== 'LEADER') {
+      throw new ForbiddenError('모임 리더만 수정할 수 있습니다');
+    }
+  }
+  return club;
+}
+
+/**
+ * Update a 모임's info (LEADER of the club OR SUPER_ADMIN). At least one field is
+ * required (enforced by updateClubSchema). homeFacilityId, when given non-null, is
+ * validated to be a real Facility. Passing null clears the home facility /
+ * description. Returns the updated club.
+ */
+export async function updateClub(
+  clubId: string,
+  requesterId: string,
+  requesterRole: string,
+  input: UpdateClubInput,
+) {
+  await verifyClubLeaderOrSuperAdmin(clubId, requesterId, requesterRole);
+
+  // Validate the home facility exists when a non-null id is provided.
+  if (input.homeFacilityId) {
+    const facility = await prisma.facility.findUnique({
+      where: { id: input.homeFacilityId },
+      select: { id: true },
+    });
+    if (!facility) throw new NotFoundError('시설');
+  }
+
+  // Build a partial update only from the fields actually present in the body so
+  // unspecified fields are left untouched (and explicit null clears them).
+  const data: { name?: string; homeFacilityId?: string | null; description?: string | null } = {};
+  if (input.name !== undefined) data.name = input.name;
+  if (input.homeFacilityId !== undefined) data.homeFacilityId = input.homeFacilityId;
+  if (input.description !== undefined) {
+    // Normalize empty/whitespace-only description to null (소개 제거).
+    const trimmed = input.description?.trim();
+    data.description = trimmed ? trimmed : null;
+  }
+
+  const club = await prisma.club.update({
+    where: { id: clubId },
+    data,
+    include: { _count: { select: { members: true } } },
+  });
+
+  return {
+    id: club.id,
+    name: club.name,
+    description: club.description,
+    inviteCode: club.inviteCode,
+    homeFacilityId: club.homeFacilityId,
+    memberCount: club._count.members,
+    createdAt: club.createdAt.toISOString(),
+  };
+}
+
+/**
+ * Regenerate a fresh, unique invite code for the club (LEADER or SUPER_ADMIN).
+ * The OLD code/QR/link stops working immediately — that's intended (e.g. to cut
+ * off a leaked link). Retries on the rare unique-collision. Returns the new code.
+ */
+export async function regenerateInviteCode(
+  clubId: string,
+  requesterId: string,
+  requesterRole: string,
+): Promise<{ inviteCode: string }> {
+  await verifyClubLeaderOrSuperAdmin(clubId, requesterId, requesterRole);
+
+  // Retry on unique clash (generateInviteCode is random; collisions are very rare).
+  for (let attempt = 0; attempt < 5; attempt++) {
+    const inviteCode = generateInviteCode();
+    try {
+      await prisma.club.update({ where: { id: clubId }, data: { inviteCode } });
+      return { inviteCode };
+    } catch (err: any) {
+      // P2002 = unique constraint failed → regenerate and retry.
+      if (err?.code === 'P2002') continue;
+      throw err;
+    }
+  }
+  throw new ConflictError('초대코드 재발급에 실패했습니다. 다시 시도해 주세요');
 }
 
 export async function listMyClubs(userId: string) {
@@ -51,6 +156,7 @@ export async function listMyClubs(userId: string) {
   return memberships.map((m) => ({
     id: m.club.id,
     name: m.club.name,
+    description: m.club.description,
     inviteCode: m.club.inviteCode,
     homeFacilityId: m.club.homeFacilityId,
     memberCount: m.club._count.members,
