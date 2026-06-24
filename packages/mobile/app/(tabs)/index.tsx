@@ -19,6 +19,7 @@ import { Skeleton, SkeletonGroup } from '../../components/ui/Skeleton';
 import { EmptyState } from '../../components/ui/EmptyState';
 import { SectionHeader } from '../../components/ui/SectionHeader';
 import { AnimatedRefreshControl } from '../../components/ui/AnimatedRefreshControl';
+import { ScreenContainer } from '../../components/ui/ScreenContainer';
 import { ClubModal } from '../../components/settings/ClubModal';
 
 interface ActiveSession {
@@ -231,24 +232,27 @@ export default function HomeScreen() {
   if (loading) {
     return (
       <View style={[styles.container, { backgroundColor: pageBg }]}>
-        <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
-          <View style={styles.greetingRow}>
-            <SkeletonGroup>
-              <Skeleton width={160} height={28} borderRadius={radius.sm} />
-              <Skeleton width={220} height={16} borderRadius={radius.sm} style={{ marginTop: spacing.sm }} />
-            </SkeletonGroup>
-          </View>
-          <View style={{ height: spacing.xl }} />
-          <Skeleton width="100%" height={150} borderRadius={radius.card} />
-          <View style={{ height: spacing.lg }} />
-          <Skeleton width="100%" height={130} borderRadius={radius.card} />
-        </ScrollView>
+        <ScreenContainer>
+          <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
+            <View style={styles.greetingRow}>
+              <SkeletonGroup>
+                <Skeleton width={160} height={28} borderRadius={radius.sm} />
+                <Skeleton width={220} height={16} borderRadius={radius.sm} style={{ marginTop: spacing.sm }} />
+              </SkeletonGroup>
+            </View>
+            <View style={{ height: spacing.xl }} />
+            <Skeleton width="100%" height={150} borderRadius={radius.card} />
+            <View style={{ height: spacing.lg }} />
+            <Skeleton width="100%" height={130} borderRadius={radius.card} />
+          </ScrollView>
+        </ScreenContainer>
       </View>
     );
   }
 
   return (
     <View style={[styles.container, { backgroundColor: pageBg }]}>
+      <ScreenContainer>
       <ScrollView
         contentContainerStyle={styles.content}
         showsVerticalScrollIndicator={false}
@@ -515,6 +519,7 @@ export default function HomeScreen() {
           </View>
         )}
       </ScrollView>
+      </ScreenContainer>
 
       {/* Club modals */}
       <ClubModal

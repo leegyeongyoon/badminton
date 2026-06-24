@@ -1,6 +1,8 @@
 import { useEffect, useState, useCallback, useRef } from 'react';
 import { Tabs } from 'expo-router';
-import { Text, View, StyleSheet, Platform } from 'react-native';
+import { Text, View, StyleSheet, Platform, Pressable } from 'react-native';
+import { BottomTabBar, type BottomTabBarProps } from '@react-navigation/bottom-tabs';
+import { CommonActions } from '@react-navigation/native';
 import Animated, {
   useSharedValue,
   useAnimatedStyle,
@@ -8,10 +10,11 @@ import Animated, {
   withSequence,
 } from 'react-native-reanimated';
 import { useTheme } from '../../hooks/useTheme';
+import { useResponsiveLayout } from '../../hooks/useResponsiveLayout';
 import { Strings } from '../../constants/strings';
 import { Icon, IconName } from '../../components/ui/Icon';
 import api from '../../services/api';
-import { palette, radius, spacing, typography } from '../../constants/theme';
+import { breakpoints, palette, radius, spacing, typography } from '../../constants/theme';
 import { springPresets } from '../../utils/animations';
 import { A11y } from '../../constants/accessibility';
 
@@ -87,8 +90,104 @@ const badgeStyles = StyleSheet.create({
   },
 });
 
+/**
+ * Left vertical side-rail nav for tablet/desktop. Mirrors the bottom tab bar's
+ * routes, icons, labels and active logic — only the presentation differs.
+ * Navigation goes through the same `tabPress` emit + `navigate` path the
+ * default bar uses, so expo-router routing is unaffected. Web-safe: no direct
+ * window/document access (sizing comes from `useResponsiveLayout`).
+ */
+function SideRail({ state, descriptors, navigation }: BottomTabBarProps) {
+  const { colors } = useTheme();
+
+  return (
+    <View style={[railStyles.rail, { backgroundColor: colors.surface, borderRightColor: colors.border }]}>
+      {state.routes.map((route, index) => {
+        const { options } = descriptors[route.key];
+
+        // Skip routes hidden via `href: null` (expo-router marks them with
+        // tabBarItemStyle.display === 'none').
+        const itemStyle = StyleSheet.flatten(options.tabBarItemStyle) as { display?: string } | undefined;
+        if (itemStyle?.display === 'none') return null;
+
+        const focused = state.index === index;
+        const color = focused ? colors.primary : colors.textLight;
+        const label =
+          typeof options.tabBarLabel === 'string'
+            ? options.tabBarLabel
+            : options.title ?? route.name;
+
+        const onPress = () => {
+          const event = navigation.emit({
+            type: 'tabPress',
+            target: route.key,
+            canPreventDefault: true,
+          });
+          if (!focused && !event.defaultPrevented) {
+            // Mirror the default bottom tab bar's navigation exactly: dispatch a
+            // navigate action targeted at THIS navigator's state key. Using
+            // `navigation.navigate(name)` can be swallowed in expo-router's
+            // nested layout; this is the reliable path.
+            navigation.dispatch({
+              ...CommonActions.navigate(route.name, route.params),
+              target: state.key,
+            });
+          }
+        };
+
+        return (
+          <Pressable
+            key={route.key}
+            onPress={onPress}
+            accessibilityRole="tab"
+            accessibilityState={{ selected: focused }}
+            accessibilityLabel={options.tabBarAccessibilityLabel}
+            style={({ pressed }) => [
+              railStyles.item,
+              focused && { backgroundColor: colors.primaryLight },
+              pressed && { opacity: 0.7 },
+            ]}
+          >
+            {options.tabBarIcon?.({ focused, color, size: 22 })}
+            <Text
+              style={[railStyles.label, { color: focused ? colors.primary : colors.textSecondary }]}
+              numberOfLines={1}
+            >
+              {label}
+            </Text>
+          </Pressable>
+        );
+      })}
+    </View>
+  );
+}
+
+const railStyles = StyleSheet.create({
+  rail: {
+    width: 200,
+    paddingTop: spacing.xl,
+    paddingHorizontal: spacing.md,
+    gap: spacing.xs,
+    borderRightWidth: StyleSheet.hairlineWidth,
+  },
+  item: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.md,
+    paddingVertical: spacing.md,
+    paddingHorizontal: spacing.md,
+    borderRadius: radius.lg,
+  },
+  label: {
+    ...typography.subtitle2,
+    flex: 1,
+  },
+});
+
 export default function TabsLayout() {
   const { colors } = useTheme();
+  const { width } = useResponsiveLayout();
+  const useSideRail = width >= breakpoints.tablet;
   const [unreadCount, setUnreadCount] = useState(0);
 
   const loadUnreadCount = useCallback(async () => {
@@ -110,7 +209,11 @@ export default function TabsLayout() {
 
   const tabs = (
     <Tabs
+      // On tablet/desktop render a left vertical side-rail; on phone keep the
+      // bottom bar exactly as before. Same routes/icons/active logic either way.
+      tabBar={(props) => (useSideRail ? <SideRail {...props} /> : <BottomTabBar {...props} />)}
       screenOptions={{
+        tabBarPosition: useSideRail ? 'left' : 'bottom',
         tabBarActiveTintColor: colors.primary,
         tabBarInactiveTintColor: colors.textLight,
         tabBarStyle: {
@@ -175,9 +278,13 @@ export default function TabsLayout() {
   );
 
   if (Platform.OS === 'web') {
+    // Phone-width web stays in a phone-like 480 column (unchanged). At tablet+
+    // we un-cage to a comfortable centered shell so the rail + content have
+    // room to breathe instead of being squeezed into a 480 phone frame.
+    const shellMaxWidth = useSideRail ? 1100 : 480;
     return (
       <View style={[webStyles.outer, { backgroundColor: colors.background }]}>
-        <View style={webStyles.inner}>
+        <View style={[webStyles.inner, { maxWidth: shellMaxWidth }]}>
           {tabs}
         </View>
       </View>
@@ -195,6 +302,5 @@ const webStyles = StyleSheet.create({
   inner: {
     flex: 1,
     width: '100%',
-    maxWidth: 480,
   },
 });

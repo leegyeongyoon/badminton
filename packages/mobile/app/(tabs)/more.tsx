@@ -21,6 +21,7 @@ import { ClubModal } from '../../components/settings/ClubModal';
 import { Modal } from '../../components/ui/Modal';
 import { Input } from '../../components/ui/Input';
 import { Button } from '../../components/ui/Button';
+import { ScreenContainer } from '../../components/ui/ScreenContainer';
 
 // 운영자 신청 상태 → 사용자에게 보여줄 한 줄 라벨.
 const OPERATOR_STATUS_LABEL: Record<string, string> = {
@@ -157,8 +158,10 @@ export default function MoreScreen() {
   };
 
   return (
+    <View style={[styles.container, { backgroundColor: colors.background }]}>
+    <ScreenContainer>
     <ScrollView
-      style={[styles.container, { backgroundColor: colors.background }]}
+      style={styles.container}
       contentContainerStyle={styles.content}
     >
       {/* Profile card */}
@@ -335,6 +338,8 @@ export default function MoreScreen() {
         />
       </Modal>
     </ScrollView>
+    </ScreenContainer>
+    </View>
   );
 }
 

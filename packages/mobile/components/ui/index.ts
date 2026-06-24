@@ -1,5 +1,7 @@
 export { Icon } from './Icon';
 export type { IconName } from './Icon';
+export { ScreenContainer } from './ScreenContainer';
+export type { ScreenContainerProps } from './ScreenContainer';
 export { Button } from './Button';
 export { Badge } from './Badge';
 export { Card } from './Card';

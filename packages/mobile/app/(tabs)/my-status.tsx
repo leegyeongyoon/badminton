@@ -14,6 +14,7 @@ import { typography, spacing, radius, palette } from '../../constants/theme';
 import { showAlert, showConfirm } from '../../utils/alert';
 import { Strings } from '../../constants/strings';
 import { AnimatedRefreshControl } from '../../components/ui/AnimatedRefreshControl';
+import { ScreenContainer } from '../../components/ui/ScreenContainer';
 import { PlayingTurnCard } from '../../components/activity/PlayingTurnCard';
 import { EmptyState } from '../../components/ui/EmptyState';
 import { Icon } from '../../components/ui/Icon';
@@ -183,8 +184,10 @@ export default function MyStatusScreen() {
   }[state];
 
   return (
+    <View style={[styles.container, { backgroundColor: colors.background }]}>
+    <ScreenContainer>
     <ScrollView
-      style={[styles.container, { backgroundColor: colors.background }]}
+      style={styles.container}
       contentContainerStyle={styles.content}
       refreshControl={
         Platform.OS === 'web' ? undefined : (
@@ -257,6 +260,8 @@ export default function MyStatusScreen() {
         />
       )}
     </ScrollView>
+    </ScreenContainer>
+    </View>
   );
 }
 

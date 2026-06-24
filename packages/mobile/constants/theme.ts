@@ -290,6 +290,15 @@ export const typography = {
     : { fontVariant: ['tabular-nums'] as ('tabular-nums')[] },
 } as const;
 
+// ─── Responsive Breakpoints ─────────────────────────────────
+// Centralized width thresholds for responsive layout. Mirrors the values
+// already used by `useResponsiveLayout` (tablet 768, twoPane 1200) so new
+// layout code can reference named breakpoints instead of magic numbers.
+//   tablet  → tablet-class / start of side-rail nav
+//   desktop → comfortable centered content cap
+//   wide    → roomier horizontal padding on very wide screens
+export const breakpoints = { tablet: 768, desktop: 1200, wide: 1600 } as const;
+
 // ─── Spacing Scale ──────────────────────────────────────────
 export const spacing = {
   xs: 4,
