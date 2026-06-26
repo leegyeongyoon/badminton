@@ -86,6 +86,7 @@ model User {
   phone         String?  @unique
   password      String?
   kakaoId       String?  @unique
+  googleId      String?  @unique
   name          String
   role          UserRole @default(PLAYER)
   isGuest       Boolean  @default(false)

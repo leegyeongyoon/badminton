@@ -47,6 +47,9 @@ jobs:
           # Kakao REST key = public OAuth client_id (safe to ship; only the
           # client_secret is private and stays server-side on the Pi).
           EXPO_PUBLIC_KAKAO_REST_KEY: 5a202bd90ab8dff01348f24cb1c37f3f
+          # Google OAuth client id = public (safe to ship; client_secret stays
+          # server-side on the Pi via .env.prod, injected by deploy.yml).
+          EXPO_PUBLIC_GOOGLE_CLIENT_ID: 1020314759155-5itpocn654tbvt8ah0a44kif04pj8hjh.apps.googleusercontent.com
         run: |
           npx expo export --platform web
           # Cloudflare Pages SKIPS any directory named `node_modules` during

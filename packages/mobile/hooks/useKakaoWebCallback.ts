@@ -1,8 +1,9 @@
 import { useEffect, useRef } from 'react';
 import { Platform } from 'react-native';
+import { router } from 'expo-router';
 import { consumeKakaoWebCallback } from '../services/kakao';
 import { useAuthStore } from '../store/authStore';
-import { showError } from '../utils/feedback';
+import { showError, showSuccess } from '../utils/feedback';
 
 /**
  * WEB-only: finishes the Kakao full-page redirect login.
@@ -40,7 +41,10 @@ export function useKakaoWebCallback(): void {
     if (result.kind === 'none') return;
 
     if (result.kind === 'error') {
-      showError(result.message || '카카오 로그인에 실패했어요');
+      showError(
+        result.message ||
+          (result.mode === 'link' ? '카카오 연동에 실패했어요' : '카카오 로그인에 실패했어요'),
+      );
       return;
     }
 
@@ -49,7 +53,28 @@ export function useKakaoWebCallback(): void {
       return;
     }
 
-    // result.kind === 'success' — finish login with the obtained code.
+    // result.kind === 'success' — branch on the flow mode.
+    if (result.mode === 'link') {
+      // LINK: the user's token persisted across the redirect → attach Kakao to
+      // the current account, refresh the user (linkedProviders updates), toast,
+      // and return to the profile (내 정보) screen.
+      (async () => {
+        try {
+          await useAuthStore.getState().linkKakao({
+            code: result.code,
+            redirectUri: result.redirectUri,
+          });
+          showSuccess('카카오 연동 완료');
+          router.replace('/(tabs)/profile');
+        } catch (err: any) {
+          const msg = err?.response?.data?.error || err?.message || '카카오 연동에 실패했어요';
+          showError(msg);
+        }
+      })();
+      return;
+    }
+
+    // mode==='login' — finish login with the obtained code (existing behavior).
     (async () => {
       try {
         await useAuthStore.getState().kakaoLogin({

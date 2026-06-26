@@ -13,9 +13,18 @@ import { useAuthStore } from '../../store/authStore';
 import { profileApi } from '../../services/profile';
 import { Colors } from '../../constants/colors';
 import { createShadow } from '../../constants/theme';
-import { showAlert } from '../../utils/alert';
+import { showAlert, showConfirm } from '../../utils/alert';
+import { showError } from '../../utils/feedback';
+import { startKakaoWebLogin } from '../../services/kakao';
+import { startGoogleWebLogin } from '../../services/google';
 import { SKILL_LEVELS as SKILL_LETTERS, getSkillMeta } from '../../constants/skill';
 import { GENDER_META, type Gender } from '../../constants/gender';
+
+// 계정 연동(account linking) providers rendered in the 내 정보 section.
+const LINK_PROVIDERS = [
+  { key: 'kakao' as const, label: '카카오', start: startKakaoWebLogin },
+  { key: 'google' as const, label: '구글', start: startGoogleWebLogin },
+];
 
 const roleLabels: Record<string, string> = {
   FACILITY_ADMIN: '시설 관리자',
@@ -31,7 +40,7 @@ const GAME_TYPES = [
 
 export default function ProfileScreen() {
   const router = useRouter();
-  const { user, loadUser } = useAuthStore();
+  const { user, loadUser, unlinkKakao, unlinkGoogle } = useAuthStore();
 
   const [skillLevel, setSkillLevel] = useState<string>('');
   const [gender, setGender] = useState<string>('');
@@ -113,6 +122,45 @@ export default function ProfileScreen() {
     } finally {
       setIsSaving(false);
     }
+  };
+
+  // ── 계정 연동(account linking) ──────────────────────────────────────────
+  // Count the user's login methods (password + each linked provider) so the
+  // "keep ≥1 method" rule hides the last 연동 해제 (the server enforces it too).
+  const linkedProviders = user?.linkedProviders ?? { kakao: false, google: false };
+  const hasPassword = !!user?.hasPassword;
+  const methodCount =
+    (hasPassword ? 1 : 0) + (linkedProviders.kakao ? 1 : 0) + (linkedProviders.google ? 1 : 0);
+
+  // Start the link-mode OAuth round-trip. WEB full-page redirect → the provider
+  // returns to our origin and the callback (useKakao/GoogleWebCallback) finishes
+  // the link under the persisted token. `start('link')` returns false when the
+  // provider key isn't configured (placeholder) → friendly notice.
+  const handleLink = (start: (mode?: 'login' | 'link') => boolean, label: string) => {
+    const started = start('link');
+    if (!started) {
+      showError(`${label} 연동 설정이 준비 중이에요 (키 필요)`);
+    }
+    // started === true → the page is navigating to the provider; nothing else to do.
+  };
+
+  const handleUnlink = (key: 'kakao' | 'google', label: string) => {
+    showConfirm(
+      `${label} 연동 해제`,
+      `${label} 계정 연동을 해제할까요?`,
+      async () => {
+        try {
+          if (key === 'kakao') await unlinkKakao();
+          else await unlinkGoogle();
+        } catch (err: any) {
+          // 400 (마지막 로그인 수단…) etc. → surface the server message.
+          showError(err?.response?.data?.error || err?.message || '연동 해제에 실패했어요');
+        }
+      },
+      '연동 해제',
+      '취소',
+      'danger',
+    );
   };
 
   const formatRemainingTime = (expiresAt: string): string => {
@@ -336,6 +384,75 @@ export default function ProfileScreen() {
             <Text style={styles.settingArrow}>›</Text>
           </View>
         </TouchableOpacity>
+      </View>
+
+      {/* 계정 연동 (account linking) — attach a 2nd social provider so EITHER
+          provider logs into THIS one account. Phone accounts also list 비밀번호
+          as a login method. The last remaining method can't be unlinked. */}
+      <View style={styles.section}>
+        <Text style={styles.sectionTitle}>계정 연동</Text>
+        <View style={styles.settingCard}>
+          {/* 비밀번호 (phone accounts only) — a login method, not unlinkable here. */}
+          {hasPassword && (
+            <View style={[styles.linkRow, styles.linkRowDivider]}>
+              <View style={styles.linkLabelWrap}>
+                <Text style={styles.linkLabel}>비밀번호</Text>
+                <Text style={styles.linkSubLabel}>전화번호 로그인</Text>
+              </View>
+              <View style={styles.linkedBadge}>
+                <Text style={styles.linkedBadgeText}>✓ 사용 중</Text>
+              </View>
+            </View>
+          )}
+
+          {LINK_PROVIDERS.map((p, idx) => {
+            const linked = linkedProviders[p.key];
+            // Show 연동 해제 only when linked AND another method remains (≥2 total).
+            const canUnlink = linked && methodCount > 1;
+            const isLast = idx === LINK_PROVIDERS.length - 1;
+            return (
+              <View
+                key={p.key}
+                style={[styles.linkRow, !isLast && styles.linkRowDivider]}
+              >
+                <View style={styles.linkLabelWrap}>
+                  <Text style={styles.linkLabel}>{p.label}</Text>
+                  <Text style={styles.linkSubLabel}>
+                    {linked ? `${p.label} 로그인` : `${p.label} 계정 연결`}
+                  </Text>
+                </View>
+                {linked ? (
+                  <View style={styles.linkActionWrap}>
+                    <View style={styles.linkedBadge}>
+                      <Text style={styles.linkedBadgeText}>✓ 연동됨</Text>
+                    </View>
+                    {canUnlink && (
+                      <TouchableOpacity
+                        style={styles.unlinkButton}
+                        onPress={() => handleUnlink(p.key, p.label)}
+                        activeOpacity={0.7}
+                        accessibilityRole="button"
+                        accessibilityLabel={`${p.label} 연동 해제`}
+                      >
+                        <Text style={styles.unlinkButtonText}>연동 해제</Text>
+                      </TouchableOpacity>
+                    )}
+                  </View>
+                ) : (
+                  <TouchableOpacity
+                    style={styles.linkButton}
+                    onPress={() => handleLink(p.start, p.label)}
+                    activeOpacity={0.7}
+                    accessibilityRole="button"
+                    accessibilityLabel={`${p.label} 연동`}
+                  >
+                    <Text style={styles.linkButtonText}>{p.label} 연동</Text>
+                  </TouchableOpacity>
+                )}
+              </View>
+            );
+          })}
+        </View>
       </View>
 
     </ScrollView>
@@ -568,6 +685,72 @@ const styles = StyleSheet.create({
   settingArrow: {
     fontSize: 22,
     color: Colors.textLight,
+  },
+  // 계정 연동 rows
+  linkRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingVertical: 12,
+  },
+  linkRowDivider: {
+    borderBottomWidth: 1,
+    borderBottomColor: Colors.divider,
+  },
+  linkLabelWrap: {
+    flex: 1,
+    gap: 2,
+  },
+  linkLabel: {
+    fontSize: 15,
+    fontWeight: '600',
+    color: Colors.text,
+  },
+  linkSubLabel: {
+    fontSize: 12,
+    color: Colors.textSecondary,
+  },
+  linkActionWrap: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  linkedBadge: {
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: 8,
+    backgroundColor: Colors.primaryLight,
+  },
+  linkedBadgeText: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: Colors.primary,
+  },
+  linkButton: {
+    paddingHorizontal: 14,
+    paddingVertical: 7,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: Colors.primary,
+    backgroundColor: Colors.surface,
+  },
+  linkButtonText: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: Colors.primary,
+  },
+  unlinkButton: {
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: Colors.border,
+    backgroundColor: Colors.surface,
+  },
+  unlinkButtonText: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: Colors.textSecondary,
   },
   skillButtonRow: {
     flexDirection: 'row',

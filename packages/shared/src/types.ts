@@ -16,6 +16,18 @@ export interface UserResponse {
   skillLevel?: string | null;
   /** 성별 ('M' | 'F') from the PlayerProfile; null when not set. */
   gender?: string | null;
+  /**
+   * Which social providers are currently LINKED to this account (kakaoId /
+   * googleId non-null). Drives the 계정 연동 UI's ✓연동됨 vs 연동 state. Optional
+   * for backwards-compatibility with any older client that ignores it.
+   */
+  linkedProviders?: { kakao: boolean; google: boolean };
+  /**
+   * True when the account has a password (a phone account). Combined with
+   * linkedProviders, the client enforces "keep ≥1 login method" — the last
+   * remaining method can't be unlinked.
+   */
+  hasPassword?: boolean;
 }
 
 export interface AuthTokens {

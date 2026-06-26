@@ -42,6 +42,45 @@ export const kakaoLoginSchema = z
     },
   );
 
+// Google social login — SECURE server-side authorization-code flow.
+//
+// Mirrors kakaoLoginSchema. The Google client_secret must NEVER ship in the
+// web/mobile bundle, so the client does NOT exchange the code for a token
+// itself. Instead it sends EITHER:
+//   - { code, redirectUri }  — preferred. The client ran Google's authorize
+//     step and got an authorization `code`; the server exchanges it (with the
+//     secret) for a Google access token. `redirectUri` MUST be the exact same
+//     value the client used to obtain the code (Google validates the match).
+//   - { accessToken }        — kept for a future native Google SDK that yields a
+//     Google access token directly; the server validates it as-is.
+// Exactly one of the two shapes is required.
+export const googleLoginSchema = z
+  .object({
+    code: z.string().min(1).optional(),
+    redirectUri: z.string().min(1).optional(),
+    accessToken: z.string().min(1).optional(),
+  })
+  .refine(
+    (d) => (!!d.code && !!d.redirectUri) || !!d.accessToken,
+    {
+      message: 'code+redirectUri 또는 accessToken이 필요합니다',
+      path: ['code'],
+    },
+  );
+
+// Manual account linking — attach a SECOND social provider to the CURRENT
+// (authenticated) account, so logging in with EITHER provider later resolves to
+// the SAME account. Mirrors the social-LOGIN body exactly ({ code, redirectUri }),
+// because the server reuses the same authorization-code exchange + provider
+// userinfo to resolve the provider id — it just attaches it to req.user.userId
+// instead of creating/logging in a new user. Both fields are required (the link
+// flow always runs the web full-page redirect, which yields a fresh code +
+// the exact redirectUri used at authorize).
+export const linkProviderSchema = z.object({
+  code: z.string().min(1, 'code가 필요합니다'),
+  redirectUri: z.string().min(1, 'redirectUri가 필요합니다'),
+});
+
 // New-user profile completion (신규 카카오 가입자 프로필 설정).
 // Sets the User.name and upserts the caller's PlayerProfile (급수/성별).
 // 이름은 필수, 급수·성별은 선택.
@@ -291,6 +330,8 @@ export type OperatorRequestReviewInput = z.infer<typeof operatorRequestReviewSch
 export type RegisterInput = z.infer<typeof registerSchema>;
 export type LoginInput = z.infer<typeof loginSchema>;
 export type KakaoLoginInput = z.infer<typeof kakaoLoginSchema>;
+export type GoogleLoginInput = z.infer<typeof googleLoginSchema>;
+export type LinkProviderInput = z.infer<typeof linkProviderSchema>;
 export type ChangePasswordInput = z.infer<typeof changePasswordSchema>;
 export type CompleteProfileInput = z.infer<typeof completeProfileSchema>;
 export type CreateFacilityInput = z.infer<typeof createFacilitySchema>;

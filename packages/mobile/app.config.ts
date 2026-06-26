@@ -28,6 +28,15 @@ export default ({ config }: ConfigContext): ExpoConfig => {
     process.env.EXPO_PUBLIC_KAKAO_REST_KEY ??
     config.extra?.kakaoRestKey ??
     'REPLACE_WITH_KAKAO_KEY';
+  // Google OAuth client id (PUBLIC — safe to ship; only the SECRET is private,
+  // and that lives server-side only). Injected at build via
+  // EXPO_PUBLIC_GOOGLE_CLIENT_ID, mirroring kakaoRestKey. Falls back to the
+  // "REPLACE_WITH_GOOGLE_CLIENT_ID" placeholder, which services/google.ts treats
+  // as "not configured" (never attempts OAuth) so dev/web/preview never crash.
+  const googleClientId =
+    process.env.EXPO_PUBLIC_GOOGLE_CLIENT_ID ??
+    config.extra?.googleClientId ??
+    'REPLACE_WITH_GOOGLE_CLIENT_ID';
   const projectId =
     process.env.EAS_PROJECT_ID ??
     process.env.EXPO_PUBLIC_EAS_PROJECT_ID ??
@@ -42,6 +51,7 @@ export default ({ config }: ConfigContext): ExpoConfig => {
       ...config.extra,
       apiUrl,
       kakaoRestKey,
+      googleClientId,
       eas: {
         ...config.extra?.eas,
         projectId,

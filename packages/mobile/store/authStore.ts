@@ -19,6 +19,18 @@ export class KakaoNotConfiguredError extends Error {
   }
 }
 
+/**
+ * Thrown by `googleLogin` when Google OAuth could not start because no real
+ * Google client id is configured (the placeholder is still in place). Mirrors
+ * KakaoNotConfiguredError so the login screen can show the same "키 필요" message.
+ */
+export class GoogleNotConfiguredError extends Error {
+  constructor() {
+    super('구글 로그인 설정이 준비 중이에요 (키 필요)');
+    this.name = 'GoogleNotConfiguredError';
+  }
+}
+
 interface User {
   id: string;
   phone: string | null;
@@ -30,6 +42,10 @@ interface User {
   skillLevel?: string | null;
   /** 성별 ('M' | 'F') from the profile; null when not set. */
   gender?: string | null;
+  /** Which social providers are linked to this account (계정 연동 UI). */
+  linkedProviders?: { kakao: boolean; google: boolean };
+  /** True for a phone account (has a password) — counts as a login method. */
+  hasPassword?: boolean;
 }
 
 interface AuthState {
@@ -53,6 +69,29 @@ interface AuthState {
    * runs the authorize step as before.
    */
   kakaoLogin: (auth?: { code: string; redirectUri: string }) => Promise<{ isNew: boolean }>;
+  /**
+   * Player social login via Google (secure server-side code exchange). Mirrors
+   * kakaoLogin: the WEB full-page redirect flow already holds the
+   * { code, redirectUri } from Google's return URL and passes them in directly;
+   * the backend exchanges the code using the client_secret (never on the
+   * client), and the resulting JWTs are stored exactly like a normal login.
+   * Throws GoogleNotConfiguredError when no { code, redirectUri } is available
+   * (e.g. no real Google client id configured).
+   */
+  googleLogin: (auth?: { code: string; redirectUri: string }) => Promise<{ isNew: boolean }>;
+  /**
+   * Manual account linking (계정 연동) — attach a SECOND social provider to the
+   * CURRENT authenticated account. The web link-mode OAuth round-trip already
+   * holds { code, redirectUri } from the provider's return URL; these hand them
+   * to the authenticated /auth/link/* endpoint, then refresh the local user
+   * (loadUser) so linkedProviders updates. Throw on 409/400 so the caller can
+   * surface the server message. The user's token persists across the redirect.
+   */
+  linkKakao: (auth: { code: string; redirectUri: string }) => Promise<void>;
+  linkGoogle: (auth: { code: string; redirectUri: string }) => Promise<void>;
+  /** Unlink a provider; refreshes the local user. Server guards ≥1 method. */
+  unlinkKakao: () => Promise<void>;
+  unlinkGoogle: () => Promise<void>;
   register: (phone: string, password: string, name: string) => Promise<void>;
   /**
    * New-user profile completion (신규 카카오 가입자). Sets name + 급수/성별 on the
@@ -102,6 +141,53 @@ export const useAuthStore = create<AuthState>((set) => ({
     // Surface `isNew` so the gate / login screen can route brand-new Kakao users
     // to /profile-setup before the home tabs.
     return { isNew: !!data.isNew };
+  },
+
+  googleLogin: async (preauth) => {
+    // WEB full-page redirect already obtained { code, redirectUri } from Google's
+    // return URL → use them directly. (Google has no native popup path here.)
+    const auth = preauth;
+    // null → no { code, redirectUri } available (e.g. no real client id / the
+    // user cancelled). Surface the "키 필요" path like Kakao does.
+    if (!auth) {
+      throw new GoogleNotConfiguredError();
+    }
+    // Hand the code + redirectUri to our backend, which does the secure
+    // server-side token exchange (client_secret never leaves the server).
+    const { data } = await authApi.googleLogin(auth);
+    // Reuse the exact same token-storage path as phone/password + kakao login.
+    await setItem('accessToken', data.tokens.accessToken);
+    await setItem('refreshToken', data.tokens.refreshToken);
+    set({ user: data.user, isAuthenticated: true, isGuest: !!data.user?.isGuest });
+    // Surface `isNew` so the gate / login screen can route brand-new Google users
+    // to /profile-setup before the home tabs.
+    return { isNew: !!data.isNew };
+  },
+
+  // ── Manual account linking (계정 연동) ───────────────────────────────────
+  // Each calls the authenticated link/unlink endpoint, then loadUser() to pull
+  // the refreshed linkedProviders/hasPassword into the local user. Errors
+  // (409 already-linked / 400 last-method) propagate so the caller can toast the
+  // server message. loadUser sets the returned getMe user (which now carries
+  // linkedProviders), keeping the gate inputs (skillLevel/gender) intact.
+  linkKakao: async (auth) => {
+    await authApi.linkKakao(auth);
+    await useAuthStore.getState().loadUser();
+  },
+
+  linkGoogle: async (auth) => {
+    await authApi.linkGoogle(auth);
+    await useAuthStore.getState().loadUser();
+  },
+
+  unlinkKakao: async () => {
+    await authApi.unlinkKakao();
+    await useAuthStore.getState().loadUser();
+  },
+
+  unlinkGoogle: async () => {
+    await authApi.unlinkGoogle();
+    await useAuthStore.getState().loadUser();
   },
 
   register: async (phone, password, name) => {

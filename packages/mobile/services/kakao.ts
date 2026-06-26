@@ -122,6 +122,13 @@ export async function getKakaoAuthCode(): Promise<{ code: string; redirectUri: s
 // full-page redirect. sessionStorage survives the redirect within the same tab
 // and is cleared when the tab closes — exactly the lifetime we want.
 const KAKAO_WEB_STATE_KEY = 'kakao_oauth_state';
+// sessionStorage key holding the FLOW MODE ('login' | 'link') across the
+// redirect, so the callback knows whether to LOG IN or LINK the returned Kakao
+// identity. Distinct from Google's mode key.
+const KAKAO_WEB_MODE_KEY = 'kakao_oauth_mode';
+
+/** Whether the OAuth round-trip is a normal login or a (authenticated) link. */
+export type OAuthMode = 'login' | 'link';
 
 /** Generate a random, URL-safe state token for CSRF protection. */
 function generateState(): string {
@@ -145,7 +152,7 @@ function generateState(): string {
  * real key is configured so the caller can show the friendly "키 필요" notice.
  * Returns `true` once navigation has been kicked off (the page is leaving).
  */
-export function startKakaoWebLogin(): boolean {
+export function startKakaoWebLogin(mode: OAuthMode = 'login'): boolean {
   const clientId = getKakaoKey();
   if (!clientId) return false;
 
@@ -154,6 +161,9 @@ export function startKakaoWebLogin(): boolean {
 
   try {
     sessionStorage.setItem(KAKAO_WEB_STATE_KEY, JSON.stringify({ state, ts: Date.now() }));
+    // Remember whether this round-trip is a LOGIN or a LINK so the callback can
+    // branch. Default 'login' keeps the existing flow untouched.
+    sessionStorage.setItem(KAKAO_WEB_MODE_KEY, mode);
   } catch {
     // sessionStorage unavailable (private mode quirks) — proceed anyway; the
     // callback will simply skip strict state verification if it can't read back.
@@ -171,12 +181,14 @@ export function startKakaoWebLogin(): boolean {
   return true;
 }
 
-/** Result of inspecting the current URL for a Kakao OAuth return. */
+/** Result of inspecting the current URL for a Kakao OAuth return. `mode`
+ *  ('login' | 'link') tells the callback whether to log in or LINK the returned
+ *  identity (carried across the redirect via sessionStorage). */
 export type KakaoWebCallback =
   | { kind: 'none' }
-  | { kind: 'success'; code: string; redirectUri: string }
+  | { kind: 'success'; code: string; redirectUri: string; mode: OAuthMode }
   | { kind: 'state_mismatch' }
-  | { kind: 'error'; message: string };
+  | { kind: 'error'; message: string; mode: OAuthMode };
 
 /**
  * Inspects the current web URL for a Kakao OAuth return and, on a valid
@@ -203,12 +215,15 @@ export function consumeKakaoWebCallback(): KakaoWebCallback {
   // Nothing OAuth-related → leave the URL untouched.
   if (!code && !error) return { kind: 'none' };
 
-  // Read + clear the stored state regardless of outcome (single-use).
+  // Read + clear the stored state + mode regardless of outcome (single-use).
   let storedState: string | null = null;
+  let mode: OAuthMode = 'login';
   try {
     const raw = sessionStorage.getItem(KAKAO_WEB_STATE_KEY);
     if (raw) storedState = (JSON.parse(raw) as { state?: string }).state ?? null;
+    if (sessionStorage.getItem(KAKAO_WEB_MODE_KEY) === 'link') mode = 'link';
     sessionStorage.removeItem(KAKAO_WEB_STATE_KEY);
+    sessionStorage.removeItem(KAKAO_WEB_MODE_KEY);
   } catch {
     /* sessionStorage unreadable — treat as no stored state. */
   }
@@ -221,6 +236,7 @@ export function consumeKakaoWebCallback(): KakaoWebCallback {
     return {
       kind: 'error',
       message: errorDescription || error || '카카오 로그인이 취소되었어요',
+      mode,
     };
   }
 
@@ -231,10 +247,10 @@ export function consumeKakaoWebCallback(): KakaoWebCallback {
     return { kind: 'state_mismatch' };
   }
 
-  // A fresh, verified code → log in the returned Kakao identity. redirectUri
-  // MUST equal what we sent at authorize (the bare origin) so the server's
-  // exchange matches.
-  return { kind: 'success', code, redirectUri: window.location.origin };
+  // A fresh, verified code → log in OR link the returned Kakao identity.
+  // redirectUri MUST equal what we sent at authorize (the bare origin) so the
+  // server's exchange matches.
+  return { kind: 'success', code, redirectUri: window.location.origin, mode };
 }
 
 /** Remove the query string (OAuth params) from the URL without reloading. */

@@ -10,6 +10,7 @@ import {
 import { Link, useRouter } from 'expo-router';
 import { useAuthStore, KakaoNotConfiguredError } from '../../store/authStore';
 import { startKakaoWebLogin } from '../../services/kakao';
+import { startGoogleWebLogin } from '../../services/google';
 import { useTheme } from '../../hooks/useTheme';
 import { useFormValidation } from '../../hooks/useFormValidation';
 import { compose, required, phone as phoneRule, password as passwordRule } from '../../utils/validation';
@@ -24,10 +25,19 @@ import { ScreenContainer } from '../../components/ui/ScreenContainer';
 const KAKAO_YELLOW = '#FEE500';
 const KAKAO_LABEL = '#191600';
 
+// Google brand colors (Google 디자인 가이드): white container, near-black label,
+// hairline border. The "G" mark uses Google blue.
+const GOOGLE_WHITE = '#FFFFFF';
+const GOOGLE_LABEL = '#1F1F1F';
+const GOOGLE_BORDER = '#DADCE0';
+const GOOGLE_BLUE = '#4285F4';
+
 export default function LoginScreen() {
   const [loading, setLoading] = useState(false);
   const [kakaoLoading, setKakaoLoading] = useState(false);
   const [kakaoNotice, setKakaoNotice] = useState<string | null>(null);
+  const [googleLoading, setGoogleLoading] = useState(false);
+  const [googleNotice, setGoogleNotice] = useState<string | null>(null);
   const { login, kakaoLogin } = useAuthStore();
   const { colors } = useTheme();
   const router = useRouter();
@@ -96,6 +106,33 @@ export default function LoginScreen() {
     }
   };
 
+  const handleGoogleLogin = async () => {
+    setGoogleNotice(null);
+    setGoogleLoading(true);
+
+    // WEB: drive OAuth via a FULL-PAGE redirect (no popup), mirroring Kakao.
+    // startGoogleWebLogin navigates the whole tab to Google; the return
+    // (?code&state) is handled on startup by useGoogleWebCallback.
+    if (Platform.OS === 'web') {
+      const started = startGoogleWebLogin();
+      if (!started) {
+        // No real Google client id yet — friendly inline message, no crash, no nav.
+        const msg = '구글 로그인 설정이 준비 중이에요 (키 필요)';
+        setGoogleNotice(msg);
+        showInfo(msg);
+        setGoogleLoading(false);
+      }
+      // On success the page is leaving (location.assign) — leave the spinner up.
+      return;
+    }
+
+    // Native: Google login is web-only here — show the friendly "키 필요" notice.
+    const msg = '구글 로그인 설정이 준비 중이에요 (키 필요)';
+    setGoogleNotice(msg);
+    showInfo(msg);
+    setGoogleLoading(false);
+  };
+
   return (
     <KeyboardAvoidingView
       style={[styles.container, { backgroundColor: colors.background }]}
@@ -133,6 +170,34 @@ export default function LoginScreen() {
             회원은 카카오로 간편하게 로그인하세요
           </Text>
         )}
+
+        {/* Secondary social path: Google login (구글로 로그인). */}
+        <Pressable
+          onPress={handleGoogleLogin}
+          disabled={googleLoading}
+          accessibilityRole="button"
+          accessibilityLabel="구글로 로그인"
+          accessibilityState={{ disabled: googleLoading, busy: googleLoading }}
+          style={({ pressed }) => [
+            styles.googleButton,
+            {
+              backgroundColor: GOOGLE_WHITE,
+              borderColor: GOOGLE_BORDER,
+              opacity: googleLoading ? 0.6 : pressed ? 0.9 : 1,
+            },
+          ]}
+        >
+          <Text style={[styles.googleBubble, { color: GOOGLE_BLUE }]}>G</Text>
+          <Text style={[styles.googleText, { color: GOOGLE_LABEL }]}>
+            {googleLoading ? '구글 로그인 중…' : '구글로 로그인'}
+          </Text>
+        </Pressable>
+
+        {googleNotice ? (
+          <Text style={[styles.kakaoNotice, { color: colors.textSecondary }]}>
+            {googleNotice}
+          </Text>
+        ) : null}
 
         {/* Divider */}
         <View style={styles.dividerRow}>
@@ -228,6 +293,31 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(0,0,0,0.06)',
   },
   kakaoText: {
+    ...typography.button,
+    fontSize: 16,
+  },
+  googleButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: spacing.sm,
+    borderRadius: radius.xxl,
+    minHeight: 52,
+    paddingHorizontal: spacing.xl,
+    width: '100%',
+    borderWidth: 1,
+    marginTop: spacing.md,
+  },
+  googleBubble: {
+    ...typography.caption,
+    fontWeight: '700',
+    fontSize: 16,
+    borderRadius: radius.sm,
+    overflow: 'hidden',
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+  },
+  googleText: {
     ...typography.button,
     fontSize: 16,
   },

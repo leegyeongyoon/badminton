@@ -64,6 +64,18 @@ jobs:
             echo "rsync 재시도 $attempt..."; sleep 10
           done
 
+      - name: Inject Google OAuth keys into .env.prod (Pi)
+        env:
+          SSHPASS: ${{ secrets.SSH_PASSWORD }}
+          G_CLIENT_ID: ${{ secrets.GOOGLE_CLIENT_ID }}
+          G_CLIENT_SECRET: ${{ secrets.GOOGLE_CLIENT_SECRET }}
+        run: |
+          if [ -z "$G_CLIENT_SECRET" ]; then echo "GOOGLE 시크릿 미설정 — 건너뜀"; exit 0; fi
+          ssh_pi() { sshpass -e ssh -o ConnectTimeout=25 "${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}" "$1"; }
+          # .env.prod 는 서버에만 있고 rsync 에서 제외됨 — 여기서 GOOGLE_* 만 idempotent 하게 갱신.
+          ssh_pi "cd /opt/badminton && touch .env.prod && sed -i '/^GOOGLE_CLIENT_ID=/d; /^GOOGLE_CLIENT_SECRET=/d' .env.prod && echo 'GOOGLE_CLIENT_ID=$G_CLIENT_ID' >> .env.prod && echo 'GOOGLE_CLIENT_SECRET=$G_CLIENT_SECRET' >> .env.prod && echo 'GOOGLE keys injected'" \
+            || echo "주입 실패(무시) — 구글 로그인은 키 설정 전까지 비활성"
+
       - name: Build & deploy on Pi (detached) + poll
         env:
           SSHPASS: ${{ secrets.SSH_PASSWORD }}

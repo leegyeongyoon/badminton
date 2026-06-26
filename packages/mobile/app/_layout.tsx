@@ -18,6 +18,7 @@ import { ThemeProvider, useThemeContext } from '../contexts/ThemeContext';
 import { useNetworkStatus } from '../hooks/useNetworkStatus';
 import { useDeepLinking } from '../hooks/useDeepLinking';
 import { useKakaoWebCallback } from '../hooks/useKakaoWebCallback';
+import { useGoogleWebCallback } from '../hooks/useGoogleWebCallback';
 import { useNotifications } from '../hooks/useNotifications';
 import { useSocketToast } from '../hooks/useSocketToast';
 import { useSocket, useUserRoom } from '../hooks/useSocket';
@@ -57,6 +58,11 @@ function RootLayoutInner() {
   const { isConnected, isSocketConnected } = useNetworkStatus();
   const isNavigatingRef = useRef(false);
   useDeepLinking();
+  // WEB-only: detect the Google full-page-redirect return (?code&state) on
+  // startup and finish login. Mounted BEFORE useKakaoWebCallback so on a Google
+  // return it resolves + cleans the URL first, and on a Kakao return it no-ops
+  // without touching the URL (each checks ITS OWN stored state). Native no-op.
+  useGoogleWebCallback();
   // WEB-only: detect the Kakao full-page-redirect return (?code&state) on
   // startup and finish login. Runs independently of the gate; native no-op.
   useKakaoWebCallback();

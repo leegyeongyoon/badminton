@@ -3,7 +3,7 @@ import jwt from 'jsonwebtoken';
 import { prisma } from '../../utils/prisma';
 import { AppError, ConflictError, UnauthorizedError, BadRequestError } from '../../utils/errors';
 import { AuthPayload } from '../../middleware/auth';
-import type { RegisterInput, LoginInput, KakaoLoginInput, CompleteProfileInput } from '@badminton/shared';
+import type { RegisterInput, LoginInput, KakaoLoginInput, GoogleLoginInput, CompleteProfileInput, LinkProviderInput } from '@badminton/shared';
 
 const JWT_SECRET = process.env.JWT_SECRET || 'dev-secret';
 const JWT_REFRESH_SECRET = process.env.JWT_REFRESH_SECRET || 'dev-refresh-secret';
@@ -27,6 +27,11 @@ type UserWithProfile = {
   role: string;
   isGuest: boolean;
   createdAt: Date;
+  // Linked-provider ids + password presence drive linkedProviders/hasPassword in
+  // the response so the client can show 연동 status + enforce "keep ≥1 method".
+  kakaoId: string | null;
+  googleId: string | null;
+  password: string | null;
   profile: { skillLevel: string | null; gender: string | null } | null;
 };
 
@@ -46,6 +51,15 @@ function toUserResponse(user: UserWithProfile) {
     createdAt: user.createdAt.toISOString(),
     skillLevel: user.profile?.skillLevel ?? null,
     gender: user.profile?.gender ?? null,
+    // Linked social providers (✓연동됨 vs 연동 in the client). A provider is
+    // "linked" when its id column is non-null.
+    linkedProviders: {
+      kakao: user.kakaoId != null,
+      google: user.googleId != null,
+    },
+    // hasPassword = a phone account. Together with linkedProviders the client
+    // counts the user's login methods and blocks unlinking the LAST one.
+    hasPassword: user.password != null,
   };
 }
 
@@ -279,6 +293,360 @@ export async function kakaoLogin(input: KakaoLoginInput) {
     user: toUserResponse(withProfile),
     tokens,
   };
+}
+
+/**
+ * Exchange a Google authorization `code` for a Google access token, SERVER-SIDE.
+ *
+ * Mirrors exchangeKakaoCode: the client_secret lives only here on the backend
+ * (never reaches the web/mobile bundle). The client sends us the `code` it got
+ * from Google's authorize step plus the EXACT `redirectUri` it used (Google
+ * requires the redirect_uri at exchange time to match the one used at authorize
+ * time).
+ *
+ * Throws:
+ *   - 503 '구글 로그인이 설정되지 않았습니다' if our Google keys aren't loaded
+ *     (so a misconfigured server never 500s on this path).
+ *   - 401 '구글 인증에 실패했습니다' on any non-200 / network error from Google.
+ */
+async function exchangeGoogleCode(code: string, redirectUri: string): Promise<string> {
+  const clientId = process.env.GOOGLE_CLIENT_ID;
+  const clientSecret = process.env.GOOGLE_CLIENT_SECRET;
+  if (!clientId || !clientSecret) {
+    throw new AppError(503, '구글 로그인이 설정되지 않았습니다');
+  }
+
+  const body = new URLSearchParams({
+    grant_type: 'authorization_code',
+    client_id: clientId,
+    client_secret: clientSecret,
+    redirect_uri: redirectUri,
+    code,
+  });
+
+  let tokenRes: globalThis.Response;
+  try {
+    tokenRes = await fetch('https://oauth2.googleapis.com/token', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded;charset=utf-8' },
+      body: body.toString(),
+    });
+  } catch {
+    // Network failure reaching Google's token endpoint — auth failure, not 500.
+    throw new UnauthorizedError('구글 인증에 실패했습니다');
+  }
+
+  if (!tokenRes.ok) {
+    // Surface Google's actual error (status + body) so misconfig (invalid_grant /
+    // redirect_uri_mismatch / invalid_client) is diagnosable. The body holds
+    // Google error codes only — never our client_secret.
+    let detail = '';
+    try { detail = (await tokenRes.text()).slice(0, 300); } catch { /* noop */ }
+    console.error('[google] token exchange failed', tokenRes.status, detail);
+    throw new UnauthorizedError(`구글 인증 실패(토큰교환) [${tokenRes.status}] ${detail}`);
+  }
+
+  const tokenData = (await tokenRes.json()) as { access_token?: string };
+  if (!tokenData.access_token) {
+    throw new UnauthorizedError('구글 인증 실패(토큰없음)');
+  }
+  return tokenData.access_token;
+}
+
+/**
+ * Google social login (secure server-side authorization-code flow).
+ *
+ * Mirrors kakaoLogin. Accepts EITHER:
+ *   - { code, redirectUri } — preferred. We exchange the code for a Google
+ *     access token server-side (using our client_secret), keeping the secret off
+ *     the client entirely.
+ *   - { accessToken } — kept for a future native Google SDK that hands us a
+ *     Google access token directly.
+ *
+ * In both cases we then fetch the Google user info, upsert a PLAYER User keyed
+ * by the Google account id (sub), and issue OUR JWTs so a Google-logged-in user
+ * behaves like any other authenticated member. The response shape
+ * ({ isNew, user, tokens }) is identical to /auth/kakao and /auth/login.
+ */
+export async function googleLogin(input: GoogleLoginInput) {
+  // Resolve a Google access token from whichever shape the client sent.
+  const accessToken =
+    input.code && input.redirectUri
+      ? await exchangeGoogleCode(input.code, input.redirectUri)
+      : input.accessToken!;
+
+  let googleRes: globalThis.Response;
+  try {
+    googleRes = await fetch('https://www.googleapis.com/oauth2/v3/userinfo', {
+      headers: { Authorization: `Bearer ${accessToken}` },
+    });
+  } catch {
+    // Network failure reaching Google — surface as an auth failure (not a 500).
+    throw new UnauthorizedError('구글 인증에 실패했습니다');
+  }
+
+  if (!googleRes.ok) {
+    let detail = '';
+    try { detail = (await googleRes.text()).slice(0, 300); } catch { /* noop */ }
+    console.error('[google] userinfo failed', googleRes.status, detail);
+    throw new UnauthorizedError(`구글 인증 실패(사용자조회) [${googleRes.status}] ${detail}`);
+  }
+
+  const data = (await googleRes.json()) as {
+    sub?: string;
+    email?: string;
+    name?: string;
+    picture?: string;
+  };
+
+  if (!data.sub) {
+    throw new UnauthorizedError('구글 인증에 실패했습니다');
+  }
+
+  const googleId = data.sub;
+  // Name = Google name, else email local-part, else a friendly fallback.
+  const emailLocalPart = data.email ? data.email.split('@')[0] : undefined;
+  const displayName = data.name || emailLocalPart || '구글회원';
+
+  // Upsert by googleId: existing Google user → that user; otherwise create a new
+  // PLAYER (phone/password null, isGuest false) plus a default PlayerProfile.
+  // `isNew` is true only when we just created the account — the client uses it
+  // to route brand-new Google users through the profile-setup step before home.
+  let user = await prisma.user.findUnique({ where: { googleId } });
+  let isNew = false;
+  if (!user) {
+    isNew = true;
+    user = await prisma.user.create({
+      data: {
+        googleId,
+        name: displayName,
+        role: 'PLAYER',
+        isGuest: false,
+        profile: { create: {} },
+      },
+    });
+  }
+
+  const payload: AuthPayload = { userId: user.id, role: user.role };
+  const tokens = generateTokens(payload);
+
+  await prisma.user.update({
+    where: { id: user.id },
+    data: { refreshToken: tokens.refreshToken },
+  });
+
+  // Fetch WITH the profile so the response includes skillLevel/gender (a brand-new
+  // Google user has an empty profile → both null, which drives the profile-setup gate).
+  const withProfile = await prisma.user.findUniqueOrThrow({
+    where: { id: user.id },
+    include: { profile: true },
+  });
+
+  return {
+    isNew,
+    user: toUserResponse(withProfile),
+    tokens,
+  };
+}
+
+// ───────────────────────────────────────────────────────────────────────────
+// Manual account linking (계정 연동)
+//
+// A logged-in user attaches a SECOND social provider to their ONE account so a
+// later login with EITHER provider resolves to the SAME account. These REUSE the
+// exact same secure server-side code-exchange + provider userinfo as the social
+// LOGIN path above (exchangeKakaoCode/exchangeGoogleCode + the user/me / userinfo
+// fetch), but instead of upserting/creating a user they resolve ONLY the provider
+// id and attach it to the CURRENT authenticated user (userId). The login path is
+// completely untouched.
+// ───────────────────────────────────────────────────────────────────────────
+
+/**
+ * Resolve a Kakao account id from a { code, redirectUri } using the SAME exchange
+ * + user/me call as kakaoLogin — but WITHOUT creating/logging in any user. Used
+ * by the link flow to discover which Kakao identity to attach to the current
+ * account. Throws the same diagnosable auth errors as the login path.
+ */
+async function resolveKakaoIdFromCode(code: string, redirectUri: string): Promise<string> {
+  const accessToken = await exchangeKakaoCode(code, redirectUri);
+
+  let kakaoRes: globalThis.Response;
+  try {
+    kakaoRes = await fetch('https://kapi.kakao.com/v2/user/me', {
+      headers: { Authorization: `Bearer ${accessToken}` },
+    });
+  } catch {
+    throw new UnauthorizedError('카카오 인증에 실패했습니다');
+  }
+
+  if (!kakaoRes.ok) {
+    let detail = '';
+    try { detail = (await kakaoRes.text()).slice(0, 300); } catch { /* noop */ }
+    console.error('[kakao] user/me failed (link)', kakaoRes.status, detail);
+    throw new UnauthorizedError(`카카오 인증 실패(사용자조회) [${kakaoRes.status}] ${detail}`);
+  }
+
+  const data = (await kakaoRes.json()) as { id?: number };
+  if (data.id == null) {
+    throw new UnauthorizedError('카카오 인증에 실패했습니다');
+  }
+  return String(data.id);
+}
+
+/**
+ * Resolve a Google account id (sub) from a { code, redirectUri } using the SAME
+ * exchange + userinfo call as googleLogin — but WITHOUT creating/logging in any
+ * user. Used by the link flow. Throws the same diagnosable auth errors.
+ */
+async function resolveGoogleIdFromCode(code: string, redirectUri: string): Promise<string> {
+  const accessToken = await exchangeGoogleCode(code, redirectUri);
+
+  let googleRes: globalThis.Response;
+  try {
+    googleRes = await fetch('https://www.googleapis.com/oauth2/v3/userinfo', {
+      headers: { Authorization: `Bearer ${accessToken}` },
+    });
+  } catch {
+    throw new UnauthorizedError('구글 인증에 실패했습니다');
+  }
+
+  if (!googleRes.ok) {
+    let detail = '';
+    try { detail = (await googleRes.text()).slice(0, 300); } catch { /* noop */ }
+    console.error('[google] userinfo failed (link)', googleRes.status, detail);
+    throw new UnauthorizedError(`구글 인증 실패(사용자조회) [${googleRes.status}] ${detail}`);
+  }
+
+  const data = (await googleRes.json()) as { sub?: string };
+  if (!data.sub) {
+    throw new UnauthorizedError('구글 인증에 실패했습니다');
+  }
+  return data.sub;
+}
+
+/** Re-fetch the current user WITH profile and return the canonical user response. */
+async function getUserResponse(userId: string) {
+  const withProfile = await prisma.user.findUniqueOrThrow({
+    where: { id: userId },
+    include: { profile: true },
+  });
+  return toUserResponse(withProfile);
+}
+
+/**
+ * 그 소셜 id가 붙어 있는 '다른 계정'에 실제 활동 내역(모임 멤버십/체크인)이 있는지.
+ * 활동이 없으면 '빈 중복 계정'(소셜로 한 번 들어왔다 아무것도 안 한 계정)으로 보고
+ * 연동 시 흡수(삭제)해도 안전하다. 활동이 있으면 흡수하지 않고 안내한다.
+ */
+async function otherAccountHasActivity(otherUserId: string): Promise<boolean> {
+  const [members, checkins] = await Promise.all([
+    prisma.clubMember.count({ where: { userId: otherUserId } }),
+    prisma.checkIn.count({ where: { userId: otherUserId } }),
+  ]);
+  return members > 0 || checkins > 0;
+}
+
+/**
+ * Link a Kakao account to the CURRENT user (authenticated). Resolves the Kakao id:
+ *   - already on THIS user → idempotent.
+ *   - on ANOTHER user that is an EMPTY duplicate (no 모임/출석) → 흡수: 그 빈 계정을
+ *     삭제하고 이 계정에 kakaoId를 붙인다(데이터 손실 없음).
+ *   - on ANOTHER user WITH activity → 409: 그 계정으로 로그인하라고 안내(자동 병합 안 함).
+ */
+export async function linkKakao(userId: string, input: LinkProviderInput) {
+  const kakaoId = await resolveKakaoIdFromCode(input.code, input.redirectUri);
+
+  const existing = await prisma.user.findUnique({ where: { kakaoId } });
+  if (existing && existing.id !== userId) {
+    if (await otherAccountHasActivity(existing.id)) {
+      throw new ConflictError('이미 다른 계정에서 활동 중인 카카오 계정이에요. 그 계정으로 로그인해 주세요');
+    }
+    // 빈 중복 계정 흡수: 삭제(소셜 id 해제) + 현재 계정에 부착을 원자적으로.
+    await prisma.$transaction([
+      prisma.user.delete({ where: { id: existing.id } }),
+      prisma.user.update({ where: { id: userId }, data: { kakaoId } }),
+    ]);
+    return getUserResponse(userId);
+  }
+  if (!existing) {
+    await prisma.user.update({ where: { id: userId }, data: { kakaoId } });
+  }
+  return getUserResponse(userId);
+}
+
+/**
+ * Link a Google account to the CURRENT user (authenticated). Mirrors linkKakao
+ * (빈 중복 계정은 흡수, 활동 있는 계정은 409 안내).
+ */
+export async function linkGoogle(userId: string, input: LinkProviderInput) {
+  const googleId = await resolveGoogleIdFromCode(input.code, input.redirectUri);
+
+  const existing = await prisma.user.findUnique({ where: { googleId } });
+  if (existing && existing.id !== userId) {
+    if (await otherAccountHasActivity(existing.id)) {
+      throw new ConflictError('이미 다른 계정에서 활동 중인 구글 계정이에요. 그 계정으로 로그인해 주세요');
+    }
+    await prisma.$transaction([
+      prisma.user.delete({ where: { id: existing.id } }),
+      prisma.user.update({ where: { id: userId }, data: { googleId } }),
+    ]);
+    return getUserResponse(userId);
+  }
+  if (!existing) {
+    await prisma.user.update({ where: { id: userId }, data: { googleId } });
+  }
+  return getUserResponse(userId);
+}
+
+/**
+ * Count how many login methods a user has: password (phone) + each linked
+ * provider. Used by the unlink guard to keep at least one.
+ */
+function countLoginMethods(u: { password: string | null; kakaoId: string | null; googleId: string | null }): number {
+  let n = 0;
+  if (u.password != null) n += 1;
+  if (u.kakaoId != null) n += 1;
+  if (u.googleId != null) n += 1;
+  return n;
+}
+
+/**
+ * Unlink Kakao from the CURRENT user. GUARDS that the user keeps ≥1 login method
+ * (another provider OR a password) — unlinking the last method → 400. Idempotent
+ * when Kakao isn't linked (nothing to do, but still guard-checked so we never
+ * leave the account with zero methods).
+ */
+export async function unlinkKakao(userId: string) {
+  const user = await prisma.user.findUnique({ where: { id: userId } });
+  if (!user) throw new UnauthorizedError();
+
+  // Only enforce the guard when Kakao is actually the thing being removed; if it
+  // isn't linked, removing it changes nothing and the account keeps its methods.
+  if (user.kakaoId != null && countLoginMethods(user) <= 1) {
+    throw new BadRequestError('마지막 로그인 수단은 해제할 수 없어요');
+  }
+
+  if (user.kakaoId != null) {
+    await prisma.user.update({ where: { id: userId }, data: { kakaoId: null } });
+  }
+  return getUserResponse(userId);
+}
+
+/**
+ * Unlink Google from the CURRENT user. Mirrors unlinkKakao.
+ */
+export async function unlinkGoogle(userId: string) {
+  const user = await prisma.user.findUnique({ where: { id: userId } });
+  if (!user) throw new UnauthorizedError();
+
+  if (user.googleId != null && countLoginMethods(user) <= 1) {
+    throw new BadRequestError('마지막 로그인 수단은 해제할 수 없어요');
+  }
+
+  if (user.googleId != null) {
+    await prisma.user.update({ where: { id: userId }, data: { googleId: null } });
+  }
+  return getUserResponse(userId);
 }
 
 /**
