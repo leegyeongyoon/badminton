@@ -8,6 +8,10 @@ packages/server/.env
 packages/server/.env.test
 packages/mobile/.env
 *.log
+logs/
+# DB dumps — contain real data, NEVER commit
+backups/
+*.sql.gz
 .DS_Store
 coverage/
 

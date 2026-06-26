@@ -52,6 +52,11 @@ FROM node:22-alpine AS runner
 WORKDIR /app
 ENV NODE_ENV=production
 
+# curl is used by the compose `server` healthcheck (GET /api/v1/health).
+# node:22-alpine ships without it; install just curl (no recommends) so the
+# container can probe its own liveness. Additive — does not affect the app.
+RUN apk add --no-cache curl
+
 # Copy the workspace root manifests and the pruned, production node_modules.
 # In npm workspaces the hoisted dependencies live in the ROOT node_modules,
 # while the workspace packages are symlinked under node_modules/@badminton/*.

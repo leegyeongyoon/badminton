@@ -24,10 +24,50 @@ httpServer.listen(PORT, () => {
   initScheduler();
 });
 
-process.on('SIGTERM', async () => {
-  logger.info('SIGTERM received, shutting down...');
-  stopScheduler();
-  await prisma.$disconnect();
-  httpServer.close();
-  process.exit(0);
+// Last-resort crash handlers. Without these, an uncaught exception or rejected
+// promise that escapes a request handler would either kill the process with no
+// log line (vanishing on restart) or, for rejections, silently warn. We log it
+// to the persisted error file FIRST so the team can know after the fact.
+process.on('uncaughtException', (err) => {
+  logger.error('uncaughtException', { err });
+  // The process is now in an undefined state; the only safe action is to exit
+  // and let the restart policy (docker `restart: unless-stopped`) bring up a
+  // clean instance. Give winston a moment to flush file transports first.
+  setTimeout(() => process.exit(1), 1000).unref();
 });
+
+process.on('unhandledRejection', (reason) => {
+  // Log but do NOT exit: an unhandled rejection is less certainly fatal than an
+  // uncaught exception, and exiting here would be a denial-of-service vector.
+  logger.error('unhandledRejection', { reason });
+});
+
+// Graceful shutdown with a hard timeout so a hung prisma.$disconnect() (or any
+// other slow teardown) can't leave the container stuck and unkillable by the
+// orchestrator's normal SIGTERM. Force-exit after 5s.
+let shuttingDown = false;
+async function gracefulShutdown(signal: string) {
+  if (shuttingDown) return;
+  shuttingDown = true;
+  logger.info(`${signal} received, shutting down...`);
+
+  const forceExit = setTimeout(() => {
+    logger.error('graceful shutdown timed out, forcing exit');
+    process.exit(1);
+  }, 5000);
+  forceExit.unref();
+
+  try {
+    stopScheduler();
+    httpServer.close();
+    await prisma.$disconnect();
+    clearTimeout(forceExit);
+    process.exit(0);
+  } catch (err) {
+    logger.error('error during shutdown', { err });
+    clearTimeout(forceExit);
+    process.exit(1);
+  }
+}
+
+process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));

@@ -17,6 +17,7 @@ import clubSessionRouter from './modules/clubSession/clubSession.router';
 import gameBoardRouter from './modules/gameBoard/gameBoard.router';
 import chatRouter from './modules/chat/chat.router';
 import operatorRequestRouter from './modules/operatorRequest/operatorRequest.router';
+import clientErrorRouter from './modules/clientError/clientError.router';
 
 const app = express();
 
@@ -52,6 +53,11 @@ app.use('/api/v1/club-sessions', clubSessionRouter);   // /club-sessions/:id/*
 app.use('/api/v1/club-sessions', gameBoardRouter);     // /club-sessions/:id/game-board
 app.use('/api/v1/game-boards', gameBoardRouter);       // /game-boards/:id/entries/*
 app.use('/api/v1/operator-requests', operatorRequestRouter);
+// Client crash/error sink. Use a tight body limit so a runtime error report
+// (message + stack) can't carry an oversized payload. Mounted before the
+// errorHandler. The global express.json() above already parsed the body; the
+// extra parser just enforces the smaller cap for this route's content.
+app.use('/api/v1', express.json({ limit: '32kb' }), clientErrorRouter);
 
 app.use(errorHandler);
 

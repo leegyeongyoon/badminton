@@ -46,8 +46,45 @@ fi
 echo "==> Building images (server + migrator)"
 $COMPOSE build server migrate
 
+# --- Pre-migration backup (DATA-LOSS GUARD) -------------------------------
+# Take a full DB dump BEFORE applying migrations. If the backup fails we ABORT
+# the deploy rather than migrate an un-backed-up DB. Only relevant when we own
+# the bundled Postgres; an external DB is the operator's responsibility.
+if [[ "$USE_BUNDLED_DB" == "1" ]]; then
+  echo "==> Pre-migration backup"
+  if ! bash scripts/backup-db.sh; then
+    echo "ERROR: pre-migration backup FAILED. Aborting deploy; NOT running migrations." >&2
+    echo "       Fix the backup (DB up? disk space?) and re-run the deploy." >&2
+    exit 1
+  fi
+else
+  echo "==> Skipping pre-migration backup (external DATABASE_URL; not managed here)"
+fi
+
 echo "==> Applying migrations (prisma migrate deploy)"
 $COMPOSE run --rm migrate
+
+# --- Post-migrate sanity check --------------------------------------------
+# Surface accidental data wipes: core tables should not be empty after a deploy
+# on an existing install. We don't roll back automatically (a fresh DB legitimately
+# starts empty), but a count of 0 on a populated install is a loud red flag.
+if [[ "$USE_BUNDLED_DB" == "1" ]]; then
+  echo "==> Post-migrate sanity check (core table counts)"
+  for tbl in User Facility Club; do
+    cnt="$($COMPOSE exec -T postgres \
+            psql -U badminton -d badminton -tAc "SELECT count(*) FROM \"${tbl}\";" \
+            2>/dev/null | tr -d '[:space:]' || echo "ERR")"
+    if [[ "$cnt" == "ERR" || -z "$cnt" ]]; then
+      echo "    WARNING: could not read count for \"${tbl}\" (table missing or DB error)."
+    elif [[ "$cnt" == "0" ]]; then
+      echo "    !!! WARNING: core table \"${tbl}\" is EMPTY (count 0) after migrate."
+      echo "    !!! If this is an existing install this may indicate DATA LOSS."
+      echo "    !!! A pre-migration backup was taken; restore with scripts/restore-db.sh if needed."
+    else
+      echo "    OK: \"${tbl}\" = ${cnt} row(s)"
+    fi
+  done
+fi
 
 echo "==> (Re)starting server"
 $COMPOSE up -d server

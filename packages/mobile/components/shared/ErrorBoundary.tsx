@@ -1,6 +1,31 @@
 import React, { Component, ErrorInfo, ReactNode } from 'react';
 import { View, Text, ScrollView, StyleSheet, Platform } from 'react-native';
 import { ErrorFallback } from './ErrorFallback';
+import { API_URL } from '../../constants/api';
+
+/**
+ * Fire-and-forget report of a runtime crash to the server's error sink so the
+ * team can KNOW a client crashed in production. Web-safe (uses fetch), never
+ * throws, never blocks the fallback UI — all failures are swallowed.
+ */
+function reportClientError(error: Error, componentStack: string | null) {
+  try {
+    fetch(`${API_URL}/errors`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        message: error?.message ?? String(error),
+        stack: error?.stack,
+        context: componentStack ?? undefined,
+        platform: Platform.OS,
+      }),
+    }).catch(() => {
+      /* swallow — reporting must never surface to the user */
+    });
+  } catch {
+    /* swallow synchronous failures (e.g. JSON/serialization) */
+  }
+}
 
 interface Props {
   children: ReactNode;
@@ -26,6 +51,9 @@ export class ErrorBoundary extends Component<Props, State> {
   componentDidCatch(error: Error, errorInfo: ErrorInfo) {
     console.error('ErrorBoundary caught:', error, errorInfo);
     this.setState({ componentStack: errorInfo.componentStack || null });
+    // Fire-and-forget: persist the crash server-side. Never blocks rendering
+    // the fallback UI and never throws.
+    reportClientError(error, errorInfo.componentStack || null);
   }
 
   handleRetry = () => {

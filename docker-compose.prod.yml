@@ -52,6 +52,15 @@ services:
     # Cloudflare 터널 public hostname 도 localhost:3131 로 연결.
     ports:
       - '3131:3000'
+    # Liveness probe against the in-container app port (3000). Lets compose /
+    # orchestrators detect a wedged process even while `restart: unless-stopped`
+    # keeps a crashed one coming back.
+    healthcheck:
+      test: ['CMD-SHELL', 'curl -f http://localhost:3000/api/v1/health || exit 1']
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
     restart: unless-stopped
 
 volumes:
