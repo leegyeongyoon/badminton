@@ -197,31 +197,10 @@ export default function ClubDetailScreen() {
     [loadFacilities],
   );
 
-  // Auto check-in on entering an ACTIVE 정모: a club member who opens the 정모 is
-  // checked in automatically (NO geofence — per product decision). Done at most
-  // ONCE per 정모 (persisted), so a member who later checks out is NOT auto
-  // re-checked-in — they re-check-in with the manual 체크인 button. Guests and
-  // non-members are excluded.
-  const autoTriedRef = useRef<string | null>(null);
+  // 자동 체크인 제거: 회원이 정모 화면을 '열기만 해도' 자동 출석되던 동작은, 오늘 안 오는
+  // 사람까지 정모 풀에 잡혀 혼란을 줘서 제거했다. 출석은 (1) 현장 QR 스캔 또는 (2) 수동
+  // 체크인 버튼으로만 이뤄진다. (autoCheckMsg는 항상 null — 렌더의 안내 블록은 비활성.)
   const [autoCheckMsg] = useState<string | null>(null);
-  const AUTO_ATTEND_KEY = 'badminton_auto_attended_sessions';
-  useEffect(() => {
-    const sid = activeSession?.id;
-    if (!sid || !user || isGuest || isCheckedIn || !myMembership) return;
-    if (autoTriedRef.current === sid) return;
-    autoTriedRef.current = sid;
-    (async () => {
-      let done: string[] = [];
-      try { done = JSON.parse((await getItem(AUTO_ATTEND_KEY)) || '[]'); } catch { done = []; }
-      if (done.includes(sid)) return; // already auto-attended once (e.g. then checked out)
-      try {
-        await clubSessionApi.attend(sid); // unconditional check-in (no geofence)
-        try { await setItem(AUTO_ATTEND_KEY, JSON.stringify([...done, sid])); } catch { /* noop */ }
-        showSuccess('정모 참여 — 자동 체크인됐어요');
-        await Promise.all([fetchStatus(), fetchMembers(clubId)]);
-      } catch { /* non-fatal — 수동 체크인 버튼 유지 */ }
-    })();
-  }, [activeSession?.id, user, isGuest, isCheckedIn, myMembership, clubId]);
 
   const onRefresh = useCallback(async () => {
     if (clubId) {

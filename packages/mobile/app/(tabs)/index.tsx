@@ -129,29 +129,9 @@ export default function HomeScreen() {
     }
   }, [fetchStatus, loadMyStatus, loadActiveSessions]);
 
-  // Auto check-in: a member who opens the home with an ACTIVE 정모 they belong to
-  // is checked in automatically (no code/geofence). Once per 정모 (persisted) so a
-  // later checkout isn't auto-undone — the 체크인 버튼 re-checks-in manually.
-  const autoAttendedRef = useRef<Set<string>>(new Set());
-  useEffect(() => {
-    if (!user || activeSessions.length === 0) return;
-    (async () => {
-      const KEY = 'badminton_auto_attended_sessions';
-      let done: string[] = [];
-      try { done = JSON.parse((await getItem(KEY)) || '[]'); } catch { done = []; }
-      let changed = false;
-      for (const s of activeSessions) {
-        if (autoAttendedRef.current.has(s.id) || done.includes(s.id)) continue;
-        autoAttendedRef.current.add(s.id);
-        try { await clubSessionApi.attend(s.id); done.push(s.id); changed = true; } catch { /* noop */ }
-      }
-      if (changed) {
-        try { await setItem(KEY, JSON.stringify(done)); } catch { /* noop */ }
-        await Promise.all([fetchStatus(), loadMyStatus(), loadActiveSessions(useClubStore.getState().clubs)]);
-        showSuccess('정모 참여 — 자동 체크인됐어요');
-      }
-    })();
-  }, [activeSessions, user]);
+  // 자동 체크인 제거: 홈을 '열기만 해도' 활성 정모에 자동 출석되던 동작은, 오늘 안 오는
+  // 사람까지 정모 풀에 잡혀 혼란을 줘서 제거했다. 출석은 현장 QR 스캔 또는 위 '체크인'
+  // 버튼(handleQuickCheckin)으로만 이뤄진다.
 
   const loadProfile = async () => {
     try {
