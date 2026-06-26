@@ -3524,10 +3524,12 @@ const styles = StyleSheet.create({
   gameChipBody: { flex: 1, minWidth: 0 },
   gameChipNameRow: { flexDirection: 'row', alignItems: 'center', gap: 3 },
   // Name = primary content: 13.5px, bold, full (never truncated for KO names).
-  gameChipName: { fontSize: 13.5, fontWeight: '700', flexShrink: 1 },
+  gameChipName: { fontSize: 13.5, fontWeight: '700', flexShrink: 1, lineHeight: 18 },
   // Gender marker = a BARE colored ♂/♀ glyph (no tinted pill) — bigger + bolder
   // + gender-colored so male/female pop at a glance on every on-court chip.
-  gameChipGenderText: { fontSize: 15, fontWeight: '900', lineHeight: 17 },
+  // lineHeight matches the name box (18) so the glyph shares its vertical box
+  // and `alignItems:'center'` centers it (was 17 → floated a hair high).
+  gameChipGenderText: { fontSize: 15, fontWeight: '900', lineHeight: 18, textAlignVertical: 'center', includeFontPadding: false },
   // 게임수 = secondary, quiet (smaller + lighter weight so it doesn't compete).
   gameChipGames: { fontSize: 10, fontWeight: '600' },
 

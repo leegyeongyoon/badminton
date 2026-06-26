@@ -592,8 +592,9 @@ const styles = StyleSheet.create({
   },
   queueSkillTag: { width: 22, height: 22, borderRadius: radius.sm, borderWidth: 1.5, alignItems: 'center', justifyContent: 'center' },
   queueSkillText: { fontSize: 13, fontWeight: '900' },
-  queueName: { fontSize: 15, fontWeight: '800', maxWidth: 110 },
-  queueGender: { fontSize: 15, fontWeight: '900' },
+  queueName: { fontSize: 15, fontWeight: '800', maxWidth: 110, lineHeight: 20 },
+  // Gender ♂/♀: share the name's vertical box (lineHeight 20) so it centers.
+  queueGender: { fontSize: 15, fontWeight: '900', lineHeight: 20, textAlignVertical: 'center', includeFontPadding: false },
 
   // Waiting line — wrapping grid
   waitWrap: { gap: spacing.sm },

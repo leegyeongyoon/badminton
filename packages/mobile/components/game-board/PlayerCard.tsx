@@ -257,7 +257,16 @@ const styles = StyleSheet.create({
 
   // Gender marker = a BARE colored ♂/♀ glyph (no tinted pill). Bigger + bolder
   // + gender-colored (blue ♂ / rose ♀) so male/female pop at a glance.
-  genderSymbol: { fontSize: 17, fontWeight: '900', lineHeight: 19 },
+  // lineHeight matches the name box (subtitle1 = 22 / nameCourt ≈ 20) so the
+  // glyph shares the name's vertical box and `alignItems:'center'` truly
+  // centers it instead of letting a shorter glyph box float high/low.
+  genderSymbol: {
+    fontSize: 17,
+    fontWeight: '900',
+    lineHeight: 22,
+    textAlignVertical: 'center',
+    includeFontPadding: false,
+  },
 
   metaRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.xs },
   guestTag: { paddingHorizontal: spacing.sm, paddingVertical: 1, borderRadius: radius.sm },
