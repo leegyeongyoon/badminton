@@ -569,6 +569,31 @@ export async function removeMember(
   return { success: true };
 }
 
+/**
+ * 멤버 출석 기록 삭제 — 이 모임의 정모(ClubSession)에 묶인 그 회원의 CheckIn 행을 모두
+ * 삭제한다(출석왕 카운트 0). 멤버십·역할은 유지. 시설 레벨(clubSessionId=null) 행은
+ * 건드리지 않는다. 잘못 들어간 출석(예: 과거 자동출석)을 운영자가 정리할 때 사용.
+ * Auth: 이 모임의 LEADER(또는 SUPER_ADMIN).
+ */
+export async function clearMemberAttendance(
+  clubId: string,
+  targetUserId: string,
+  requesterId: string,
+  requesterRole: string,
+): Promise<{ deleted: number }> {
+  await verifyClubLeaderOrSuperAdmin(clubId, requesterId, requesterRole);
+
+  const target = await prisma.clubMember.findUnique({
+    where: { userId_clubId: { userId: targetUserId, clubId } },
+  });
+  if (!target) throw new NotFoundError('모임 멤버');
+
+  const result = await prisma.checkIn.deleteMany({
+    where: { userId: targetUserId, clubSession: { clubId } },
+  });
+  return { deleted: result.count };
+}
+
 // --- Managed members (운영자 관리 멤버) ---
 
 /**

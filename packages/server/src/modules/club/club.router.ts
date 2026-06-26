@@ -177,6 +177,20 @@ router.get('/:clubId/members/:userId/attendance', authenticate, async (req: Requ
   } catch (err) { next(err); }
 });
 
+// DELETE /api/v1/clubs/:clubId/members/:userId/attendance - 그 회원의 이 모임 정모
+// 출석(CheckIn) 기록을 모두 삭제(출석왕 0). 멤버십 유지. Auth: LEADER/SUPER_ADMIN(service).
+router.delete('/:clubId/members/:userId/attendance', authenticate, async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const result = await clubService.clearMemberAttendance(
+      req.params.clubId as string,
+      req.params.userId as string,
+      req.user!.userId,
+      req.user!.role as string,
+    );
+    res.json(result);
+  } catch (err) { next(err); }
+});
+
 // GET /api/v1/clubs/:clubId/dues?period=YYYY-MM - per-member monthly dues +
 // totals (LEADER/STAFF). Default period = current month (server-side).
 router.get('/:clubId/dues', authenticate, async (req: Request, res: Response, next: NextFunction) => {
