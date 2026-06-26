@@ -19,10 +19,12 @@ import { Button } from '../components/ui/Button';
 import { ScreenContainer } from '../components/ui/ScreenContainer';
 
 // ─────────────────────────────────────────────────────────
-// 신규 카카오 가입자 프로필 설정 — 이름(필수) + 급수(선택) + 성별(선택).
+// 신규 카카오 가입자 프로필 설정 — 이름(필수) + 급수(필수) + 성별(필수).
 //  • POST /auth/complete-profile → 이름/급수/성별 저장
 //  • 제출 후 authStore.completeProfile 로 로컬 user 갱신 → 게이트가 홈으로 보냄
 //    (대기 중인 모임 초대코드가 있으면 게이트가 자동 가입까지 처리)
+//  • 카카오는 성별을 주지 않으므로(닉네임만) 여기서 한 번 필수로 받는다.
+//    성별은 ♂/♀ 마커 + 혼복/남복 매칭에 쓰이므로 게이트가 강제한다.
 // ─────────────────────────────────────────────────────────
 
 export default function ProfileSetupScreen() {
@@ -40,20 +42,22 @@ export default function ProfileSetupScreen() {
   const trimmedName = name.trim();
   const nameError = touched && trimmedName.length === 0 ? '이름을 입력하세요' : undefined;
   // 급수 is REQUIRED — it's captured once here and never re-prompted, so the
-  // 시작하기 button stays disabled until both 이름 and 급수 are provided.
+  // 시작하기 button stays disabled until 이름·급수·성별 are all provided.
   const skillError = touched && !skill ? '급수를 선택하세요' : undefined;
-  const canSubmit = trimmedName.length > 0 && !!skill;
+  // 성별 is REQUIRED — the gate enforces it (카카오는 성별을 주지 않음).
+  const genderError = touched && !gender ? '성별을 선택하세요' : undefined;
+  const canSubmit = trimmedName.length > 0 && !!skill && !!gender;
 
   const handleSubmit = async () => {
     setTouched(true);
-    if (trimmedName.length === 0 || !skill) return;
+    if (trimmedName.length === 0 || !skill || !gender) return;
 
     setLoading(true);
     try {
       await completeProfile({
         name: trimmedName,
         skillLevel: skill,
-        ...(gender ? { gender } : {}),
+        gender,
       });
       // Navigation handled by the root layout gate (→ home, or auto-join a
       // pending club invite then into that club).
@@ -76,7 +80,7 @@ export default function ProfileSetupScreen() {
       >
         <Text style={[styles.title, { color: colors.text }]}>프로필 설정</Text>
         <Text style={[styles.subtitle, { color: colors.textSecondary }]}>
-          모임에서 보여질 이름과 급수를 입력해 주세요
+          모임에서 보여질 이름·급수·성별을 입력해 주세요
         </Text>
 
         {/* 이름 (필수) */}
@@ -157,9 +161,9 @@ export default function ProfileSetupScreen() {
           )}
         </View>
 
-        {/* 성별 (선택) */}
+        {/* 성별 (필수) — ♂/♀ 마커 + 혼복/남복 매칭에 사용 */}
         <View style={styles.field}>
-          <Text style={[styles.fieldLabel, { color: colors.textSecondary }]}>성별 (선택)</Text>
+          <Text style={[styles.fieldLabel, { color: colors.textSecondary }]}>성별 (필수)</Text>
           <View style={styles.genderRow}>
             {(['M', 'F'] as Gender[]).map((g) => {
               const meta = GENDER_META[g];
@@ -187,6 +191,11 @@ export default function ProfileSetupScreen() {
               );
             })}
           </View>
+          {genderError && (
+            <Text style={[styles.errorText, { color: colors.danger }]} accessibilityLiveRegion="polite">
+              {genderError}
+            </Text>
+          )}
         </View>
 
         <Button

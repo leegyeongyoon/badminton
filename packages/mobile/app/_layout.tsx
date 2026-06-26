@@ -114,17 +114,18 @@ function RootLayoutInner() {
         setTimeout(() => { isNavigatingRef.current = false; }, 100);
       }
     } else {
-      // Logged-in member. ORDER: profile-setup (if new/placeholder/no 급수) →
+      // Logged-in member. ORDER: profile-setup (if new/placeholder/no 급수/no 성별) →
       // consume pendingJoin → home/club.
-      // A returning user whose profile has NO 급수 (skillLevel) is also routed to
-      // profile-setup so 급수 is set exactly once (existing users WITH a 급수 — e.g.
-      // seed leaders — are unaffected).
-      // 최고관리자(SUPER_ADMIN)는 플레이어가 아니므로 급수/프로필 온보딩을 건너뛴다.
+      // A returning user whose profile has NO 급수 (skillLevel) OR NO 성별 (gender)
+      // is also routed to profile-setup so both are set exactly once. 카카오 로그인은
+      // 성별을 주지 않으므로(닉네임만) 성별 없는 기존 회원도 한 번 프롬프트된다.
+      // 성별은 ♂/♀ 마커 + 혼복/남복 매칭에 필수이므로 게이트가 강제한다.
+      // 최고관리자(SUPER_ADMIN)는 플레이어가 아니므로 급수/성별/프로필 온보딩을 건너뛴다.
       const needsProfile =
         user?.role !== 'SUPER_ADMIN' &&
-        (!user || user.name === PLACEHOLDER_NAME || !user.name?.trim() || !user.skillLevel);
+        (!user || user.name === PLACEHOLDER_NAME || !user.name?.trim() || !user.skillLevel || !user.gender);
 
-      // 1) New Kakao user (placeholder name) OR a user missing 급수 → finish profile first.
+      // 1) New Kakao user (placeholder name) OR a user missing 급수/성별 → finish profile first.
       if (needsProfile) {
         if (!inProfileSetup) {
           isNavigatingRef.current = true;

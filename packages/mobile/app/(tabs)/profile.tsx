@@ -15,6 +15,7 @@ import { Colors } from '../../constants/colors';
 import { createShadow } from '../../constants/theme';
 import { showAlert } from '../../utils/alert';
 import { SKILL_LEVELS as SKILL_LETTERS, getSkillMeta } from '../../constants/skill';
+import { GENDER_META, type Gender } from '../../constants/gender';
 
 const roleLabels: Record<string, string> = {
   FACILITY_ADMIN: '시설 관리자',
@@ -30,9 +31,10 @@ const GAME_TYPES = [
 
 export default function ProfileScreen() {
   const router = useRouter();
-  const { user } = useAuthStore();
+  const { user, loadUser } = useAuthStore();
 
   const [skillLevel, setSkillLevel] = useState<string>('');
+  const [gender, setGender] = useState<string>('');
   const [preferredGameTypes, setPreferredGameTypes] = useState<string[]>([]);
   const [stats, setStats] = useState<any>(null);
   const [penalties, setPenalties] = useState<any[]>([]);
@@ -48,6 +50,7 @@ export default function ProfileScreen() {
         profileApi.getPenalties(),
       ]);
       setSkillLevel(profileRes.data.skillLevel || '');
+      setGender(profileRes.data.gender || '');
       setPreferredGameTypes(profileRes.data.preferredGameTypes || []);
       setStats(statsRes.data);
       setPenalties(penaltiesRes.data || []);
@@ -68,6 +71,26 @@ export default function ProfileScreen() {
     try {
       await profileApi.updateProfile({ skillLevel: level });
     } catch {
+      showAlert('오류', '설정 저장에 실패했습니다');
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  // 성별 (남/여) — 필수 항목. 카카오는 성별을 주지 않으므로 여기서 변경 가능하게 하고,
+  // 변경 시 즉시 반영 + 인증 사용자 갱신(loadUser)으로 게이트가 새 값을 보게 한다.
+  const handleGenderChange = async (next: Gender) => {
+    const prev = gender;
+    if (prev === next) return;
+    setGender(next);
+    setIsSaving(true);
+    try {
+      await profileApi.updateProfile({ gender: next });
+      // Refresh the auth user so the onboarding gate sees the new gender and
+      // won't bounce a previously gender-less member back to profile-setup.
+      await loadUser();
+    } catch {
+      setGender(prev);
       showAlert('오류', '설정 저장에 실패했습니다');
     } finally {
       setIsSaving(false);
@@ -224,6 +247,37 @@ export default function ProfileScreen() {
                     numberOfLines={1}
                   >
                     {meta.description}
+                  </Text>
+                </TouchableOpacity>
+              );
+            })}
+          </View>
+        </View>
+
+        {/* Gender (성별) — 필수 */}
+        <View style={styles.settingCard}>
+          <Text style={styles.settingLabel}>성별</Text>
+          <View style={styles.genderRow}>
+            {(['M', 'F'] as Gender[]).map((g) => {
+              const meta = GENDER_META[g];
+              const active = gender === g;
+              return (
+                <TouchableOpacity
+                  key={g}
+                  style={[
+                    styles.genderButton,
+                    active && { backgroundColor: meta.bg, borderColor: meta.color },
+                  ]}
+                  onPress={() => handleGenderChange(g)}
+                  accessibilityRole="button"
+                  accessibilityLabel={`성별 ${meta.label}`}
+                  accessibilityState={{ selected: active }}
+                >
+                  <Text style={[styles.genderSymbol, { color: active ? meta.color : Colors.textSecondary }]}>
+                    {meta.symbol}
+                  </Text>
+                  <Text style={[styles.genderLabel, active && { color: meta.color, fontWeight: '700' }]}>
+                    {meta.label}
                   </Text>
                 </TouchableOpacity>
               );
@@ -545,6 +599,31 @@ const styles = StyleSheet.create({
   },
   skillButtonTextActive: {
     color: '#fff',
+  },
+  genderRow: {
+    flexDirection: 'row',
+    gap: 8,
+  },
+  genderButton: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    paddingVertical: 12,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: Colors.border,
+    backgroundColor: Colors.background,
+  },
+  genderSymbol: {
+    fontSize: 18,
+    fontWeight: '700',
+  },
+  genderLabel: {
+    fontSize: 15,
+    fontWeight: '600',
+    color: Colors.textSecondary,
   },
   gameTypeRow: {
     gap: 10,

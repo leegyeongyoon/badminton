@@ -177,25 +177,8 @@ export default function LoginScreen() {
           style={styles.loginButton}
         />
 
-        <Link href="/(auth)/register" asChild>
-          <Text style={[styles.linkText, { color: colors.primary }]}>
-            {Strings.auth.goToRegister}
-          </Text>
-        </Link>
-
-        {/* Guest entry — non-members can check in without an account */}
-        <Button
-          title="게스트로 참여"
-          onPress={() => router.push('/(auth)/guest')}
-          variant="outline"
-          icon="person"
-          fullWidth
-          accessibilityLabel="게스트로 출석하기"
-          style={styles.guestButton}
-        />
-        <Text style={[styles.guestHint, { color: colors.textLight }]}>
-          회원가입 없이 오늘 모임에 출석할 수 있어요
-        </Text>
+        {/* 회원가입·게스트 참여 제거 — 회원은 카카오 로그인으로만 진입(현장 QR 스캔 출석),
+            운영자/관리자는 위 전화번호 로그인. 게스트는 운영자가 운영판에서 직접 추가. */}
       </View>
       </ScreenContainer>
     </KeyboardAvoidingView>
