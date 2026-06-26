@@ -19,6 +19,7 @@ import { startKakaoWebLogin } from '../../services/kakao';
 import { startGoogleWebLogin } from '../../services/google';
 import { SKILL_LEVELS as SKILL_LETTERS, getSkillMeta } from '../../constants/skill';
 import { GENDER_META, type Gender } from '../../constants/gender';
+import { GenderMarker } from '../../components/ui/GenderMarker';
 
 // 계정 연동(account linking) providers rendered in the 내 정보 section.
 const LINK_PROVIDERS = [
@@ -321,9 +322,7 @@ export default function ProfileScreen() {
                   accessibilityLabel={`성별 ${meta.label}`}
                   accessibilityState={{ selected: active }}
                 >
-                  <Text style={[styles.genderSymbol, { color: active ? meta.color : Colors.textSecondary }]}>
-                    {meta.symbol}
-                  </Text>
+                  <GenderMarker meta={meta} size={18} color={active ? meta.color : Colors.textSecondary} />
                   <Text style={[styles.genderLabel, active && { color: meta.color, fontWeight: '700' }]}>
                     {meta.label}
                   </Text>
@@ -798,10 +797,6 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: Colors.border,
     backgroundColor: Colors.background,
-  },
-  genderSymbol: {
-    fontSize: 18,
-    fontWeight: '700',
   },
   genderLabel: {
     fontSize: 15,

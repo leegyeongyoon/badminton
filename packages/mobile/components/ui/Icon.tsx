@@ -68,6 +68,11 @@ const ICON_MAP = {
   admin: 'shield-account-outline',
   leader: 'crown-outline',
 
+  // Gender — vector glyphs that render identically on every device/font and
+  // align predictably (no raw ♂/♀ Unicode tofu / baseline drift).
+  genderMale: 'gender-male',
+  genderFemale: 'gender-female',
+
   // Misc
   target: 'target',
   star: 'star-outline',

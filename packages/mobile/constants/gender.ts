@@ -2,18 +2,27 @@
  * Gender (성별) design tokens.
  *
  * Maps the server's `gender` value ('M' | 'F' | null) to an instantly
- * distinguishable marker: blue ♂ for male, rose ♀ for female. Colors are
- * resolved from the theme so they adapt to light/dark, with palette
- * fallbacks for non-themed call sites.
+ * distinguishable marker: blue male / rose female. The marker is rendered as a
+ * VECTOR icon (MaterialCommunityIcons gender-male/gender-female via the shared
+ * <GenderMarker> component) so it renders identically on every device + font
+ * and aligns predictably — never raw ♂/♀ Unicode (which showed as tofu/□ or
+ * drifted off-baseline on some mobile fonts). Colors resolve from the theme so
+ * they adapt to light/dark, with palette fallbacks for non-themed call sites.
  */
+import type { IconName } from '../components/ui/Icon';
 import { palette } from './theme';
 
 export type Gender = 'M' | 'F';
 
 export interface GenderMeta {
   gender: Gender;
-  /** Unicode gender symbol marker. */
+  /**
+   * Unicode gender symbol. KEPT for non-visual uses (a11y labels, logs) but
+   * NOT for on-screen markers — render <GenderMarker> / the `icon` instead.
+   */
   symbol: string;
+  /** Semantic Icon name for the robust vector marker (renders everywhere). */
+  icon: IconName;
   /** Korean label. */
   label: string;
   /** Solid marker color (light-theme fallback). */
@@ -23,8 +32,8 @@ export interface GenderMeta {
 }
 
 export const GENDER_META: Record<Gender, GenderMeta> = {
-  M: { gender: 'M', symbol: '♂', label: '남', color: palette.blue500, bg: palette.blue50 },
-  F: { gender: 'F', symbol: '♀', label: '여', color: palette.rose500, bg: palette.rose50 },
+  M: { gender: 'M', symbol: '♂', icon: 'genderMale', label: '남', color: palette.blue500, bg: palette.blue50 },
+  F: { gender: 'F', symbol: '♀', icon: 'genderFemale', label: '여', color: palette.rose500, bg: palette.rose50 },
 };
 
 /**

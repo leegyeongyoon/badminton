@@ -15,6 +15,7 @@ import { useFacilityRoom, useClubRoom, useSocketEvent } from '../../../hooks/use
 import { Icon } from '../../../components/ui/Icon';
 import { getSkillMeta, SKILL_LEVELS } from '../../../constants/skill';
 import { getGenderMeta, getGameType, GENDER_META, type Gender } from '../../../constants/gender';
+import { GenderMarker } from '../../../components/ui/GenderMarker';
 import { PlayerCard } from '../../../components/game-board/PlayerCard';
 import api from '../../../services/api';
 import { clubApi } from '../../../services/club';
@@ -1133,9 +1134,7 @@ export default function OperateScreen() {
             >
               {display || '?'}
             </Text>
-            {g && (
-              <Text style={[styles.gameChipGenderText, { color: g.color }]}>{g.symbol}</Text>
-            )}
+            {g && <GenderMarker meta={g} size={15} />}
           </View>
           <Text style={[styles.gameChipGames, { color: colors.textSecondary }]} numberOfLines={1}>
             {p?.gamesPlayedToday ?? 0}게임
@@ -1626,7 +1625,7 @@ export default function OperateScreen() {
         >
           {display}
         </Text>
-        {g && <Text style={[styles.miniChipGender, { color: g.color }]}>{g.symbol}</Text>}
+        {g && <GenderMarker meta={g} size={14} />}
         {busy && <View style={[styles.conflictDot, { borderColor: colors.surfaceSecondary }]} />}
       </View>
     );
@@ -2701,7 +2700,7 @@ function MatchupModal({
                     <Text style={[modalStyles.matchupName, { color: colors.text }]} numberOfLines={1}>
                       {p.name}
                     </Text>
-                    {g && <Text style={[modalStyles.matchupGender, { color: g.color }]}>{g.symbol}</Text>}
+                    {g && <GenderMarker meta={g} size={15} />}
                     <View style={{ flex: 1 }} />
                     <View style={[modalStyles.matchupCount, { backgroundColor: colors.primaryBg }]}>
                       <Text style={[modalStyles.matchupCountText, { color: colors.primary }]}>{p.count}번</Text>
@@ -3137,15 +3136,16 @@ function AddGuestModal({
                 <TouchableOpacity
                   key={g}
                   style={[
-                    modalStyles.skillChip,
+                    modalStyles.genderChip,
                     { borderColor: active ? meta.color : colors.border, backgroundColor: active ? meta.color : colors.background },
                   ]}
                   onPress={() => setGender(active ? null : g)}
                   activeOpacity={0.8}
                   accessibilityLabel={`성별 ${meta.label}`}
                 >
-                  <Text style={[modalStyles.skillChipText, { color: active ? palette.white : colors.textSecondary }]}>
-                    {meta.symbol}{meta.label}
+                  <GenderMarker meta={meta} size={18} color={active ? palette.white : meta.color} />
+                  <Text style={[modalStyles.genderChipLabel, { color: active ? palette.white : colors.textSecondary }]}>
+                    {meta.label}
                   </Text>
                 </TouchableOpacity>
               );
@@ -3522,8 +3522,7 @@ const styles = StyleSheet.create({
   },
   miniChipSkillText: { fontSize: 10, fontWeight: '900', lineHeight: 12 },
   miniChipName: { flexShrink: 1, fontSize: 13, fontWeight: '700' },
-  // Bigger + bolder gender-colored ♂/♀ so it reads at a glance in compact rows.
-  miniChipGender: { fontSize: 15, fontWeight: '900', lineHeight: 17 },
+  // Gender marker → shared <GenderMarker> vector icon (robust, auto-centered).
   miniChipEmpty: { fontSize: 13, fontWeight: '700', textAlign: 'center', flex: 1 },
   editBtnSm: {
     flexDirection: 'row', alignItems: 'center', gap: 2,
@@ -3551,11 +3550,7 @@ const styles = StyleSheet.create({
   gameChipNameRow: { flexDirection: 'row', alignItems: 'center', gap: 3 },
   // Name = primary content: 13.5px, bold, full (never truncated for KO names).
   gameChipName: { fontSize: 13.5, fontWeight: '700', flexShrink: 1, lineHeight: 18 },
-  // Gender marker = a BARE colored ♂/♀ glyph (no tinted pill) — bigger + bolder
-  // + gender-colored so male/female pop at a glance on every on-court chip.
-  // lineHeight matches the name box (18) so the glyph shares its vertical box
-  // and `alignItems:'center'` centers it (was 17 → floated a hair high).
-  gameChipGenderText: { fontSize: 15, fontWeight: '900', lineHeight: 18, textAlignVertical: 'center', includeFontPadding: false },
+  // Gender marker → shared <GenderMarker> vector icon (robust, auto-centered).
   // 게임수 = secondary, quiet (smaller + lighter weight so it doesn't compete).
   gameChipGames: { fontSize: 10, fontWeight: '600' },
 
@@ -3667,6 +3662,12 @@ const modalStyles = StyleSheet.create({
     alignItems: 'center', justifyContent: 'center',
   },
   skillChipText: { fontSize: 15, fontWeight: '800' },
+  // 성별 selector chip: vector marker + 남/여 label (auto width so both fit).
+  genderChip: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 4,
+    height: 38, paddingHorizontal: spacing.md, borderRadius: radius.md, borderWidth: 1.5,
+  },
+  genderChipLabel: { fontSize: 15, fontWeight: '800' },
   submitBtn: {
     marginTop: spacing.lg, paddingVertical: spacing.md, borderRadius: radius.lg,
     alignItems: 'center', justifyContent: 'center', minHeight: 48,
@@ -3691,7 +3692,7 @@ const modalStyles = StyleSheet.create({
   },
   matchupSkillText: { fontSize: 12, fontWeight: '900' },
   matchupName: { ...typography.subtitle2, flexShrink: 1 },
-  matchupGender: { fontSize: 15, fontWeight: '900', lineHeight: 17 },
+  // Gender marker → shared <GenderMarker> vector icon (robust, auto-centered).
   matchupCount: { paddingHorizontal: spacing.sm, paddingVertical: 3, borderRadius: radius.pill },
   matchupCountText: { fontSize: 12, fontWeight: '800' },
   // 헤더: 이름 + 게스트 배지

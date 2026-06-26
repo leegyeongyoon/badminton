@@ -13,6 +13,7 @@ import { useTheme } from '../hooks/useTheme';
 import { typography, spacing, radius } from '../constants/theme';
 import { SKILL_LEVELS, getSkillMeta, type SkillLevel } from '../constants/skill';
 import { GENDER_META, type Gender } from '../constants/gender';
+import { GenderMarker } from '../components/ui/GenderMarker';
 import { showError } from '../utils/feedback';
 import { Input } from '../components/ui/Input';
 import { Button } from '../components/ui/Button';
@@ -181,9 +182,7 @@ export default function ProfileSetupScreen() {
                     selected && { borderColor: meta.color, backgroundColor: meta.bg },
                   ]}
                 >
-                  <Text style={[styles.genderSymbol, { color: selected ? meta.color : colors.textSecondary }]}>
-                    {meta.symbol}
-                  </Text>
+                  <GenderMarker meta={meta} size={18} color={selected ? meta.color : colors.textSecondary} />
                   <Text style={[styles.genderLabel, { color: selected ? meta.color : colors.text }]}>
                     {meta.label}
                   </Text>
@@ -271,10 +270,6 @@ const styles = StyleSheet.create({
     borderWidth: 1.5,
     borderRadius: radius.lg,
     paddingVertical: spacing.mlg,
-  },
-  genderSymbol: {
-    fontSize: 18,
-    fontWeight: '700',
   },
   genderLabel: {
     ...typography.subtitle2,

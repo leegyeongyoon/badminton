@@ -3,6 +3,7 @@ import { View, Text, TouchableOpacity, StyleSheet, ViewStyle } from 'react-nativ
 import { useTheme } from '../../hooks/useTheme';
 import { getSkillMeta } from '../../constants/skill';
 import { getGenderMeta } from '../../constants/gender';
+import { GenderMarker } from '../ui/GenderMarker';
 import { typography, spacing, radius, palette } from '../../constants/theme';
 
 export interface PlayerCardData {
@@ -141,7 +142,7 @@ export function PlayerCard({
             {name}{nameSuffix}
           </Text>
           {genderMeta && (
-            <Text style={[styles.genderSymbol, { color: genderMeta.color }]}>{genderMeta.symbol}</Text>
+            <GenderMarker meta={genderMeta} size={isCourt ? 16 : 17} />
           )}
         </View>
 
@@ -255,18 +256,9 @@ const styles = StyleSheet.create({
   name: { ...typography.subtitle1, flexShrink: 1 },
   nameCourt: { ...typography.subtitle2, fontSize: 15, flexShrink: 1 },
 
-  // Gender marker = a BARE colored ♂/♀ glyph (no tinted pill). Bigger + bolder
-  // + gender-colored (blue ♂ / rose ♀) so male/female pop at a glance.
-  // lineHeight matches the name box (subtitle1 = 22 / nameCourt ≈ 20) so the
-  // glyph shares the name's vertical box and `alignItems:'center'` truly
-  // centers it instead of letting a shorter glyph box float high/low.
-  genderSymbol: {
-    fontSize: 17,
-    fontWeight: '900',
-    lineHeight: 22,
-    textAlignVertical: 'center',
-    includeFontPadding: false,
-  },
+  // Gender marker now renders via the shared <GenderMarker> vector icon
+  // (blue male / rose female) — robust on every device, no raw-glyph tofu /
+  // baseline drift. nameRow's `alignItems:'center'` centers it with the name.
 
   metaRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.xs },
   guestTag: { paddingHorizontal: spacing.sm, paddingVertical: 1, borderRadius: radius.sm },

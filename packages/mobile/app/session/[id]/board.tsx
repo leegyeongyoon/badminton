@@ -15,6 +15,7 @@ import { useFacilityRoom, useSocketEvent } from '../../../hooks/useSocket';
 import { Icon } from '../../../components/ui/Icon';
 import { getSkillMeta } from '../../../constants/skill';
 import { getGenderMeta } from '../../../constants/gender';
+import { GenderMarker } from '../../../components/ui/GenderMarker';
 import { PlayerCard } from '../../../components/game-board/PlayerCard';
 import api from '../../../services/api';
 import { typography, spacing, radius, palette, breakpoints } from '../../../constants/theme';
@@ -436,7 +437,7 @@ export default function ViewBoardScreen() {
                             >
                               {p?.userName || entry.playerNames?.[i] || '?'}{isMe ? ' (나)' : ''}
                             </Text>
-                            {g && <Text style={[styles.queueGender, { color: g.color }]}>{g.symbol}</Text>}
+                            {g && <GenderMarker meta={g} size={15} />}
                           </View>
                         );
                       })}
@@ -593,8 +594,7 @@ const styles = StyleSheet.create({
   queueSkillTag: { width: 22, height: 22, borderRadius: radius.sm, borderWidth: 1.5, alignItems: 'center', justifyContent: 'center' },
   queueSkillText: { fontSize: 13, fontWeight: '900' },
   queueName: { fontSize: 15, fontWeight: '800', maxWidth: 110, lineHeight: 20 },
-  // Gender ♂/♀: share the name's vertical box (lineHeight 20) so it centers.
-  queueGender: { fontSize: 15, fontWeight: '900', lineHeight: 20, textAlignVertical: 'center', includeFontPadding: false },
+  // Gender marker → shared <GenderMarker> vector icon (robust, auto-centered).
 
   // Waiting line — wrapping grid
   waitWrap: { gap: spacing.sm },

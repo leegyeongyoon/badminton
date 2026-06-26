@@ -32,6 +32,7 @@ import { showSuccess } from '../../../utils/feedback';
 import { Strings } from '../../../constants/strings';
 import { typography, spacing, radius } from '../../../constants/theme';
 import { GENDER_META, type Gender } from '../../../constants/gender';
+import { GenderMarker } from '../../../components/ui/GenderMarker';
 import { ScreenContainer } from '../../../components/ui/ScreenContainer';
 import { useResponsiveLayout } from '../../../hooks/useResponsiveLayout';
 
@@ -1061,7 +1062,7 @@ export default function ClubManageScreen() {
                           <TouchableOpacity
                             key={g}
                             style={[
-                              styles.skillChip,
+                              styles.genderChip,
                               {
                                 backgroundColor: active ? meta.color : colors.background,
                                 borderColor: active ? meta.color : colors.border,
@@ -1072,8 +1073,9 @@ export default function ClubManageScreen() {
                             activeOpacity={0.7}
                             accessibilityLabel={`성별 ${meta.label}`}
                           >
-                            <Text style={[styles.skillChipText, { color: active ? '#fff' : colors.textSecondary }]}>
-                              {meta.symbol}{meta.label}
+                            <GenderMarker meta={meta} size={20} color={active ? '#fff' : meta.color} />
+                            <Text style={[styles.genderChipText, { color: active ? '#fff' : colors.textSecondary }]}>
+                              {meta.label}
                             </Text>
                           </TouchableOpacity>
                         );
@@ -1107,9 +1109,9 @@ export default function ClubManageScreen() {
                       label="성별 편집"
                       sub={
                         actionMember.gender === 'M'
-                          ? '현재 ♂남'
+                          ? '현재 남'
                           : actionMember.gender === 'F'
-                            ? '현재 ♀여'
+                            ? '현재 여'
                             : '성별 미설정'
                       }
                       colors={colors}
@@ -1492,6 +1494,12 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   skillChipText: { ...typography.subtitle1, fontWeight: '800' },
+  // 성별 편집 chip: vector marker + 남/여 label (auto width so both fit).
+  genderChip: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: spacing.xs,
+    height: 44, paddingHorizontal: spacing.lg, borderRadius: radius.md, borderWidth: 1.5,
+  },
+  genderChipText: { ...typography.subtitle1, fontWeight: '800' },
   sheetClose: {
     marginTop: spacing.lg,
     borderWidth: 1.5,
