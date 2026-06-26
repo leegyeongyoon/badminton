@@ -26,11 +26,23 @@ import type {
   ClubSessionListItem,
 } from '@badminton/shared';
 
+// 최고관리자(SUPER_ADMIN, the app owner)는 모든 모임을 보고/접근/운영/관리할 수 있다.
+// 이 헬퍼는 전역(global) 역할만 본다 — 모임별(per-club) 권한은 건드리지 않는다.
+export async function isSuperAdmin(userId: string): Promise<boolean> {
+  const u = await prisma.user.findUnique({
+    where: { id: userId },
+    select: { role: true },
+  });
+  return u?.role === 'SUPER_ADMIN';
+}
+
 export async function verifyClubStaff(clubId: string, userId: string) {
   const member = await prisma.clubMember.findUnique({
     where: { userId_clubId: { userId, clubId } },
   });
   if (!member || (member.role !== 'LEADER' && member.role !== 'STAFF')) {
+    // 최고관리자는 모임 멤버가 아니어도 스태프 권한을 가진다(전역 우회).
+    if (await isSuperAdmin(userId)) return member;
     throw new ForbiddenError('모임 리더 또는 스태프만 가능합니다');
   }
   return member;
@@ -42,6 +54,8 @@ async function verifyClubMember(clubId: string, userId: string) {
     where: { userId_clubId: { userId, clubId } },
   });
   if (!member) {
+    // 최고관리자는 비멤버여도 조회 가능(전역 우회).
+    if (await isSuperAdmin(userId)) return member;
     throw new ForbiddenError('모임 멤버만 조회할 수 있습니다');
   }
   return member;

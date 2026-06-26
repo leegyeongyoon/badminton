@@ -2,7 +2,7 @@ import crypto from 'crypto';
 import QRCode from 'qrcode';
 import { prisma } from '../../utils/prisma';
 import { NotFoundError, ConflictError, ForbiddenError, BadRequestError } from '../../utils/errors';
-import { verifyClubStaff, deleteSessionCascade } from '../clubSession/clubSession.service';
+import { verifyClubStaff, deleteSessionCascade, isSuperAdmin } from '../clubSession/clubSession.service';
 import { cleanupTurnsOnCheckout } from '../checkin/checkin.service';
 import { getIO } from '../../socket';
 import type {
@@ -159,7 +159,27 @@ export async function regenerateInviteCode(
   throw new ConflictError('초대코드 재발급에 실패했습니다. 다시 시도해 주세요');
 }
 
-export async function listMyClubs(userId: string) {
+export async function listMyClubs(userId: string, role?: string) {
+  // 최고관리자(SUPER_ADMIN)는 앱의 모든 모임을 보고/운영/관리할 수 있다.
+  // 멤버십과 무관하게 전체 모임을 같은 응답 형태로 반환하며, 모든 모임에 대해
+  // 리더 권한(role: 'LEADER')으로 표시한다. 그 외 사용자는 동작 변화 없음(본인 멤버십만).
+  if (role === 'SUPER_ADMIN') {
+    const clubs = await prisma.club.findMany({
+      include: { _count: { select: { members: true } } },
+    });
+    return clubs.map((club) => ({
+      id: club.id,
+      name: club.name,
+      description: club.description,
+      inviteCode: club.inviteCode,
+      homeFacilityId: club.homeFacilityId,
+      monthlyDuesAmount: club.monthlyDuesAmount,
+      memberCount: club._count.members,
+      role: 'LEADER' as ClubMemberRole,
+      createdAt: club.createdAt.toISOString(),
+    }));
+  }
+
   const memberships = await prisma.clubMember.findMany({
     where: { userId },
     include: {
@@ -690,7 +710,11 @@ async function verifyClubMember(clubId: string, userId: string) {
   const member = await prisma.clubMember.findUnique({
     where: { userId_clubId: { userId, clubId } },
   });
-  if (!member) throw new ForbiddenError('모임 멤버만 조회할 수 있습니다');
+  if (!member) {
+    // 최고관리자는 비멤버여도 조회 가능(전역 우회).
+    if (await isSuperAdmin(userId)) return member;
+    throw new ForbiddenError('모임 멤버만 조회할 수 있습니다');
+  }
   return member;
 }
 

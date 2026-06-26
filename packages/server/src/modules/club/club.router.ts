@@ -56,7 +56,7 @@ router.post('/', authenticate, roleGuard('SUPER_ADMIN', 'CLUB_LEADER'), validate
 
 router.get('/', authenticate, async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const clubs = await clubService.listMyClubs(req.user!.userId);
+    const clubs = await clubService.listMyClubs(req.user!.userId, req.user!.role);
     res.json(clubs);
   } catch (err) { next(err); }
 });

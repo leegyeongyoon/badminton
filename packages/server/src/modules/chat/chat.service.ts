@@ -1,6 +1,7 @@
 import { prisma } from '../../utils/prisma';
 import { ForbiddenError, NotFoundError } from '../../utils/errors';
 import { getIO } from '../../socket/index';
+import { isSuperAdmin } from '../clubSession/clubSession.service';
 import type { ClubMessageResponse, SkillLevel, SendMessageInput } from '@badminton/shared';
 
 // 모임 멤버만 채팅/건의를 읽고 쓸 수 있다. (비멤버 → 403)
@@ -9,6 +10,8 @@ async function verifyClubMember(clubId: string, userId: string) {
     where: { userId_clubId: { userId, clubId } },
   });
   if (!member) {
+    // 최고관리자는 비멤버여도 이용 가능(전역 우회).
+    if (await isSuperAdmin(userId)) return member;
     throw new ForbiddenError('모임 멤버만 이용할 수 있습니다');
   }
   return member;
