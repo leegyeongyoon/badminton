@@ -31,6 +31,8 @@ import { showAlert, showConfirm } from '../../../utils/alert';
 import { showSuccess } from '../../../utils/feedback';
 import { Strings } from '../../../constants/strings';
 import { typography, spacing, radius } from '../../../constants/theme';
+import { ScreenContainer } from '../../../components/ui/ScreenContainer';
+import { useResponsiveLayout } from '../../../hooks/useResponsiveLayout';
 
 // 역할/급수 라벨 + 선택지 (멤버·운영진 섹션 전용).
 const ROLE_LABELS: Record<string, string> = { LEADER: '대표', STAFF: '운영진', MEMBER: '회원' };
@@ -60,6 +62,8 @@ export default function ClubManageScreen() {
   const { colors, shadows } = useTheme();
   const { clubs, fetchClubs, deleteClub } = useClubStore();
   const myUserId = useAuthStore((s) => s.user?.id);
+  // 태블릿/데스크톱(>=768)에서는 바텀시트 모달을 가운데 다이얼로그로 전환.
+  const { isTablet } = useResponsiveLayout();
 
   const club = useMemo(() => clubs.find((c) => c.id === clubId), [clubs, clubId]);
   // 운영진(LEADER/STAFF)만 접근. clubs 의 role 로 판정 (목록에 내 역할이 담겨 있음).
@@ -505,9 +509,10 @@ export default function ClubManageScreen() {
       {Header}
       <ScrollView
         style={styles.scroll}
-        contentContainerStyle={styles.content}
+        contentContainerStyle={styles.scrollContent}
         keyboardShouldPersistTaps="handled"
       >
+        <ScreenContainer maxWidth={760} style={styles.content}>
         {/* ── 클럽 정보 ─────────────────────────────── */}
         <View style={[styles.card, { backgroundColor: colors.surface }, shadows.sm]}>
           <View style={styles.cardHeader}>
@@ -931,6 +936,7 @@ export default function ClubManageScreen() {
             <Text style={[styles.deleteBtnText, { color: colors.danger }]}>모임 삭제</Text>
           </TouchableOpacity>
         </View>
+        </ScreenContainer>
       </ScrollView>
 
       {/* ── 멤버 액션 시트 (역할 / 급수 / 내보내기) ───────────── */}
@@ -940,10 +946,14 @@ export default function ClubManageScreen() {
         animationType="fade"
         onRequestClose={closeMemberSheet}
       >
-        <TouchableOpacity style={styles.sheetOverlay} activeOpacity={1} onPress={closeMemberSheet}>
+        <TouchableOpacity
+          style={[styles.sheetOverlay, isTablet && styles.sheetOverlayCentered]}
+          activeOpacity={1}
+          onPress={closeMemberSheet}
+        >
           <TouchableOpacity
             activeOpacity={1}
-            style={[styles.sheet, { backgroundColor: colors.surface }]}
+            style={[styles.sheet, isTablet && styles.sheetCentered, { backgroundColor: colors.surface }]}
             onPress={() => {}}
           >
             {actionMember && (
@@ -1087,13 +1097,13 @@ export default function ClubManageScreen() {
         onRequestClose={() => setHistoryMember(null)}
       >
         <TouchableOpacity
-          style={styles.sheetOverlay}
+          style={[styles.sheetOverlay, isTablet && styles.sheetOverlayCentered]}
           activeOpacity={1}
           onPress={() => setHistoryMember(null)}
         >
           <TouchableOpacity
             activeOpacity={1}
-            style={[styles.sheet, { backgroundColor: colors.surface }]}
+            style={[styles.sheet, isTablet && styles.sheetCentered, { backgroundColor: colors.surface }]}
             onPress={() => {}}
           >
             <View style={styles.sheetHeader}>
@@ -1235,6 +1245,9 @@ function FacilityChip({
 const styles = StyleSheet.create({
   container: { flex: 1 },
   scroll: { flex: 1 },
+  // ScrollView content host — grows to fit; ScreenContainer centers on wide.
+  scrollContent: { flexGrow: 1 },
+  // Inner (ScreenContainer) column padding/gap for the form sections.
   content: { padding: spacing.lg, paddingBottom: spacing.xxxxl, gap: spacing.lg },
 
   header: {
@@ -1357,16 +1370,28 @@ const styles = StyleSheet.create({
   roleBadgeText: { ...typography.caption, fontWeight: '700' },
 
   // ── 액션 시트 ──
+  // Phone: bottom-sheet (flex-end). Tablet/desktop: centered dialog.
   sheetOverlay: {
     flex: 1,
     backgroundColor: 'rgba(0,0,0,0.45)',
     justifyContent: 'flex-end',
+  },
+  sheetOverlayCentered: {
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: spacing.xl,
   },
   sheet: {
     borderTopLeftRadius: radius.xl,
     borderTopRightRadius: radius.xl,
     padding: spacing.lg,
     paddingBottom: spacing.xxl,
+  },
+  sheetCentered: {
+    width: '100%',
+    maxWidth: 480,
+    borderRadius: radius.xl,
+    paddingBottom: spacing.lg,
   },
   sheetHeader: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
   sheetName: { ...typography.h3, flexShrink: 1 },

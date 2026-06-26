@@ -15,6 +15,7 @@ import { Strings } from '../../constants/strings';
 import { showAlert, showConfirm } from '../../utils/alert';
 import { showSuccess } from '../../utils/feedback';
 import { Button } from '../../components/ui/Button';
+import { ScreenContainer } from '../../components/ui/ScreenContainer';
 import { operatorRequestApi } from '../../services/operatorRequest';
 import type { OperatorRequestWithRequester } from '@badminton/shared';
 import { typography, radius, spacing } from '../../constants/theme';
@@ -130,6 +131,7 @@ export default function OperatorRequestsScreen() {
   return (
     <View style={[styles.container, { backgroundColor: colors.background }]}>
       {Header}
+      <ScreenContainer maxWidth={720}>
       <FlatList
         data={requests}
         renderItem={renderItem}
@@ -149,6 +151,7 @@ export default function OperatorRequestsScreen() {
           </View>
         }
       />
+      </ScreenContainer>
     </View>
   );
 }

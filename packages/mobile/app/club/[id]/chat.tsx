@@ -18,6 +18,7 @@ import { useClubStore } from '../../../store/clubStore';
 import { useAuthStore } from '../../../store/authStore';
 import { useClubRoom, useSocketEvent } from '../../../hooks/useSocket';
 import { useTheme } from '../../../hooks/useTheme';
+import { useResponsiveLayout } from '../../../hooks/useResponsiveLayout';
 import { BackButton } from '../../../components/ui/BackButton';
 import { getSkillMeta } from '../../../constants/skill';
 import { ClubMessage } from '../../../services/chat';
@@ -62,6 +63,11 @@ export default function ClubChatScreen() {
   const { id: clubId } = useLocalSearchParams<{ id: string }>();
   const router = useRouter();
   const { colors } = useTheme();
+  // 태블릿/데스크톱에서 메시지·입력바를 가운데 720 컬럼으로 모음. 폰은 그대로.
+  const { isTablet } = useResponsiveLayout();
+  const centeredColumn = isTablet
+    ? { maxWidth: 720, alignSelf: 'center' as const, width: '100%' as const }
+    : null;
   const { user } = useAuthStore();
   const { currentMembers, fetchMembers, clubs } = useClubStore();
   const { messagesByClub, loadingByClub, fetchMessages, sendMessage, appendMessage } =
@@ -267,14 +273,14 @@ export default function ClubChatScreen() {
             data={messages}
             keyExtractor={(m) => m.id}
             renderItem={renderItem}
-            contentContainerStyle={styles.listContent}
+            contentContainerStyle={[styles.listContent, centeredColumn]}
             onContentSizeChange={scrollToEnd}
             onLayout={scrollToEnd}
           />
         )}
 
         {/* 입력 바 + 짝 요청 토글 */}
-        <View style={[styles.inputBar, { backgroundColor: colors.surface, borderTopColor: colors.border }]}>
+        <View style={[styles.inputBar, centeredColumn, { backgroundColor: colors.surface, borderTopColor: colors.border }]}>
           <TouchableOpacity
             style={[styles.requestToggle, { borderColor: colors.warning, backgroundColor: colors.warningBg }]}
             onPress={() => {

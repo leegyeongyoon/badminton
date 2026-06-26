@@ -18,6 +18,7 @@ import { Strings } from '../../constants/strings';
 import { showError, showInfo } from '../../utils/feedback';
 import { Input } from '../../components/ui/Input';
 import { Button } from '../../components/ui/Button';
+import { ScreenContainer } from '../../components/ui/ScreenContainer';
 
 // Kakao brand colors (카카오 디자인 가이드): yellow container, near-black label.
 const KAKAO_YELLOW = '#FEE500';
@@ -100,6 +101,7 @@ export default function LoginScreen() {
       style={[styles.container, { backgroundColor: colors.background }]}
       behavior={Platform.OS === 'ios' ? 'padding' : undefined}
     >
+      <ScreenContainer maxWidth={440}>
       <View style={styles.content}>
         <Text style={[styles.title, { color: colors.primary }]}>{Strings.app.name}</Text>
         <Text style={[styles.subtitle, { color: colors.textSecondary }]}>{Strings.auth.login}</Text>
@@ -195,6 +197,7 @@ export default function LoginScreen() {
           회원가입 없이 오늘 모임에 출석할 수 있어요
         </Text>
       </View>
+      </ScreenContainer>
     </KeyboardAvoidingView>
   );
 }

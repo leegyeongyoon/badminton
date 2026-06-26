@@ -16,6 +16,7 @@ import { GENDER_META, type Gender } from '../constants/gender';
 import { showError } from '../utils/feedback';
 import { Input } from '../components/ui/Input';
 import { Button } from '../components/ui/Button';
+import { ScreenContainer } from '../components/ui/ScreenContainer';
 
 // ─────────────────────────────────────────────────────────
 // 신규 카카오 가입자 프로필 설정 — 이름(필수) + 급수(선택) + 성별(선택).
@@ -68,6 +69,7 @@ export default function ProfileSetupScreen() {
       style={[styles.container, { backgroundColor: colors.background }]}
       behavior={Platform.OS === 'ios' ? 'padding' : undefined}
     >
+      <ScreenContainer maxWidth={480}>
       <ScrollView
         contentContainerStyle={styles.content}
         keyboardShouldPersistTaps="handled"
@@ -197,6 +199,7 @@ export default function ProfileSetupScreen() {
           accessibilityLabel="프로필 저장하고 시작하기"
         />
       </ScrollView>
+      </ScreenContainer>
     </KeyboardAvoidingView>
   );
 }

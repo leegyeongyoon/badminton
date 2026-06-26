@@ -592,7 +592,8 @@ const styles = StyleSheet.create({
     flex: 1,
     padding: spacing.xl,
   },
-  // Info card
+  // Info card — capped + centered so it doesn't span full width on desktop
+  // (matches the main code card's ~400 max). Phone (<460) is unaffected.
   infoCard: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -601,6 +602,9 @@ const styles = StyleSheet.create({
     borderRadius: radius.xl,
     borderWidth: 1,
     marginBottom: spacing.xl,
+    width: '100%',
+    maxWidth: 460,
+    alignSelf: 'center',
   },
   infoText: {
     ...typography.body2,

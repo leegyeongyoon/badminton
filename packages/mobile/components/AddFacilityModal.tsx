@@ -21,6 +21,7 @@ import { Colors } from '../constants/colors';
 import { facilityApi } from '../services/facility';
 import { getCurrentPosition } from '../utils/geo';
 import { showAlert } from '../utils/alert';
+import { useResponsiveLayout } from '../hooks/useResponsiveLayout';
 
 interface AddFacilityModalProps {
   visible: boolean;
@@ -29,6 +30,8 @@ interface AddFacilityModalProps {
 }
 
 export function AddFacilityModal({ visible, onClose, onCreated }: AddFacilityModalProps) {
+  // 태블릿/데스크톱(>=768)에서는 바텀시트 대신 가운데 다이얼로그로.
+  const { isTablet } = useResponsiveLayout();
   const [name, setName] = useState('');
   const [address, setAddress] = useState('');
   const [coords, setCoords] = useState<{ latitude: number; longitude: number } | null>(null);
@@ -98,8 +101,8 @@ export function AddFacilityModal({ visible, onClose, onCreated }: AddFacilityMod
 
   return (
     <Modal visible={visible} transparent animationType="slide" onRequestClose={handleClose}>
-      <View style={styles.overlay}>
-        <View style={styles.card}>
+      <View style={[styles.overlay, isTablet && styles.overlayCentered]}>
+        <View style={[styles.card, isTablet && styles.cardCentered]}>
           <View style={styles.header}>
             <Text style={styles.title}>장소 추가</Text>
             <TouchableOpacity onPress={handleClose} accessibilityLabel="닫기">
@@ -176,12 +179,24 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(0,0,0,0.4)',
     justifyContent: 'flex-end',
   },
+  // Tablet/desktop: center the dialog instead of a full-width bottom strip.
+  overlayCentered: {
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 20,
+  },
   card: {
     backgroundColor: Colors.surface,
     borderTopLeftRadius: 20,
     borderTopRightRadius: 20,
     padding: 20,
     paddingBottom: Platform.OS === 'web' ? 24 : 36,
+  },
+  cardCentered: {
+    width: '100%',
+    maxWidth: 480,
+    borderRadius: 20,
+    paddingBottom: 24,
   },
   header: {
     flexDirection: 'row',

@@ -6,6 +6,7 @@ import {
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useTheme } from '../../../hooks/useTheme';
 import { Icon } from '../../../components/ui/Icon';
+import { ScreenContainer } from '../../../components/ui/ScreenContainer';
 import { clubSessionApi, SessionSummary } from '../../../services/clubSession';
 import { typography, spacing, radius, palette } from '../../../constants/theme';
 
@@ -129,6 +130,7 @@ export default function SummaryScreen() {
   return (
     <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]}>
       {Header}
+      <ScreenContainer maxWidth={760}>
       <ScrollView
         style={{ flex: 1 }}
         contentContainerStyle={styles.content}
@@ -267,6 +269,7 @@ export default function SummaryScreen() {
         </TouchableOpacity>
         <View style={{ height: spacing.xxxl }} />
       </ScrollView>
+      </ScreenContainer>
     </SafeAreaView>
   );
 }

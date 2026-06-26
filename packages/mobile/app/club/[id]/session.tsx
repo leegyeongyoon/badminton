@@ -16,6 +16,7 @@ import { facilityApi } from '../../../services/facility';
 import { Colors } from '../../../constants/colors';
 import { Strings } from '../../../constants/strings';
 import { showAlert, showConfirm } from '../../../utils/alert';
+import { ScreenContainer } from '../../../components/ui/ScreenContainer';
 
 interface ClubMember {
   userId: string;
@@ -208,6 +209,8 @@ export default function ClubSessionScreen() {
   return (
     <>
       <Stack.Screen options={{ headerShown: true, title: `${session.clubName} 모임` }} />
+      <View style={styles.container}>
+      <ScreenContainer maxWidth={820}>
       <ScrollView
         style={styles.container}
         contentContainerStyle={styles.content}
@@ -362,6 +365,8 @@ export default function ClubSessionScreen() {
           </View>
         </View>
       </ScrollView>
+      </ScreenContainer>
+      </View>
 
       {/* Court management modal */}
       <Modal visible={showCourtModal} transparent animationType="slide">

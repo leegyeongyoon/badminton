@@ -12,6 +12,7 @@ import { useRouter } from 'expo-router';
 import { authApi } from '../services/auth';
 import { Colors } from '../constants/colors';
 import { showAlert } from '../utils/alert';
+import { ScreenContainer } from '../components/ui/ScreenContainer';
 
 export default function ChangePasswordScreen() {
   const router = useRouter();
@@ -60,6 +61,7 @@ export default function ChangePasswordScreen() {
         <View style={{ width: 60 }} />
       </View>
 
+      <ScreenContainer maxWidth={440}>
       <View style={styles.content}>
         <View style={styles.inputGroup}>
           <Text style={styles.label}>현재 비밀번호</Text>
@@ -115,6 +117,7 @@ export default function ChangePasswordScreen() {
           </Text>
         </TouchableOpacity>
       </View>
+      </ScreenContainer>
     </KeyboardAvoidingView>
   );
 }

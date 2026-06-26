@@ -25,6 +25,7 @@ import { showSuccess } from '../../utils/feedback';
 import { getItem, setItem } from '../../services/storage';
 import { AttendanceLeaderboard } from '../../components/club/AttendanceLeaderboard';
 import { Icon } from '../../components/ui/Icon';
+import { ScreenContainer } from '../../components/ui/ScreenContainer';
 import { AddFacilityModal } from '../../components/AddFacilityModal';
 
 interface ClubMember {
@@ -403,6 +404,7 @@ export default function ClubDetailScreen() {
         }}
       />
       <View style={styles.container}>
+        <ScreenContainer maxWidth={820}>
         <ScrollView
           contentContainerStyle={styles.scrollContent}
           refreshControl={Platform.OS === 'web' ? undefined : <RefreshControl refreshing={loadingSession} onRefresh={onRefresh} />}
@@ -670,6 +672,7 @@ export default function ClubDetailScreen() {
             )}
           </View>
         </ScrollView>
+        </ScreenContainer>
 
         {/* Start Session Modal */}
         <Modal visible={showStartModal} transparent animationType="slide">

@@ -14,6 +14,7 @@ import { Colors } from '../constants/colors';
 import { createShadow } from '../constants/theme';
 import { Strings } from '../constants/strings';
 import { BackButton } from '../components/ui/BackButton';
+import { ScreenContainer } from '../components/ui/ScreenContainer';
 import api from '../services/api';
 
 interface Notification {
@@ -201,6 +202,7 @@ export default function NotificationsScreen() {
         </View>
       )}
 
+      <ScreenContainer maxWidth={720}>
       <FlatList
         data={notifications}
         renderItem={renderItem}
@@ -226,6 +228,7 @@ export default function NotificationsScreen() {
           </View>
         }
       />
+      </ScreenContainer>
     </View>
   );
 }
