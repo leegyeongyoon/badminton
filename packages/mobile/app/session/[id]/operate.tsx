@@ -14,7 +14,7 @@ import { useAuthStore } from '../../../store/authStore';
 import { useFacilityRoom, useClubRoom, useSocketEvent } from '../../../hooks/useSocket';
 import { Icon } from '../../../components/ui/Icon';
 import { getSkillMeta, SKILL_LEVELS } from '../../../constants/skill';
-import { getGenderMeta, getGameType } from '../../../constants/gender';
+import { getGenderMeta, getGameType, GENDER_META, type Gender } from '../../../constants/gender';
 import { PlayerCard } from '../../../components/game-board/PlayerCard';
 import api from '../../../services/api';
 import { clubApi } from '../../../services/club';
@@ -3059,6 +3059,7 @@ function AddGuestModal({
 }: { sessionId: string; colors: any; onClose: () => void; onAdded: () => void }) {
   const [name, setName] = useState('');
   const [skill, setSkill] = useState<string>('D');
+  const [gender, setGender] = useState<Gender | null>(null);
   const [fee, setFee] = useState('');
   const [submitting, setSubmitting] = useState(false);
 
@@ -3070,6 +3071,7 @@ function AddGuestModal({
       await clubSessionApi.addGuest(sessionId, {
         name: name.trim(),
         skillLevel: skill,
+        ...(gender ? { gender } : {}),
         ...(feeAmount && feeAmount > 0 ? { feeAmount } : {}),
       });
       showSuccess('게스트 추가 완료!');
@@ -3079,7 +3081,7 @@ function AddGuestModal({
     } finally {
       setSubmitting(false);
     }
-  }, [name, skill, fee, sessionId, onAdded]);
+  }, [name, skill, gender, fee, sessionId, onAdded]);
 
   return (
     <Modal visible transparent animationType="fade" onRequestClose={onClose}>
@@ -3121,6 +3123,30 @@ function AddGuestModal({
                   activeOpacity={0.8}
                 >
                   <Text style={[modalStyles.skillChipText, { color: active ? palette.white : colors.textSecondary }]}>{lv}</Text>
+                </TouchableOpacity>
+              );
+            })}
+          </View>
+
+          <Text style={[modalStyles.label, { color: colors.textSecondary }]}>성별 (선택)</Text>
+          <View style={modalStyles.skillRow}>
+            {(['M', 'F'] as Gender[]).map((g) => {
+              const meta = GENDER_META[g];
+              const active = gender === g;
+              return (
+                <TouchableOpacity
+                  key={g}
+                  style={[
+                    modalStyles.skillChip,
+                    { borderColor: active ? meta.color : colors.border, backgroundColor: active ? meta.color : colors.background },
+                  ]}
+                  onPress={() => setGender(active ? null : g)}
+                  activeOpacity={0.8}
+                  accessibilityLabel={`성별 ${meta.label}`}
+                >
+                  <Text style={[modalStyles.skillChipText, { color: active ? palette.white : colors.textSecondary }]}>
+                    {meta.symbol}{meta.label}
+                  </Text>
                 </TouchableOpacity>
               );
             })}

@@ -31,6 +31,7 @@ import { showAlert, showConfirm } from '../../../utils/alert';
 import { showSuccess } from '../../../utils/feedback';
 import { Strings } from '../../../constants/strings';
 import { typography, spacing, radius } from '../../../constants/theme';
+import { GENDER_META, type Gender } from '../../../constants/gender';
 import { ScreenContainer } from '../../../components/ui/ScreenContainer';
 import { useResponsiveLayout } from '../../../hooks/useResponsiveLayout';
 
@@ -88,8 +89,8 @@ export default function ClubManageScreen() {
   const [memberSearch, setMemberSearch] = useState('');
   // 선택된 멤버의 액션 시트(역할/급수/내보내기). null 이면 닫힘.
   const [actionMember, setActionMember] = useState<ClubMemberResponse | null>(null);
-  // 'role' | 'skill' | null — 액션 시트 안에서 어떤 편집 패널을 보여줄지.
-  const [editMode, setEditMode] = useState<'role' | 'skill' | null>(null);
+  // 'role' | 'skill' | 'gender' | null — 액션 시트 안에서 어떤 편집 패널을 보여줄지.
+  const [editMode, setEditMode] = useState<'role' | 'skill' | 'gender' | null>(null);
   const [memberBusy, setMemberBusy] = useState(false);
 
   // ── 출석 이력 모달 상태 (멤버별 정모 이력) ──
@@ -289,6 +290,24 @@ export default function ClubManageScreen() {
       } catch (err: any) {
         setMemberBusy(false);
         showAlert(Strings.common.error, err?.response?.data?.error || '급수 변경에 실패했습니다');
+      }
+    },
+    [clubId, actionMember, loadMembers, closeMemberSheet],
+  );
+
+  // 성별 편집 (LEADER/STAFF) — 멤버 PlayerProfile 의 성별 수정.
+  const handleChangeGender = useCallback(
+    async (gender: Gender) => {
+      if (!clubId || !actionMember || actionMember.gender === gender) return;
+      setMemberBusy(true);
+      try {
+        await clubApi.updateMemberProfile(clubId, actionMember.userId, { gender });
+        showSuccess(`성별을 ${GENDER_META[gender].label}로 변경했어요`);
+        closeMemberSheet();
+        await loadMembers();
+      } catch (err: any) {
+        setMemberBusy(false);
+        showAlert(Strings.common.error, err?.response?.data?.error || '성별 변경에 실패했습니다');
       }
     },
     [clubId, actionMember, loadMembers, closeMemberSheet],
@@ -1029,6 +1048,38 @@ export default function ClubManageScreen() {
                       })}
                     </View>
                   </View>
+                ) : editMode === 'gender' ? (
+                  <View style={styles.sheetPanel}>
+                    <Text style={[styles.sheetPanelTitle, { color: colors.textSecondary }]}>
+                      성별 편집
+                    </Text>
+                    <View style={styles.skillGrid}>
+                      {(['M', 'F'] as Gender[]).map((g) => {
+                        const active = actionMember.gender === g;
+                        const meta = GENDER_META[g];
+                        return (
+                          <TouchableOpacity
+                            key={g}
+                            style={[
+                              styles.skillChip,
+                              {
+                                backgroundColor: active ? meta.color : colors.background,
+                                borderColor: active ? meta.color : colors.border,
+                              },
+                            ]}
+                            onPress={() => handleChangeGender(g)}
+                            disabled={active || memberBusy}
+                            activeOpacity={0.7}
+                            accessibilityLabel={`성별 ${meta.label}`}
+                          >
+                            <Text style={[styles.skillChipText, { color: active ? '#fff' : colors.textSecondary }]}>
+                              {meta.symbol}{meta.label}
+                            </Text>
+                          </TouchableOpacity>
+                        );
+                      })}
+                    </View>
+                  </View>
                 ) : (
                   // 액션 메뉴 (기본)
                   <View style={styles.sheetActions}>
@@ -1049,6 +1100,20 @@ export default function ClubManageScreen() {
                       sub="이 모임에서만 적용돼요"
                       colors={colors}
                       onPress={() => setEditMode('skill')}
+                    />
+                    {/* 성별 편집 — LEADER/STAFF */}
+                    <SheetAction
+                      icon="person"
+                      label="성별 편집"
+                      sub={
+                        actionMember.gender === 'M'
+                          ? '현재 ♂남'
+                          : actionMember.gender === 'F'
+                            ? '현재 ♀여'
+                            : '성별 미설정'
+                      }
+                      colors={colors}
+                      onPress={() => setEditMode('gender')}
                     />
                     {/* 내보내기 — LEADER 만, 본인/다른 LEADER 는 불가 */}
                     {isLeader &&

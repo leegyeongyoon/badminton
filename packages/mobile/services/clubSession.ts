@@ -159,7 +159,7 @@ export const clubSessionApi = {
   // 게스트 추가 — 새 게스트 유저 + 체크인을 만들어 즉시 풀에 투입
   addGuest: (
     sessionId: string,
-    body: { name: string; skillLevel?: string; feeAmount?: number },
+    body: { name: string; skillLevel?: string; feeAmount?: number; gender?: 'M' | 'F' | null },
   ) => api.post(`/club-sessions/${sessionId}/guests`, body),
 
   // 테스트/데모용: 랜덤 샘플 게스트 N명을 만들어 즉시 정모에 체크인 (LEADER/STAFF).
