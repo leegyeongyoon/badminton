@@ -113,21 +113,7 @@ export default function HomeScreen() {
     }
   }, [fetchStatus, fetchMyTurns, fetchClubs, loadActiveSessions, loadMyStatus]);
 
-  // One-tap 체크인 — 무조건 출석(코드/지오펜스 없이). 홈 카드의 '체크인' 버튼이
-  // 수동 코드 모달 대신 이걸 호출한다.
-  const [quickCheckinSid, setQuickCheckinSid] = useState<string | null>(null);
-  const handleQuickCheckin = useCallback(async (sessionId: string) => {
-    setQuickCheckinSid(sessionId);
-    try {
-      await clubSessionApi.attend(sessionId);
-      await Promise.all([fetchStatus(), loadMyStatus(), loadActiveSessions(useClubStore.getState().clubs)]);
-      showSuccess('체크인됐어요');
-    } catch {
-      /* non-fatal */
-    } finally {
-      setQuickCheckinSid(null);
-    }
-  }, [fetchStatus, loadMyStatus, loadActiveSessions]);
+  // 자가 체크인 제거: 출석은 정모 QR 스캔(→ /attend)으로만. 홈에는 체크인 버튼 없음.
 
   // 자동 체크인 제거: 홈을 '열기만 해도' 활성 정모에 자동 출석되던 동작은, 오늘 안 오는
   // 사람까지 정모 풀에 잡혀 혼란을 줘서 제거했다. 출석은 현장 QR 스캔 또는 위 '체크인'
@@ -403,17 +389,8 @@ export default function HomeScreen() {
                           style={{ flex: 1 }}
                         />
                       </View>
-                    ) : !checkedIn ? (
-                      <Button
-                        title="체크인"
-                        icon="checkin"
-                        size="md"
-                        fullWidth
-                        loading={quickCheckinSid === session.id}
-                        onPress={() => handleQuickCheckin(session.id)}
-                        style={styles.clubPrimaryBtn}
-                      />
                     ) : (
+                      // 출석은 정모 QR 스캔으로만 — 자가 체크인 버튼 없음. 회원은 현황 보기만.
                       <Button
                         title="현황 보기"
                         icon="tv"

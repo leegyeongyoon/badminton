@@ -197,10 +197,7 @@ export default function ClubDetailScreen() {
     [loadFacilities],
   );
 
-  // 자동 체크인 제거: 회원이 정모 화면을 '열기만 해도' 자동 출석되던 동작은, 오늘 안 오는
-  // 사람까지 정모 풀에 잡혀 혼란을 줘서 제거했다. 출석은 (1) 현장 QR 스캔 또는 (2) 수동
-  // 체크인 버튼으로만 이뤄진다. (autoCheckMsg는 항상 null — 렌더의 안내 블록은 비활성.)
-  const [autoCheckMsg] = useState<string | null>(null);
+  // 출석은 현장 정모 QR 스캔(→ /attend)으로만. 자동 체크인 + 자가 체크인 버튼 모두 제거.
 
   const onRefresh = useCallback(async () => {
     if (clubId) {
@@ -458,14 +455,8 @@ export default function ClubDetailScreen() {
               {/* 멤버: 참석 상태 (체크인 / 참석 중 + 체크아웃) — quiet, 카드 안에서. */}
               {!isLeaderOrStaff && (
                 !isCheckedIn ? (
-                  <TouchableOpacity
-                    style={styles.heroSecondaryBtn}
-                    onPress={() => router.push(`/checkin-modal?clubSessionId=${activeSession.id}`)}
-                    activeOpacity={0.85}
-                    accessibilityLabel="체크인"
-                  >
-                    <Text style={styles.heroSecondaryText}>체크인</Text>
-                  </TouchableOpacity>
+                  // 출석은 현장 정모 QR 스캔으로만 — 자가 체크인 버튼 없음.
+                  <Text style={styles.autoCheckHint}>현장에서 정모 QR을 스캔하면 출석돼요</Text>
                 ) : (
                   <View style={styles.attendingRow}>
                     <View style={styles.attendingBadge}>
@@ -484,9 +475,6 @@ export default function ClubDetailScreen() {
                     </TouchableOpacity>
                   </View>
                 )
-              )}
-              {!!autoCheckMsg && !isLeaderOrStaff && !isCheckedIn && (
-                <Text style={styles.autoCheckHint}>📍 {autoCheckMsg}</Text>
               )}
 
               {/* ONE PRIMARY ACTION — 운영진: 운영판 들어가기 / 멤버: 현황 보기 */}
