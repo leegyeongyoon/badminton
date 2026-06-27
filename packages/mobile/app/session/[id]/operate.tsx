@@ -24,6 +24,7 @@ import { courtApi } from '../../../services/court';
 import { showAlert, showConfirm } from '../../../utils/alert';
 import { showSuccess, showError } from '../../../utils/feedback';
 import { copyToClipboard } from '../../../utils/clipboard';
+import { getItem, setItem } from '../../../services/storage';
 import { typography, spacing, radius, palette } from '../../../constants/theme';
 
 if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental) {
@@ -94,6 +95,10 @@ interface DropTarget {
   slotIndex: number;     // 0..3 for tray/queue; the queue INDEX for 'queue-card'
   rect: { x: number; y: number; w: number; h: number };
 }
+
+// 방금 나온(recentlyOut) 누적 목록의 최대 보관 개수. 가장 최근 N개만 들고
+// 있다가 더 오래된 건 떨군다 — 바쁜 주말에도 목록이 무한히 길어지지 않게.
+const RECENT_OUT_MAX = 8;
 
 // Safe LayoutAnimation (web treats it as a no-op but guard anyway)
 function animateNext() {
@@ -192,9 +197,64 @@ export default function OperateScreen() {
   // 표시. 표시할 때 trim + 소문자로 정규화해 대소문자 무시 부분일치로 거른다.
   const [poolSearch, setPoolSearch] = useState('');
   // 출석 풀 보기 전환: 'group' = 미편성/편성됨/게임중 3분할(기본), 'all' = 전체를
-  // 가나다 한 줄 목록으로 묶고 각 카드에 편성 상태 배지를 붙인다. 검색/정렬/그리드
-  // 측정은 두 보기에서 모두 동일하게 동작한다.
-  const [poolTab, setPoolTab] = useState<'group' | 'all'>('group');
+  // 가나다 한 줄 목록으로 묶고 각 카드에 편성 상태 배지를 붙인다. 'recent' = 방금
+  // 끝난 게임들을 게임 단위(함께 친 4명)로 묶어 보여줘 새 조합으로 바로 다시 편성.
+  // 검색/정렬/그리드 측정은 group/all 보기에서 동일하게 동작한다.
+  const [poolTab, setPoolTab] = useState<'group' | 'all' | 'recent'>('group');
+
+  // ─── 방금 나온(recentlyOut): 막 끝난 게임들의 4인 묶음 ───
+  // 게임 종료(게임 종료 → completeTurn) 직전에 그 코트의 4명 playerIds 를 캡처해
+  // 가장 최근이 앞으로 오도록 unshift. 최대 ~6개만 유지. 새로고침에도 남도록
+  // sessionStorage(웹)/storage 유틸(네이티브)에 정모 id 로 키해 영속화한다. names 는
+  // 풀에서 빠진 사람을 위한 폴백(캡처 시점의 이름)으로 함께 저장한다.
+  type RecentOut = { id: string; playerIds: string[]; names: Record<string, string>; at: number };
+  const [recentlyOut, setRecentlyOut] = useState<RecentOut[]>([]);
+  // 영속화 키 — 정모별로 분리. 웹은 sessionStorage, 네이티브는 storage 유틸.
+  const recentOutKey = clubSessionId ? `operate_recent_out_${clubSessionId}` : null;
+  // 마운트 시 1회 로드. 로드가 끝났는지 표시해 그 전에 저장이 덮어쓰지 않게 한다.
+  const recentLoadedRef = useRef(false);
+
+  // ─── 방금 나온 로드/영속화 ───
+  // 마운트(정모 id 확정) 시 1회 저장소에서 읽어와 복원. 파싱 실패/형식 불일치는
+  // 조용히 빈 목록으로 폴백한다. 로드가 끝나야 영속화 effect 가 덮어쓰기를 시작한다.
+  useEffect(() => {
+    if (!recentOutKey) return;
+    let alive = true;
+    getItem(recentOutKey)
+      .then((raw) => {
+        if (!alive) return;
+        if (raw) {
+          try {
+            const parsed = JSON.parse(raw);
+            if (Array.isArray(parsed)) {
+              const clean = parsed
+                .filter((e: any) => e && Array.isArray(e.playerIds) && typeof e.at === 'number')
+                .map((e: any) => ({
+                  id: String(e.id ?? `${e.at}`),
+                  playerIds: e.playerIds.map((p: any) => String(p)),
+                  names: e.names && typeof e.names === 'object' ? e.names : {},
+                  at: e.at,
+                }))
+                .slice(0, RECENT_OUT_MAX);
+              setRecentlyOut(clean);
+            }
+          } catch {
+            // 형식 깨짐 → 빈 목록 유지(앱은 정상 동작).
+          }
+        }
+      })
+      .catch(() => {})
+      .finally(() => { recentLoadedRef.current = true; });
+    return () => { alive = false; };
+  }, [recentOutKey]);
+
+  // 변경 시 저장. 최초 로드 완료 전에는 저장하지 않아(빈 초기 상태로) 디스크를
+  // 덮어쓰지 않는다. 직렬화 실패는 무시(영속화는 best-effort, 메모리 상태가 진실).
+  useEffect(() => {
+    if (!recentOutKey || !recentLoadedRef.current) return;
+    setItem(recentOutKey, JSON.stringify(recentlyOut)).catch(() => {});
+  }, [recentlyOut, recentOutKey]);
+
   const [suggestNote, setSuggestNote] = useState<string | null>(null);
   const [suggestUnavailable, setSuggestUnavailable] = useState(false);
   // 자동 추천 모드 칩 표시 여부 (🎲 자동 추천 탭 시 토글).
@@ -781,6 +841,42 @@ export default function OperateScreen() {
   }, [queuedEntries, handleAssign]);
 
   // ─── 게임 종료 (코트 위 게임 턴 완료) ───
+  // ─── 방금 나온: 막 끝난 코트의 4명을 누적 목록에 쌓기 ───
+  // 게임 종료가 성공한 직후 호출. 그 코트의 4명 playerIds 를 (보드 엔트리 → 코트
+  // currentTurn 순으로) 잡아내고, 캡처 시점의 이름을 함께 저장(풀에서 빠진 사람용
+  // 폴백). 가장 최근이 위로 오도록 unshift, 최대 RECENT_OUT_MAX 개 유지.
+  //  - 2명 미만이면 스킵(의미 없는 빈 묶음 방지).
+  //  - 직전 항목과 멤버가 완전히 같으면 중복으로 건너뜀(연타/중복 이벤트 방어).
+  const pushRecentOut = useCallback((courtId: string) => {
+    const court = courts.find((c) => c.id === courtId);
+    const entry = playingByCourtId.get(courtId);
+    const ids = (entry?.playerIds ?? court?.currentTurn?.playerIds ?? []).filter(Boolean);
+    if (ids.length < 2) return;
+    // 캡처 시점 이름: 현재 풀 → 보드 엔트리/코트 turn 의 playerNames 순으로 폴백.
+    const turnNames = entry?.playerNames ?? court?.currentTurn?.playerNames ?? [];
+    const names: Record<string, string> = {};
+    ids.forEach((pid, i) => {
+      const nm = getPlayer(pid)?.userName ?? turnNames[i];
+      if (nm) names[pid] = nm;
+    });
+    setRecentlyOut((prev) => {
+      // 직전 항목과 동일 멤버면 중복으로 보고 스킵(순서 무관 비교).
+      const prevTop = prev[0];
+      if (prevTop) {
+        const a = [...prevTop.playerIds].sort().join('|');
+        const b = [...ids].sort().join('|');
+        if (a === b) return prev;
+      }
+      const next: RecentOut = {
+        id: `${courtId}-${Date.now()}`,
+        playerIds: ids,
+        names,
+        at: Date.now(),
+      };
+      return [next, ...prev].slice(0, RECENT_OUT_MAX);
+    });
+  }, [courts, playingByCourtId, getPlayer]);
+
   const handleEndGame = useCallback(
     (courtId: string) => {
       const court = courts.find((c) => c.id === courtId);
@@ -797,6 +893,8 @@ export default function OperateScreen() {
         async () => {
           try {
             await clubSessionApi.completeTurn(turnId);
+            // 종료 성공 → 방금 나온 목록에 이 4명을 쌓는다(풀 갱신 전에 캡처).
+            pushRecentOut(courtId);
             loadBoard();
             loadCourts();
             loadPool();
@@ -808,7 +906,7 @@ export default function OperateScreen() {
         '종료', '취소', 'danger',
       );
     },
-    [playingByCourtId, courts, loadBoard, loadCourts, loadPool],
+    [playingByCourtId, courts, loadBoard, loadCourts, loadPool, pushRecentOut],
   );
 
   const handleDeleteQueued = useCallback(
@@ -1471,12 +1569,173 @@ export default function OperateScreen() {
     );
   };
 
+  // ─── 방금 나온(recent) 보기 ───
+  // NOTE: 이 아래 보조 렌더러들은 위 권한 early-return 뒤에 정의되므로 절대 훅을
+  // 호출하면 안 된다(Rules of Hooks). 모두 평범한 함수/컴포넌트로 둔다.
+  //
+  // at(종료 시각) → "방금" / "N분 전" / "N시간 전" 상대 시간. nowTs(30초 틱)에
+  // 맞춰 다시 계산돼 시간이 자연스럽게 흘러간다.
+  const relativeTime = (at: number) => {
+    const diff = Math.max(0, nowTs - at);
+    const mins = Math.floor(diff / 60000);
+    if (mins < 1) return '방금';
+    if (mins < 60) return `${mins}분 전`;
+    const hrs = Math.floor(mins / 60);
+    return `${hrs}시간 전`;
+  };
+
+  // 한 사람의 현재 풀 상태(게임 중 / 편성됨 / 미편성) — 방금 나온 칩에서 누가
+  // 아직 자유로운지(다시 편성 가능) 살짝 보여주기 위해 쓴다. 풀에서 빠졌으면 null.
+  const recentPlayerStatus = (pid: string): 'free' | 'queued' | 'playing' | null => {
+    const p = getPlayer(pid);
+    if (!p) return null;
+    if (p.status === 'IN_TURN') return 'playing';
+    if (queuedPlayerIds.has(pid)) return 'queued';
+    return 'free';
+  };
+
+  // 방금 나온 한 묶음의 선수 칩. 급수 avatar(letter) + 이름 + 성별 마커.
+  // 탭하면 toggleStaged(그 한 명만 골라 트레이에 추가/제거 — 다른 묶음과 섞기).
+  // 이미 트레이에 있으면 primary 로 강조. 현재 게임 중/편성됨이면 작은 dim 태그를
+  // 덧붙여 운영자가 누가 아직 자유로운지 한눈에 본다. 풀에서 빠진 사람은 저장된
+  // 이름으로 폴백 표시하되 탭 불가(편성할 대상이 없음).
+  const RecentChip = ({ pid, fallbackName }: { pid: string; fallbackName?: string }) => {
+    const p = getPlayer(pid);
+    const skill = getSkillMeta(p?.skillLevel);
+    const g = getGenderMeta(p?.gender);
+    const display = p?.userName || fallbackName;
+    const isStaged = stagedSet.has(pid);
+    const st = recentPlayerStatus(pid);
+    const gone = !p; // 풀에서 빠짐 → 편성 불가
+    const busy = busySet.has(pid);
+    const body = (
+      <>
+        <View style={[styles.recentChipSkill, { borderColor: skill.color, backgroundColor: colors.surface }]}>
+          <Text style={[styles.recentChipSkillText, { color: skill.color }]}>
+            {(p?.skillLevel || '·').toUpperCase()}
+          </Text>
+        </View>
+        <Text
+          style={[styles.recentChipName, { color: isStaged ? colors.primary : gone ? colors.textLight : colors.text }]}
+          numberOfLines={1}
+          ellipsizeMode="tail"
+        >
+          {display || '?'}
+        </Text>
+        {g && <GenderMarker meta={g} size={13} />}
+        {/* 현재 상태가 게임 중/편성됨이면 작은 dim 태그. 미편성(free)이면 깔끔하게
+            아무 것도 안 붙여 "자유로운 사람"이 시각적으로 도드라지게. */}
+        {st === 'playing' && (
+          <View style={[styles.recentStatusTag, { backgroundColor: colors.dangerBg }]}>
+            <Text style={[styles.recentStatusTagText, { color: colors.playerInTurn }]}>게임 중</Text>
+          </View>
+        )}
+        {st === 'queued' && (
+          <View style={[styles.recentStatusTag, { backgroundColor: colors.infoBg }]}>
+            <Text style={[styles.recentStatusTagText, { color: colors.info }]}>편성됨</Text>
+          </View>
+        )}
+        {gone && (
+          <View style={[styles.recentStatusTag, { backgroundColor: colors.surfaceSecondary }]}>
+            <Text style={[styles.recentStatusTagText, { color: colors.textLight }]}>퇴장</Text>
+          </View>
+        )}
+        {busy && !gone && <View style={[styles.conflictDot, { borderColor: colors.surface }]} />}
+      </>
+    );
+    const chipStyle = [
+      styles.recentChip,
+      {
+        borderColor: isStaged ? colors.primary : colors.border,
+        backgroundColor: isStaged ? colors.primaryLight : colors.surface,
+      },
+    ];
+    if (gone) {
+      // 풀에 없는 사람 → 표시만, 탭 불가.
+      return <View style={[chipStyle, { opacity: 0.7 }]}>{body}</View>;
+    }
+    return (
+      <TouchableOpacity
+        style={chipStyle}
+        onPress={() => toggleStaged(pid)}
+        activeOpacity={0.7}
+        accessibilityLabel={`${display || ''} ${isStaged ? '편성 해제' : '다음 게임에 추가'}`}
+      >
+        {body}
+      </TouchableOpacity>
+    );
+  };
+
+  // 방금 나온 한 묶음 카드 = 함께 친 4명 한 게임. 헤더(상대 시간) + 4개 칩 +
+  // "이 4명 편성" 버튼. 버튼은 setStaged 로 4명(클램프)을 통째로 트레이에 올린다
+  // (풀에 남아 있는 사람만; 퇴장자는 제외). 칩 각각은 개별 탭으로 섞어 고를 수 있다.
+  const RecentGroupCard = ({ item }: { item: RecentOut }) => {
+    // 편성 가능한(아직 풀에 있는) id 만 → "이 4명 편성" 대상. 전원 퇴장이면 비활성.
+    const stageableIds = item.playerIds.filter((pid) => getPlayer(pid));
+    const canStageGroup = stageableIds.length >= 2;
+    return (
+      <View style={[styles.recentCard, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+        <View style={styles.recentCardHeader}>
+          <View style={[styles.recentTimeDot, { backgroundColor: colors.playerInTurn }]} />
+          <Text style={[styles.recentTime, { color: colors.text }]}>{relativeTime(item.at)}</Text>
+          <Text style={[styles.recentSub, { color: colors.textLight }]}>· 끝난 게임</Text>
+          <View style={{ flex: 1 }} />
+          <TouchableOpacity
+            style={[
+              styles.recentStageBtn,
+              { backgroundColor: canStageGroup ? colors.primary : colors.textLight },
+            ]}
+            onPress={() => prefillStaged(stageableIds)}
+            disabled={!canStageGroup}
+            activeOpacity={0.85}
+            accessibilityLabel="이 4명 편성"
+          >
+            <Text style={styles.recentStageBtnText}>이 {stageableIds.length}명 편성</Text>
+          </TouchableOpacity>
+        </View>
+        <View style={styles.recentChipGrid}>
+          {item.playerIds.map((pid, i) => (
+            <RecentChip key={`${pid}-${i}`} pid={pid} fallbackName={item.names[pid]} />
+          ))}
+        </View>
+      </View>
+    );
+  };
+
+  // 방금 나온 컨테이너 — 누적 목록을 최신순으로 카드로 쌓는다. 비어 있으면 안내.
+  // 그룹 단위 보기라 가나다 평면 목록이 아니다(검색 미사용 — 깔끔하게 유지).
+  const RecentOutBox = () => (
+    <View style={[styles.poolBox, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+      <View style={styles.poolBoxHeader}>
+        <View style={[styles.poolBoxDot, { backgroundColor: colors.playerInTurn }]} />
+        <Text style={[styles.poolBoxLabel, { color: colors.text }]}>방금 나온</Text>
+        <View style={[styles.poolBoxCount, { backgroundColor: colors.surfaceSecondary }]}>
+          <Text style={[styles.poolBoxCountText, { color: colors.textSecondary }]}>
+            {recentlyOut.length}게임
+          </Text>
+        </View>
+      </View>
+      {recentlyOut.length === 0 ? (
+        <Text style={[styles.poolBoxEmpty, { color: colors.textLight }]}>
+          아직 끝난 게임이 없어요 — 게임을 종료하면 여기 쌓여요
+        </Text>
+      ) : (
+        <View style={styles.recentList}>
+          {recentlyOut.map((item) => (
+            <RecentGroupCard key={item.id} item={item} />
+          ))}
+        </View>
+      )}
+    </View>
+  );
+
   // ─── 풀 보기 전환 탭(그룹별 | 전체) ───
   // 컴팩트 세그먼트 컨트롤 — 보드의 깔끔한 톤에 맞춘 분절 토글. 좌측 패널(태블릿/
   // 데스크톱) 또는 풀 위(폰)에 위치. 선택된 탭만 surface + primary 텍스트로 강조.
   const PoolTabs = (
     <View style={[styles.poolTabs, { backgroundColor: colors.surfaceSecondary, borderColor: colors.border }]}>
-      {([['group', '그룹별'], ['all', '전체']] as const).map(([key, label]) => {
+      {/* 3 세그먼트 — 폰 390 폭에서도 넘치지 않게 라벨을 짧게(그룹/전체/방금 나온). */}
+      {([['group', '그룹'], ['all', '전체'], ['recent', '방금 나온']] as const).map(([key, label]) => {
         const active = poolTab === key;
         return (
           <TouchableOpacity
@@ -1547,8 +1806,10 @@ export default function OperateScreen() {
             tint={colors.playerInTurn} stageable emptyText="진행 중인 게임이 없어요"
           />
         </>
-      ) : (
+      ) : poolTab === 'all' ? (
         <AllPoolBox />
+      ) : (
+        <RecentOutBox />
       )}
     </>
   );
@@ -2645,7 +2906,8 @@ export default function OperateScreen() {
               )}
             </View>
             {PoolActions}
-            {PoolSearch}
+            {/* 방금 나온은 그룹 보기라 가나다 검색이 의미 없으니 검색줄을 숨긴다. */}
+            {poolTab !== 'recent' && PoolSearch}
             <ScrollView
               style={{ flex: 1 }}
               contentContainerStyle={styles.poolList}
@@ -2722,7 +2984,8 @@ export default function OperateScreen() {
           )}
         </View>
         {PoolActions}
-        {PoolSearch}
+        {/* 방금 나온은 그룹 보기라 가나다 검색이 의미 없으니 검색줄을 숨긴다. */}
+        {poolTab !== 'recent' && PoolSearch}
         <Tray />
         {PoolBoxes}
         <View style={{ height: spacing.xxxl }} />
@@ -3603,9 +3866,9 @@ const styles = StyleSheet.create({
     marginBottom: spacing.sm, gap: 3,
   },
   poolTab: {
-    paddingHorizontal: spacing.md, paddingVertical: 6,
+    paddingHorizontal: spacing.sm, paddingVertical: 6,
     borderRadius: radius.md, alignItems: 'center', justifyContent: 'center',
-    minWidth: 64,
+    minWidth: 52,
   },
   poolTabActive: {
     ...(Platform.OS === 'web' ? {} : {
@@ -3621,6 +3884,40 @@ const styles = StyleSheet.create({
     borderRadius: radius.sm, borderWidth: 1, borderColor: palette.white,
   },
   statusBadgeText: { fontSize: 10, fontWeight: '800' },
+
+  // ─── 방금 나온(recent) 보기 ───
+  // 누적 카드 목록 — 최신 묶음이 위. 카드는 다음 게임 큐 카드처럼 surface 위에
+  // 살짝 떠 있고, 헤더(상대 시간 + 이 4명 편성) + 4개 칩 그리드로 구성.
+  recentList: { gap: spacing.sm },
+  recentCard: {
+    borderRadius: radius.card, borderWidth: 1, padding: spacing.sm, gap: spacing.xs,
+  },
+  recentCardHeader: { flexDirection: 'row', alignItems: 'center', gap: spacing.xs },
+  recentTimeDot: { width: 7, height: 7, borderRadius: 4 },
+  recentTime: { fontSize: 13, fontWeight: '800' },
+  recentSub: { fontSize: 11, fontWeight: '600' },
+  recentStageBtn: {
+    paddingHorizontal: spacing.sm, paddingVertical: 5, borderRadius: radius.md,
+    alignItems: 'center', justifyContent: 'center', minHeight: 28,
+  },
+  recentStageBtnText: { color: palette.white, fontSize: 12, fontWeight: '800' },
+  // 4 칩이 2열로 깔리는 그리드(폰) — 측정 없이 48% 고정. 좁아도 2열이 안정적.
+  recentChipGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.xs },
+  recentChip: {
+    width: '48.5%', flexDirection: 'row', alignItems: 'center', gap: 5,
+    borderWidth: 1, borderRadius: radius.md, paddingHorizontal: 6, paddingVertical: 6,
+    minHeight: 36,
+  },
+  recentChipSkill: {
+    width: 18, height: 18, borderRadius: radius.sm, borderWidth: 1.5,
+    alignItems: 'center', justifyContent: 'center',
+  },
+  recentChipSkillText: { fontSize: 10, fontWeight: '900' },
+  recentChipName: { flexShrink: 1, fontSize: 12.5, fontWeight: '700' },
+  recentStatusTag: {
+    paddingHorizontal: 4, paddingVertical: 1, borderRadius: radius.sm,
+  },
+  recentStatusTagText: { fontSize: 9, fontWeight: '800' },
 
   // Pool boxes
   poolList: { paddingBottom: spacing.sm, gap: spacing.sm },
