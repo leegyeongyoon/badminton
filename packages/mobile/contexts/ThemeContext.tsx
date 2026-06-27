@@ -32,7 +32,9 @@ const ThemeContext = createContext<ThemeContextValue | null>(null);
 
 export function ThemeProvider({ children }: { children: React.ReactNode }) {
   const systemScheme = useColorScheme();
-  const [mode, setMode] = useState<ThemeMode>('system');
+  // 기본값을 라이트(화이트)로 — 크롬/OS가 다크여도 앱은 화이트로 뜬다. 다크를 원하면
+  // 설정의 다크 모드 토글로 켤 수 있다(저장된 선택은 위 useEffect에서 복원).
+  const [mode, setMode] = useState<ThemeMode>('light');
   const [loaded, setLoaded] = useState(false);
 
   useEffect(() => {
