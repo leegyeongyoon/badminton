@@ -174,6 +174,9 @@ export default function OperateScreen() {
 
   // Staging tray (build a new queued game)
   const [staged, setStaged] = useState<string[]>([]);
+  // 선수 검색: 출석 풀에서 이름으로 빠르게 찾아 다음 게임에 편성. 비어 있으면 전체
+  // 표시. 표시할 때 trim + 소문자로 정규화해 대소문자 무시 부분일치로 거른다.
+  const [poolSearch, setPoolSearch] = useState('');
   const [suggestNote, setSuggestNote] = useState<string | null>(null);
   const [suggestUnavailable, setSuggestUnavailable] = useState(false);
   // 자동 추천 모드 칩 표시 여부 (🎲 자동 추천 탭 시 토글).
@@ -517,7 +520,10 @@ export default function OperateScreen() {
   // 대기 편성됨 — already placed in a queued game (and not playing).
   // 미편성 (대기) — checked-in, not playing, not in any queued game. Primary build pool.
   const { playingPool, queuedPool, freePool } = useMemo(() => {
-    const sortByGames = (a: Player, b: Player) => (a.gamesPlayedToday ?? 0) - (b.gamesPlayedToday ?? 0);
+    // 가나다 순(ㄱㄴㄷ) — 한국어 콜레이션으로 이름 정렬. 게스트도 동일. .slice()로
+    // 원본을 변형하지 않고 정렬한다.
+    const byName = (a: Player, b: Player) =>
+      (a.userName || '').localeCompare(b.userName || '', 'ko-KR');
     const playingP: Player[] = [];
     const queuedP: Player[] = [];
     const freeP: Player[] = [];
@@ -527,15 +533,9 @@ export default function OperateScreen() {
       freeP.push(p);
     }
     return {
-      playingPool: playingP.sort(sortByGames),
-      queuedPool: queuedP.sort(sortByGames),
-      // 미편성: resting last, then fewest games first.
-      freePool: freeP.sort((a, b) => {
-        const ar = a.status === 'RESTING' ? 1 : 0;
-        const br = b.status === 'RESTING' ? 1 : 0;
-        if (ar !== br) return ar - br;
-        return sortByGames(a, b);
-      }),
+      playingPool: playingP.slice().sort(byName),
+      queuedPool: queuedP.slice().sort(byName),
+      freePool: freeP.slice().sort(byName),
     };
   }, [uniquePlayers, queuedPlayerIds]);
 
@@ -1322,26 +1322,66 @@ export default function OperateScreen() {
     );
   };
 
-  // A labeled pool box (게임 중 / 대기 편성됨 / 미편성).
+  // A labeled pool box (게임 중 / 대기 편성됨 / 미편성). 선수 검색이 있으면 이름
+  // 부분일치(대소문자 무시)로 표시 카드를 거른다. count(헤더의 N명)는 항상 전체
+  // 그룹 인원을 보여주고, 검색 중에는 보이는 카드 수를 함께 표시한다.
   const PoolBox = ({
     label, count, list, tint, stageable, emptyText,
   }: {
     label: string; count: number; list: Player[]; tint: string; stageable: boolean; emptyText: string;
-  }) => (
-    <View style={[styles.poolBox, { backgroundColor: colors.surface, borderColor: colors.border }]}>
-      <View style={styles.poolBoxHeader}>
-        <View style={[styles.poolBoxDot, { backgroundColor: tint }]} />
-        <Text style={[styles.poolBoxLabel, { color: colors.text }]}>{label}</Text>
-        <View style={[styles.poolBoxCount, { backgroundColor: colors.surfaceSecondary }]}>
-          <Text style={[styles.poolBoxCountText, { color: colors.textSecondary }]}>{count}명</Text>
+  }) => {
+    const shown = poolSearch
+      ? list.filter((m) => (m.userName || '').toLowerCase().includes(poolSearch))
+      : list;
+    return (
+      <View style={[styles.poolBox, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+        <View style={styles.poolBoxHeader}>
+          <View style={[styles.poolBoxDot, { backgroundColor: tint }]} />
+          <Text style={[styles.poolBoxLabel, { color: colors.text }]}>{label}</Text>
+          <View style={[styles.poolBoxCount, { backgroundColor: colors.surfaceSecondary }]}>
+            <Text style={[styles.poolBoxCountText, { color: colors.textSecondary }]}>
+              {poolSearch ? `${shown.length}/${count}` : `${count}명`}
+            </Text>
+          </View>
         </View>
+        {shown.length === 0 ? (
+          <Text style={[styles.poolBoxEmpty, { color: colors.textLight }]}>
+            {poolSearch ? '검색 결과 없음' : emptyText}
+          </Text>
+        ) : (
+          <View style={styles.poolGrid} onLayout={onPoolAreaLayout}>
+            {shown.map((m) => <PoolCard key={m.userId} m={m} stageable={stageable} />)}
+          </View>
+        )}
       </View>
-      {list.length === 0 ? (
-        <Text style={[styles.poolBoxEmpty, { color: colors.textLight }]}>{emptyText}</Text>
-      ) : (
-        <View style={styles.poolGrid} onLayout={onPoolAreaLayout}>
-          {list.map((m) => <PoolCard key={m.userId} m={m} stageable={stageable} />)}
-        </View>
+    );
+  };
+
+  // 선수 검색 입력 — 출석 인원 섹션 맨 위(풀 위)에 들어가는 슬림한 한 줄 입력.
+  // WEB-SAFE(네이티브 전용 prop 없음). 검색어는 trim+소문자로 정규화해 저장하고,
+  // ✕ 로 즉시 비울 수 있다.
+  const PoolSearch = (
+    <View style={[styles.poolSearchRow, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+      <Icon name="search" size={15} color={colors.textLight} />
+      <TextInput
+        style={[styles.poolSearchInput, { color: colors.text }]}
+        value={poolSearch}
+        onChangeText={(t) => setPoolSearch(t.trim().toLowerCase())}
+        placeholder="선수 검색"
+        placeholderTextColor={colors.textLight}
+        autoCapitalize="none"
+        autoCorrect={false}
+        returnKeyType="search"
+        accessibilityLabel="선수 검색"
+      />
+      {poolSearch.length > 0 && (
+        <TouchableOpacity
+          onPress={() => setPoolSearch('')}
+          hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+          accessibilityLabel="검색어 지우기"
+        >
+          <Icon name="close" size={15} color={colors.textLight} />
+        </TouchableOpacity>
       )}
     </View>
   );
@@ -2434,6 +2474,7 @@ export default function OperateScreen() {
               )}
             </View>
             {PoolActions}
+            {PoolSearch}
             <ScrollView
               style={{ flex: 1 }}
               contentContainerStyle={styles.poolList}
@@ -2510,6 +2551,7 @@ export default function OperateScreen() {
           )}
         </View>
         {PoolActions}
+        {PoolSearch}
         <Tray />
         {PoolBoxes}
         <View style={{ height: spacing.xxxl }} />
@@ -3352,6 +3394,14 @@ const styles = StyleSheet.create({
 
   colHeaderRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
   colHeader: { ...typography.overline, marginBottom: spacing.xs, paddingHorizontal: spacing.xs },
+
+  // 선수 검색 — 슬림한 한 줄 입력. 풀 그리드 사이즈에 영향을 주지 않도록 풀 위에만 둠.
+  poolSearchRow: {
+    flexDirection: 'row', alignItems: 'center', gap: spacing.xs,
+    paddingHorizontal: spacing.sm, paddingVertical: Platform.OS === 'web' ? 6 : 4,
+    borderWidth: 1, borderRadius: radius.lg, marginBottom: spacing.xs,
+  },
+  poolSearchInput: { ...typography.body2, flex: 1, paddingVertical: 2, ...(Platform.OS === 'web' ? { outlineWidth: 0 as any } : null) },
 
   poolActionsWrap: { marginBottom: spacing.xs, gap: spacing.xs },
   poolActions: { flexDirection: 'row', gap: spacing.sm },
