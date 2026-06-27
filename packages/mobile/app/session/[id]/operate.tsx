@@ -1431,11 +1431,12 @@ export default function OperateScreen() {
 
   // 전체 보기의 한 카드 = PoolCard(급수 avatar + 이름 + 성별 마커) + 편성 상태 배지.
   // 미편성(free)만 stageable — 탭하면 toggleStaged 로 다음 게임에 편성(3분할의
-  // 미편성 박스와 동일). 편성됨/게임중 카드는 stageable=false 라 탭/드래그가 막혀
-  // 무심코 편성되지 않는다. 배지는 PoolCard 셀 내부 오버레이로 그려 그리드 폭
-  // (poolCellStyle) 측정/컬럼 계산을 그대로 유지한다.
+  // 미편성 박스와 동일). 전체 탭에서도 3분할과 똑같이 미편성/편성됨/게임중 '모두'
+  // 편성 가능(stageable) — 이미 편성됐거나 게임 중인 사람도 '미리 다음 게임'에 넣을 수
+  // 있어야 하니까(소프트 중복 = 빨간 점만, 막지 않음). 상태는 배지로 표시한다. 배지는
+  // PoolCard 셀 내부 오버레이로 그려 그리드 폭(poolCellStyle) 측정/컬럼 계산을 유지한다.
   const AllPoolCard = ({ player, poolStatus }: { player: Player; poolStatus: 'free' | 'queued' | 'playing' }) => (
-    <PoolCard m={player} stageable={poolStatus === 'free'} statusBadge={<StatusBadge s={poolStatus} />} />
+    <PoolCard m={player} stageable statusBadge={<StatusBadge s={poolStatus} />} />
   );
 
   // 전체 보기 컨테이너 — PoolBox 와 같은 외형의 단일 박스. 검색은 3분할과 동일한
