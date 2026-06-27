@@ -27,6 +27,22 @@ router.get('/:courtId/turns', async (req: Request, res: Response, next: NextFunc
   } catch (err) { next(err); }
 });
 
+// POST /api/v1/courts/:courtId/complete-active - 게임 종료 / 코트 비우기 BY COURT.
+// Robust 게임 종료 + stuck-court recovery: resolves and completes the court's
+// actually-PLAYING turn server-side (no client turnId), cancels leftover WAITING
+// turns, frees the players. Auth (in service): LEADER/STAFF of the court's 정모
+// OR SUPER_ADMIN. Mounted under /courts (NOT /turns), so the path is
+// /courts/:courtId/complete-active.
+router.post('/:courtId/complete-active', authenticate, async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const result = await turnService.completeActiveTurnByCourt(
+      req.params.courtId as string,
+      req.user!.userId,
+    );
+    res.json(result);
+  } catch (err) { next(err); }
+});
+
 // POST /api/v1/turns/:turnId/complete - complete a turn
 router.post('/:turnId/complete', authenticate, async (req: Request, res: Response, next: NextFunction) => {
   try {

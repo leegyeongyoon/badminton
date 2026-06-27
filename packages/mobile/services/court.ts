@@ -26,6 +26,11 @@ export const courtApi = {
     api.post(`/courts/${courtId}/turns`, { playerIds, ...(gameType && { gameType }) }),
   completeTurn: (turnId: string) =>
     api.post(`/turns/${turnId}/complete`),
+  // 게임 종료 / 코트 비우기 BY COURT — robust: the server resolves whatever is
+  // actually PLAYING on this court and completes it (+ cancels leftover WAITING
+  // turns), so it can't get stuck on a stale client turnId. Frees the players.
+  completeActiveByCourt: (courtId: string) =>
+    api.post(`/courts/${courtId}/complete-active`),
   cancelTurn: (turnId: string) =>
     api.post(`/turns/${turnId}/cancel`),
   requeueTurn: (turnId: string, options?: { newPlayerIds?: string[]; targetCourtId?: string }) =>

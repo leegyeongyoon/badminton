@@ -7,6 +7,7 @@ import { getIO } from '../../socket';
 import { sendPushToUser } from '../notification/notification.service';
 import { scheduleJob, cancelJob } from '../scheduler/scheduler.service';
 import { emitPlayersUpdated } from '../checkin/checkin.service';
+import { verifyClubStaff, isSuperAdmin } from '../clubSession/clubSession.service';
 
 // True when `userId` is LEADER/STAFF of the 정모 that owns this turn — i.e. the
 // operator, who may complete/cancel any game on their board.
@@ -291,18 +292,23 @@ async function startTurn(turnId: string, courtId: string, playerIds: string[], f
   }
 }
 
+// Turn-include shape shared by completeTurn / completeActiveTurnByCourt so the
+// core completion logic always sees the same fields (court+facility+policy,
+// players, game). Keep both load sites identical.
+const COMPLETE_TURN_INCLUDE = {
+  players: { include: { user: true } },
+  createdBy: true,
+  game: true,
+  court: { include: { facility: { include: { policy: true } } } },
+} as const;
+
 export async function completeTurn(
   turnId: string,
   userId: string,
 ): Promise<CourtTurnResponse> {
   const turn = await prisma.courtTurn.findUnique({
     where: { id: turnId },
-    include: {
-      players: { include: { user: true } },
-      createdBy: true,
-      game: true,
-      court: { include: { facility: { include: { policy: true } } } },
-    },
+    include: COMPLETE_TURN_INCLUDE,
   });
   if (!turn) throw new NotFoundError('순번');
   if (turn.status !== TurnStatus.PLAYING) {
@@ -321,6 +327,19 @@ export async function completeTurn(
   if (!isPlayer && !isCreator && !isAdmin && !isClubStaff) {
     throw new ForbiddenError('이 순번을 종료할 권한이 없습니다');
   }
+
+  return completeTurnCore(turn);
+}
+
+// Core completion logic shared by completeTurn (by turnId, with player/creator
+// permission) and completeActiveTurnByCourt (by courtId, with operator/staff
+// permission). The CALLER is responsible for authorization and for ensuring the
+// turn is PLAYING — this function performs the state changes, board entry
+// transition, waiting-turn promotion, sockets/pushes and player-availability
+// emit identically for both paths so the game record + your_turn/board sockets
+// never drift. `turn` must be loaded with COMPLETE_TURN_INCLUDE.
+async function completeTurnCore(turn: any): Promise<CourtTurnResponse> {
+  const turnId: string = turn.id;
 
   // Cancel any scheduled timer jobs
   await cancelJob(turnId, 'game_time_warning');
@@ -403,6 +422,108 @@ export async function completeTurn(
   });
 
   return mapTurn(updated!);
+}
+
+/**
+ * 코트 비우기 / 게임 종료 BY COURT — robust, never depends on a client-resolved
+ * turnId. Resolves the court's *actually* PLAYING turn server-side and completes
+ * it via the SAME completeTurnCore as the normal 게임 종료, then cancels any
+ * leftover WAITING turn so the court ends fully empty. This is the stuck-court
+ * recovery: even when the client state is desynced, the operator can clear the
+ * court and free its players (so the assign guard stops blocking them).
+ *
+ * Auth: LEADER/STAFF of the court's clubSession OR SUPER_ADMIN — the operator may
+ * clear ANY court in their 정모 (does NOT require being a player/creator).
+ *
+ * Returns the refreshed court/board state (turns still WAITING/PLAYING on the
+ * court — empty when fully cleared) plus a flag indicating whether anything was
+ * actually cleared.
+ */
+export async function completeActiveTurnByCourt(
+  courtId: string,
+  userId: string,
+): Promise<CourtDetailResponse & { cleared: boolean }> {
+  const court = await prisma.court.findUnique({
+    where: { id: courtId },
+    include: { facility: { include: { policy: true } }, clubSession: true },
+  });
+  if (!court) throw new NotFoundError('코트');
+
+  // Auth: the court must belong to a 정모; operator (LEADER/STAFF of that 정모) or
+  // SUPER_ADMIN may clear it. verifyClubStaff already allows SUPER_ADMIN globally,
+  // but a court with no clubSession (facility-level) can only be cleared by an
+  // explicit SUPER_ADMIN.
+  if (court.clubSessionId) {
+    await verifyClubStaff(court.clubSession!.clubId, userId);
+  } else if (!(await isSuperAdmin(userId))) {
+    throw new ForbiddenError('이 코트를 비울 권한이 없습니다');
+  }
+
+  let cleared = false;
+
+  // 1) Cancel any WAITING turn(s) still queued on this court FIRST. A 비우기 must
+  //    empty the court, and a queued turn never actually played — so it should be
+  //    CANCELLED, not counted as a played game. Cancelling first also means the
+  //    PLAYING completion below has nothing to auto-promote, so the court ends
+  //    empty in one pass (no promote→complete that would inflate game stats).
+  const waitingTurns = await prisma.courtTurn.findMany({
+    where: { courtId, status: TurnStatus.WAITING },
+    orderBy: { position: 'asc' },
+  });
+  for (const w of waitingTurns) {
+    await cancelStuckWaitingTurn(w, courtId, court.facilityId);
+    cleared = true;
+  }
+
+  // 2) Complete the court's PLAYING turn (most recent if somehow >1) via the
+  //    shared core, so the game record + sockets/pushes stay identical to 게임 종료.
+  //    With no WAITING turns left, completeTurnCore transitions the court to EMPTY.
+  const playingTurn = await prisma.courtTurn.findFirst({
+    where: { courtId, status: TurnStatus.PLAYING },
+    orderBy: { startedAt: 'desc' },
+    include: COMPLETE_TURN_INCLUDE,
+  });
+  if (playingTurn) {
+    await completeTurnCore(playingTurn);
+    cleared = true;
+  }
+
+  // 3) Make sure the court itself is EMPTY (completeTurnCore already sets EMPTY
+  //    when no waiting turns remain; this is a belt-and-braces no-op otherwise).
+  const remaining = await prisma.courtTurn.count({
+    where: { courtId, status: { in: [TurnStatus.WAITING, TurnStatus.PLAYING] } },
+  });
+  if (remaining === 0 && court.status !== CourtStatus.MAINTENANCE) {
+    await transitionCourtStatus(courtId, CourtStatus.EMPTY);
+    const io = getIO();
+    io.to(`facility:${court.facilityId}`).emit('court:statusChanged', {
+      courtId,
+      status: CourtStatus.EMPTY,
+    });
+  }
+
+  // Return the refreshed court/board state.
+  const detail = await getCourtTurns(courtId);
+  return { ...detail, cleared };
+}
+
+// Cancel a stuck WAITING turn during a court-clear: mark it CANCELLED, transition
+// its board entry, and emit the same cancel/promote sockets as cancelTurn (no
+// permission check — the caller of completeActiveTurnByCourt already authorized).
+async function cancelStuckWaitingTurn(turn: any, courtId: string, facilityId: string) {
+  await prisma.courtTurn.update({
+    where: { id: turn.id },
+    data: { status: TurnStatus.CANCELLED },
+  });
+  await prisma.gameBoardEntry.updateMany({
+    where: { turnId: turn.id, status: { in: ['MATERIALIZED', 'PLAYING'] } },
+    data: { status: 'CANCELLED' },
+  });
+  const io = getIO();
+  io.to(`court:${courtId}`).emit('turn:cancelled', { courtId, turnId: turn.id });
+  const allTurns = await getCourtTurnsRaw(courtId);
+  io.to(`court:${courtId}`).emit('turn:promoted', { courtId, turns: allTurns });
+  await emitPlayersUpdated(facilityId);
 }
 
 export async function cancelTurn(

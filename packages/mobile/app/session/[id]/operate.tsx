@@ -196,6 +196,14 @@ export default function OperateScreen() {
   // 선수 검색: 출석 풀에서 이름으로 빠르게 찾아 다음 게임에 편성. 비어 있으면 전체
   // 표시. 표시할 때 trim + 소문자로 정규화해 대소문자 무시 부분일치로 거른다.
   const [poolSearch, setPoolSearch] = useState('');
+  // ─── 풀 다중 필터 (이름검색 위에 얹는 속성 필터) ───
+  // 급수(S~F + 'none' 미설정) · 성별(M/F) 다중선택, 게임수 구간 단일선택. 모두 비어
+  // 있으면 '전체'. matchesPoolFilters 가 이름검색까지 한데 묶어 판정한다. 3분할/전체
+  // 보기(그리고 이후 모드2 게임판)가 같은 predicate 를 공유한다.
+  const [filterOpen, setFilterOpen] = useState(false);
+  const [filterSkills, setFilterSkills] = useState<Set<string>>(new Set());
+  const [filterGenders, setFilterGenders] = useState<Set<'M' | 'F'>>(new Set());
+  const [filterGames, setFilterGames] = useState<'all' | '0' | '1-2' | '3+'>('all');
   // 출석 풀 보기 전환: 'group' = 미편성/편성됨/게임중 3분할(기본), 'all' = 전체를
   // 가나다 한 줄 목록으로 묶고 각 카드에 편성 상태 배지를 붙인다. 'recent' = 방금
   // 끝난 게임들을 게임 단위(함께 친 4명)로 묶어 보여줘 새 조합으로 바로 다시 편성.
@@ -635,6 +643,58 @@ export default function OperateScreen() {
       });
   }, [uniquePlayers, queuedPlayerIds]);
 
+  // ─── 풀 필터 판정 (이름검색 + 급수 + 성별 + 게임수) ───
+  // 한 선수가 현재 걸린 모든 필터를 통과하는지. 비어 있는 차원은 건너뛴다. 급수
+  // 미설정은 'none' 키로 취급해 '미설정' 칩으로 거를 수 있게 한다. PoolBox/AllPoolBox
+  // 가 공유한다.
+  const matchesPoolFilters = useCallback((p: Player): boolean => {
+    if (poolSearch && !(p.userName || '').toLowerCase().includes(poolSearch)) return false;
+    if (filterSkills.size > 0) {
+      const lv = p.skillLevel && (SKILL_LEVELS as string[]).includes(p.skillLevel) ? p.skillLevel : 'none';
+      if (!filterSkills.has(lv)) return false;
+    }
+    if (filterGenders.size > 0) {
+      if (!p.gender || !filterGenders.has(p.gender)) return false;
+    }
+    if (filterGames !== 'all') {
+      const g = p.gamesPlayedToday ?? 0;
+      const ok = filterGames === '0' ? g === 0 : filterGames === '1-2' ? g >= 1 && g <= 2 : g >= 3;
+      if (!ok) return false;
+    }
+    return true;
+  }, [poolSearch, filterSkills, filterGenders, filterGames]);
+
+  // 속성 필터(급수/성별/게임수) 개수 — 토글 배지에 표시. 이름검색은 별도 줄이라 제외.
+  const activeFilterCount = useMemo(
+    () => filterSkills.size + filterGenders.size + (filterGames !== 'all' ? 1 : 0),
+    [filterSkills, filterGenders, filterGames],
+  );
+  // 어떤 거름(검색 OR 속성 필터)이라도 걸려 있나 — 카운트 표시/빈 문구를 바꾸는 데 쓴다.
+  const filtersActive = useMemo(
+    () => poolSearch.length > 0 || activeFilterCount > 0,
+    [poolSearch, activeFilterCount],
+  );
+  const clearPoolFilters = useCallback(() => {
+    setFilterSkills(new Set());
+    setFilterGenders(new Set());
+    setFilterGames('all');
+  }, []);
+  // 급수/성별 칩 토글 — 들어있으면 빼고 없으면 넣는다(불변 복사).
+  const toggleFilterSkill = useCallback((lv: string) => {
+    setFilterSkills((prev) => {
+      const next = new Set(prev);
+      next.has(lv) ? next.delete(lv) : next.add(lv);
+      return next;
+    });
+  }, []);
+  const toggleFilterGender = useCallback((g: 'M' | 'F') => {
+    setFilterGenders((prev) => {
+      const next = new Set(prev);
+      next.has(g) ? next.delete(g) : next.add(g);
+      return next;
+    });
+  }, []);
+
   const guestCount = useMemo(() => uniquePlayers.filter((p) => p.isGuest).length, [uniquePlayers]);
 
   // M/F balance over the 미편성 pool (who's free to build from).
@@ -877,36 +937,38 @@ export default function OperateScreen() {
     });
   }, [courts, playingByCourtId, getPlayer]);
 
+  // 게임 종료 — COURT-based so it ALWAYS ends whatever's actually PLAYING on this
+  // court. The server resolves the turn from the court (not a client turnId that
+  // can desync) and completes it + cancels any leftover WAITING turn, freeing the
+  // players. This is also the stuck-court recovery: a court that shows 게임 중 but
+  // can't otherwise be cleared is freed here, so the assign guard stops blocking
+  // those players. `forceClear` only changes the confirm copy (the endpoint is
+  // robust either way).
   const handleEndGame = useCallback(
-    (courtId: string) => {
+    (courtId: string, forceClear = false) => {
       const court = courts.find((c) => c.id === courtId);
-      // Prefer the board entry's turnId; fall back to the court's currentTurn
-      // (games created directly have no GameBoardEntry).
-      const turnId = playingByCourtId.get(courtId)?.turnId ?? court?.currentTurn?.id ?? null;
-      if (!turnId) {
-        showAlert('알림', '이 코트에서 진행 중인 게임 정보를 찾을 수 없어요.');
-        return;
-      }
       showConfirm(
-        '게임 종료',
-        `${court?.name || '코트'}의 게임을 종료할까요?`,
+        forceClear ? '코트 비우기' : '게임 종료',
+        forceClear
+          ? `${court?.name || '코트'}을(를) 강제로 비울까요? 진행 중인 게임이 종료되고 선수들이 풀려요.`
+          : `${court?.name || '코트'}의 게임을 종료할까요?`,
         async () => {
           try {
-            await clubSessionApi.completeTurn(turnId);
+            await courtApi.completeActiveByCourt(courtId);
             // 종료 성공 → 방금 나온 목록에 이 4명을 쌓는다(풀 갱신 전에 캡처).
             pushRecentOut(courtId);
             loadBoard();
             loadCourts();
             loadPool();
-            showSuccess('게임 종료!');
+            showSuccess(forceClear ? '코트를 비웠어요' : '게임 종료!');
           } catch (err: any) {
-            showAlert('오류', err.response?.data?.error || '종료 실패');
+            showAlert('오류', err.response?.data?.error || (forceClear ? '비우기 실패' : '종료 실패'));
           }
         },
-        '종료', '취소', 'danger',
+        forceClear ? '비우기' : '종료', '취소', 'danger',
       );
     },
-    [playingByCourtId, courts, loadBoard, loadCourts, loadPool, pushRecentOut],
+    [courts, loadBoard, loadCourts, loadPool, pushRecentOut],
   );
 
   const handleDeleteQueued = useCallback(
@@ -1481,9 +1543,7 @@ export default function OperateScreen() {
   }: {
     label: string; count: number; list: Player[]; tint: string; stageable: boolean; emptyText: string;
   }) => {
-    const shown = poolSearch
-      ? list.filter((m) => (m.userName || '').toLowerCase().includes(poolSearch))
-      : list;
+    const shown = filtersActive ? list.filter(matchesPoolFilters) : list;
     return (
       <View style={[styles.poolBox, { backgroundColor: colors.surface, borderColor: colors.border }]}>
         <View style={styles.poolBoxHeader}>
@@ -1491,13 +1551,13 @@ export default function OperateScreen() {
           <Text style={[styles.poolBoxLabel, { color: colors.text }]}>{label}</Text>
           <View style={[styles.poolBoxCount, { backgroundColor: colors.surfaceSecondary }]}>
             <Text style={[styles.poolBoxCountText, { color: colors.textSecondary }]}>
-              {poolSearch ? `${shown.length}/${count}` : `${count}명`}
+              {filtersActive ? `${shown.length}/${count}` : `${count}명`}
             </Text>
           </View>
         </View>
         {shown.length === 0 ? (
           <Text style={[styles.poolBoxEmpty, { color: colors.textLight }]}>
-            {poolSearch ? '검색 결과 없음' : emptyText}
+            {filtersActive ? '조건에 맞는 회원 없음' : emptyText}
           </Text>
         ) : (
           <View style={styles.poolGrid} onLayout={onPoolAreaLayout}>
@@ -1541,22 +1601,20 @@ export default function OperateScreen() {
   // poolSearch 로 거르고, 헤더 카운트는 검색 중엔 shown/total, 아니면 total 을
   // 보여준다. onPoolAreaLayout 으로 그리드 폭을 측정해 컬럼 수를 동일하게 맞춘다.
   const AllPoolBox = () => {
-    const shown = poolSearch
-      ? allPool.filter(({ player }) => (player.userName || '').toLowerCase().includes(poolSearch))
-      : allPool;
+    const shown = filtersActive ? allPool.filter(({ player }) => matchesPoolFilters(player)) : allPool;
     return (
       <View style={[styles.poolBox, { backgroundColor: colors.surface, borderColor: colors.border }]}>
         <View style={styles.poolBoxHeader}>
           <Text style={[styles.poolBoxLabel, { color: colors.text }]}>전체 출석</Text>
           <View style={[styles.poolBoxCount, { backgroundColor: colors.surfaceSecondary }]}>
             <Text style={[styles.poolBoxCountText, { color: colors.textSecondary }]}>
-              {poolSearch ? `${shown.length}/${allPool.length}` : `${allPool.length}명`}
+              {filtersActive ? `${shown.length}/${allPool.length}` : `${allPool.length}명`}
             </Text>
           </View>
         </View>
         {shown.length === 0 ? (
           <Text style={[styles.poolBoxEmpty, { color: colors.textLight }]}>
-            {poolSearch ? '검색 결과 없음' : '출석한 회원이 없어요'}
+            {filtersActive ? '조건에 맞는 회원 없음' : '출석한 회원이 없어요'}
           </Text>
         ) : (
           <View style={styles.poolGrid} onLayout={onPoolAreaLayout}>
@@ -1758,28 +1816,140 @@ export default function OperateScreen() {
   // 선수 검색 입력 — 출석 인원 섹션 맨 위(풀 위)에 들어가는 슬림한 한 줄 입력.
   // WEB-SAFE(네이티브 전용 prop 없음). 검색어는 trim+소문자로 정규화해 저장하고,
   // ✕ 로 즉시 비울 수 있다.
+  // 게임수 구간 칩 정의(단일 선택). 0 / 1–2 / 3+ 로 적게 친 사람을 빠르게 추려낸다.
+  const GAMES_FILTERS: { key: 'all' | '0' | '1-2' | '3+'; label: string }[] = [
+    { key: 'all', label: '전체' }, { key: '0', label: '0게임' },
+    { key: '1-2', label: '1–2' }, { key: '3+', label: '3+' },
+  ];
   const PoolSearch = (
-    <View style={[styles.poolSearchRow, { backgroundColor: colors.surface, borderColor: colors.border }]}>
-      <Icon name="search" size={15} color={colors.textLight} />
-      <TextInput
-        style={[styles.poolSearchInput, { color: colors.text }]}
-        value={poolSearch}
-        onChangeText={(t) => setPoolSearch(t.trim().toLowerCase())}
-        placeholder="선수 검색"
-        placeholderTextColor={colors.textLight}
-        autoCapitalize="none"
-        autoCorrect={false}
-        returnKeyType="search"
-        accessibilityLabel="선수 검색"
-      />
-      {poolSearch.length > 0 && (
+    <View style={styles.poolSearchWrap}>
+      <View style={[styles.poolSearchRow, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+        <Icon name="search" size={15} color={colors.textLight} />
+        <TextInput
+          style={[styles.poolSearchInput, { color: colors.text }]}
+          value={poolSearch}
+          onChangeText={(t) => setPoolSearch(t.trim().toLowerCase())}
+          placeholder="선수 검색"
+          placeholderTextColor={colors.textLight}
+          autoCapitalize="none"
+          autoCorrect={false}
+          returnKeyType="search"
+          accessibilityLabel="선수 검색"
+        />
+        {poolSearch.length > 0 && (
+          <TouchableOpacity
+            onPress={() => setPoolSearch('')}
+            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+            accessibilityLabel="검색어 지우기"
+          >
+            <Icon name="close" size={15} color={colors.textLight} />
+          </TouchableOpacity>
+        )}
+        {/* 필터 토글 — 활성 속성 필터 개수를 배지로. 탭하면 아래 칩 패널이 열린다. */}
         <TouchableOpacity
-          onPress={() => setPoolSearch('')}
-          hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-          accessibilityLabel="검색어 지우기"
+          style={[
+            styles.poolFilterToggle,
+            { borderColor: colors.border },
+            (filterOpen || activeFilterCount > 0) && { backgroundColor: colors.primaryBg, borderColor: colors.primary },
+          ]}
+          onPress={() => setFilterOpen((v) => !v)}
+          hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}
+          accessibilityRole="button"
+          accessibilityLabel="필터"
+          accessibilityState={{ expanded: filterOpen }}
         >
-          <Icon name="close" size={15} color={colors.textLight} />
+          <Icon name="tools" size={14} color={activeFilterCount > 0 ? colors.primary : colors.textSecondary} />
+          {activeFilterCount > 0 && (
+            <View style={[styles.poolFilterBadge, { backgroundColor: colors.primary }]}>
+              <Text style={styles.poolFilterBadgeText}>{activeFilterCount}</Text>
+            </View>
+          )}
         </TouchableOpacity>
+      </View>
+
+      {filterOpen && (
+        <View style={[styles.poolFilterPanel, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+          {/* 급수 (다중) — 선택 시 해당 급수색으로 채워 한눈에. 'none'=미설정. */}
+          <View style={styles.poolFilterRow}>
+            <Text style={[styles.poolFilterRowLabel, { color: colors.textSecondary }]}>급수</Text>
+            <View style={styles.poolFilterChips}>
+              {SKILL_LEVELS.map((lv) => {
+                const on = filterSkills.has(lv);
+                const meta = getSkillMeta(lv);
+                return (
+                  <TouchableOpacity
+                    key={lv}
+                    style={[styles.filterChip, { borderColor: colors.border }, on && { backgroundColor: meta.color, borderColor: meta.color }]}
+                    onPress={() => toggleFilterSkill(lv)}
+                    accessibilityRole="button"
+                    accessibilityState={{ selected: on }}
+                    accessibilityLabel={`급수 ${lv}`}
+                  >
+                    <Text style={[styles.filterChipText, { color: on ? '#fff' : colors.text }]}>{lv}</Text>
+                  </TouchableOpacity>
+                );
+              })}
+              <TouchableOpacity
+                style={[styles.filterChip, { borderColor: colors.border }, filterSkills.has('none') && { backgroundColor: colors.textLight, borderColor: colors.textLight }]}
+                onPress={() => toggleFilterSkill('none')}
+                accessibilityRole="button"
+                accessibilityState={{ selected: filterSkills.has('none') }}
+                accessibilityLabel="급수 미설정"
+              >
+                <Text style={[styles.filterChipText, { color: filterSkills.has('none') ? '#fff' : colors.textSecondary }]}>미설정</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+          {/* 성별 (다중) */}
+          <View style={styles.poolFilterRow}>
+            <Text style={[styles.poolFilterRowLabel, { color: colors.textSecondary }]}>성별</Text>
+            <View style={styles.poolFilterChips}>
+              {(['M', 'F'] as const).map((g) => {
+                const on = filterGenders.has(g);
+                const gm = GENDER_META[g];
+                return (
+                  <TouchableOpacity
+                    key={g}
+                    style={[styles.filterChip, { borderColor: colors.border }, on && { backgroundColor: gm.color, borderColor: gm.color }]}
+                    onPress={() => toggleFilterGender(g)}
+                    accessibilityRole="button"
+                    accessibilityState={{ selected: on }}
+                    accessibilityLabel={`성별 ${gm.label}`}
+                  >
+                    <Text style={[styles.filterChipText, { color: on ? '#fff' : colors.text }]}>{gm.label}</Text>
+                  </TouchableOpacity>
+                );
+              })}
+            </View>
+          </View>
+          {/* 게임수 (단일) */}
+          <View style={styles.poolFilterRow}>
+            <Text style={[styles.poolFilterRowLabel, { color: colors.textSecondary }]}>게임수</Text>
+            <View style={styles.poolFilterChips}>
+              {GAMES_FILTERS.map(({ key, label }) => {
+                const on = filterGames === key;
+                return (
+                  <TouchableOpacity
+                    key={key}
+                    style={[styles.filterChip, { borderColor: colors.border }, on && { backgroundColor: colors.primary, borderColor: colors.primary }]}
+                    onPress={() => setFilterGames(key)}
+                    accessibilityRole="button"
+                    accessibilityState={{ selected: on }}
+                    accessibilityLabel={`게임수 ${label}`}
+                  >
+                    <Text style={[styles.filterChipText, { color: on ? '#fff' : colors.text }]}>{label}</Text>
+                  </TouchableOpacity>
+                );
+              })}
+            </View>
+          </View>
+          {activeFilterCount > 0 && (
+            <TouchableOpacity style={styles.poolFilterClear} onPress={clearPoolFilters} accessibilityRole="button" accessibilityLabel="필터 초기화">
+              <Icon name="close" size={13} color={colors.textSecondary} />
+              <Text style={[styles.poolFilterClearText, { color: colors.textSecondary }]}>필터 초기화</Text>
+            </TouchableOpacity>
+          )}
+        </View>
       )}
     </View>
   );
@@ -2593,6 +2763,19 @@ export default function OperateScreen() {
         >
           <Icon name="stop" size={14} color={colors.danger} />
           <Text style={[styles.courtActionText, { color: colors.danger }]}>게임 종료</Text>
+        </TouchableOpacity>
+
+        {/* Quiet secondary action for a court the operator believes is stuck
+            (shows 게임 중 but won't clear). Calls the same robust court-based
+            endpoint with a clearer confirm, freeing the players so they can be
+            reassigned. */}
+        <TouchableOpacity
+          style={styles.courtClearLink}
+          onPress={() => handleEndGame(court.id, true)}
+          activeOpacity={0.7}
+          accessibilityLabel={`${court.name} 코트 비우기`}
+        >
+          <Text style={[styles.courtClearLinkText, { color: colors.textLight }]}>코트가 안 비워지나요? 코트 비우기</Text>
         </TouchableOpacity>
       </View>
     );
@@ -3837,6 +4020,36 @@ const styles = StyleSheet.create({
   },
   poolSearchInput: { ...typography.body2, flex: 1, paddingVertical: 2, ...(Platform.OS === 'web' ? { outlineWidth: 0 as any } : null) },
 
+  // ─── 풀 다중 필터 (급수/성별/게임수) ───
+  poolSearchWrap: {},
+  poolFilterToggle: {
+    flexDirection: 'row', alignItems: 'center', gap: 3,
+    paddingHorizontal: 7, paddingVertical: 4,
+    borderWidth: 1, borderRadius: radius.md,
+  },
+  poolFilterBadge: {
+    minWidth: 15, height: 15, borderRadius: 8, paddingHorizontal: 3,
+    alignItems: 'center', justifyContent: 'center',
+  },
+  poolFilterBadgeText: { color: '#fff', fontSize: 10, fontWeight: '700', lineHeight: 14 },
+  poolFilterPanel: {
+    borderWidth: 1, borderRadius: radius.lg, padding: spacing.sm,
+    marginBottom: spacing.sm, gap: spacing.xs,
+  },
+  poolFilterRow: { flexDirection: 'row', alignItems: 'flex-start', gap: spacing.xs },
+  poolFilterRowLabel: { ...typography.caption, width: 38, paddingTop: 5 },
+  poolFilterChips: { flexDirection: 'row', flexWrap: 'wrap', gap: 5, flex: 1 },
+  filterChip: {
+    minWidth: 30, paddingHorizontal: 9, paddingVertical: 4,
+    borderWidth: 1, borderRadius: radius.md, alignItems: 'center', justifyContent: 'center',
+  },
+  filterChipText: { ...typography.buttonSm },
+  poolFilterClear: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 4,
+    paddingVertical: 5, marginTop: 2,
+  },
+  poolFilterClearText: { ...typography.caption },
+
   poolActionsWrap: { marginBottom: spacing.xs, gap: spacing.xs },
   poolActions: { flexDirection: 'row', gap: spacing.sm },
   poolActionBtn: {
@@ -4186,6 +4399,8 @@ const styles = StyleSheet.create({
     paddingVertical: spacing.sm, borderRadius: radius.md, borderWidth: 1,
   },
   courtActionText: { ...typography.buttonSm },
+  courtClearLink: { alignItems: 'center', justifyContent: 'center', paddingVertical: spacing.xs, marginTop: spacing.xs },
+  courtClearLinkText: { ...typography.caption, textDecorationLine: 'underline' },
 
   // Denied
   denied: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: spacing.xxl, gap: spacing.md },
