@@ -191,6 +191,10 @@ export default function OperateScreen() {
   // 선수 검색: 출석 풀에서 이름으로 빠르게 찾아 다음 게임에 편성. 비어 있으면 전체
   // 표시. 표시할 때 trim + 소문자로 정규화해 대소문자 무시 부분일치로 거른다.
   const [poolSearch, setPoolSearch] = useState('');
+  // 출석 풀 보기 전환: 'group' = 미편성/편성됨/게임중 3분할(기본), 'all' = 전체를
+  // 가나다 한 줄 목록으로 묶고 각 카드에 편성 상태 배지를 붙인다. 검색/정렬/그리드
+  // 측정은 두 보기에서 모두 동일하게 동작한다.
+  const [poolTab, setPoolTab] = useState<'group' | 'all'>('group');
   const [suggestNote, setSuggestNote] = useState<string | null>(null);
   const [suggestUnavailable, setSuggestUnavailable] = useState(false);
   // 자동 추천 모드 칩 표시 여부 (🎲 자동 추천 탭 시 토글).
@@ -551,6 +555,24 @@ export default function OperateScreen() {
       queuedPool: queuedP.slice().sort(byName),
       freePool: freeP.slice().sort(byName),
     };
+  }, [uniquePlayers, queuedPlayerIds]);
+
+  // ─── 전체 보기용 단일 목록 ───
+  // 출석한 모든 사람을 가나다(ko-KR) 한 줄로 합치고, 각 사람의 현재 편성 상태
+  // (free=미편성 / queued=편성됨 / playing=게임 중)를 함께 들고 다닌다. 3분할과
+  // 동일한 분류 규칙(게임 중 우선 → 편성됨 → 미편성)을 그대로 쓴다. 미편성만
+  // 다음 게임에 편성 가능(stageable) — 3분할의 미편성 박스와 같은 동작.
+  const allPool = useMemo<{ player: Player; poolStatus: 'free' | 'queued' | 'playing' }[]>(() => {
+    const byName = (a: Player, b: Player) =>
+      (a.userName || '').localeCompare(b.userName || '', 'ko-KR');
+    return uniquePlayers
+      .slice()
+      .sort(byName)
+      .map((p) => {
+        const poolStatus: 'free' | 'queued' | 'playing' =
+          p.status === 'IN_TURN' ? 'playing' : queuedPlayerIds.has(p.userId) ? 'queued' : 'free';
+        return { player: p, poolStatus };
+      });
   }, [uniquePlayers, queuedPlayerIds]);
 
   const guestCount = useMemo(() => uniquePlayers.filter((p) => p.isGuest).length, [uniquePlayers]);
@@ -1224,7 +1246,7 @@ export default function OperateScreen() {
   //               nothing here (the card's onPress already handled the tap).
   //      • native → PanResponder claims on move (not start) so a tap falls
   //               through to the PlayerCard's onPress.
-  const PoolCard = ({ m, stageable }: { m: Player; stageable: boolean }) => {
+  const PoolCard = ({ m, stageable, statusBadge }: { m: Player; stageable: boolean; statusBadge?: React.ReactNode }) => {
     const isStaged = stagedSet.has(m.userId);
     // Any checked-in player can be composed into the next game regardless of
     // state — 미편성/대기, 휴식(RESTING), 대기 편성됨, 게임 중 모두 편성 가능.
@@ -1333,6 +1355,7 @@ export default function OperateScreen() {
             busy={busy}
           />
           {infoButton}
+          {statusBadge && <View style={styles.allPoolBadgeOverlay} pointerEvents="none">{statusBadge}</View>}
         </View>
       );
     }
@@ -1347,6 +1370,7 @@ export default function OperateScreen() {
           busy={busy}
         />
         {infoButton}
+        {statusBadge && <View style={styles.allPoolBadgeOverlay} pointerEvents="none">{statusBadge}</View>}
       </View>
     );
   };
@@ -1386,6 +1410,91 @@ export default function OperateScreen() {
     );
   };
 
+  // ─── 편성 상태 배지(전체 보기 전용) ───
+  // 풀 상태 → 라벨 + 색. 3분할 박스의 점 색과 같은 매핑으로 통일:
+  //   미편성(free)     = 초록(playerAvailable / secondary)
+  //   편성됨(queued)   = 보라(info)
+  //   게임 중(playing) = 빨강/주황(playerInTurn)
+  const poolStatusMeta = (s: 'free' | 'queued' | 'playing') => {
+    if (s === 'playing') return { label: '게임 중', fg: colors.playerInTurn, bg: colors.dangerBg };
+    if (s === 'queued') return { label: '편성됨', fg: colors.info, bg: colors.infoBg };
+    return { label: '미편성', fg: colors.secondary, bg: colors.secondaryBg };
+  };
+  const StatusBadge = ({ s }: { s: 'free' | 'queued' | 'playing' }) => {
+    const meta = poolStatusMeta(s);
+    return (
+      <View style={[styles.statusBadge, { backgroundColor: meta.bg }]}>
+        <Text style={[styles.statusBadgeText, { color: meta.fg }]}>{meta.label}</Text>
+      </View>
+    );
+  };
+
+  // 전체 보기의 한 카드 = PoolCard(급수 avatar + 이름 + 성별 마커) + 편성 상태 배지.
+  // 미편성(free)만 stageable — 탭하면 toggleStaged 로 다음 게임에 편성(3분할의
+  // 미편성 박스와 동일). 편성됨/게임중 카드는 stageable=false 라 탭/드래그가 막혀
+  // 무심코 편성되지 않는다. 배지는 PoolCard 셀 내부 오버레이로 그려 그리드 폭
+  // (poolCellStyle) 측정/컬럼 계산을 그대로 유지한다.
+  const AllPoolCard = ({ player, poolStatus }: { player: Player; poolStatus: 'free' | 'queued' | 'playing' }) => (
+    <PoolCard m={player} stageable={poolStatus === 'free'} statusBadge={<StatusBadge s={poolStatus} />} />
+  );
+
+  // 전체 보기 컨테이너 — PoolBox 와 같은 외형의 단일 박스. 검색은 3분할과 동일한
+  // poolSearch 로 거르고, 헤더 카운트는 검색 중엔 shown/total, 아니면 total 을
+  // 보여준다. onPoolAreaLayout 으로 그리드 폭을 측정해 컬럼 수를 동일하게 맞춘다.
+  const AllPoolBox = () => {
+    const shown = poolSearch
+      ? allPool.filter(({ player }) => (player.userName || '').toLowerCase().includes(poolSearch))
+      : allPool;
+    return (
+      <View style={[styles.poolBox, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+        <View style={styles.poolBoxHeader}>
+          <Text style={[styles.poolBoxLabel, { color: colors.text }]}>전체 출석</Text>
+          <View style={[styles.poolBoxCount, { backgroundColor: colors.surfaceSecondary }]}>
+            <Text style={[styles.poolBoxCountText, { color: colors.textSecondary }]}>
+              {poolSearch ? `${shown.length}/${allPool.length}` : `${allPool.length}명`}
+            </Text>
+          </View>
+        </View>
+        {shown.length === 0 ? (
+          <Text style={[styles.poolBoxEmpty, { color: colors.textLight }]}>
+            {poolSearch ? '검색 결과 없음' : '출석한 회원이 없어요'}
+          </Text>
+        ) : (
+          <View style={styles.poolGrid} onLayout={onPoolAreaLayout}>
+            {shown.map(({ player, poolStatus }) => (
+              <AllPoolCard key={player.userId} player={player} poolStatus={poolStatus} />
+            ))}
+          </View>
+        )}
+      </View>
+    );
+  };
+
+  // ─── 풀 보기 전환 탭(그룹별 | 전체) ───
+  // 컴팩트 세그먼트 컨트롤 — 보드의 깔끔한 톤에 맞춘 분절 토글. 좌측 패널(태블릿/
+  // 데스크톱) 또는 풀 위(폰)에 위치. 선택된 탭만 surface + primary 텍스트로 강조.
+  const PoolTabs = (
+    <View style={[styles.poolTabs, { backgroundColor: colors.surfaceSecondary, borderColor: colors.border }]}>
+      {([['group', '그룹별'], ['all', '전체']] as const).map(([key, label]) => {
+        const active = poolTab === key;
+        return (
+          <TouchableOpacity
+            key={key}
+            style={[styles.poolTab, active && [styles.poolTabActive, { backgroundColor: colors.surface }]]}
+            onPress={() => setPoolTab(key)}
+            accessibilityRole="tab"
+            accessibilityState={{ selected: active }}
+            accessibilityLabel={`${label} 보기`}
+          >
+            <Text style={[styles.poolTabText, { color: active ? colors.primary : colors.textSecondary }]}>
+              {label}
+            </Text>
+          </TouchableOpacity>
+        );
+      })}
+    </View>
+  );
+
   // 선수 검색 입력 — 출석 인원 섹션 맨 위(풀 위)에 들어가는 슬림한 한 줄 입력.
   // WEB-SAFE(네이티브 전용 prop 없음). 검색어는 trim+소문자로 정규화해 저장하고,
   // ✕ 로 즉시 비울 수 있다.
@@ -1415,22 +1524,31 @@ export default function OperateScreen() {
     </View>
   );
 
+  // 풀 본문 — 탭에 따라 3분할(그룹별) 또는 전체 단일 목록을 보여준다. 탭 스위처
+  // 자체는 위에 항상 떠 있고, 여기서 본문만 갈아끼운다.
   const PoolBoxes = (
     <>
-      <PoolBox
-        label="미편성 (대기)" count={freePool.length} list={freePool}
-        tint={colors.playerAvailable} stageable emptyText="대기 중인 회원이 없어요"
-      />
-      {/* 대기 편성됨 / 게임 중 도 stageable — 이미 편성됐거나 게임 중인 사람도
-          '미리 다음 게임'에 넣을 수 있어야 함(소프트 중복 = 빨간 점만, 막지 않음). */}
-      <PoolBox
-        label="대기 편성됨" count={queuedPool.length} list={queuedPool}
-        tint={colors.info} stageable emptyText="아직 편성된 회원이 없어요"
-      />
-      <PoolBox
-        label="게임 중" count={playingPool.length} list={playingPool}
-        tint={colors.playerInTurn} stageable emptyText="진행 중인 게임이 없어요"
-      />
+      {PoolTabs}
+      {poolTab === 'group' ? (
+        <>
+          <PoolBox
+            label="미편성 (대기)" count={freePool.length} list={freePool}
+            tint={colors.playerAvailable} stageable emptyText="대기 중인 회원이 없어요"
+          />
+          {/* 대기 편성됨 / 게임 중 도 stageable — 이미 편성됐거나 게임 중인 사람도
+              '미리 다음 게임'에 넣을 수 있어야 함(소프트 중복 = 빨간 점만, 막지 않음). */}
+          <PoolBox
+            label="대기 편성됨" count={queuedPool.length} list={queuedPool}
+            tint={colors.info} stageable emptyText="아직 편성된 회원이 없어요"
+          />
+          <PoolBox
+            label="게임 중" count={playingPool.length} list={playingPool}
+            tint={colors.playerInTurn} stageable emptyText="진행 중인 게임이 없어요"
+          />
+        </>
+      ) : (
+        <AllPoolBox />
+      )}
     </>
   );
 
@@ -3475,6 +3593,33 @@ const styles = StyleSheet.create({
     borderWidth: 1, borderRadius: radius.md,
   },
   testGuestBtnText: { ...typography.buttonSm },
+
+  // 풀 보기 전환 탭(그룹별 | 전체) — 컴팩트 세그먼트 컨트롤. 트랙은 옅은
+  // surfaceSecondary, 선택 탭만 surface 로 떠 보이게.
+  poolTabs: {
+    flexDirection: 'row', alignSelf: 'flex-start',
+    padding: 3, borderRadius: radius.lg, borderWidth: 1,
+    marginBottom: spacing.sm, gap: 3,
+  },
+  poolTab: {
+    paddingHorizontal: spacing.md, paddingVertical: 6,
+    borderRadius: radius.md, alignItems: 'center', justifyContent: 'center',
+    minWidth: 64,
+  },
+  poolTabActive: {
+    ...(Platform.OS === 'web' ? {} : {
+      shadowColor: '#000', shadowOpacity: 0.08, shadowRadius: 2, shadowOffset: { width: 0, height: 1 },
+    }),
+  },
+  poolTabText: { ...typography.buttonSm },
+
+  // 편성 상태 배지(전체 보기) — 카드 좌상단에 살짝 걸쳐 떠 있는 작은 필 라벨.
+  allPoolBadgeOverlay: { position: 'absolute', top: -7, left: spacing.sm, zIndex: 2 },
+  statusBadge: {
+    paddingHorizontal: spacing.sm, paddingVertical: 1,
+    borderRadius: radius.sm, borderWidth: 1, borderColor: palette.white,
+  },
+  statusBadgeText: { fontSize: 10, fontWeight: '800' },
 
   // Pool boxes
   poolList: { paddingBottom: spacing.sm, gap: spacing.sm },
