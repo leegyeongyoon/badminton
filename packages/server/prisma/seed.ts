@@ -222,7 +222,8 @@ async function main() {
       status: 'PLAYING',
       createdById: leader1.id,
       clubSessionId: sessionA.id,
-      startedAt: new Date(),
+      // ~12분 전 시작 — 운영판 "N분 진행 중" 타이머가 의미 있는 값으로 보이도록.
+      startedAt: new Date(Date.now() - 12 * 60 * 1000),
       players: {
         create: [
           { userId: players[0].id },  // 이경윤 S
@@ -282,7 +283,8 @@ async function main() {
       status: 'PLAYING',
       createdById: leader1.id,
       clubSessionId: sessionA.id,
-      startedAt: new Date(),
+      // ~24분 전 시작 — ≥20분 경과 시 따뜻한 색조(회전 유도)도 함께 시연되도록.
+      startedAt: new Date(Date.now() - 24 * 60 * 1000),
       players: {
         create: [
           { userId: players[4].id },  // 최동현 A

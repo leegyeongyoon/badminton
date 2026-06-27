@@ -117,6 +117,10 @@ export async function getSessionCourts(sessionId: string) {
         ? {
             id: playing.id,
             status: playing.status,
+            // The game's start time (ISO) so the operator board can show a live
+            // "N분 진행 중" elapsed timer per court. null until the turn actually
+            // started playing (WAITING turns surfaced here have no startedAt yet).
+            startedAt: playing.startedAt?.toISOString() ?? null,
             playerIds: playing.players.map((p) => p.userId),
             playerNames: playing.players.map((p) => p.user.name),
           }

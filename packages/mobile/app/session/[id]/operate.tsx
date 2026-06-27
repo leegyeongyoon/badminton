@@ -50,6 +50,9 @@ interface Court {
   currentTurn?: {
     id: string;
     status: string;
+    // ISO start time of the running game (CourtTurn.startedAt). Drives the
+    // per-court "N분 진행 중" elapsed timer. null until the turn actually started.
+    startedAt?: string | null;
     playerIds: string[];
     playerNames: string[];
   } | null;
@@ -168,6 +171,17 @@ export default function OperateScreen() {
   const [clubId, setClubId] = useState<string | undefined>(undefined);
   // 운영판에 머무는 동안 들어온 채팅/건의(특히 짝 요청) 개수 — 헤더에 빨간 점으로 표시.
   const [unreadChat, setUnreadChat] = useState(0);
+
+  // ─── Live clock for the per-court "N분 진행 중" elapsed timer ───
+  // A lightweight ticker: every 30s we bump `nowTs` so any court card showing an
+  // elapsed badge re-renders with the fresh now − startedAt value. The interval
+  // is cleared on unmount (WEB-SAFE — plain setInterval, no native deps). This is
+  // the ONLY periodic render; it never touches the compose/drag state.
+  const [nowTs, setNowTs] = useState(() => Date.now());
+  useEffect(() => {
+    const t = setInterval(() => setNowTs(Date.now()), 30 * 1000);
+    return () => clearInterval(t);
+  }, []);
 
   // Permission self-guard (per-club role, NOT the global gate)
   const [roleState, setRoleState] = useState<RoleState>('loading');
@@ -1101,6 +1115,21 @@ export default function OperateScreen() {
     );
   };
 
+  // Game-type TAG (남복/여복/혼복) for the 다음 게임 queue cards — a small tinted
+  // PILL (type color text on a soft type-tinted bg) so the game composition is
+  // obvious at a glance while scanning the queue. Same getGameType source as
+  // GameTypeLabel; hidden for neutral/incomplete games (no misleading tag).
+  const QueueTypeTag = ({ playerIds }: { playerIds: string[] }) => {
+    const genders = [0, 1, 2, 3].map((i) => getPlayer(playerIds[i])?.gender);
+    const t = getGameType(genders);
+    if (t.type === 'neutral') return null;
+    return (
+      <View style={[styles.queueTypeTag, { backgroundColor: colors[t.bgKey] }]}>
+        <Text style={[styles.queueTypeTagText, { color: colors[t.colorKey] }]}>{t.label}</Text>
+      </View>
+    );
+  };
+
   // One LEGIBLE player chip for an on-court / queued game: 급수 avatar (letter),
   // FULL Korean name (≥13px, never 2-char truncated), gender marker (♂/♀), and
   // "N게임". Laid out in a 2×2 grid by the parent. Names won't clip for 2–4 char
@@ -1880,7 +1909,7 @@ export default function OperateScreen() {
                   <Text style={[styles.nextTagText, { color: colors.primary }]}>다음</Text>
                 </View>
               )}
-              <GameTypeLabel playerIds={entry.playerIds} />
+              <QueueTypeTag playerIds={entry.playerIds} />
               <View style={{ flex: 1 }} />
               <TouchableOpacity
                 style={[styles.editBtnSm, { borderColor: colors.border, backgroundColor: colors.surface }]}
@@ -1931,7 +1960,7 @@ export default function OperateScreen() {
           <View style={[styles.queueNum, { backgroundColor: idx === 0 ? colors.primary : colors.primaryLight }]}>
             <Text style={[styles.queueNumText, { color: idx === 0 ? palette.white : colors.primary }]}>{idx + 1}</Text>
           </View>
-          <GameTypeLabel playerIds={entry.playerIds} />
+          <QueueTypeTag playerIds={entry.playerIds} />
           <View style={{ flex: 1 }} />
 
           {/* 수정 toggle. Switches THIS card back to compact. */}
@@ -2052,6 +2081,27 @@ export default function OperateScreen() {
     </View>
   );
 
+  // ── Per-court elapsed timer badge: "⏱ N분 진행 중" (or "방금" under 1 min). ──
+  // Computed from now − startedAt and re-rendered by the 30s `nowTs` ticker.
+  // Long games (≥ WARN_MIN) are tinted a warm color as a gentle nudge to rotate.
+  // Renders nothing when there's no start time (so it never shows on empty courts).
+  const ELAPSED_WARN_MIN = 20;
+  const CourtElapsedBadge = ({ startedAt }: { startedAt?: string | null }) => {
+    if (!startedAt) return null;
+    const startMs = new Date(startedAt).getTime();
+    if (!Number.isFinite(startMs)) return null;
+    const mins = Math.max(0, Math.floor((nowTs - startMs) / 60000));
+    const warm = mins >= ELAPSED_WARN_MIN;
+    const tint = warm ? colors.warning : colors.textSecondary;
+    const bg = warm ? colors.warningLight : colors.surfaceSecondary;
+    const label = mins < 1 ? '⏱ 방금 시작' : `⏱ ${mins}분 진행 중`;
+    return (
+      <View style={[styles.elapsedBadge, { backgroundColor: bg }]} accessibilityLabel={mins < 1 ? '방금 시작' : `${mins}분 진행 중`}>
+        <Text style={[styles.elapsedBadgeText, { color: tint }]} numberOfLines={1}>{label}</Text>
+      </View>
+    );
+  };
+
   const CourtCard = ({ court }: { court: Court }) => {
     const isMaint = court.status === 'MAINTENANCE';
     // A court is EMPTY only when the SERVER says so (court.status). Relying on
@@ -2134,6 +2184,8 @@ export default function OperateScreen() {
         <View style={styles.courtCardHeader}>
           <Text style={[styles.courtCardName, { color: colors.text }]} numberOfLines={1}>{court.name}</Text>
           <GameTypeLabel playerIds={occupiedPlayerIds} />
+          {/* Live elapsed timer (N분 진행 중). Pushed to the right next to 게임 중. */}
+          <CourtElapsedBadge startedAt={court.currentTurn?.startedAt} />
           <View style={[styles.courtStateBadge, { backgroundColor: colors.warningLight }]}>
             <View style={[styles.courtStateDot, { backgroundColor: colors.courtInGame }]} />
             <Text style={[styles.courtStateText, { color: colors.warning }]}>게임 중</Text>
@@ -2437,7 +2489,7 @@ export default function OperateScreen() {
           <View style={[styles.queueNumSm, { backgroundColor: colors.primary }]}>
             <Text style={[styles.queueNumText, { color: palette.white }]}>{queueDrag.fromIdx + 1}</Text>
           </View>
-          <GameTypeLabel playerIds={queueDragEntry.playerIds} />
+          <QueueTypeTag playerIds={queueDragEntry.playerIds} />
           <View style={{ flex: 1 }} />
         </View>
         <View style={styles.miniChipRow}>
@@ -3554,9 +3606,13 @@ const styles = StyleSheet.create({
     shadowColor: '#000', shadowOpacity: 0.28, shadowRadius: 14,
     shadowOffset: { width: 0, height: 8 },
   },
-  queueNumSm: { width: 22, height: 22, borderRadius: 11, alignItems: 'center', justifyContent: 'center' },
+  queueNumSm: { width: 26, height: 26, borderRadius: 13, alignItems: 'center', justifyContent: 'center' },
   nextTag: { paddingHorizontal: spacing.sm, paddingVertical: 2, borderRadius: radius.sm },
   nextTagText: { fontSize: 11, fontWeight: '800' },
+  // Game-type TAG pill (남복/여복/혼복) for queue cards — soft tinted bg so the
+  // composition is scannable at a glance.
+  queueTypeTag: { paddingHorizontal: spacing.sm, paddingVertical: 2, borderRadius: radius.sm },
+  queueTypeTagText: { fontSize: 11, fontWeight: '800' },
   // The 4 player chips split the FULL row width evenly on their own line.
   miniChipRow: { flexDirection: 'row', alignItems: 'stretch', gap: spacing.xs },
   miniChip: {
@@ -3583,8 +3639,8 @@ const styles = StyleSheet.create({
     width: 24, height: 28, borderRadius: radius.sm, borderWidth: 1,
     alignItems: 'center', justifyContent: 'center',
   },
-  queueNum: { width: 22, height: 22, borderRadius: 11, alignItems: 'center', justifyContent: 'center' },
-  queueNumText: { fontSize: 12, fontWeight: '800' },
+  queueNum: { width: 26, height: 26, borderRadius: 13, alignItems: 'center', justifyContent: 'center' },
+  queueNumText: { fontSize: 13, fontWeight: '900' },
 
   // ─── Shared 2×2 game-player grid + legible chip (court + queue) ───
   gameGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.xs },
@@ -3675,6 +3731,12 @@ const styles = StyleSheet.create({
   },
   courtStateDot: { width: 7, height: 7, borderRadius: 4 },
   courtStateText: { fontSize: 11, fontWeight: '700' },
+  // Per-court elapsed timer pill ("⏱ N분 진행 중"). Sits left of the 게임 중 badge.
+  elapsedBadge: {
+    paddingHorizontal: spacing.sm, paddingVertical: 3, borderRadius: radius.pill,
+    flexShrink: 1, minWidth: 0,
+  },
+  elapsedBadgeText: { fontSize: 11, fontWeight: '700' },
 
   courtActionBtn: {
     flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: spacing.xs,
