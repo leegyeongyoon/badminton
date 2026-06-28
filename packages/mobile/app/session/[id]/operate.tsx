@@ -1029,10 +1029,14 @@ export default function OperateScreen() {
   // 확정되며 그때 소켓으로 양쪽 모드·다른 운영판에 동기화된다.
   const [courtDrafts, setCourtDrafts] = useState<Record<string, string[]>>({});
   const draftCourt = useCallback((courtId: string, ids: string[]) => {
-    const next = Array.from(new Set(ids)).slice(0, 4);
-    if (next.length === 0) return;
+    if (ids.length === 0) return;
     animateNext();
-    setCourtDrafts((prev) => ({ ...prev, [courtId]: next }));
+    // 기존 draft에 '추가'(append) — 중복 제거, 최대 4명. 한 번에 4명 드롭하면 그대로,
+    // 한 명씩 더 끌어오면 채워진다("게임판에서 더 끌어올 수 있어요").
+    setCourtDrafts((prev) => {
+      const merged = Array.from(new Set([...(prev[courtId] || []), ...ids])).slice(0, 4);
+      return { ...prev, [courtId]: merged };
+    });
     setStaged([]);
     setSuggestNote(null);
   }, []);
