@@ -88,11 +88,12 @@ const SUGGEST_MODES: {
 // 'tray'/'queue' = a player-tile drop slot (compose). 'queue-card' = a whole
 // queued game card registered as a reorder drop target (drag the card itself to
 // reorder the 다음 게임 대기열).
-type DropKind = 'tray' | 'queue' | 'queue-card';
+type DropKind = 'tray' | 'queue' | 'queue-card' | 'court';
 interface DropTarget {
   id: string;            // unique key
   kind: DropKind;
   entryId?: string;      // queued entry id (for kind === 'queue'/'queue-card')
+  courtId?: string;      // court id (for kind === 'court' — 모드2 코트 드롭존)
   slotIndex: number;     // 0..3 for tray/queue; the queue INDEX for 'queue-card'
   rect: { x: number; y: number; w: number; h: number };
 }
@@ -226,11 +227,12 @@ export default function OperateScreen() {
     if (!boardModeKey || !boardModeLoadedRef.current) return;
     setItem(boardModeKey, String(boardMode)).catch(() => {});
   }, [boardMode, boardModeKey]);
-  // 모드 전환 시 선택/추천 상태 초기화(모드 1 트레이 ↔ 모드 2 게임판 혼동 방지).
+  // 모드 전환 시 선택/추천/코트 draft 초기화(모드 1 트레이 ↔ 모드 2 게임판 혼동 방지).
   useEffect(() => {
     setStaged([]);
     setSuggestNote(null);
     setModeChooserOpen(false);
+    setCourtDrafts({});
   }, [boardMode]);
 
   // ─── 2분할(편성 ↔ 코트·큐) 크기 조절 ───
@@ -464,7 +466,7 @@ export default function OperateScreen() {
       const x = ev.pageX; const y = ev.pageY;
       poolMovedRef.current = true;
       setPoolDrag((prev) => (prev ? { ...prev, x, y } : prev));
-      const hit = hitTestDrop(x, y, ['tray', 'queue']);
+      const hit = hitTestDrop(x, y, ['tray', 'queue', 'court']);
       setHoverDropId(hit ? hit.id : null);
     };
     const onUp = (ev: PointerEvent) => {
@@ -1020,6 +1022,57 @@ export default function OperateScreen() {
     }
   }, [staged, courts, createQueueGame, assignEntry, loadBoard, loadCourts, loadPool]);
 
+  // ─── 모드 2: 코트 드롭존 편성 (draft) ───
+  // 게임판에서 4명 선택 → 그룹을 코트로 드래그(또는 코트 탭) → 그 코트에 '편성 중'
+  // draft 로 올린다(아직 시작 X). 코트의 "게임 시작" 버튼을 눌러야 실제 게임이 시작된다.
+  // draft 는 클라이언트 임시 상태(빈 코트 한정) — 시작 시 createQueueGame→assignEntry 로
+  // 확정되며 그때 소켓으로 양쪽 모드·다른 운영판에 동기화된다.
+  const [courtDrafts, setCourtDrafts] = useState<Record<string, string[]>>({});
+  const draftCourt = useCallback((courtId: string, ids: string[]) => {
+    const next = Array.from(new Set(ids)).slice(0, 4);
+    if (next.length === 0) return;
+    animateNext();
+    setCourtDrafts((prev) => ({ ...prev, [courtId]: next }));
+    setStaged([]);
+    setSuggestNote(null);
+  }, []);
+  const clearCourtDraft = useCallback((courtId: string) => {
+    animateNext();
+    setCourtDrafts((prev) => {
+      if (!(courtId in prev)) return prev;
+      const n = { ...prev }; delete n[courtId]; return n;
+    });
+  }, []);
+  const removeFromCourtDraft = useCallback((courtId: string, idx: number) => {
+    animateNext();
+    setCourtDrafts((prev) => {
+      const cur = prev[courtId];
+      if (!cur) return prev;
+      const next = cur.filter((_, i) => i !== idx);
+      const n = { ...prev };
+      if (next.length === 0) delete n[courtId]; else n[courtId] = next;
+      return n;
+    });
+  }, []);
+  // draft 를 실제 게임으로: createQueueGame→assignEntry(한 동작). 성공 시 draft 비움.
+  const startCourtDraft = useCallback(async (courtId: string) => {
+    const ids = courtDrafts[courtId] || [];
+    if (ids.length < 2) { showAlert('알림', '최소 2명이 필요해요'); return; }
+    const court = courts.find((c) => c.id === courtId);
+    try {
+      const entry = await createQueueGame(ids);
+      if (!entry?.id) throw new Error('entry');
+      await assignEntry(entry.id, courtId);
+      clearCourtDraft(courtId);
+      loadBoard();
+      loadCourts();
+      loadPool();
+      showSuccess(`${court?.name || '코트'} 게임 시작!`);
+    } catch (err: any) {
+      showAlert('오류', err?.response?.data?.error || '게임 시작에 실패했어요');
+    }
+  }, [courtDrafts, courts, createQueueGame, assignEntry, clearCourtDraft, loadBoard, loadCourts, loadPool]);
+
   // ─── 게임 종료 (코트 위 게임 턴 완료) ───
   // ─── 방금 나온: 막 끝난 코트의 4명을 누적 목록에 쌓기 ───
   // 게임 종료가 성공한 직후 호출. 그 코트의 4명 playerIds 를 (보드 엔트리 → 코트
@@ -1309,14 +1362,17 @@ export default function OperateScreen() {
 
   // ─── Resolve a drop (called on pool-drag release) ───
   const resolveDrop = useCallback((userId: string, pageX: number, pageY: number) => {
-    const hit = hitTestDrop(pageX, pageY, ['tray', 'queue']);
+    const hit = hitTestDrop(pageX, pageY, ['tray', 'queue', 'court']);
     if (!hit) return;
     if (hit.kind === 'tray') {
       placeStagedAt(userId, hit.slotIndex);
     } else if (hit.kind === 'queue' && hit.entryId) {
       handleDropOnQueueSlot(hit.entryId, hit.slotIndex, userId);
+    } else if (hit.kind === 'court' && hit.courtId) {
+      // 코트로 드롭: 선택된 그룹(staged)을 그 코트 draft 로. 선택이 없으면 끌어온 한 명만.
+      draftCourt(hit.courtId, staged.length > 0 ? staged : [userId]);
     }
-  }, [hitTestDrop, placeStagedAt, handleDropOnQueueSlot]);
+  }, [hitTestDrop, placeStagedAt, handleDropOnQueueSlot, draftCourt, staged]);
   resolveDropRef.current = resolveDrop;
 
   // ─── Animate the card-sized gap open/closed for a given hover state ───
@@ -1594,7 +1650,7 @@ export default function OperateScreen() {
           if (Platform.OS === 'web') return;
           const { pageX, pageY } = e.nativeEvent;
           setPoolDrag((prev) => (prev ? { ...prev, x: pageX, y: pageY } : prev));
-          const hit = hitTestDrop(pageX, pageY, ['tray', 'queue']);
+          const hit = hitTestDrop(pageX, pageY, ['tray', 'queue', 'court']);
           setHoverDropId(hit ? hit.id : null);
         },
         onPanResponderRelease: (e) => {
@@ -3317,9 +3373,122 @@ export default function OperateScreen() {
       )}
     </View>
   );
+  // 모드 2 코트 = 드롭존 박스. 비어 있으면 '코트' 드롭타깃으로 등록(게임판에서 고른
+  // 그룹을 끌어다 놓거나 탭해서 올림) → draft 표시 + "게임 시작". 게임 중/점검은 기존
+  // CourtCard 를 그대로 재사용(2×2 + 게임 종료).
+  const Mode2CourtBox = ({ court }: { court: Court }) => {
+    const ref = useRef<View>(null);
+    const dropId = `court-${court.id}`;
+    const playingEntry = playingByCourtId.get(court.id);
+    const isMaint = court.status === 'MAINTENANCE';
+    const isEmpty = !isMaint && court.status === 'EMPTY' && !playingEntry;
+    const draft = courtDrafts[court.id] || [];
+    const isHover = hoverDropId === dropId;
+    const courtWidth = courtCardWidth ? { width: courtCardWidth } : null;
+
+    const measure = useCallback(() => {
+      if (!isEmpty) { unregisterDrop(dropId); return; }
+      ref.current?.measureInWindow((x, y, w, h) => {
+        registerDrop({ id: dropId, kind: 'court', courtId: court.id, slotIndex: 0, rect: { x, y, w, h } });
+      });
+    }, [dropId, isEmpty, court.id]);
+    useEffect(() => {
+      if (!isEmpty) { unregisterDrop(dropId); return; }
+      const t = setTimeout(measure, 0);
+      return () => { clearTimeout(t); unregisterDrop(dropId); };
+    });
+
+    if (!isEmpty) return <CourtCard court={court} />;
+
+    const hasDraft = draft.length > 0;
+    const canStart = draft.length >= 2;
+    return (
+      <View
+        ref={ref}
+        onLayout={measure}
+        collapsable={false}
+        style={[
+          styles.mode2CourtBox,
+          courtWidth,
+          {
+            backgroundColor: isHover ? colors.primaryBg : colors.surface,
+            borderColor: isHover ? colors.primary : hasDraft ? colors.info : colors.border,
+            borderStyle: hasDraft || isHover ? 'solid' : 'dashed',
+          },
+        ]}
+      >
+        <View style={styles.mode2CourtHeader}>
+          <View style={[styles.courtStateDot, { backgroundColor: colors.courtEmpty }]} />
+          <Text style={[styles.courtCardName, { color: colors.text }]} numberOfLines={1}>{court.name}</Text>
+          <View style={{ flex: 1 }} />
+          <Text style={[styles.mode2CourtMeta, { color: hasDraft ? colors.info : colors.textLight }]}>
+            {hasDraft ? `편성 중 ${draft.length}/4` : '비어있음'}
+          </Text>
+        </View>
+
+        {hasDraft ? (
+          <>
+            <View style={styles.gameGrid}>
+              {[0, 1, 2, 3].map((i) => {
+                const pId = draft[i];
+                const p = pId ? getPlayer(pId) : null;
+                if (!pId) {
+                  return (
+                    <View key={i} style={styles.gameGridCell}>
+                      <View style={[styles.mode2DraftEmpty, { borderColor: colors.border }]}>
+                        <Text style={[styles.mode2DraftEmptyText, { color: colors.textLight }]}>＋</Text>
+                      </View>
+                    </View>
+                  );
+                }
+                return (
+                  <View key={i} style={styles.gameGridCell}>
+                    <GamePlayerChip
+                      pId={pId}
+                      name={p?.userName}
+                      busy={busySet.has(pId)}
+                      onPress={() => removeFromCourtDraft(court.id, i)}
+                      accessibilityLabel={`${p?.userName || ''} 빼기`}
+                    />
+                  </View>
+                );
+              })}
+            </View>
+            <Text style={[styles.mode2CourtHint, { color: colors.textLight }]}>선수 탭=빼기 · 게임판에서 더 끌어올 수 있어요</Text>
+            <View style={styles.mode2CourtActions}>
+              <TouchableOpacity
+                style={[styles.mode2StartBtn, { backgroundColor: canStart ? colors.primary : colors.textLight }]}
+                onPress={() => startCourtDraft(court.id)}
+                disabled={!canStart}
+                activeOpacity={0.85}
+                accessibilityLabel={`${court.name} 게임 시작`}
+              >
+                <Icon name="play" size={15} color="#fff" />
+                <Text style={styles.mode2StartBtnText}>게임 시작{draft.length < 4 ? ` (${draft.length}/4)` : ''}</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={[styles.clearBtn, { borderColor: colors.border }]} onPress={() => clearCourtDraft(court.id)}>
+                <Text style={[styles.clearBtnText, { color: colors.textSecondary }]}>비우기</Text>
+              </TouchableOpacity>
+            </View>
+          </>
+        ) : (
+          <TouchableOpacity
+            activeOpacity={staged.length > 0 ? 0.7 : 1}
+            onPress={() => { if (staged.length > 0) draftCourt(court.id, staged); }}
+            style={styles.mode2CourtEmptyInner}
+            accessibilityLabel={staged.length > 0 ? `${court.name}에 선택 인원 올리기` : `${court.name} 비어있음`}
+          >
+            <Text style={[styles.mode2CourtEmptyText, { color: colors.textLight }]} numberOfLines={2}>
+              {staged.length > 0 ? `탭하면 선택한 ${staged.length}명을 여기 올려요` : '게임판에서 고른 인원을\n여기로 드래그'}
+            </Text>
+          </TouchableOpacity>
+        )}
+      </View>
+    );
+  };
   const Mode2Courts = (
     <View style={styles.courtGrid} onLayout={onCourtAreaLayout}>
-      {courts.map((court) => <CourtCard key={court.id} court={court} />)}
+      {courts.map((court) => <Mode2CourtBox key={court.id} court={court} />)}
       {courts.length === 0 && (
         <Text style={[styles.emptyPool, { color: colors.textLight }]}>코트가 없어요. "코트 관리"에서 추가하세요</Text>
       )}
@@ -3343,7 +3512,7 @@ export default function OperateScreen() {
       <View style={styles.mode2SelectTop}>
         <Text style={[styles.mode2SelectCount, { color: colors.text }]}>선택 {staged.length}/4</Text>
         <Text style={[styles.mode2SelectHint, { color: colors.textLight }]} numberOfLines={1}>
-          빈 코트 탭=바로 시작 · 선택 카드를 끌어 편성 수정
+          고른 인원을 코트로 드래그(또는 코트 탭) → 코트에서 "게임 시작"
         </Text>
       </View>
       {suggestNote && <Text style={[styles.suggestNote, { color: colors.warning }]}>{suggestNote}</Text>}
@@ -4507,6 +4676,29 @@ const styles = StyleSheet.create({
   mode2SelectTop: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
   mode2SelectCount: { ...typography.buttonSm },
   mode2SelectHint: { ...typography.caption, flex: 1 },
+
+  // 모드 2 코트 드롭존 박스 (비어있음=드롭존 / 편성 중=draft + 게임 시작)
+  mode2CourtBox: {
+    borderWidth: 1.5, borderRadius: radius.lg, padding: spacing.sm, gap: spacing.xs, minHeight: 132,
+  },
+  mode2CourtHeader: { flexDirection: 'row', alignItems: 'center', gap: spacing.xs },
+  mode2CourtMeta: { ...typography.caption, fontWeight: '700' },
+  mode2CourtHint: { ...typography.caption, textAlign: 'center' },
+  mode2CourtActions: { flexDirection: 'row', gap: spacing.sm, marginTop: 2 },
+  mode2StartBtn: {
+    flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: spacing.xs,
+    paddingVertical: spacing.sm, borderRadius: radius.lg,
+  },
+  mode2StartBtnText: { ...typography.buttonSm, color: '#fff', fontWeight: '700' },
+  mode2DraftEmpty: {
+    flex: 1, minHeight: 44, borderWidth: 1, borderStyle: 'dashed', borderRadius: radius.md,
+    alignItems: 'center', justifyContent: 'center',
+  },
+  mode2DraftEmptyText: { ...typography.body2 },
+  mode2CourtEmptyInner: {
+    minHeight: 72, alignItems: 'center', justifyContent: 'center', paddingVertical: spacing.md,
+  },
+  mode2CourtEmptyText: { ...typography.caption, textAlign: 'center', lineHeight: 18 },
 
   poolTabs: {
     flexDirection: 'row', alignSelf: 'flex-start',
