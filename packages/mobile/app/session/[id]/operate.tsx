@@ -232,6 +232,62 @@ export default function OperateScreen() {
     setSuggestNote(null);
     setModeChooserOpen(false);
   }, [boardMode]);
+
+  // ─── 2분할(편성 ↔ 코트·큐) 크기 조절 ───
+  // divider를 드래그해 왼쪽(선수 편성/풀) 폭을 px로 조정. null=기존 38% 기본.
+  // 정모별 영속화. 모드 1·모드 2 twoPane 분할이 같은 값을 공유한다.
+  const SPLIT_MIN_LEFT = 340;   // leftPane.minWidth 와 일치
+  const SPLIT_MIN_RIGHT = 360;  // 오른쪽(코트·큐)이 안 찌부러지는 최소
+  const [leftPaneWidth, setLeftPaneWidth] = useState<number | null>(null);
+  const [splitWidth, setSplitWidth] = useState(0);
+  const splitWidthKey = clubSessionId ? `operate_split_w_${clubSessionId}` : null;
+  const splitLoadedRef = useRef(false);
+  const splitWidthRef = useRef(0);
+  splitWidthRef.current = splitWidth;
+  const leftPaneWidthRef = useRef<number | null>(null);
+  leftPaneWidthRef.current = leftPaneWidth;
+  const dragStartLeftRef = useRef(0);
+  useEffect(() => {
+    if (!splitWidthKey) return;
+    let alive = true;
+    getItem(splitWidthKey)
+      .then((raw) => {
+        if (!alive) return;
+        const n = raw ? parseInt(raw, 10) : NaN;
+        if (Number.isFinite(n) && n > 0) setLeftPaneWidth(n);
+      })
+      .catch(() => {})
+      .finally(() => { splitLoadedRef.current = true; });
+    return () => { alive = false; };
+  }, [splitWidthKey]);
+  useEffect(() => {
+    if (!splitWidthKey || !splitLoadedRef.current || leftPaneWidth == null) return;
+    setItem(splitWidthKey, String(Math.round(leftPaneWidth))).catch(() => {});
+  }, [leftPaneWidth, splitWidthKey]);
+  const onSplitLayout = useCallback((e: LayoutChangeEvent) => {
+    const w = e.nativeEvent.layout.width;
+    setSplitWidth((prev) => (Math.abs(prev - w) > 1 ? w : prev));
+  }, []);
+  // 드래그 중 폭 적용(클램프). ref만 읽어 한 번 만든 PanResponder에서도 최신값 사용.
+  const applyLeftWidth = useCallback((px: number) => {
+    const sw = splitWidthRef.current;
+    const maxLeft = sw > 0 ? sw - SPLIT_MIN_RIGHT : px;
+    const clamped = Math.max(SPLIT_MIN_LEFT, Math.min(px, Math.max(SPLIT_MIN_LEFT, maxLeft)));
+    setLeftPaneWidth(clamped);
+  }, []);
+  // 분할 divider 드래그 — 웹·네이티브 공용 PanResponder(RN-web가 마우스도 처리).
+  const dividerPan = useRef(
+    PanResponder.create({
+      onStartShouldSetPanResponder: () => true,
+      onMoveShouldSetPanResponder: () => true,
+      onPanResponderGrant: () => {
+        dragStartLeftRef.current = leftPaneWidthRef.current ?? Math.round((splitWidthRef.current || 0) * 0.38);
+      },
+      onPanResponderMove: (_e, g) => {
+        applyLeftWidth(dragStartLeftRef.current + g.dx);
+      },
+    }),
+  ).current;
   // 출석 풀 보기 전환: 'group' = 미편성/편성됨/게임중 3분할(기본), 'all' = 전체를
   // 가나다 한 줄 목록으로 묶고 각 카드에 편성 상태 배지를 붙인다. 'recent' = 방금
   // 끝난 게임들을 게임 단위(함께 친 4명)로 묶어 보여줘 새 조합으로 바로 다시 편성.
@@ -1200,6 +1256,29 @@ export default function OperateScreen() {
       showAlert('오류', err.response?.data?.error || (isAdd ? '추가 실패' : '교체 실패'));
     }
   }, [swapTarget, queuedEntries, updateEntry, loadBoard]);
+
+  // ─── 대기 게임에서 이 자리 선수 빼기(제거) ───
+  // 교체가 아니라 그 슬롯의 선수를 빼서 인원을 줄인다(예: 4→3). 남는 인원이 0이면
+  // 빈 게임이 되므로 카드를 통째 삭제. updateEntry/deleteEntry 둘 다 소켓을 emit하므로
+  // 양쪽 모드·다른 운영판이 자동 갱신된다.
+  const handleRemoveFromGame = useCallback(async () => {
+    if (!swapTarget) return;
+    const entry = queuedEntries.find((e) => e.id === swapTarget.entryId);
+    if (!entry) { setSwapTarget(null); return; }
+    const nextIds = entry.playerIds.filter((_, i) => i !== swapTarget.slotIndex);
+    try {
+      if (nextIds.length === 0) {
+        await deleteEntry(entry.id);
+      } else {
+        await updateEntry(entry.id, nextIds);
+      }
+      setSwapTarget(null);
+      loadBoard();
+      showSuccess(nextIds.length === 0 ? '게임 삭제됨' : '제거 완료!');
+    } catch (err: any) {
+      showAlert('오류', err.response?.data?.error || '제거 실패');
+    }
+  }, [swapTarget, queuedEntries, updateEntry, deleteEntry, loadBoard]);
 
   // ─── Drag-drop a pool player onto a queued game slot (replace) ───
   const handleDropOnQueueSlot = useCallback(async (entryId: string, slotIndex: number, replacementId: string) => {
@@ -3070,6 +3149,8 @@ export default function OperateScreen() {
           onPick={handleSwapPlayer}
           onClose={() => setSwapTarget(null)}
           allowAddToEmpty={(queuedEntries.find((e) => e.id === swapTarget.entryId)?.playerIds.length ?? 0) < 4}
+          canRemove={swapTarget.slotIndex < (queuedEntries.find((e) => e.id === swapTarget.entryId)?.playerIds.length ?? 0)}
+          onRemove={handleRemoveFromGame}
         />
       )}
       {matchupTarget && clubSessionId && (
@@ -3190,6 +3271,18 @@ export default function OperateScreen() {
     </View>
   );
 
+  // 2분할 크기 조절 막대 — leftPane↔rightPane 사이. 드래그로 왼쪽 폭 조정(웹: col-resize).
+  const SplitDivider = (
+    <View
+      {...dividerPan.panHandlers}
+      style={styles.splitDivider}
+      accessibilityRole="adjustable"
+      accessibilityLabel="분할 크기 조절"
+    >
+      <View style={[styles.splitDividerHandle, { backgroundColor: colors.border }]} />
+    </View>
+  );
+
   // ─── 모드 2 (게임판) 구성 요소 ───
   // 게임판: 출석 전원을 태그 그리드로(필터 predicate 공유). Phase 2는 표시 전용
   // (stageable=false → 탭/드래그 없음). 코트/커스텀/레슨자는 기존 컴포넌트 재사용.
@@ -3302,8 +3395,8 @@ export default function OperateScreen() {
   // 넓은 화면=2열[게임판 | 코트·커스텀·레슨자], 좁으면 세로 스택. 기존 split/leftPane/
   // rightPane/stackedContent 스타일을 그대로 재사용한다.
   const BoardMode2 = twoPane ? (
-    <View style={styles.split}>
-      <View style={[styles.leftPane, { borderRightColor: colors.border }]}>
+    <View style={styles.split} onLayout={onSplitLayout}>
+      <View style={[styles.leftPane, { borderRightColor: colors.border }, leftPaneWidth != null && { width: leftPaneWidth }]}>
         <Text style={[styles.colHeader, { color: colors.textSecondary }]}>게임판</Text>
         {PoolSearch}
         {Mode2SelectBar}
@@ -3312,6 +3405,7 @@ export default function OperateScreen() {
           <View style={{ height: spacing.sm }} />
         </ScrollView>
       </View>
+      {SplitDivider}
       <View style={styles.rightPane}>
         <ScrollView style={{ flex: 1 }} contentContainerStyle={styles.rightContent} showsVerticalScrollIndicator={false}>
           {Mode2RightColumn}
@@ -3349,9 +3443,9 @@ export default function OperateScreen() {
       <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]}>
         {Header}
         {ModeTabs}
-        <View style={styles.split}>
+        <View style={styles.split} onLayout={onSplitLayout}>
           {/* LEFT PANE — pool boxes + tray */}
-          <View style={[styles.leftPane, { borderRightColor: colors.border }]}>
+          <View style={[styles.leftPane, { borderRightColor: colors.border }, leftPaneWidth != null && { width: leftPaneWidth }]}>
             <View style={styles.colHeaderRow}>
               <Text style={[styles.colHeader, { color: colors.textSecondary }]}>출석 인원</Text>
               {(genderCount.male > 0 || genderCount.female > 0) && (
@@ -3376,6 +3470,8 @@ export default function OperateScreen() {
             </ScrollView>
             <Tray />
           </View>
+
+          {SplitDivider}
 
           {/* RIGHT PANE — courts grid (TOP) + queue (BELOW) */}
           <View style={styles.rightPane}>
@@ -3459,7 +3555,7 @@ export default function OperateScreen() {
 // Swap-player modal — pick a replacement for a queued-game slot
 // ─────────────────────────────────────────────────────────
 function SwapPlayerModal({
-  colors, freePool, queuedPool, currentIds, onPick, onClose, allowAddToEmpty,
+  colors, freePool, queuedPool, currentIds, onPick, onClose, allowAddToEmpty, canRemove, onRemove,
 }: {
   colors: any;
   freePool: Player[];
@@ -3469,6 +3565,10 @@ function SwapPlayerModal({
   onClose: () => void;
   /** true when the tapped slot is EMPTY (game has <4 players) → adding, not replacing. */
   allowAddToEmpty?: boolean;
+  /** true면 이 슬롯에 선수가 있어 '빼기'(제거) 가능 — 교체 모드에서만. */
+  canRemove?: boolean;
+  /** 이 자리 선수를 게임에서 제거(인원 줄이기). */
+  onRemove?: () => void;
 }) {
   const inGame = new Set(currentIds);
   return (
@@ -3481,6 +3581,18 @@ function SwapPlayerModal({
               <Icon name="close" size={22} color={colors.textSecondary} />
             </TouchableOpacity>
           </View>
+          {/* 교체 대신 이 자리 선수를 게임에서 빼기(인원 줄이기). 채워진 슬롯에서만. */}
+          {canRemove && onRemove && (
+            <TouchableOpacity
+              style={[modalStyles.removeBtn, { borderColor: colors.danger }]}
+              onPress={onRemove}
+              activeOpacity={0.85}
+              accessibilityLabel="이 자리에서 빼기"
+            >
+              <Icon name="close" size={15} color={colors.danger} />
+              <Text style={[modalStyles.removeBtnText, { color: colors.danger }]}>이 자리에서 빼기 (인원 줄이기)</Text>
+            </TouchableOpacity>
+          )}
           <ScrollView style={{ maxHeight: 420 }} showsVerticalScrollIndicator={false} refreshControl={undefined}>
             <Text style={[modalStyles.swapGroupLabel, { color: colors.textSecondary }]}>미편성 (대기) 중에서</Text>
             <View style={modalStyles.swapGrid}>
@@ -4299,6 +4411,12 @@ const styles = StyleSheet.create({
   split: { flex: 1, flexDirection: 'row' },
   leftPane: { width: '38%', minWidth: 340, borderRightWidth: 1, paddingHorizontal: spacing.smd, paddingVertical: spacing.sm, gap: spacing.xs },
   rightPane: { flex: 1, paddingHorizontal: spacing.smd, paddingVertical: spacing.sm, gap: spacing.sm },
+  // 2분할 크기 조절 막대 — 드래그 가능한 가는 세로 바 + 가운데 grab handle.
+  splitDivider: {
+    width: 14, alignSelf: 'stretch', alignItems: 'center', justifyContent: 'center',
+    ...(Platform.OS === 'web' ? ({ cursor: 'col-resize', userSelect: 'none' } as any) : null),
+  },
+  splitDividerHandle: { width: 4, height: 48, borderRadius: 2 },
   rightContent: { gap: spacing.sm, paddingBottom: spacing.xl },
 
   colHeaderRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
@@ -4794,6 +4912,12 @@ const modalStyles = StyleSheet.create({
     marginTop: spacing.md, paddingVertical: spacing.md, borderRadius: radius.lg, borderWidth: 1.5,
   },
   checkoutBtnText: { ...typography.button },
+  // 교체 시트의 '이 자리에서 빼기' 버튼 (danger, outline)
+  removeBtn: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: spacing.xs,
+    marginBottom: spacing.sm, paddingVertical: spacing.sm, borderRadius: radius.lg, borderWidth: 1.5,
+  },
+  removeBtnText: { ...typography.buttonSm },
 
   // Court manage modal
   courtAddRow: { flexDirection: 'row', gap: spacing.sm, marginBottom: spacing.sm },
