@@ -19,6 +19,20 @@ router.post('/:courtId/turns', authenticate, validate(registerTurnSchema), async
   } catch (err) { next(err); }
 });
 
+// POST /api/v1/turns/:turnId/replace-player - 진행 중(PLAYING) 게임의 선수 1명 교체
+// (LEADER/STAFF; 서비스에서 권한·체크인·페널티·중복 검증). Body { outUserId, inUserId }.
+router.post('/:turnId/replace-player', authenticate, async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const result = await turnService.replacePlayerInRunningTurn(
+      req.params.turnId as string,
+      req.body.outUserId as string,
+      req.body.inUserId as string,
+      req.user!.userId,
+    );
+    res.json(result);
+  } catch (err) { next(err); }
+});
+
 // GET /api/v1/courts/:courtId/turns - get court turns
 router.get('/:courtId/turns', async (req: Request, res: Response, next: NextFunction) => {
   try {

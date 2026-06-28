@@ -21,6 +21,69 @@ async function isSessionStaff(clubSessionId: string | null, userId: string): Pro
   return !!member && (member.role === 'LEADER' || member.role === 'STAFF');
 }
 
+// 진행 중(PLAYING)인 게임의 선수 1명을 다른 선수로 교체. TurnPlayer + GamePlayer +
+// GameBoardEntry.playerIds 를 한 트랜잭션으로 함께 갱신해 셋이 어긋나지 않게 한다.
+// 권한·체크인·페널티·다른 코트 PLAYING 충돌을 registerTurn 과 동일하게 검증. 운영판/
+// 현황판 갱신용 소켓 emit. (마이그레이션 없음 — 기존 테이블만 갱신)
+export async function replacePlayerInRunningTurn(
+  turnId: string,
+  outUserId: string,
+  inUserId: string,
+  operatorUserId: string,
+): Promise<{ success: true }> {
+  if (!inUserId || outUserId === inUserId) throw new BadRequestError('교체할 새 선수를 선택해주세요');
+  const turn = await prisma.courtTurn.findUnique({
+    where: { id: turnId },
+    include: { court: true, players: true, game: true },
+  });
+  if (!turn) throw new NotFoundError('순번');
+  if (turn.status !== TurnStatus.PLAYING) throw new BadRequestError('진행 중인 게임만 선수를 교체할 수 있어요');
+
+  const allowed = (await isSessionStaff(turn.clubSessionId, operatorUserId)) || (await isSuperAdmin(operatorUserId));
+  if (!allowed) throw new ForbiddenError('대표/운영진만 선수를 교체할 수 있어요');
+
+  if (!turn.players.some((p) => p.userId === outUserId)) throw new BadRequestError('교체할 선수가 이 게임에 없습니다');
+  if (turn.players.some((p) => p.userId === inUserId)) throw new BadRequestError('이미 이 게임에 있는 선수예요');
+
+  const court = turn.court;
+  const inUser = await prisma.user.findUnique({ where: { id: inUserId }, select: { name: true } });
+  const checkin = await prisma.checkIn.findFirst({
+    where: { userId: inUserId, facilityId: court.facilityId, checkedOutAt: null },
+  });
+  if (!checkin) throw new BadRequestError(`${inUser?.name ?? ''}님이 체크인되어 있지 않습니다`);
+  const penalty = await prisma.noShowRecord.findFirst({ where: { userId: inUserId, penaltyEndsAt: { gt: new Date() } } });
+  if (penalty) throw new BadRequestError(`${inUser?.name ?? ''}님은 페널티 중입니다`);
+  if (turn.clubSessionId) {
+    const elsewhere = await prisma.courtTurn.findFirst({
+      where: { clubSessionId: turn.clubSessionId, status: TurnStatus.PLAYING, courtId: { not: court.id }, players: { some: { userId: inUserId } } },
+    });
+    if (elsewhere) throw new BadRequestError(`${inUser?.name ?? ''}님이 다른 코트에서 게임 중이에요`);
+  }
+
+  const gameId = turn.game?.id ?? null;
+  const entry = await prisma.gameBoardEntry.findFirst({ where: { turnId } });
+  await prisma.$transaction(async (tx) => {
+    await tx.turnPlayer.deleteMany({ where: { turnId, userId: outUserId } });
+    await tx.turnPlayer.create({ data: { turnId, userId: inUserId } });
+    if (gameId) {
+      await tx.gamePlayer.deleteMany({ where: { gameId, userId: outUserId } });
+      await tx.gamePlayer.create({ data: { gameId, userId: inUserId } });
+    }
+    if (entry) {
+      await tx.gameBoardEntry.update({
+        where: { id: entry.id },
+        data: { playerIds: entry.playerIds.map((id) => (id === outUserId ? inUserId : id)) },
+      });
+    }
+  });
+
+  const io = getIO();
+  io.to(`facility:${court.facilityId}`).emit('court:statusChanged', { courtId: court.id });
+  io.to(`court:${court.id}`).emit('turn:updated', { turnId, courtId: court.id });
+  await emitPlayersUpdated(court.facilityId, turn.clubSessionId ?? undefined);
+  return { success: true };
+}
+
 export async function registerTurn(
   courtId: string,
   creatorUserId: string,

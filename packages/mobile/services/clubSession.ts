@@ -183,6 +183,11 @@ export const clubSessionApi = {
   // 코트 위 게임(턴) 종료
   completeTurn: (turnId: string) => api.post(`/turns/${turnId}/complete`),
 
+  // 진행 중 게임의 선수 1명 교체 (LEADER/STAFF). 서버가 TurnPlayer/GamePlayer/board를
+  // 한 트랜잭션으로 동기 갱신하고 소켓으로 운영판/현황판을 갱신한다.
+  replacePlayer: (turnId: string, outUserId: string, inUserId: string) =>
+    api.post<{ success: boolean }>(`/turns/${turnId}/replace-player`, { outUserId, inUserId }),
+
   // ─── 운영자: 특정 참가자를 정모에서 체크아웃 (LEADER/STAFF) ───
   // Self-checkout과 동일한 정리(대기 턴 취소·대기 보드에서 제거, 진행 중 게임은 유지)를
   // 수행하고 갱신된 출석 풀을 반환. 게스트도 동작.

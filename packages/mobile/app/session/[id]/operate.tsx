@@ -366,6 +366,8 @@ export default function OperateScreen() {
 
   // Swap: { entryId, slotIndex } of the queued-game slot being replaced
   const [swapTarget, setSwapTarget] = useState<{ entryId: string; slotIndex: number } | null>(null);
+  // 게임 중(PLAYING) 코트에서 선수 1명 교체: 그 코트의 turnId + 빠질 선수 + 현재 4명(제외용).
+  const [runningSwap, setRunningSwap] = useState<{ turnId: string; outUserId: string; courtName: string; currentIds: string[] } | null>(null);
   // Assign: entryId awaiting a court pick
   const [assignTarget, setAssignTarget] = useState<string | null>(null);
 
@@ -1122,6 +1124,19 @@ export default function OperateScreen() {
       showAlert('오류', err?.response?.data?.error || '게임 시작에 실패했어요');
     }
   }, [courts, createQueueGame, assignEntry, loadBoard, loadCourts, loadPool]);
+
+  // 게임 중 코트의 선수 1명을 교체(서버 replacePlayer). 성공 시 풀/보드/코트 갱신.
+  const handleReplaceRunning = useCallback(async (replacementId: string) => {
+    if (!runningSwap) return;
+    try {
+      await clubSessionApi.replacePlayer(runningSwap.turnId, runningSwap.outUserId, replacementId);
+      setRunningSwap(null);
+      loadBoard(); loadCourts(); loadPool();
+      showSuccess('선수 교체 완료!');
+    } catch (err: any) {
+      showAlert('오류', err?.response?.data?.error || '선수 교체에 실패했어요');
+    }
+  }, [runningSwap, loadBoard, loadCourts, loadPool]);
 
   // ─── 게임 종료 (코트 위 게임 턴 완료) ───
   // ─── 방금 나온: 막 끝난 코트의 4명을 누적 목록에 쌓기 ───
@@ -3259,6 +3274,17 @@ export default function OperateScreen() {
           onRemove={handleRemoveFromGame}
         />
       )}
+      {runningSwap && (
+        <SwapPlayerModal
+          colors={colors}
+          freePool={freePool}
+          queuedPool={queuedPool}
+          currentIds={runningSwap.currentIds}
+          onPick={handleReplaceRunning}
+          onClose={() => setRunningSwap(null)}
+          allowAddToEmpty={false}
+        />
+      )}
       {matchupTarget && clubSessionId && (
         <MatchupModal
           colors={colors}
@@ -3691,7 +3717,9 @@ export default function OperateScreen() {
     const r = zoneRect(idx);
     const playingEntry = playingByCourtId.get(court.id);
     const occupied = court.status !== 'EMPTY' || !!playingEntry;
-    const names = (playingEntry?.playerNames ?? court.currentTurn?.playerNames ?? []).filter(Boolean);
+    const pids = playingEntry?.playerIds ?? court.currentTurn?.playerIds ?? [];
+    const pnames = playingEntry?.playerNames ?? court.currentTurn?.playerNames ?? [];
+    const turnId = court.currentTurn?.id ?? playingEntry?.turnId ?? null;
     return (
       <View
         pointerEvents={occupied ? 'box-none' : 'none'}
@@ -3709,7 +3737,19 @@ export default function OperateScreen() {
         </View>
         {occupied && (
           <>
-            <Text style={[styles.canvasZoneNames, { color: colors.textSecondary }]} numberOfLines={3}>{names.join(' · ')}</Text>
+            <View style={styles.canvasZoneChips}>
+              {pids.map((pid, i) => (
+                <TouchableOpacity
+                  key={pid}
+                  style={[styles.canvasZoneChip, { borderColor: colors.border, backgroundColor: colors.surface }]}
+                  onPress={() => { if (turnId) setRunningSwap({ turnId, outUserId: pid, courtName: court.name, currentIds: pids }); }}
+                  accessibilityLabel={`${pnames[i] || ''} 교체`}
+                >
+                  <Text style={[styles.canvasZoneChipText, { color: colors.text }]} numberOfLines={1}>{pnames[i] || '선수'}</Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+            <Text style={[styles.canvasZoneHintT, { color: colors.textLight }]}>선수 탭 = 교체</Text>
             <TouchableOpacity style={[styles.canvasZoneBtn, { borderColor: colors.danger }]} onPress={() => handleEndGame(court.id)} accessibilityLabel={`${court.name} 게임 종료`}>
               <Text style={[styles.canvasZoneBtnText, { color: colors.danger }]}>게임 종료</Text>
             </TouchableOpacity>
@@ -4873,6 +4913,10 @@ const styles = StyleSheet.create({
   canvasZoneName: { ...typography.buttonSm, fontWeight: '700' },
   canvasZoneState: { ...typography.caption },
   canvasZoneNames: { ...typography.caption, marginTop: 4 },
+  canvasZoneChips: { flexDirection: 'row', flexWrap: 'wrap', gap: 4, marginTop: 4 },
+  canvasZoneChip: { paddingHorizontal: 8, paddingVertical: 3, borderWidth: 1, borderRadius: radius.md },
+  canvasZoneChipText: { ...typography.caption, fontWeight: '600' },
+  canvasZoneHintT: { ...typography.caption, marginTop: 3 },
   canvasZoneBtn: { marginTop: 6, alignSelf: 'flex-start', paddingHorizontal: 10, paddingVertical: 4, borderRadius: radius.md, borderWidth: 1 },
   canvasZoneBtnText: { ...typography.caption, fontWeight: '700' },
   canvasStartBtn: { position: 'absolute', height: 32, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 4, borderRadius: radius.md, zIndex: 20 },
