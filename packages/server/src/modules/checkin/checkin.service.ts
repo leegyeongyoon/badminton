@@ -1046,6 +1046,7 @@ export async function getAvailablePlayers(facilityId: string, clubSessionId?: st
       gamesPlayedToday: c.user.gamePlayers.length,
       status,
       isGuest: c.user.isGuest,
+      isInLesson: c.isInLesson,
     };
   });
 }

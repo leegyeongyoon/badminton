@@ -989,6 +989,55 @@ export async function editPlayer(
   };
 }
 
+/**
+ * Operator toggles a participant's "레슨 중"(in-lesson) state for THIS 정모.
+ * 레슨자는 자동추천 + 미편성 풀에서 제외되고(운영판에서 '레슨자' 박스로 분리) 코트엔
+ * 수동으로만 내릴 수 있다. editPlayer/operatorCheckOut과 동일한 권한·대상 해석을 쓰며,
+ * players-updated를 emit해 모든 운영판이 즉시 동기화된다.
+ */
+export async function setPlayerLesson(
+  sessionId: string,
+  targetUserId: string,
+  operatorUserId: string,
+  inLesson: boolean,
+): Promise<{ success: true; inLesson: boolean }> {
+  const session = await prisma.clubSession.findUnique({
+    where: { id: sessionId },
+    select: { id: true, clubId: true, facilityId: true },
+  });
+  if (!session) throw new NotFoundError('모임 세션');
+
+  // LEADER/STAFF of the session's club only.
+  await verifyClubStaff(session.clubId, operatorUserId);
+
+  // The target must be an ACTIVE participant of THIS 정모 (session-scoped, or a
+  // facility-scoped open check-in at this session's facility — same resolution
+  // as editPlayer/operatorCheckOut).
+  const active =
+    (await prisma.checkIn.findFirst({
+      where: { userId: targetUserId, clubSessionId: sessionId, checkedOutAt: null },
+    })) ??
+    (await prisma.checkIn.findFirst({
+      where: {
+        userId: targetUserId,
+        facilityId: session.facilityId,
+        clubSessionId: null,
+        checkedOutAt: null,
+      },
+    }));
+  if (!active) throw new NotFoundError('체크인된 참가자');
+
+  await prisma.checkIn.update({
+    where: { id: active.id },
+    data: { isInLesson: inLesson },
+  });
+
+  // Refresh every operator board (same event the checkout / edit / addGuest emit).
+  await emitPlayersUpdated(session.facilityId, sessionId);
+
+  return { success: true, inLesson };
+}
+
 // --- B1: Player matchups within a 정모 (선수 매치업) ---
 
 /**

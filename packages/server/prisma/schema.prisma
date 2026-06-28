@@ -235,6 +235,7 @@ model CheckIn {
   checkedInAt   DateTime  @default(now())
   checkedOutAt  DateTime?
   restingAt     DateTime?
+  isInLesson    Boolean   @default(false) // 레슨 중: 자동추천/풀에서 제외, 수동으로만 코트 배정
 
   user        User         @relation(fields: [userId], references: [id], onDelete: Cascade)
   facility    Facility     @relation(fields: [facilityId], references: [id], onDelete: Cascade)

@@ -393,6 +393,8 @@ export interface AvailablePlayerResponse {
   gamesPlayedToday: number;
   status: PlayerStatus;
   isGuest: boolean;
+  /** 레슨 중 — 자동추천/풀에서 제외, 수동으로만 코트 배정. */
+  isInLesson: boolean;
 }
 
 // --- Attendance leaderboard (출석왕) ---

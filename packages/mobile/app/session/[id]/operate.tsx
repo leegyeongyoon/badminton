@@ -39,6 +39,7 @@ interface Player {
   status: string;
   gamesPlayedToday?: number;
   isGuest?: boolean;
+  isInLesson?: boolean;
 }
 
 interface Court {
@@ -204,6 +205,33 @@ export default function OperateScreen() {
   const [filterSkills, setFilterSkills] = useState<Set<string>>(new Set());
   const [filterGenders, setFilterGenders] = useState<Set<'M' | 'F'>>(new Set());
   const [filterGames, setFilterGames] = useState<'all' | '0' | '1-2' | '3+'>('all');
+
+  // ─── 운영판 모드 (1=현행 3분할 / 2=게임판 레이아웃) ───
+  // 운영자마다 편한 UI가 달라 탭으로 전환. 두 모드는 같은 서버 보드 상태의 두 '뷰'라
+  // (board/courts/players + 소켓 구독·핸들러 공유) 전환만으로 계속 sync 된다. 정모별로
+  // 마지막 선택을 저장(웹 localStorage / 네이티브 SecureStore)해 새로고침에도 유지.
+  const [boardMode, setBoardMode] = useState<1 | 2>(1);
+  const boardModeKey = clubSessionId ? `operate_board_mode_${clubSessionId}` : null;
+  const boardModeLoadedRef = useRef(false);
+  useEffect(() => {
+    if (!boardModeKey) return;
+    let alive = true;
+    getItem(boardModeKey)
+      .then((raw) => { if (alive && (raw === '1' || raw === '2')) setBoardMode(raw === '2' ? 2 : 1); })
+      .catch(() => {})
+      .finally(() => { boardModeLoadedRef.current = true; });
+    return () => { alive = false; };
+  }, [boardModeKey]);
+  useEffect(() => {
+    if (!boardModeKey || !boardModeLoadedRef.current) return;
+    setItem(boardModeKey, String(boardMode)).catch(() => {});
+  }, [boardMode, boardModeKey]);
+  // 모드 전환 시 선택/추천 상태 초기화(모드 1 트레이 ↔ 모드 2 게임판 혼동 방지).
+  useEffect(() => {
+    setStaged([]);
+    setSuggestNote(null);
+    setModeChooserOpen(false);
+  }, [boardMode]);
   // 출석 풀 보기 전환: 'group' = 미편성/편성됨/게임중 3분할(기본), 'all' = 전체를
   // 가나다 한 줄 목록으로 묶고 각 카드에 편성 상태 배지를 붙인다. 'recent' = 방금
   // 끝난 게임들을 게임 단위(함께 친 4명)로 묶어 보여줘 새 조합으로 바로 다시 편성.
@@ -605,7 +633,7 @@ export default function OperateScreen() {
   // 게임 중 — currently playing (status IN_TURN).
   // 대기 편성됨 — already placed in a queued game (and not playing).
   // 미편성 (대기) — checked-in, not playing, not in any queued game. Primary build pool.
-  const { playingPool, queuedPool, freePool } = useMemo(() => {
+  const { playingPool, queuedPool, freePool, lessonPool } = useMemo(() => {
     // 가나다 순(ㄱㄴㄷ) — 한국어 콜레이션으로 이름 정렬. 게스트도 동일. .slice()로
     // 원본을 변형하지 않고 정렬한다.
     const byName = (a: Player, b: Player) =>
@@ -613,8 +641,12 @@ export default function OperateScreen() {
     const playingP: Player[] = [];
     const queuedP: Player[] = [];
     const freeP: Player[] = [];
+    const lessonP: Player[] = [];
     for (const p of uniquePlayers) {
+      // 게임 중이면 레슨 여부와 무관하게 '게임 중'(수동 배정으로 코트에 있을 수 있음).
       if (p.status === 'IN_TURN') { playingP.push(p); continue; }
+      // 레슨 중(비-게임) → 레슨자 박스로 분리(미편성/편성 풀에서 제외).
+      if (p.isInLesson) { lessonP.push(p); continue; }
       if (queuedPlayerIds.has(p.userId)) { queuedP.push(p); continue; }
       freeP.push(p);
     }
@@ -622,8 +654,19 @@ export default function OperateScreen() {
       playingPool: playingP.slice().sort(byName),
       queuedPool: queuedP.slice().sort(byName),
       freePool: freeP.slice().sort(byName),
+      lessonPool: lessonP.slice().sort(byName),
     };
   }, [uniquePlayers, queuedPlayerIds]);
+
+  // 모드 2 게임판에 보일 사람들 = 출석 전원 − 레슨자(비-게임). 가나다 정렬.
+  const gamePanelPlayers = useMemo(() => {
+    const byName = (a: Player, b: Player) =>
+      (a.userName || '').localeCompare(b.userName || '', 'ko-KR');
+    return uniquePlayers
+      .filter((m) => !(m.isInLesson && m.status !== 'IN_TURN'))
+      .slice()
+      .sort(byName);
+  }, [uniquePlayers]);
 
   // ─── 전체 보기용 단일 목록 ───
   // 출석한 모든 사람을 가나다(ko-KR) 한 줄로 합치고, 각 사람의 현재 편성 상태
@@ -900,6 +943,27 @@ export default function OperateScreen() {
     handleAssign(firstAssignable.id, courtId);
   }, [queuedEntries, handleAssign]);
 
+  // ─── 모드 2: 선택(staged) 인원을 빈 코트에 바로 내려 즉시 시작 ───
+  // 큐에 새 게임을 만들고(createQueueGame) 그 엔트리를 곧바로 코트에 배정(assignEntry)
+  // = 모드 1의 2단계를 한 동작으로. 인원<2면 친절 안내. 성공 시 선택 초기화 + 갱신.
+  const handlePlaceSelectedOnCourt = useCallback(async (courtId: string) => {
+    if (staged.length < 2) { showAlert('알림', '최소 2명을 선택해주세요'); return; }
+    const court = courts.find((c) => c.id === courtId);
+    try {
+      const entry = await createQueueGame(staged);
+      if (!entry?.id) throw new Error('entry');
+      await assignEntry(entry.id, courtId);
+      setStaged([]);
+      setSuggestNote(null);
+      loadBoard();
+      loadCourts();
+      loadPool();
+      showSuccess(`${court?.name || '코트'}에서 게임 시작!`);
+    } catch (err: any) {
+      showAlert('오류', err?.response?.data?.error || '게임 시작에 실패했어요');
+    }
+  }, [staged, courts, createQueueGame, assignEntry, loadBoard, loadCourts, loadPool]);
+
   // ─── 게임 종료 (코트 위 게임 턴 완료) ───
   // ─── 방금 나온: 막 끝난 코트의 4명을 누적 목록에 쌓기 ───
   // 게임 종료가 성공한 직후 호출. 그 코트의 4명 playerIds 를 (보드 엔트리 → 코트
@@ -1085,6 +1149,25 @@ export default function OperateScreen() {
         '취소',
         'danger',
       );
+    },
+    [clubSessionId, loadPool, loadBoard],
+  );
+
+  // ─── 운영자: 참가자 레슨 중 토글 ───
+  // 레슨 시작 → 자동추천/미편성 풀에서 빠지고 '레슨자' 박스로. 레슨 종료 → 로테이션
+  // 복귀. 서버가 players:updated 를 emit 하므로 모든 운영판이 동기화된다.
+  const handleToggleLesson = useCallback(
+    async (targetUserId: string, targetName: string, makeLesson: boolean) => {
+      if (!clubSessionId) return;
+      try {
+        await clubSessionApi.setPlayerLesson(clubSessionId, targetUserId, makeLesson);
+        setMatchupTarget(null);
+        loadPool();
+        loadBoard();
+        showSuccess(makeLesson ? `${targetName}님 레슨 시작` : `${targetName}님 레슨 종료`);
+      } catch (err: any) {
+        showAlert('오류', err?.response?.data?.error || '레슨 상태 변경에 실패했어요');
+      }
     },
     [clubSessionId, loadPool, loadBoard],
   );
@@ -1406,13 +1489,15 @@ export default function OperateScreen() {
   //               nothing here (the card's onPress already handled the tap).
   //      • native → PanResponder claims on move (not start) so a tap falls
   //               through to the PlayerCard's onPress.
-  const PoolCard = ({ m, stageable, statusBadge }: { m: Player; stageable: boolean; statusBadge?: React.ReactNode }) => {
+  const PoolCard = ({ m, stageable, statusBadge, selectToDrag }: { m: Player; stageable: boolean; statusBadge?: React.ReactNode; selectToDrag?: boolean }) => {
     const isStaged = stagedSet.has(m.userId);
     // Any checked-in player can be composed into the next game regardless of
     // state — 미편성/대기, 휴식(RESTING), 대기 편성됨, 게임 중 모두 편성 가능.
     // (중복은 빨간 점만, 막지 않음 — 운영자가 판단.)
     const canTap = stageable;
-    const draggable = stageable;
+    // 모드 2(selectToDrag): '선택된'(isStaged) 카드만 드래그 가능 — 먼저 탭해 선택한
+    // 뒤에야 끌 수 있어 오작동을 막는다. 모드 1은 종전대로 stageable 카드 전부 드래그.
+    const draggable = stageable && (!selectToDrag || isStaged);
     const tap = canTap ? () => toggleStaged(m.userId) : undefined;
     // Double-booked (in another game's roster) → small subtle red dot only.
     const busy = busySet.has(m.userId);
@@ -2676,16 +2761,23 @@ export default function OperateScreen() {
     if (isEmpty || isMaint) {
       // A queued game with 2–4 players is assignable; only a 1-player draft is not.
       const hasAssignable = queuedEntries.some((e) => e.playerIds.length >= 2);
-      const canAssign = isEmpty && hasAssignable;
+      // 모드 2: 게임판에서 2명 이상 선택돼 있으면 빈 코트 탭으로 그 인원 바로 시작.
+      const canPlaceSelected = boardMode === 2 && isEmpty && staged.length >= 2;
+      const canAssign = isEmpty && (hasAssignable || canPlaceSelected);
       const affordance = isMaint
         ? '사용 불가'
-        : canAssign
-          ? '탭하여 다음 게임 배정'
-          : queuedEntries.length > 0
-            ? '배정 가능한 게임 없음'
-            : '대기 게임 없음';
+        : canPlaceSelected
+          ? '탭하여 선택 인원으로 시작'
+          : canAssign
+            ? '탭하여 다음 게임 배정'
+            : queuedEntries.length > 0
+              ? '배정 가능한 게임 없음'
+              : '대기 게임 없음';
       const dotColor = isMaint ? colors.courtMaintenance : colors.courtEmpty;
       const Wrapper: any = canAssign ? TouchableOpacity : View;
+      const onCourtPress = canPlaceSelected
+        ? () => handlePlaceSelectedOnCourt(court.id)
+        : () => handleAssignToCourt(court.id);
       return (
         <Wrapper
           style={[
@@ -2698,7 +2790,7 @@ export default function OperateScreen() {
             },
           ]}
           {...(canAssign
-            ? { onPress: () => handleAssignToCourt(court.id), activeOpacity: 0.8, accessibilityLabel: `${court.name} 배정` }
+            ? { onPress: onCourtPress, activeOpacity: 0.8, accessibilityLabel: `${court.name} 배정` }
             : {})}
         >
           <View style={[styles.courtStateDot, { backgroundColor: dotColor }]} />
@@ -2988,6 +3080,8 @@ export default function OperateScreen() {
           name={matchupTarget.name}
           skillLevel={matchupTarget.skillLevel ?? null}
           isGuest={!!matchupTarget.isGuest}
+          isInLesson={!!getPlayer(matchupTarget.userId)?.isInLesson}
+          onToggleLesson={() => handleToggleLesson(matchupTarget.userId, matchupTarget.name, !getPlayer(matchupTarget.userId)?.isInLesson)}
           onCheckout={() => handleOperatorCheckout(matchupTarget.userId, matchupTarget.name)}
           onSaved={(updatedName) => {
             // Keep the open modal's header/edit form in sync, then refresh pool.
@@ -3071,10 +3165,190 @@ export default function OperateScreen() {
   // ─────────────────────────────────────────────────────────
   // Layout
   // ─────────────────────────────────────────────────────────
+
+  // ─── 운영판 모드 전환 탭(모드 1 | 모드 2) ───
+  // 헤더 바로 아래 공통 위치. 풀 보기 탭과 같은 세그먼트 스타일을 재사용한다.
+  const ModeTabs = (
+    <View style={styles.modeTabsRow}>
+      <View style={[styles.poolTabs, { backgroundColor: colors.surfaceSecondary, borderColor: colors.border }]}>
+        {([[1, '모드 1'], [2, '모드 2']] as const).map(([key, label]) => {
+          const active = boardMode === key;
+          return (
+            <TouchableOpacity
+              key={key}
+              style={[styles.poolTab, active && [styles.poolTabActive, { backgroundColor: colors.surface }]]}
+              onPress={() => setBoardMode(key)}
+              accessibilityRole="tab"
+              accessibilityState={{ selected: active }}
+              accessibilityLabel={`${label}로 전환`}
+            >
+              <Text style={[styles.poolTabText, { color: active ? colors.primary : colors.textSecondary }]}>{label}</Text>
+            </TouchableOpacity>
+          );
+        })}
+      </View>
+    </View>
+  );
+
+  // ─── 모드 2 (게임판) 구성 요소 ───
+  // 게임판: 출석 전원을 태그 그리드로(필터 predicate 공유). Phase 2는 표시 전용
+  // (stageable=false → 탭/드래그 없음). 코트/커스텀/레슨자는 기존 컴포넌트 재사용.
+  const Mode2GamePanel = (
+    <View style={[styles.poolBox, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+      <View style={styles.poolGrid} onLayout={onPoolAreaLayout}>
+        {gamePanelPlayers.filter(matchesPoolFilters).map((m) => (
+          <PoolCard key={m.userId} m={m} stageable selectToDrag />
+        ))}
+      </View>
+      {gamePanelPlayers.length === 0 && (
+        <Text style={[styles.poolBoxEmpty, { color: colors.textLight }]}>게임판에 올릴 회원이 없어요</Text>
+      )}
+      {gamePanelPlayers.length > 0 && gamePanelPlayers.filter(matchesPoolFilters).length === 0 && (
+        <Text style={[styles.poolBoxEmpty, { color: colors.textLight }]}>조건에 맞는 회원 없음</Text>
+      )}
+    </View>
+  );
+  // 레슨자 박스 — 레슨 중(비-게임) 인원. 수동으로만 코트에 내릴 수 있게 선택 가능
+  // (탭=선택 → 빈 코트 탭/편성). 자동추천·미편성 풀에는 잡히지 않는다.
+  const Mode2LessonBox = (
+    <View style={[styles.poolBox, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+      {lessonPool.length === 0 ? (
+        <Text style={[styles.poolBoxEmpty, { color: colors.textLight }]}>레슨 중인 회원이 없어요</Text>
+      ) : (
+        <View style={styles.poolGrid}>
+          {lessonPool.map((m) => <PoolCard key={m.userId} m={m} stageable selectToDrag />)}
+        </View>
+      )}
+    </View>
+  );
+  const Mode2Courts = (
+    <View style={styles.courtGrid} onLayout={onCourtAreaLayout}>
+      {courts.map((court) => <CourtCard key={court.id} court={court} />)}
+      {courts.length === 0 && (
+        <Text style={[styles.emptyPool, { color: colors.textLight }]}>코트가 없어요. "코트 관리"에서 추가하세요</Text>
+      )}
+    </View>
+  );
+  const Mode2RightColumn = (
+    <>
+      <Text style={[styles.colHeader, { color: colors.textSecondary }]}>코트</Text>
+      {Mode2Courts}
+      <Text style={[styles.colHeader, { color: colors.textSecondary, marginTop: spacing.md }]}>커스텀 (요구사항)</Text>
+      {QueuePanel}
+      <Text style={[styles.colHeader, { color: colors.textSecondary, marginTop: spacing.md }]}>레슨자</Text>
+      {Mode2LessonBox}
+    </>
+  );
+  // 모드 2 선택 바 — 게임판에서 고른 인원(staged) 요약 + 자동추천/큐추가/초기화.
+  // 코트로 바로 내리는 건 빈 코트 탭(handlePlaceSelectedOnCourt), 큐 등록은 여기 버튼.
+  // 트레이와 같은 버튼/추천칩 스타일을 재사용한다.
+  const Mode2SelectBar = (
+    <View style={[styles.mode2SelectBar, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+      <View style={styles.mode2SelectTop}>
+        <Text style={[styles.mode2SelectCount, { color: colors.text }]}>선택 {staged.length}/4</Text>
+        <Text style={[styles.mode2SelectHint, { color: colors.textLight }]} numberOfLines={1}>
+          빈 코트 탭=바로 시작 · 선택 카드를 끌어 편성 수정
+        </Text>
+      </View>
+      {suggestNote && <Text style={[styles.suggestNote, { color: colors.warning }]}>{suggestNote}</Text>}
+      <View style={styles.trayButtons}>
+        <TouchableOpacity
+          style={[styles.suggestBtn, { backgroundColor: suggestUnavailable ? colors.textLight : colors.info }]}
+          onPress={() => { if (suggestUnavailable) return; setSuggestNote(null); setModeChooserOpen((o) => !o); }}
+          disabled={suggesting || suggestUnavailable}
+          activeOpacity={0.85}
+          accessibilityLabel="자동 추천"
+        >
+          {suggesting
+            ? <ActivityIndicator size="small" color={palette.white} />
+            : <Text style={styles.suggestBtnText}>{suggestUnavailable ? '준비 중' : `🎲 자동 추천${modeChooserOpen ? ' ▴' : ' ▾'}`}</Text>}
+        </TouchableOpacity>
+        {staged.length > 0 && (
+          <TouchableOpacity style={[styles.clearBtn, { borderColor: colors.border }]} onPress={clearStaged}>
+            <Text style={[styles.clearBtnText, { color: colors.textSecondary }]}>초기화</Text>
+          </TouchableOpacity>
+        )}
+      </View>
+      {modeChooserOpen && !suggestUnavailable && (
+        <View style={[styles.modeChooser, { borderColor: colors.border, backgroundColor: colors.background }]}>
+          <View style={styles.modeChips}>
+            {SUGGEST_MODES.map((m) => (
+              <TouchableOpacity
+                key={m.mode}
+                style={[styles.modeChip, { borderColor: colors.border, backgroundColor: colors.surface }]}
+                onPress={() => handleSuggest(m.mode)}
+                disabled={suggesting}
+                activeOpacity={0.8}
+                accessibilityLabel={`${m.label} 추천`}
+              >
+                <Text style={[styles.modeChipLabel, { color: colors.text }]}>{m.emoji} {m.label}</Text>
+                <Text style={[styles.modeChipHint, { color: colors.textSecondary }]} numberOfLines={1}>{m.hint}</Text>
+              </TouchableOpacity>
+            ))}
+          </View>
+        </View>
+      )}
+      <TouchableOpacity
+        style={[styles.registerBtn, { backgroundColor: staged.length >= 2 ? colors.primary : colors.textLight }]}
+        onPress={handleAddToQueue}
+        disabled={staged.length < 2}
+        activeOpacity={0.85}
+      >
+        <Text style={styles.registerBtnText}>다음 게임 큐에 추가{staged.length > 0 && staged.length < 4 ? ` (${staged.length}/4)` : ''}</Text>
+      </TouchableOpacity>
+    </View>
+  );
+
+  // 넓은 화면=2열[게임판 | 코트·커스텀·레슨자], 좁으면 세로 스택. 기존 split/leftPane/
+  // rightPane/stackedContent 스타일을 그대로 재사용한다.
+  const BoardMode2 = twoPane ? (
+    <View style={styles.split}>
+      <View style={[styles.leftPane, { borderRightColor: colors.border }]}>
+        <Text style={[styles.colHeader, { color: colors.textSecondary }]}>게임판</Text>
+        {PoolSearch}
+        {Mode2SelectBar}
+        <ScrollView style={{ flex: 1 }} contentContainerStyle={styles.poolList} showsVerticalScrollIndicator={false}>
+          {Mode2GamePanel}
+          <View style={{ height: spacing.sm }} />
+        </ScrollView>
+      </View>
+      <View style={styles.rightPane}>
+        <ScrollView style={{ flex: 1 }} contentContainerStyle={styles.rightContent} showsVerticalScrollIndicator={false}>
+          {Mode2RightColumn}
+        </ScrollView>
+      </View>
+    </View>
+  ) : (
+    <ScrollView style={{ flex: 1 }} contentContainerStyle={styles.stackedContent} showsVerticalScrollIndicator={false}>
+      <Text style={[styles.colHeader, { color: colors.textSecondary }]}>게임판</Text>
+      {PoolSearch}
+      {Mode2SelectBar}
+      {Mode2GamePanel}
+      <View style={{ height: spacing.md }} />
+      {Mode2RightColumn}
+      <View style={{ height: spacing.xxxl }} />
+    </ScrollView>
+  );
+
+  // 모드 2 — 헤더 + 모드 탭 + 게임판 레이아웃. 드래그 오버레이/모달은 모드 1과 공통.
+  if (boardMode === 2) {
+    return (
+      <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]}>
+        {Header}
+        {ModeTabs}
+        {BoardMode2}
+        {DragOverlay}
+        {QueueDragOverlay}
+        {modals}
+      </SafeAreaView>
+    );
+  }
+
   if (twoPane) {
     return (
       <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]}>
         {Header}
+        {ModeTabs}
         <View style={styles.split}>
           {/* LEFT PANE — pool boxes + tray */}
           <View style={[styles.leftPane, { borderRightColor: colors.border }]}>
@@ -3137,6 +3411,7 @@ export default function OperateScreen() {
   return (
     <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]}>
       {Header}
+      {ModeTabs}
       <ScrollView
         style={{ flex: 1 }}
         contentContainerStyle={styles.stackedContent}
@@ -3246,7 +3521,7 @@ function SwapPlayerModal({
 // count desc) on open. Read-only, calm. Shows "기록 없음" when no partners yet.
 // ─────────────────────────────────────────────────────────
 function MatchupModal({
-  colors, clubSessionId, userId, name, skillLevel, isGuest, onCheckout, onSaved, onClose,
+  colors, clubSessionId, userId, name, skillLevel, isGuest, isInLesson, onToggleLesson, onCheckout, onSaved, onClose,
 }: {
   colors: any;
   clubSessionId: string;
@@ -3256,6 +3531,10 @@ function MatchupModal({
   skillLevel: string | null;
   /** 게스트면 헤더에 게스트 배지 표시. */
   isGuest: boolean;
+  /** 현재 레슨 중 여부 — 토글 버튼 라벨/상태를 결정. */
+  isInLesson: boolean;
+  /** 레슨 시작/종료 토글 (반대 상태로 전환). */
+  onToggleLesson: () => void;
   onCheckout: () => void;
   /** 저장 성공 후 부모가 풀을 갱신하도록 콜백 (갱신된 이름 전달). */
   onSaved: (name: string) => void;
@@ -3434,6 +3713,19 @@ function MatchupModal({
               </TouchableOpacity>
             </View>
           )}
+
+          {/* 레슨 토글 — 레슨 중이면 자동추천/미편성 풀에서 빼고 '레슨자' 박스로
+              (수동으로만 코트 배정). 다시 누르면 로테이션 복귀. */}
+          <TouchableOpacity
+            style={[modalStyles.checkoutBtn, { borderColor: colors.info, backgroundColor: isInLesson ? colors.infoBg : 'transparent' }]}
+            onPress={onToggleLesson}
+            activeOpacity={0.85}
+            accessibilityLabel={isInLesson ? `${name} 레슨 종료` : `${name} 레슨 시작`}
+          >
+            <Text style={[modalStyles.checkoutBtnText, { color: colors.info }]}>
+              {isInLesson ? '🎓 레슨 종료 (로테이션 복귀)' : '🎓 레슨 시작 (로테이션 제외)'}
+            </Text>
+          </TouchableOpacity>
 
           {/* 운영자 액션 행: [이름·급수 수정] [체크아웃] — 사용자가 한 것 없이
               운영자가 이름표를 고치고/내보낼 수 있다. 매치업 탭은 안 건드림. */}
@@ -4073,6 +4365,18 @@ const styles = StyleSheet.create({
 
   // 풀 보기 전환 탭(그룹별 | 전체) — 컴팩트 세그먼트 컨트롤. 트랙은 옅은
   // surfaceSecondary, 선택 탭만 surface 로 떠 보이게.
+  // 운영판 모드 전환 탭(모드 1 | 모드 2) — 헤더 아래 공통 행.
+  modeTabsRow: { paddingHorizontal: spacing.smd, paddingTop: spacing.sm, alignItems: 'flex-start' },
+
+  // 모드 2 선택 바 — 게임판 선택 인원 요약 + 액션.
+  mode2SelectBar: {
+    borderWidth: 1, borderRadius: radius.lg, padding: spacing.sm,
+    marginBottom: spacing.xs, gap: spacing.xs,
+  },
+  mode2SelectTop: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
+  mode2SelectCount: { ...typography.buttonSm },
+  mode2SelectHint: { ...typography.caption, flex: 1 },
+
   poolTabs: {
     flexDirection: 'row', alignSelf: 'flex-start',
     padding: 3, borderRadius: radius.lg, borderWidth: 1,

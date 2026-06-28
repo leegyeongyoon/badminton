@@ -202,6 +202,15 @@ export const clubSessionApi = {
       body,
     ),
 
+  // ─── 운영자: 참가자 레슨 중 토글 (LEADER/STAFF) ───
+  // 레슨자는 자동추천/미편성 풀에서 빠지고 운영판 '레슨자' 박스로 분리된다(수동으로만
+  // 코트 배정). 서버가 players-updated 를 emit 해 모든 운영판이 즉시 동기화된다.
+  setPlayerLesson: (sessionId: string, userId: string, inLesson: boolean) =>
+    api.patch<{ success: boolean; inLesson: boolean }>(
+      `/club-sessions/${sessionId}/players/${userId}/lesson`,
+      { inLesson },
+    ),
+
   // ─── 운영자: 정모 출석 체크 (관리 멤버 포함, LEADER/STAFF) ───
   // 특정 모임원을 진행 중인 정모에 체크인(출석). 멱등 — 이미 체크인이면 created=false.
   checkInMember: (clubSessionId: string, userId: string) =>

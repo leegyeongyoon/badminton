@@ -308,6 +308,28 @@ router.patch(
   },
 );
 
+// PATCH /api/v1/club-sessions/:id/players/:userId/lesson - operator toggles a
+// participant's 레슨 중 state (LEADER/STAFF only; enforced in the service). Body
+// { inLesson: boolean }. Lesson-takers drop out of auto-suggest + the free pool
+// and can only be placed onto a court manually.
+router.patch(
+  '/:id/players/:userId/lesson',
+  authenticate,
+  async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const result = await clubSessionService.setPlayerLesson(
+        req.params.id as string,
+        req.params.userId as string,
+        req.user!.userId,
+        req.body?.inLesson === true,
+      );
+      res.json(result);
+    } catch (err) {
+      next(err);
+    }
+  },
+);
+
 // GET /api/v1/club-sessions/:id/players/:userId/matchups - who :userId played
 // with IN THIS 정모 + shared-game counts (any club member).
 router.get(

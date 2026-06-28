@@ -434,12 +434,15 @@ export async function suggestNextFoursome(
   // Active check-ins for this club session
   const checkins = await prisma.checkIn.findMany({
     where: { clubSessionId, checkedOutAt: null },
-    select: { userId: true, restingAt: true },
+    select: { userId: true, restingAt: true, isInLesson: true },
   });
 
   // Exclusion sets ------------------------------------------------------------
   // Resting users
   const restingIds = new Set(checkins.filter((c) => c.restingAt).map((c) => c.userId));
+
+  // 레슨 중인 사람 — 자동 추천에서 제외(레슨자 박스로 분리, 수동으로만 코트 배정).
+  const inLessonIds = new Set(checkins.filter((c) => c.isInLesson).map((c) => c.userId));
 
   // Users currently in a WAITING/PLAYING turn
   const inTurn = await prisma.turnPlayer.findMany({
@@ -477,6 +480,7 @@ export async function suggestNextFoursome(
     .filter(
       (id) =>
         !restingIds.has(id) &&
+        !inLessonIds.has(id) &&
         !inTurnIds.has(id) &&
         !queuedIds.has(id) &&
         !penalizedIds.has(id) &&
