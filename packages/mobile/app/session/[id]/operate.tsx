@@ -1077,6 +1077,52 @@ export default function OperateScreen() {
     }
   }, [courtDrafts, courts, createQueueGame, assignEntry, clearCourtDraft, loadBoard, loadCourts, loadPool]);
 
+  // ─── 모드 2: 자유 캔버스 자석판 ───
+  // 이름표를 캔버스 아무 좌표에나 자유 배치(분수 x,y 저장). 상단 코트 칸(드롭존)에
+  // 이름표를 끌어넣어 4명 차면 그 칸에서 "게임 시작". 위치는 정모별로 저장(Phase A
+  // device 로컬, Phase B 서버 동기화). court 소속은 좌표→칸 rect 히트테스트로 유도.
+  const [tagPos, setTagPos] = useState<Record<string, { x: number; y: number }>>({});
+  const [canvasSize, setCanvasSize] = useState({ w: 0, h: 0 });
+  const tagPosKey = clubSessionId ? `operate_tags_${clubSessionId}` : null;
+  const tagPosLoadedRef = useRef(false);
+  useEffect(() => {
+    if (!tagPosKey) return;
+    let alive = true;
+    getItem(tagPosKey)
+      .then((raw) => {
+        if (!alive || !raw) return;
+        try { const parsed = JSON.parse(raw); if (parsed && typeof parsed === 'object') setTagPos(parsed); } catch { /* ignore */ }
+      })
+      .catch(() => {})
+      .finally(() => { tagPosLoadedRef.current = true; });
+    return () => { alive = false; };
+  }, [tagPosKey]);
+  useEffect(() => {
+    if (!tagPosKey || !tagPosLoadedRef.current) return;
+    setItem(tagPosKey, JSON.stringify(tagPos)).catch(() => {});
+  }, [tagPos, tagPosKey]);
+  const onCanvasLayout = useCallback((e: LayoutChangeEvent) => {
+    const { width, height } = e.nativeEvent.layout;
+    setCanvasSize((prev) => (Math.abs(prev.w - width) > 1 || Math.abs(prev.h - height) > 1 ? { w: width, h: height } : prev));
+  }, []);
+  const commitTagFrac = useCallback((userId: string, x: number, y: number) => {
+    setTagPos((prev) => ({ ...prev, [userId]: { x: Math.max(0, Math.min(1, x)), y: Math.max(0, Math.min(1, y)) } }));
+  }, []);
+  // 캔버스 코트 칸의 4명으로 실제 게임 시작(기존 createQueueGame→assignEntry 재사용).
+  const handleStartCanvasGame = useCallback(async (courtId: string, userIds: string[]) => {
+    if (userIds.length !== 4) { showAlert('알림', '코트 칸에 4명을 넣어주세요'); return; }
+    const court = courts.find((c) => c.id === courtId);
+    try {
+      const entry = await createQueueGame(userIds);
+      if (!entry?.id) throw new Error('entry');
+      await assignEntry(entry.id, courtId);
+      loadBoard(); loadCourts(); loadPool();
+      showSuccess(`${court?.name || '코트'} 게임 시작!`);
+    } catch (err: any) {
+      showAlert('오류', err?.response?.data?.error || '게임 시작에 실패했어요');
+    }
+  }, [courts, createQueueGame, assignEntry, loadBoard, loadCourts, loadPool]);
+
   // ─── 게임 종료 (코트 위 게임 턴 완료) ───
   // ─── 방금 나온: 막 끝난 코트의 4명을 누적 목록에 쌓기 ───
   // 게임 종료가 성공한 직후 호출. 그 코트의 4명 playerIds 를 (보드 엔트리 → 코트
@@ -3570,34 +3616,139 @@ export default function OperateScreen() {
 
   // 넓은 화면=2열[게임판 | 코트·커스텀·레슨자], 좁으면 세로 스택. 기존 split/leftPane/
   // rightPane/stackedContent 스타일을 그대로 재사용한다.
-  const BoardMode2 = twoPane ? (
-    <View style={styles.split} onLayout={onSplitLayout}>
-      <View style={[styles.leftPane, { borderRightColor: colors.border }, leftPaneWidth != null && { width: leftPaneWidth }]}>
-        <Text style={[styles.colHeader, { color: colors.textSecondary }]}>게임판</Text>
-        {PoolSearch}
-        {Mode2SelectBar}
-        <ScrollView style={{ flex: 1 }} contentContainerStyle={styles.poolList} showsVerticalScrollIndicator={false}>
-          {Mode2GamePanel}
-          <View style={{ height: spacing.sm }} />
-        </ScrollView>
+  // ─── 모드 2 = 자유 캔버스 자석판 ───
+  // 출석 전원(게임 중 포함)을 이름표로 캔버스에 자유 배치. 상단 코트 칸(드롭존)에
+  // 이름표를 끌어넣어 4명 차면 "게임 시작". court 소속은 좌표→칸 히트테스트로 유도.
+  const CANVAS_PAD = 10, ZONE_H = 150, ZONE_GAP = 8, MAG_W = 88, MAG_H = 40, MAG_GAP = 8;
+  // 측정 전엔 윈도우 크기로 폴백(웹에서 빈 flex:1 + onLayout 치킨-에그 회피). 측정되면 그 값 사용.
+  const cw = canvasSize.w || layout.width;
+  const ch = canvasSize.h || Math.max(360, layout.height - 170);
+  const nZones = Math.max(1, courts.length);
+  const zoneAreaW = Math.max(0, cw - CANVAS_PAD * 2);
+  const zoneW = (zoneAreaW - ZONE_GAP * (nZones - 1)) / nZones;
+  const zoneRect = (i: number) => ({ x: CANVAS_PAD + i * (zoneW + ZONE_GAP), y: CANVAS_PAD, w: zoneW, h: ZONE_H });
+  const benchTopPx = CANVAS_PAD + ZONE_H + 16;
+  const canvasPlayers = uniquePlayers; // 게임 중 포함 — 운영진이 게임중 선수도 만질 수 있게
+  const defaultFrac = (idx: number) => {
+    if (cw <= 0 || ch <= 0) return { x: 0, y: 0 };
+    const cols = Math.max(1, Math.floor((cw - CANVAS_PAD * 2) / (MAG_W + MAG_GAP)));
+    const row = Math.floor(idx / cols), col = idx % cols;
+    return { x: (CANVAS_PAD + col * (MAG_W + MAG_GAP)) / cw, y: (benchTopPx + row * (MAG_H + MAG_GAP)) / ch };
+  };
+  const fracOf = (userId: string, idx: number) => tagPos[userId] || defaultFrac(idx);
+  const zoneOfTag = (userId: string, idx: number): number | null => {
+    if (cw <= 0) return null;
+    const f = fracOf(userId, idx);
+    const cx = f.x * cw + MAG_W / 2, cy = f.y * ch + MAG_H / 2;
+    for (let i = 0; i < nZones; i++) {
+      const r = zoneRect(i);
+      if (cx >= r.x && cx <= r.x + r.w && cy >= r.y && cy <= r.y + r.h) return i;
+    }
+    return null;
+  };
+  const zoneMembers = (i: number): string[] =>
+    canvasPlayers.filter((m, idx) => zoneOfTag(m.userId, idx) === i).map((m) => m.userId);
+
+  // 자석 이름표 — Animated 자유 드래그. 릴리즈 시 분수 좌표 확정(persist).
+  const MagnetTag = ({ player, idx }: { player: Player; idx: number }) => {
+    const f = fracOf(player.userId, idx);
+    const pan = useRef(new RNAnimated.ValueXY({ x: f.x * cw, y: f.y * ch })).current;
+    useEffect(() => { pan.setValue({ x: f.x * cw, y: f.y * ch }); }, [f.x, f.y, cw, ch]);
+    const skill = getSkillMeta(player.skillLevel);
+    const g = getGenderMeta(player.gender);
+    const busy = busySet.has(player.userId);
+    const pr = useRef(
+      PanResponder.create({
+        onMoveShouldSetPanResponder: (_e, gs) => Math.abs(gs.dx) > 4 || Math.abs(gs.dy) > 4,
+        onPanResponderGrant: () => { pan.extractOffset(); },
+        onPanResponderMove: RNAnimated.event([null, { dx: pan.x, dy: pan.y }], { useNativeDriver: false }),
+        onPanResponderRelease: () => {
+          pan.flattenOffset();
+          const nx = ((pan.x as any).__getValue?.() ?? 0) / (cw || 1);
+          const ny = ((pan.y as any).__getValue?.() ?? 0) / (ch || 1);
+          commitTagFrac(player.userId, nx, ny);
+        },
+        onPanResponderTerminate: () => { pan.flattenOffset(); },
+      }),
+    ).current;
+    return (
+      <RNAnimated.View
+        {...pr.panHandlers}
+        style={[styles.magnetTag, { width: MAG_W, borderColor: skill.color, backgroundColor: colors.surface, transform: pan.getTranslateTransform() }]}
+      >
+        <View style={[styles.magnetSkill, { backgroundColor: skill.color }]}>
+          <Text style={styles.magnetSkillText}>{(player.skillLevel || '·').toUpperCase()}</Text>
+        </View>
+        <Text style={[styles.magnetName, { color: colors.text }]} numberOfLines={1}>{player.userName}</Text>
+        {g && <GenderMarker meta={g} size={12} />}
+        {busy && <View style={[styles.conflictDot, { borderColor: colors.surface }]} />}
+      </RNAnimated.View>
+    );
+  };
+
+  // 코트 칸(드롭존). 비어있으면 점선 칸(여기로 4명), 게임 중이면 진행 중 표시 + 게임 종료.
+  const CanvasCourtZone = ({ court, idx }: { court: Court; idx: number }) => {
+    const r = zoneRect(idx);
+    const playingEntry = playingByCourtId.get(court.id);
+    const occupied = court.status !== 'EMPTY' || !!playingEntry;
+    const names = (playingEntry?.playerNames ?? court.currentTurn?.playerNames ?? []).filter(Boolean);
+    return (
+      <View
+        pointerEvents={occupied ? 'box-none' : 'none'}
+        style={[
+          styles.canvasZone,
+          { left: r.x, top: r.y, width: r.w, height: r.h,
+            borderColor: occupied ? colors.warning : colors.border,
+            borderStyle: occupied ? 'solid' : 'dashed',
+            backgroundColor: occupied ? colors.warningLight : colors.surfaceSecondary },
+        ]}
+      >
+        <View style={styles.canvasZoneHeader}>
+          <Text style={[styles.canvasZoneName, { color: colors.text }]} numberOfLines={1}>{court.name}</Text>
+          <Text style={[styles.canvasZoneState, { color: occupied ? colors.warning : colors.textLight }]}>{occupied ? '게임 중' : '여기로 4명'}</Text>
+        </View>
+        {occupied && (
+          <>
+            <Text style={[styles.canvasZoneNames, { color: colors.textSecondary }]} numberOfLines={3}>{names.join(' · ')}</Text>
+            <TouchableOpacity style={[styles.canvasZoneBtn, { borderColor: colors.danger }]} onPress={() => handleEndGame(court.id)} accessibilityLabel={`${court.name} 게임 종료`}>
+              <Text style={[styles.canvasZoneBtnText, { color: colors.danger }]}>게임 종료</Text>
+            </TouchableOpacity>
+          </>
+        )}
       </View>
-      {SplitDivider}
-      <View style={styles.rightPane}>
-        <ScrollView style={{ flex: 1 }} contentContainerStyle={styles.rightContent} showsVerticalScrollIndicator={false}>
-          {Mode2RightColumn}
-        </ScrollView>
-      </View>
+    );
+  };
+
+  const BoardMode2 = (
+    <View style={styles.canvas} onLayout={onCanvasLayout}>
+      {cw > 0 && (
+        <>
+          {courts.map((court, i) => <CanvasCourtZone key={court.id} court={court} idx={i} />)}
+          {canvasPlayers.map((m, idx) => <MagnetTag key={m.userId} player={m} idx={idx} />)}
+          {courts.map((court, i) => {
+            const occupied = court.status !== 'EMPTY' || !!playingByCourtId.get(court.id);
+            if (occupied) return null;
+            const mem = zoneMembers(i);
+            if (mem.length !== 4) return null;
+            const r = zoneRect(i);
+            return (
+              <TouchableOpacity
+                key={`start-${court.id}`}
+                style={[styles.canvasStartBtn, { left: r.x + 8, top: r.y + r.h - 36, width: r.w - 16, backgroundColor: colors.primary }]}
+                onPress={() => handleStartCanvasGame(court.id, mem)}
+                accessibilityLabel={`${court.name} 게임 시작`}
+              >
+                <Icon name="play" size={14} color="#fff" />
+                <Text style={styles.canvasStartBtnText}>{court.name} 게임 시작</Text>
+              </TouchableOpacity>
+            );
+          })}
+          {courts.length === 0 && (
+            <Text style={[styles.emptyPool, { color: colors.textLight, position: 'absolute', top: 24, left: 20, right: 20 }]}>코트가 없어요. "코트 관리"에서 추가하세요</Text>
+          )}
+        </>
+      )}
     </View>
-  ) : (
-    <ScrollView style={{ flex: 1 }} contentContainerStyle={styles.stackedContent} showsVerticalScrollIndicator={false}>
-      <Text style={[styles.colHeader, { color: colors.textSecondary }]}>게임판</Text>
-      {PoolSearch}
-      {Mode2SelectBar}
-      {Mode2GamePanel}
-      <View style={{ height: spacing.md }} />
-      {Mode2RightColumn}
-      <View style={{ height: spacing.xxxl }} />
-    </ScrollView>
   );
 
   // 모드 2 — 헤더 + 모드 탭 + 게임판 레이아웃. 드래그 오버레이/모달은 모드 1과 공통.
@@ -4703,6 +4854,29 @@ const styles = StyleSheet.create({
     minHeight: 72, alignItems: 'center', justifyContent: 'center', paddingVertical: spacing.md,
   },
   mode2CourtEmptyText: { ...typography.caption, textAlign: 'center', lineHeight: 18 },
+
+  // ─── 모드 2 자유 캔버스 자석판 ───
+  canvas: { flex: 1, position: 'relative', overflow: 'hidden' },
+  magnetTag: {
+    position: 'absolute', left: 0, top: 0,
+    flexDirection: 'row', alignItems: 'center', gap: 5,
+    paddingHorizontal: 7, paddingVertical: 6, borderWidth: 1.5, borderRadius: radius.md,
+    ...(Platform.OS === 'web' ? ({ cursor: 'grab', userSelect: 'none' } as any) : {
+      shadowColor: '#000', shadowOpacity: 0.12, shadowRadius: 3, shadowOffset: { width: 0, height: 1 }, elevation: 3,
+    }),
+  },
+  magnetSkill: { width: 18, height: 18, borderRadius: 4, alignItems: 'center', justifyContent: 'center' },
+  magnetSkillText: { color: '#fff', fontSize: 11, fontWeight: '700' },
+  magnetName: { ...typography.caption, flexShrink: 1, fontWeight: '600' },
+  canvasZone: { position: 'absolute', borderWidth: 1.5, borderRadius: radius.lg, padding: spacing.sm },
+  canvasZoneHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+  canvasZoneName: { ...typography.buttonSm, fontWeight: '700' },
+  canvasZoneState: { ...typography.caption },
+  canvasZoneNames: { ...typography.caption, marginTop: 4 },
+  canvasZoneBtn: { marginTop: 6, alignSelf: 'flex-start', paddingHorizontal: 10, paddingVertical: 4, borderRadius: radius.md, borderWidth: 1 },
+  canvasZoneBtnText: { ...typography.caption, fontWeight: '700' },
+  canvasStartBtn: { position: 'absolute', height: 32, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 4, borderRadius: radius.md, zIndex: 20 },
+  canvasStartBtnText: { color: '#fff', ...typography.buttonSm, fontWeight: '700' },
 
   poolTabs: {
     flexDirection: 'row', alignSelf: 'flex-start',
