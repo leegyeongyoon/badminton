@@ -677,7 +677,27 @@ async function formatBoard(board: any) {
     busyPlayerIds: await computeBusyPlayerIds(board.clubSessionId, rawEntries),
     playedGroups: composition.playedGroups,
     pairCounts: composition.pairCounts,
+    // 모드2 자석판 위치(운영진 공유). { [userId]: { x, y } } 분수 좌표.
+    tagLayout: ((board as { tagLayout?: unknown }).tagLayout as Record<string, { x: number; y: number }>) ?? {},
   };
+}
+
+// 모드2 자석판: 한 이름표의 위치를 갱신(운영진 공유). tagLayout JSON 을 read-modify-write
+// 하고 소켓으로 다른 운영진에 전파. LEADER/STAFF 만(verifyBoardStaff).
+export async function updateTagLayout(
+  boardId: string,
+  userId: string,
+  x: number,
+  y: number,
+  operatorId: string,
+): Promise<{ success: true }> {
+  const board = await verifyBoardStaff(boardId, operatorId);
+  const layout = { ...((board.tagLayout as unknown as Record<string, { x: number; y: number }>) || {}) };
+  layout[userId] = { x: Math.max(0, Math.min(1, x)), y: Math.max(0, Math.min(1, y)) };
+  await prisma.gameBoard.update({ where: { id: boardId }, data: { tagLayout: layout } });
+  const io = getIO();
+  io.to(`facility:${board.facilityId}`).emit('gameBoard:layoutUpdated', { boardId, userId, x: layout[userId].x, y: layout[userId].y });
+  return { success: true };
 }
 
 // Composition-aid data for THIS 정모 used by the client to flag repeat foursomes

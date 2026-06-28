@@ -19,6 +19,7 @@ import {
   createQueueGame,
   reorderQueue,
   assignEntry,
+  updateTagLayout,
 } from './gameBoard.service';
 
 const router = Router();
@@ -167,6 +168,28 @@ router.patch(
       const { entryIds } = req.body;
       const board = await reorderQueue(req.params.id as string, entryIds, req.user!.userId);
       res.json(board);
+    } catch (err) {
+      next(err);
+    }
+  },
+);
+
+// PATCH /game-boards/:boardId/layout — 모드2 자석판 이름표 1개 위치 갱신(운영진 공유)
+// Body { userId, x, y } (분수 0~1). LEADER/STAFF 만(서비스에서 검증). 소켓 전파.
+router.patch(
+  '/:id/layout',
+  authenticate,
+  async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const { userId, x, y } = req.body;
+      const result = await updateTagLayout(
+        req.params.id as string,
+        userId,
+        Number(x),
+        Number(y),
+        req.user!.userId,
+      );
+      res.json(result);
     } catch (err) {
       next(err);
     }

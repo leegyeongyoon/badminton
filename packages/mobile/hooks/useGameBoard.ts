@@ -38,6 +38,8 @@ export interface GameBoard {
    * Used to softly hint over-pairing while staging.
    */
   pairCounts?: Record<string, number>;
+  /** 모드2 자석판: { [userId]: { x, y } } 분수 좌표(운영진 공유). */
+  tagLayout?: Record<string, { x: number; y: number }>;
 }
 
 export interface FoursomeSuggestion {

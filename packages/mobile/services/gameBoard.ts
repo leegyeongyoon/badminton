@@ -53,4 +53,8 @@ export const gameBoardApi = {
   // 큐 게임을 빈(EMPTY) 코트에 배정 → 게임 시작 (your_turn push)
   assignEntry: (boardId: string, entryId: string, courtId: string) =>
     api.post(`/game-boards/${boardId}/entries/${entryId}/assign`, { courtId }),
+
+  // 모드2 자석판: 이름표 1개 위치(분수) 갱신 → 운영진 공유(소켓 전파). 드래그 릴리즈마다.
+  updateLayout: (boardId: string, userId: string, x: number, y: number) =>
+    api.patch(`/game-boards/${boardId}/layout`, { userId, x, y }),
 };

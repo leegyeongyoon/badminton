@@ -6,7 +6,7 @@ import {
 } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useGameBoard, GameBoardEntry } from '../../../hooks/useGameBoard';
-import type { SuggestMode } from '../../../services/gameBoard';
+import { gameBoardApi, type SuggestMode } from '../../../services/gameBoard';
 import { useTheme } from '../../../hooks/useTheme';
 import { useResponsiveLayout, courtColumnsFor, poolColumnsFor } from '../../../hooks/useResponsiveLayout';
 import type { LayoutChangeEvent } from 'react-native';
@@ -1107,9 +1107,33 @@ export default function OperateScreen() {
     const { width, height } = e.nativeEvent.layout;
     setCanvasSize((prev) => (Math.abs(prev.w - width) > 1 || Math.abs(prev.h - height) > 1 ? { w: width, h: height } : prev));
   }, []);
+  // 서버 공유: board.id 를 ref 로 들고(한 번 만든 PanResponder 에서도 최신값), 드래그
+  // 릴리즈마다 위치를 PATCH → 소켓으로 다른 운영진에 전파.
+  const boardIdRef = useRef<string | undefined>(undefined);
+  boardIdRef.current = board?.id;
   const commitTagFrac = useCallback((userId: string, x: number, y: number) => {
-    setTagPos((prev) => ({ ...prev, [userId]: { x: Math.max(0, Math.min(1, x)), y: Math.max(0, Math.min(1, y)) } }));
+    const fx = Math.max(0, Math.min(1, x));
+    const fy = Math.max(0, Math.min(1, y));
+    setTagPos((prev) => ({ ...prev, [userId]: { x: fx, y: fy } }));
+    const bid = boardIdRef.current;
+    if (bid) gameBoardApi.updateLayout(bid, userId, fx, fy).catch(() => {});
   }, []);
+  // 서버 자석판 배치를 초기 1회 seed(서버가 공유 진실, 로컬은 폴백). 이후 소켓으로 동기화.
+  const tagSeededRef = useRef(false);
+  useEffect(() => {
+    if (tagSeededRef.current) return;
+    const layout = board?.tagLayout;
+    if (layout && Object.keys(layout).length > 0) {
+      setTagPos((prev) => ({ ...prev, ...layout }));
+      tagSeededRef.current = true;
+    }
+  }, [board?.tagLayout]);
+  // 다른 운영진이 이름표를 옮기면 실시간 반영(소켓).
+  const handleLayoutUpdated = useCallback((msg: any) => {
+    if (!msg || typeof msg.userId !== 'string' || typeof msg.x !== 'number') return;
+    setTagPos((prev) => ({ ...prev, [msg.userId]: { x: msg.x, y: msg.y } }));
+  }, []);
+  useSocketEvent('gameBoard:layoutUpdated', handleLayoutUpdated);
   // 캔버스 코트 칸의 4명으로 실제 게임 시작(기존 createQueueGame→assignEntry 재사용).
   const handleStartCanvasGame = useCallback(async (courtId: string, userIds: string[]) => {
     if (userIds.length !== 4) { showAlert('알림', '코트 칸에 4명을 넣어주세요'); return; }
