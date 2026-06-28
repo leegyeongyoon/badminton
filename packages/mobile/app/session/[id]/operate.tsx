@@ -3250,20 +3250,23 @@ export default function OperateScreen() {
   // ─── 운영판 모드 전환 탭(모드 1 | 모드 2) ───
   // 헤더 바로 아래 공통 위치. 풀 보기 탭과 같은 세그먼트 스타일을 재사용한다.
   const ModeTabs = (
-    <View style={styles.modeTabsRow}>
-      <View style={[styles.poolTabs, { backgroundColor: colors.surfaceSecondary, borderColor: colors.border }]}>
-        {([[1, '모드 1'], [2, '모드 2']] as const).map(([key, label]) => {
+    <View style={[styles.modeTabsRow, { borderBottomColor: colors.border }]}>
+      <Text style={[styles.modeTabsLabel, { color: colors.textSecondary }]}>운영 모드</Text>
+      <View style={[styles.modeTabs, { backgroundColor: colors.surfaceSecondary, borderColor: colors.border }]}>
+        {([[1, '기본'], [2, '게임판']] as const).map(([key, label]) => {
           const active = boardMode === key;
           return (
             <TouchableOpacity
               key={key}
-              style={[styles.poolTab, active && [styles.poolTabActive, { backgroundColor: colors.surface }]]}
+              style={[styles.modeTab, active && { backgroundColor: colors.primary }]}
               onPress={() => setBoardMode(key)}
               accessibilityRole="tab"
               accessibilityState={{ selected: active }}
-              accessibilityLabel={`${label}로 전환`}
+              accessibilityLabel={`모드 ${key}로 전환`}
             >
-              <Text style={[styles.poolTabText, { color: active ? colors.primary : colors.textSecondary }]}>{label}</Text>
+              <Text style={[styles.modeTabText, { color: active ? '#fff' : colors.textSecondary }]}>
+                모드 {key} · {label}
+              </Text>
             </TouchableOpacity>
           );
         })}
@@ -4483,8 +4486,18 @@ const styles = StyleSheet.create({
 
   // 풀 보기 전환 탭(그룹별 | 전체) — 컴팩트 세그먼트 컨트롤. 트랙은 옅은
   // surfaceSecondary, 선택 탭만 surface 로 떠 보이게.
-  // 운영판 모드 전환 탭(모드 1 | 모드 2) — 헤더 아래 공통 행.
-  modeTabsRow: { paddingHorizontal: spacing.smd, paddingTop: spacing.sm, alignItems: 'flex-start' },
+  // 운영판 모드 전환(기본 | 게임판) — 헤더 바로 아래, 한눈에 띄는 라벨 + 강조 탭.
+  modeTabsRow: {
+    flexDirection: 'row', alignItems: 'center', gap: spacing.sm,
+    paddingHorizontal: spacing.smd, paddingVertical: spacing.sm, borderBottomWidth: 1,
+  },
+  modeTabsLabel: { ...typography.caption, fontWeight: '700' },
+  modeTabs: { flexDirection: 'row', padding: 3, borderRadius: radius.lg, borderWidth: 1, gap: 3 },
+  modeTab: {
+    paddingHorizontal: spacing.md, paddingVertical: 7, borderRadius: radius.md,
+    alignItems: 'center', justifyContent: 'center', minWidth: 96,
+  },
+  modeTabText: { ...typography.buttonSm, fontWeight: '700' },
 
   // 모드 2 선택 바 — 게임판 선택 인원 요약 + 액션.
   mode2SelectBar: {
