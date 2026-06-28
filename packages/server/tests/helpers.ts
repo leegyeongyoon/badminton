@@ -160,6 +160,15 @@ export async function createActiveClubSession(opts: {
       checkInClosesAt: opts.checkInClosesAt ?? null,
     },
   });
+  // per-정모 코트 모델: 이 정모가 자기 코트를 '소유'하도록 clubSessionId 를 건다.
+  // assignEntry/pushEntry 는 court.clubSessionId === board.clubSessionId 를 요구하므로
+  // (프로덕션 startSession 과 동일) 시설 코트를 그대로 넘기면 배정이 거부된다.
+  if (opts.courtIds.length > 0) {
+    await prisma.court.updateMany({
+      where: { id: { in: opts.courtIds } },
+      data: { clubSessionId: session.id },
+    });
+  }
   return { id: session.id, facilitySessionId: facilitySession.id };
 }
 

@@ -23,6 +23,7 @@ let leaderToken: string;
 let facility: Awaited<ReturnType<typeof createFacility>>;
 let clubId: string;
 let sessionId: string;
+let sessionCourtIds: string[] = [];
 let members: CreatedUser[];
 
 beforeAll(async () => {
@@ -59,7 +60,7 @@ describe('clubSession lifecycle', () => {
     const res = await request(app)
       .post(`/api/v1/clubs/${clubId}/sessions`)
       .set('Authorization', `Bearer ${leaderToken}`)
-      .send({ facilityId: facility.id }); // courtIds omitted → defaults to all courts
+      .send({ facilityId: facility.id, courtCount: 2 });
 
     expect(res.status).toBe(201);
     expect(res.body.status).toBe('ACTIVE');
@@ -72,8 +73,10 @@ describe('clubSession lifecycle', () => {
     expect(fs!.status).toBe('OPEN');
     expect(fs!.facilityId).toBe(facility.id);
 
-    // Defaulted to all (non-maintenance) facility courts.
-    expect(res.body.courtIds.sort()).toEqual([...facility.courtIds].sort());
+    // per-정모 코트 모델: 정모는 자기 전용 코트(코트 1..N)를 새로 생성한다(시설 코트를
+    // 재사용하지 않음). 요청한 2개가 만들어졌는지 확인하고, 이후 배정에 이 코트를 쓴다.
+    expect(res.body.courtIds).toHaveLength(2);
+    sessionCourtIds = res.body.courtIds;
   });
 
   it('getSummary returns attendance / games / guestFees', async () => {
@@ -100,7 +103,7 @@ describe('clubSession lifecycle', () => {
     const assign = await request(app)
       .post(`/api/v1/game-boards/${board.body.id}/entries/${queue.body.id}/assign`)
       .set('Authorization', `Bearer ${leaderToken}`)
-      .send({ courtId: facility.courtIds[0] });
+      .send({ courtId: sessionCourtIds[0] });
     expect(assign.status).toBe(200);
 
     const res = await request(app)
