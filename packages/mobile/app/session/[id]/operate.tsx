@@ -102,9 +102,9 @@ interface DropTarget {
   rect: { x: number; y: number; w: number; h: number };
 }
 
-// 방금 나온(recentlyOut) 누적 목록의 최대 보관 개수. 가장 최근 N개만 들고
-// 있다가 더 오래된 건 떨군다 — 바쁜 주말에도 목록이 무한히 길어지지 않게.
-const RECENT_OUT_MAX = 8;
+// 방금 나온(recentlyOut) 누적 목록의 최대 보관 개수. 끝난 게임이 대기 명단 맨 아래에 '계속'
+// 쌓여야 해서 넉넉히 보관(한 정모 분량). 너무 오래된 것만 떨궈 무한 증가 방지.
+const RECENT_OUT_MAX = 50;
 
 // Safe LayoutAnimation (web treats it as a no-op but guard anyway)
 function animateNext() {
@@ -3846,7 +3846,17 @@ export default function OperateScreen() {
   // 대기(게임 중 아님)는 '항상' 급수(S>A>B>C>D>E>F) → 이름순으로 정렬(일관). 게임판에서 대기로
   // 옮긴 사람도 곧장 제자리(급수순)에 들어간다. 안정 슬롯(빈칸 유지)은 정렬을 깨서 폐기.
   const skillRank = (lv?: string | null) => (({ S: 0, A: 1, B: 2, C: 3, D: 4, E: 5, F: 6 } as Record<string, number>)[(lv || '').toUpperCase()] ?? 9);
+  // 방금 끝난 게임 4명 묶음 — 정렬과 '별개로' 대기 명단 맨 아래에 그대로 한 줄로 쌓는다.
+  // (최근에 끝난 게 맨 아래로 계속 쌓임. recentlyOut 은 최신이 앞 → reverse 로 오래된 게 위/최근이 아래.)
+  const finishedGroups: string[][] = [];
+  const finishedIds = new Set<string>();
+  for (const r of [...recentlyOut].reverse()) {
+    const m = r.playerIds.filter((id) => poolSet.has(id) && !finishedIds.has(id));
+    if (m.length > 0) { m.forEach((id) => finishedIds.add(id)); finishedGroups.push(m); }
+  }
+  // 위쪽: 아직 게임 안 친(또는 묶음에서 빠진) 사람 — 급수(S>A>...>F) → 이름순 정렬.
   const sortedPool = pool
+    .filter((m) => !finishedIds.has(m.userId))
     .slice()
     .sort((a, b) => skillRank(a.skillLevel) - skillRank(b.skillLevel) || a.userName.localeCompare(b.userName))
     .map((m) => m.userId);
@@ -4171,6 +4181,17 @@ export default function OperateScreen() {
                       <View key={gi} style={styles.gameFrameSlots}>
                         {[0, 1, 2, 3].map((si) => {
                           const id = grp[si]; // string=선수, undefined=마지막 줄 채우기 패딩(투명)
+                          if (!id) return <View key={si} style={styles.poolGapSlot} />;
+                          const p = getPlayer(id); return p ? <PlayerTag key={id} player={p} fill compact /> : <View key={si} style={styles.poolGapSlot} />;
+                        })}
+                      </View>
+                    ))}
+                    {/* 방금 끝난 게임 4명 묶음 — 정렬과 별개로 그대로 한 줄, 맨 아래에 계속 쌓인다(최근이 맨 아래). */}
+                    {finishedGroups.length > 0 && <Text style={[styles.m2SectionLabel, { color: colors.textSecondary, marginTop: 6 }]}>방금 끝난 게임 (↓ 아래로 쌓임)</Text>}
+                    {finishedGroups.map((grp, gi) => (
+                      <View key={`fin${gi}`} style={styles.gameFrameSlots}>
+                        {[0, 1, 2, 3].map((si) => {
+                          const id = grp[si];
                           if (!id) return <View key={si} style={styles.poolGapSlot} />;
                           const p = getPlayer(id); return p ? <PlayerTag key={id} player={p} fill compact /> : <View key={si} style={styles.poolGapSlot} />;
                         })}
