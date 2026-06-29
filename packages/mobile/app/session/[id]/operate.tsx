@@ -1143,72 +1143,47 @@ export default function OperateScreen() {
   }, []);
   useSocketEvent('gameBoard:layoutUpdated', handleLayoutUpdated);
 
-  // ─── 모드2 자석판: 이름표 4개를 가까이 붙이면 자동 묶음(틀 없이 스냅). 묶음(4명)을
-  // 코트로 끌면 투입(createQueueGame→assignEntry). 묶음에서 멀리 빼면 묶음 해제(수정). ───
-  const [groupOf, setGroupOf] = useState<Record<string, string>>({}); // userId → 묶음id
-  const groupOfRef = useRef<Record<string, string>>({});
-  groupOfRef.current = groupOf;
-  // 드롭 핸들러(한 번 만든 PanResponder)에서 최신 위치(px)/명단을 읽기 위한 ref(렌더에서 채움).
-  const posByIdRef = useRef<Record<string, { x: number; y: number }>>({});
-  const benchListRef = useRef<string[]>([]);
+  // ─── 모드2 게임판: 번호 매겨진 게임 칸(틀)에 풀에서 탭으로 넣고/빼고. 친 사람은 풀 아래로.
+  // 꽉 찬 칸을 코트에 투입(createQueueGame→assignEntry). gameFrames = 칸별 4명(클라 초안). ───
+  const [gameFrames, setGameFrames] = useState<string[][]>([]);
+  const [activeFrame, setActiveFrame] = useState(0);
 
-  // 묶음(4명)을 코트에 투입: createQueueGame→assignEntry. 성공 시 그 묶음 해제 + 갱신.
-  const startGroupOnCourt = useCallback(async (courtId: string, members: string[]) => {
+  // 풀 선수 탭 → 활성 칸(없거나 꽉 차면 첫 여유 칸, 없으면 새 칸)에 추가.
+  const addToActiveFrame = useCallback((userId: string) => {
+    setGameFrames((prev) => {
+      const frames = prev.map((f) => [...f]);
+      if (frames.some((f) => f.includes(userId))) return prev; // 이미 어떤 칸에
+      let idx = activeFrame;
+      if (idx >= frames.length || frames[idx].length >= 4) {
+        idx = frames.findIndex((f) => f.length < 4);
+        if (idx < 0) { frames.push([]); idx = frames.length - 1; }
+      }
+      frames[idx].push(userId);
+      return frames;
+    });
+  }, [activeFrame]);
+
+  // 칸에서 선수 빼기(슬롯 탭) → 풀로 복귀. 빈 칸은 제거(번호 재정렬).
+  const removeFromFrame = useCallback((userId: string) => {
+    setGameFrames((prev) => prev.map((f) => f.filter((u) => u !== userId)).filter((f) => f.length > 0));
+  }, []);
+
+  // 꽉 찬 칸(4명)을 코트에 투입: createQueueGame→assignEntry. 성공 시 그 칸 제거 + 갱신.
+  const startFrameOnCourt = useCallback(async (members: string[], courtId: string) => {
+    if (members.length !== 4) { showAlert('알림', '4명을 채워주세요'); return; }
     const court = courts.find((c) => c.id === courtId);
     try {
       const entry = await createQueueGame(members);
       if (!entry?.id) throw new Error('entry');
       await assignEntry(entry.id, courtId);
-      setGroupOf((prev) => { const n = { ...prev }; members.forEach((u) => delete n[u]); return n; });
+      const key = [...members].sort().join('|');
+      setGameFrames((prev) => prev.filter((f) => [...f].sort().join('|') !== key));
       loadBoard(); loadCourts(); loadPool();
       showSuccess(`${court?.name || '코트'} 게임 시작!`);
     } catch (err: any) {
       showAlert('오류', err?.response?.data?.error || '코트 투입에 실패했어요');
     }
   }, [courts, createQueueGame, assignEntry, loadBoard, loadCourts, loadPool]);
-
-  // 묶음 정리: 멤버 1명 이하(혼자) 남은 묶음은 해제. 새 객체 반환.
-  const cleanupGroups = (grp: Record<string, string>) => {
-    const counts: Record<string, number> = {};
-    for (const u in grp) counts[grp[u]] = (counts[grp[u]] || 0) + 1;
-    for (const u in grp) if (counts[grp[u]] <= 1) delete grp[u];
-    return grp;
-  };
-  // 이름표 드롭(위치는 파생 — px 비교): ①코트 위 + 4명 묶음 → 투입 ②근처 이름표(묶음 여유<4)
-  // → 그 묶음에 합류(렌더가 가로 한 줄로 스냅) ③아무것도 없음 → 묶음에서 빠짐(정렬 풀로 복귀).
-  const handleTagDrop = useCallback((userId: string, localX: number, localY: number, pageX: number, pageY: number) => {
-    const grp = { ...groupOfRef.current };
-    // ① 코트 위 + 4명 묶음 → 투입
-    const courtHit = hitTestDrop(pageX, pageY, ['court']);
-    if (courtHit?.kind === 'court' && courtHit.courtId) {
-      const gid = grp[userId];
-      const members = gid ? Object.keys(grp).filter((u) => grp[u] === gid) : [];
-      if (members.length === 4) { startGroupOnCourt(courtHit.courtId, members); return; }
-    }
-    // ② 근처 이름표(묶음 여유<4) 찾기 — posById 는 명단영역 px.
-    const dcx = localX + MAG_W / 2, dcy = localY + MAG_H / 2;
-    let best: string | null = null, bestD = SNAP_DIST;
-    for (const u of benchListRef.current) {
-      if (u === userId) continue;
-      const f = posByIdRef.current[u]; if (!f) continue;
-      const cx = f.x + MAG_W / 2, cy = f.y + MAG_H / 2;
-      const d = Math.hypot(cx - dcx, cy - dcy);
-      if (d < bestD) {
-        const tg = grp[u];
-        const sz = tg ? Object.keys(grp).filter((x) => grp[x] === tg && x !== userId).length : 1;
-        if (sz < 4) { best = u; bestD = d; }
-      }
-    }
-    if (best) {
-      let gid = grp[best];
-      if (!gid) { gid = best; grp[best] = gid; }
-      grp[userId] = gid;
-      setGroupOf(cleanupGroups(grp));
-      return;
-    }
-    // ③ 아무것도 없음 → 묶음에서 빠짐(정렬된 풀로 자동 복귀, 자유좌표 없음)
-    if (grp[userId]) { delete grp[userId]; setGroupOf(cleanupGroups(grp)); }
-  }, [hitTestDrop, startGroupOnCourt]);
   // 캔버스 코트 칸의 4명으로 실제 게임 시작(기존 createQueueGame→assignEntry 재사용).
   const handleStartCanvasGame = useCallback(async (courtId: string, userIds: string[]) => {
     if (userIds.length !== 4) { showAlert('알림', '코트 칸에 4명을 넣어주세요'); return; }
@@ -3741,119 +3716,59 @@ export default function OperateScreen() {
 
   // 넓은 화면=2열[게임판 | 코트·커스텀·레슨자], 좁으면 세로 스택. 기존 split/leftPane/
   // rightPane/stackedContent 스타일을 그대로 재사용한다.
-  // ─── 모드 2 = 게임판(순번 묶음 + 정렬 풀) ───
-  // 위: 코트 줄(게임중 | 빈=묶음 드롭). 아래 명단: 위쪽에 '번호 붙은 4명 묶음'(가로 한 줄,
-  // 게임수 적은 묶음이 1번 → 먼저 투입), 그 아래 정렬된 풀(게임수 적은 순 = 친 사람 아래로).
-  // 이름표를 다른 이름표에 붙이면 그 묶음에 합류, 묶음(4명)을 코트로 끌면 투입. 위치는 파생.
-  const bw = canvasSize.w || layout.width;
-  const bh = canvasSize.h || 320;
-  canvasSizeRef.current = { w: bw, h: bh };
-  // 명단 = 출석자 중 진행/대기게임에 안 든 사람. 검색/필터로 추림. 게임수 적은 순(친 사람 아래로).
-  const benchExcluded = new Set<string>();
-  for (const e of queuedEntries) for (const id of e.playerIds) benchExcluded.add(id);
-  playingByCourtId.forEach((e) => (e.playerIds || []).forEach((id) => benchExcluded.add(id)));
+  // ─── 모드 2 = 게임판(번호 게임 칸 + 정렬 풀) ───
+  // 코트 줄(게임중|빈) + 게임판(1번·2번… 칸: 풀에서 탭으로 넣고 슬롯 탭으로 빼기) + 명단 풀
+  // (게임수 적은 순 = 친 사람 아래로). 꽉 찬 칸은 '코트 투입'으로 게임 시작.
   const gamesOf = (uid: string) => getPlayer(uid)?.gamesPlayedToday ?? 0;
-  const benchPlayers = uniquePlayers
-    .filter((m) => matchesPoolFilters(m) && !benchExcluded.has(m.userId))
+  const framedIds = new Set<string>();
+  for (const f of gameFrames) for (const id of f) framedIds.add(id);
+  const poolExcluded = new Set<string>();
+  for (const e of queuedEntries) for (const id of e.playerIds) poolExcluded.add(id);
+  playingByCourtId.forEach((e) => (e.playerIds || []).forEach((id) => poolExcluded.add(id)));
+  const poolPlayers = uniquePlayers
+    .filter((m) => matchesPoolFilters(m) && !poolExcluded.has(m.userId) && !framedIds.has(m.userId))
     .sort((a, b) => gamesOf(a.userId) - gamesOf(b.userId) || a.userName.localeCompare(b.userName));
-  // 묶음 맵 + 순번(가장 적게 친 묶음이 1번). 풀 = 묶음에 안 든 사람.
-  const groupsMap: Record<string, string[]> = {};
-  for (const m of benchPlayers) { const gid = groupOf[m.userId]; if (gid) (groupsMap[gid] = groupsMap[gid] || []).push(m.userId); }
-  const groupIds = Object.keys(groupsMap).sort(
-    (g1, g2) => Math.min(...groupsMap[g1].map(gamesOf)) - Math.min(...groupsMap[g2].map(gamesOf)),
-  );
-  const groupNo: Record<string, number> = {};
-  groupIds.forEach((g, i) => { groupNo[g] = i + 1; });
-  const ungrouped = benchPlayers.filter((m) => !groupOf[m.userId]);
-  // 레이아웃(파생): 위에 묶음(번호 줄), 그 아래 정렬 풀(그리드).
-  const GROUP_ROW_H = MAG_H + 24;
-  const poolCols = Math.max(1, Math.floor((bw - BENCH_PAD * 2) / (MAG_W + MAG_GAP)));
-  const poolStartY = BENCH_PAD + groupIds.length * GROUP_ROW_H + (groupIds.length ? 14 : 0);
-  const posOf = (userId: string): { x: number; y: number } => {
-    const gid = groupOf[userId];
-    if (gid) {
-      const i = Math.max(0, groupsMap[gid].indexOf(userId));
-      return { x: BENCH_PAD + i * GRP_SLOT_W, y: BENCH_PAD + (groupNo[gid] - 1) * GROUP_ROW_H + 16 };
-    }
-    const idx = Math.max(0, ungrouped.findIndex((m) => m.userId === userId));
-    const r = Math.floor(idx / poolCols), c = idx % poolCols;
-    return { x: BENCH_PAD + c * (MAG_W + MAG_GAP), y: poolStartY + r * (MAG_H + MAG_GAP) };
-  };
-  // 드롭 핸들러가 읽을 px 위치/명단 ref 채우기.
-  benchListRef.current = benchPlayers.map((m) => m.userId);
-  const posById: Record<string, { x: number; y: number }> = {};
-  benchPlayers.forEach((m) => { posById[m.userId] = posOf(m.userId); });
-  posByIdRef.current = posById;
+  const firstEmptyCourt = courts.find((c) => c.status === 'EMPTY' && !playingByCourtId.get(c.id));
+  // 항상 끝에 빈 칸 1개(새 게임). 활성 칸 = 사용자가 고른 칸(없거나 꽉 차면 첫 미완성 칸).
+  const framesToRender = [...gameFrames, []];
+  let computedActive = activeFrame;
+  if (computedActive >= framesToRender.length || framesToRender[computedActive].length >= 4) {
+    const fi = framesToRender.findIndex((f) => f.length < 4);
+    computedActive = fi >= 0 ? fi : framesToRender.length - 1;
+  }
 
-  // 명단 자석 이름표 — 자유 드래그. 릴리즈 시 handleTagDrop: ①코트+4명묶음→투입
-  // ②근처 이름표→묶음 스냅 ③아무것도없음→자유 위치/묶음 해제.
-  const MagnetTag = ({ player }: { player: Player }) => {
-    const p0 = posOf(player.userId);
-    const pan = useRef(new RNAnimated.ValueXY({ x: p0.x, y: p0.y })).current;
-    useEffect(() => { pan.setValue({ x: p0.x, y: p0.y }); }, [p0.x, p0.y]);
+  // 풀 선수 칩 — 탭하면 현재(활성) 게임 칸에 추가.
+  const PoolTag = ({ player }: { player: Player }) => {
     const skill = getSkillMeta(player.skillLevel);
     const g = getGenderMeta(player.gender);
     const busy = busySet.has(player.userId);
-    const grouped = !!groupOf[player.userId];
-    const pr = useRef(
-      PanResponder.create({
-        onMoveShouldSetPanResponder: (_e, gs) => Math.abs(gs.dx) > 4 || Math.abs(gs.dy) > 4,
-        onPanResponderGrant: () => { pan.extractOffset(); },
-        onPanResponderMove: RNAnimated.event([null, { dx: pan.x, dy: pan.y }], { useNativeDriver: false }),
-        onPanResponderRelease: (e) => {
-          pan.flattenOffset();
-          const lx = (pan.x as any).__getValue?.() ?? 0, ly = (pan.y as any).__getValue?.() ?? 0;
-          handleTagDrop(player.userId, lx, ly, e.nativeEvent.pageX, e.nativeEvent.pageY);
-        },
-        onPanResponderTerminate: () => { pan.flattenOffset(); },
-      }),
-    ).current;
     return (
-      <RNAnimated.View
-        {...pr.panHandlers}
-        style={[styles.magnetTag, { width: MAG_W, borderColor: grouped ? colors.primary : skill.color, borderWidth: grouped ? 2.5 : 2, backgroundColor: colors.surface, transform: pan.getTranslateTransform() }]}
+      <TouchableOpacity
+        style={[styles.poolTag, { width: MAG_W, borderColor: skill.color, backgroundColor: colors.surface }]}
+        onPress={() => addToActiveFrame(player.userId)}
+        accessibilityLabel={`${player.userName} 게임 칸에 넣기`}
       >
-        <View style={[styles.magnetSkill, { backgroundColor: skill.color }]}>
-          <Text style={styles.magnetSkillText}>{(player.skillLevel || '·').toUpperCase()}</Text>
-        </View>
+        <View style={[styles.magnetSkill, { backgroundColor: skill.color }]}><Text style={styles.magnetSkillText}>{(player.skillLevel || '·').toUpperCase()}</Text></View>
         <Text style={[styles.magnetName, { color: colors.text }]} numberOfLines={1}>{player.userName}</Text>
         {g && <GenderMarker meta={g} size={14} />}
-        <View style={[styles.magnetGames, { backgroundColor: colors.surfaceSecondary }]}>
-          <Text style={[styles.magnetGamesText, { color: colors.textSecondary }]}>{player.gamesPlayedToday ?? 0}</Text>
-        </View>
+        <View style={[styles.magnetGames, { backgroundColor: colors.surfaceSecondary }]}><Text style={[styles.magnetGamesText, { color: colors.textSecondary }]}>{player.gamesPlayedToday ?? 0}</Text></View>
         {busy && <View style={[styles.conflictDot, { borderColor: colors.surface }]} />}
-      </RNAnimated.View>
+      </TouchableOpacity>
     );
   };
 
-  // 코트 카드(가로 줄). 게임중=진행칩(탭=교체)+종료. 빈=대기 게임 드롭존('court' 등록).
+  // 코트 카드 — 게임중(진행칩 탭=교체, 종료) | 빈(게임판에서 '코트 투입'으로 들어옴).
   const Mode2CourtCard = ({ court }: { court: Court }) => {
-    const ref = useRef<View>(null);
-    const dropId = `court-${court.id}`;
     const playingEntry = playingByCourtId.get(court.id);
     const occupied = court.status !== 'EMPTY' || !!playingEntry;
     const pids = playingEntry?.playerIds ?? court.currentTurn?.playerIds ?? [];
     const pnames = playingEntry?.playerNames ?? court.currentTurn?.playerNames ?? [];
     const turnId = court.currentTurn?.id ?? playingEntry?.turnId ?? null;
-    const measure = useCallback(() => {
-      if (occupied) { unregisterDrop(dropId); return; }
-      ref.current?.measureInWindow((x, y, w, h) => registerDrop({ id: dropId, kind: 'court', courtId: court.id, slotIndex: 0, rect: { x, y, w, h } }));
-    }, [dropId, occupied, court.id]);
-    useEffect(() => {
-      if (occupied) { unregisterDrop(dropId); return; }
-      const t = setTimeout(measure, 0);
-      return () => { clearTimeout(t); unregisterDrop(dropId); };
-    });
     return (
-      <View
-        ref={ref}
-        onLayout={measure}
-        collapsable={false}
-        style={[styles.m2Court, { borderColor: occupied ? colors.warning : colors.primary, borderStyle: occupied ? 'solid' : 'dashed', backgroundColor: occupied ? colors.warningLight : colors.surfaceSecondary }]}
-      >
+      <View style={[styles.m2Court, { borderColor: occupied ? colors.warning : colors.border, borderStyle: occupied ? 'solid' : 'dashed', backgroundColor: occupied ? colors.warningLight : colors.surfaceSecondary }]}>
         <View style={styles.m2CourtHead}>
           <Text style={[styles.m2CourtName, { color: colors.text }]} numberOfLines={1}>{court.name}</Text>
-          <Text style={[styles.m2CourtState, { color: occupied ? colors.warning : colors.primary }]}>{occupied ? '게임 중' : '대기 게임 ↓'}</Text>
+          <Text style={[styles.m2CourtState, { color: occupied ? colors.warning : colors.textLight }]}>{occupied ? '게임 중' : '비어 있음'}</Text>
         </View>
         {occupied ? (
           <>
@@ -3875,58 +3790,68 @@ export default function OperateScreen() {
           </>
         ) : (
           <View style={styles.m2CourtEmpty}>
-            <Text style={[styles.m2CourtEmptyT, { color: colors.textLight }]}>4명 묶음을{'\n'}여기로 끌어다 놓기</Text>
+            <Text style={[styles.m2CourtEmptyT, { color: colors.textLight }]}>게임판에서{'\n'}'코트 투입'</Text>
           </View>
         )}
       </View>
     );
   };
 
-  // 묶음 번호 테두리 — 멤버 바운딩박스에 그림. 'N번 게임' 표시, 4명이면 강조 + 코트 투입 안내.
-  const GroupBoundary = ({ gid, members }: { gid: string; members: string[] }) => {
-    if (members.length < 1) return null;
-    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
-    for (const u of members) {
-      const p = posOf(u);
-      minX = Math.min(minX, p.x); minY = Math.min(minY, p.y);
-      maxX = Math.max(maxX, p.x + MAG_W); maxY = Math.max(maxY, p.y + MAG_H);
-    }
-    if (!isFinite(minX)) return null;
+  // 게임 칸(틀) — 'N번 게임' + 4 슬롯. 슬롯(채워진 것) 탭=빼기, 빈 슬롯/머리 탭=이 칸 활성.
+  // 꽉 차고 빈 코트 있으면 '코트 투입' 버튼.
+  const GameFrame = ({ members, idx, active }: { members: string[]; idx: number; active: boolean }) => {
     const full = members.length === 4;
     return (
-      <View
-        pointerEvents="none"
-        style={[styles.m2Group, {
-          left: minX - 8, top: minY - 8 - 16,
-          width: maxX - minX + 16, height: maxY - minY + 16 + 16,
-          borderColor: full ? colors.primary : colors.textLight,
-          backgroundColor: full ? 'rgba(16,185,129,0.07)' : 'transparent',
-        }]}
-      >
-        <Text style={[styles.m2GroupTag, { color: full ? colors.primary : colors.textSecondary }]}>
-          {groupNo[gid]}번 게임 {full ? '· 코트로 끌면 투입' : `(${members.length}/4)`}
-        </Text>
+      <View style={[styles.gameFrame, { borderColor: active ? colors.primary : full ? colors.primary : colors.border, backgroundColor: active ? 'rgba(16,185,129,0.06)' : colors.surface }]}>
+        <TouchableOpacity style={styles.gameFrameHead} activeOpacity={0.7} onPress={() => setActiveFrame(idx)}>
+          <Text style={[styles.gameFrameNo, { color: active ? colors.primary : colors.text }]}>{idx + 1}번 게임{active ? ' · 짜는 중' : ''} ({members.length}/4)</Text>
+          {full && (firstEmptyCourt
+            ? <TouchableOpacity style={[styles.gameFrameStart, { backgroundColor: colors.primary }]} onPress={() => startFrameOnCourt(members, firstEmptyCourt.id)} accessibilityLabel={`${idx + 1}번 게임 코트 투입`}>
+                <Icon name="play" size={12} color="#fff" /><Text style={styles.gameFrameStartT}>코트 투입</Text>
+              </TouchableOpacity>
+            : <Text style={[styles.gameFrameWait, { color: colors.textLight }]}>코트 비면 투입</Text>)}
+        </TouchableOpacity>
+        <View style={styles.gameFrameSlots}>
+          {[0, 1, 2, 3].map((s) => {
+            const pid = members[s]; const p = pid ? getPlayer(pid) : null; const sk = getSkillMeta(p?.skillLevel);
+            return (
+              <TouchableOpacity
+                key={s}
+                onPress={() => (pid ? removeFromFrame(pid) : setActiveFrame(idx))}
+                style={[styles.gameSlot, { borderColor: pid ? sk.color : colors.border, backgroundColor: pid ? colors.surface : 'transparent', borderStyle: pid ? 'solid' : 'dashed' }]}
+                accessibilityLabel={pid ? `${p?.userName} 빼기` : `${idx + 1}번 빈 칸`}
+              >
+                {pid ? (
+                  <>
+                    <View style={[styles.slotSkill, { backgroundColor: sk.color }]}><Text style={styles.slotSkillText}>{(p?.skillLevel || '·').toUpperCase()}</Text></View>
+                    <Text style={[styles.slotName, { color: colors.text }]} numberOfLines={1}>{p?.userName}</Text>
+                  </>
+                ) : <Text style={[styles.slotEmpty, { color: colors.textLight }]}>＋</Text>}
+              </TouchableOpacity>
+            );
+          })}
+        </View>
       </View>
     );
   };
 
   const BoardMode2 = (
     <View style={styles.m2Wrap}>
-      {/* 코트 줄 — 게임중(탭=교체·종료) | 빈(4명 묶음 드롭) */}
       <View style={styles.m2CourtRow}>
         {courts.length === 0
           ? <Text style={[styles.emptyPool, { color: colors.textLight }]}>코트가 없어요. "코트 관리"에서 추가하세요</Text>
           : courts.map((court) => <Mode2CourtCard key={court.id} court={court} />)}
       </View>
-      {/* 명단 — 위쪽 '번호 붙은 묶음'(가로 한 줄) + 아래 정렬 풀(친 사람 아래로). 붙이면 묶음, 묶음을 코트로 */}
-      <View style={styles.m2Bench} onLayout={onCanvasLayout}>
-        {bw > 0 && (
-          <>
-            {groupIds.map((gid) => <GroupBoundary key={gid} gid={gid} members={groupsMap[gid]} />)}
-            {benchPlayers.map((m) => <MagnetTag key={m.userId} player={m} />)}
-          </>
-        )}
-      </View>
+      <ScrollView style={{ flex: 1 }} contentContainerStyle={styles.m2Scroll} keyboardShouldPersistTaps="handled">
+        <Text style={[styles.m2SectionLabel, { color: colors.textSecondary }]}>게임판 · 풀에서 탭=넣기, 슬롯 탭=빼기</Text>
+        {framesToRender.map((f, i) => <GameFrame key={i} members={f} idx={i} active={computedActive === i} />)}
+        <Text style={[styles.m2SectionLabel, { color: colors.textSecondary, marginTop: spacing.md }]}>명단 · 게임수 적은 순(친 사람 아래로)</Text>
+        <View style={styles.poolWrap}>
+          {poolPlayers.length === 0
+            ? <Text style={[styles.emptyPool, { color: colors.textLight }]}>대기 인원이 없어요</Text>
+            : poolPlayers.map((m) => <PoolTag key={m.userId} player={m} />)}
+        </View>
+      </ScrollView>
     </View>
   );
 
@@ -5097,6 +5022,20 @@ const styles = StyleSheet.create({
   // 묶음 색 테두리(4명이면 강조)
   m2Group: { position: 'absolute', borderWidth: 2.5, borderRadius: radius.lg, borderStyle: 'dashed', alignItems: 'center', justifyContent: 'flex-start', paddingTop: 1 },
   m2GroupTag: { ...typography.caption, fontWeight: '800' },
+  // ── 모드2 게임판(번호 칸) + 풀 ──
+  m2Scroll: { paddingHorizontal: spacing.smd, paddingBottom: spacing.xl },
+  m2SectionLabel: { ...typography.caption, fontWeight: '800', marginBottom: 6 },
+  gameFrame: { borderWidth: 2, borderRadius: radius.lg, padding: spacing.sm, marginBottom: spacing.sm },
+  gameFrameHead: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 },
+  gameFrameNo: { ...typography.body2, fontWeight: '800' },
+  gameFrameStart: { flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: spacing.md, paddingVertical: 5, borderRadius: radius.md },
+  gameFrameStartT: { ...typography.buttonSm, color: '#fff', fontWeight: '800' },
+  gameFrameWait: { ...typography.caption, fontWeight: '700' },
+  gameFrameSlots: { flexDirection: 'row', gap: 6 },
+  gameSlot: { flex: 1, minWidth: 0, flexDirection: 'row', alignItems: 'center', gap: 5, minHeight: 38, paddingHorizontal: 7, paddingVertical: 5, borderWidth: 1.5, borderRadius: radius.md },
+  poolWrap: { flexDirection: 'row', flexWrap: 'wrap', gap: MAG_GAP },
+  poolTag: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 9, paddingVertical: 9, borderWidth: 2, borderRadius: radius.md,
+    ...(Platform.OS === 'web' ? ({ cursor: 'pointer', userSelect: 'none' } as any) : {}) },
   canvasZone: { position: 'absolute', borderWidth: 1.5, borderRadius: radius.lg, padding: spacing.sm },
   canvasZoneHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
   canvasZoneName: { ...typography.buttonSm, fontWeight: '700' },
