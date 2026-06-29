@@ -3797,8 +3797,9 @@ export default function OperateScreen() {
     ...queuedEntries.map((e) => ({ id: e.id, players: e.playerIds })),
     { id: null, players: [] },
   ];
-  // 게임 그리드 열 수(반응형): 넓으면 3열, 보통 2열, 좁으면 1열 — 40~50명도 덜 스크롤.
-  const gameColW: any = layout.width > 1680 ? '32.5%' : layout.width > 1080 ? '49%' : '100%';
+  // 게임 그리드 열 수(반응형) — 가운데 폭(전체 - 오른쪽 대기 300) 기준. 40~50명도 덜 스크롤.
+  const centerW = layout.width - 320;
+  const gameColW: any = centerW > 1380 ? '32.5%' : centerW > 860 ? '49%' : '100%';
   // 선수 칩 — 탭하면 선택(다시 탭=해제). 선택된 선수는 강조. 옮길 곳은 게임/대기 칸을 탭.
   const PlayerTag = ({ player, fill, compact }: { player: Player; fill?: boolean; compact?: boolean }) => {
     const skill = getSkillMeta(player.skillLevel);
@@ -3827,43 +3828,19 @@ export default function OperateScreen() {
   };
 
   // 코트 카드 — 게임중(진행칩 탭=교체, 종료) | 빈(게임판에서 '코트 투입'으로 들어옴).
+  // 코트 카드(위 가로줄, 컴팩트) — 게임중은 표시만(상세/교체는 아래 '게임 중' 줄), 빈 코트는 탭=투입.
   const Mode2CourtCard = ({ court }: { court: Court }) => {
-    const playingEntry = playingByCourtId.get(court.id);
-    const occupied = court.status !== 'EMPTY' || !!playingEntry;
-    const pids = playingEntry?.playerIds ?? court.currentTurn?.playerIds ?? [];
-    const pnames = playingEntry?.playerNames ?? court.currentTurn?.playerNames ?? [];
-    const turnId = court.currentTurn?.id ?? playingEntry?.turnId ?? null;
-    return (
-      <View style={[styles.m2Court, { borderColor: occupied ? colors.warning : colors.border, borderStyle: occupied ? 'solid' : 'dashed', backgroundColor: occupied ? colors.warningLight : colors.surfaceSecondary }]}>
-        <View style={styles.m2CourtHead}>
-          <Text style={[styles.m2CourtName, { color: colors.text }]} numberOfLines={1}>{court.name}</Text>
-          <Text style={[styles.m2CourtState, { color: occupied ? colors.warning : colors.textLight }]}>{occupied ? '게임 중' : '비어 있음'}</Text>
-        </View>
-        {occupied ? (
-          <>
-            <View style={styles.m2CourtChips}>
-              {pids.map((pid, i) => (
-                <TouchableOpacity
-                  key={pid}
-                  style={[styles.m2Chip, { borderColor: colors.border, backgroundColor: colors.surface }]}
-                  onPress={() => { if (turnId) setRunningSwap({ turnId, outUserId: pid, courtName: court.name, currentIds: pids }); }}
-                  accessibilityLabel={`${pnames[i] || ''} 교체`}
-                >
-                  <Text style={[styles.m2ChipText, { color: colors.text }]} numberOfLines={1}>{pnames[i] || '선수'}</Text>
-                </TouchableOpacity>
-              ))}
-            </View>
-            <TouchableOpacity style={[styles.m2EndBtn, { borderColor: colors.danger }]} onPress={() => handleEndGame(court.id)} accessibilityLabel={`${court.name} 게임 종료`}>
-              <Text style={[styles.m2EndBtnText, { color: colors.danger }]}>게임 종료 · 탭=교체</Text>
-            </TouchableOpacity>
-          </>
-        ) : (
-          <TouchableOpacity style={[styles.m2CourtEmpty, { borderColor: colors.primary }]} activeOpacity={0.7} onPress={() => assignQueueToCourt(court.id)} accessibilityLabel={`${court.name} 다음 게임 투입`}>
-            <Icon name="play" size={16} color={colors.primary} />
-            <Text style={[styles.m2CourtEmptyT, { color: colors.primary }]}>탭하면 다음 게임 투입</Text>
-          </TouchableOpacity>
-        )}
+    const occupied = court.status !== 'EMPTY' || !!playingByCourtId.get(court.id);
+    return occupied ? (
+      <View style={[styles.m2CourtTop, { borderColor: colors.warning, backgroundColor: colors.warningLight }]}>
+        <Text style={[styles.m2CourtName, { color: colors.text }]} numberOfLines={1}>{court.name}</Text>
+        <Text style={[styles.m2CourtState, { color: colors.warning }]}>게임 중</Text>
       </View>
+    ) : (
+      <TouchableOpacity style={[styles.m2CourtTop, { borderColor: colors.primary, borderStyle: 'dashed', backgroundColor: colors.surfaceSecondary }]} activeOpacity={0.7} onPress={() => assignQueueToCourt(court.id)} accessibilityLabel={`${court.name} 다음 게임 투입`}>
+        <Text style={[styles.m2CourtName, { color: colors.text }]} numberOfLines={1}>{court.name}</Text>
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 3 }}><Icon name="play" size={12} color={colors.primary} /><Text style={[styles.m2CourtState, { color: colors.primary }]}>탭=다음 게임</Text></View>
+      </TouchableOpacity>
     );
   };
 
@@ -3942,23 +3919,30 @@ export default function OperateScreen() {
   };
 
   const BoardMode2 = (
-    <View style={styles.m2Board}>
-      {/* 왼쪽: 게임판(자동 편성 + 탭으로 조정) */}
-      <View style={styles.m2Left}>
-        {selectedPlayer ? (
-          <View style={[styles.m2SelectBar, { backgroundColor: colors.primary }]}>
-            <Text style={styles.m2SelectBarT} numberOfLines={1}>{getPlayer(selectedPlayer)?.userName || '선수'} 선택됨 · 옮길 게임/대기를 누르세요</Text>
-            <TouchableOpacity onPress={() => setSelectedPlayer(null)} style={styles.m2SelectCancel}><Text style={styles.m2SelectCancelT}>취소</Text></TouchableOpacity>
-          </View>
-        ) : (
-          <View style={styles.m2LeftHead}>
-            <Text style={[styles.m2PanelTitle, { color: colors.text, marginBottom: 0 }]}>게임판 · 선수 탭→선택, 옮길 게임 탭 (모드1과 연동)</Text>
-            <TouchableOpacity style={[styles.m2AutoBtn, { borderColor: colors.primary }]} onPress={() => autoFillQueue(poolIds)} accessibilityLabel="대기 인원 자동 편성">
-              <Icon name="rotation" size={13} color={colors.primary} /><Text style={[styles.m2AutoBtnT, { color: colors.primary }]}>자동 편성</Text>
-            </TouchableOpacity>
-          </View>
-        )}
-        <ScrollView style={{ flex: 1 }} contentContainerStyle={styles.m2LeftScroll} keyboardShouldPersistTaps="handled">
+    <View style={styles.m2Wrap}>
+      {/* 코트: 위 가로줄 — 빈 코트 탭=다음 게임 투입 */}
+      <View style={styles.m2CourtTopRow}>
+        {courts.length === 0
+          ? <Text style={[styles.emptyPool, { color: colors.textLight }]}>코트가 없어요. "코트 관리"에서 추가</Text>
+          : courts.map((court) => <Mode2CourtCard key={court.id} court={court} />)}
+      </View>
+      {/* 선택 배너 / 안내 + 자동 편성 */}
+      {selectedPlayer ? (
+        <View style={[styles.m2SelectBar, { backgroundColor: colors.primary }]}>
+          <Text style={styles.m2SelectBarT} numberOfLines={1}>{getPlayer(selectedPlayer)?.userName || '선수'} 선택됨 · 옮길 게임/대기를 누르세요</Text>
+          <TouchableOpacity onPress={() => setSelectedPlayer(null)} style={styles.m2SelectCancel}><Text style={styles.m2SelectCancelT}>취소</Text></TouchableOpacity>
+        </View>
+      ) : (
+        <View style={styles.m2LeftHead}>
+          <Text style={[styles.m2PanelTitle, { color: colors.text, marginBottom: 0 }]} numberOfLines={1}>게임판 · 선수 탭→선택, 옮길 게임/대기 탭 (모드1 연동)</Text>
+          <TouchableOpacity style={[styles.m2AutoBtn, { borderColor: colors.primary }]} onPress={() => autoFillQueue(poolIds)} accessibilityLabel="대기 인원 자동 편성">
+            <Icon name="rotation" size={13} color={colors.primary} /><Text style={[styles.m2AutoBtnT, { color: colors.primary }]}>자동 편성</Text>
+          </TouchableOpacity>
+        </View>
+      )}
+      {/* 아래: 게임판(가운데, 세로로 내려감) + 대기(오른쪽) */}
+      <View style={styles.m2Body}>
+        <ScrollView style={styles.m2Center} contentContainerStyle={styles.m2CenterScroll} keyboardShouldPersistTaps="handled">
           {liveGames.length > 0 && (
             <>
               <Text style={[styles.m2SectionLabel, { color: colors.warning }]}>게임 중 ({liveGames.length}) · 선수 탭=교체</Text>
@@ -3971,22 +3955,18 @@ export default function OperateScreen() {
           <View style={styles.m2GameGrid}>
             {queueFrames.map((f, i) => <GameFrame key={f.id ?? 'new'} frame={f} idx={i} colW={gameColW} />)}
           </View>
-          <Text style={[styles.m2SectionLabel, { color: colors.textSecondary, marginTop: spacing.sm }]}>대기 · 선수 선택 후 여기를 탭하면 게임에서 빠짐(게임수 적은 순 · 게임중은 뒤)</Text>
-          <PoolDropZone>
-            {pool.length === 0
-              ? <Text style={[styles.emptyPool, { color: colors.textLight }]}>대기 인원 없음</Text>
-              : pool.map((p) => <PlayerTag key={p.userId} player={p} />)}
-          </PoolDropZone>
         </ScrollView>
-      </View>
-      {/* 오른쪽: 코트 패널 */}
-      <View style={[styles.m2Right, { borderLeftColor: colors.border }]}>
-        <Text style={[styles.m2PanelTitle, { color: colors.text }]}>코트</Text>
-        <ScrollView contentContainerStyle={styles.m2CourtGrid} keyboardShouldPersistTaps="handled">
-          {courts.length === 0
-            ? <Text style={[styles.emptyPool, { color: colors.textLight }]}>코트가 없어요. "코트 관리"에서 추가</Text>
-            : courts.map((court) => <Mode2CourtCard key={court.id} court={court} />)}
-        </ScrollView>
+        {/* 오른쪽: 대기 — 게임과 같이 보며 마음대로 넣고/빼고(탭) */}
+        <View style={[styles.m2PoolRight, { borderLeftColor: colors.border }]}>
+          <Text style={[styles.m2PanelTitle, { color: colors.text }]}>대기 ({pool.length})</Text>
+          <ScrollView style={{ flex: 1 }} keyboardShouldPersistTaps="handled">
+            <PoolDropZone>
+              {pool.length === 0
+                ? <Text style={[styles.emptyPool, { color: colors.textLight }]}>대기 인원 없음</Text>
+                : pool.map((p) => <PlayerTag key={p.userId} player={p} />)}
+            </PoolDropZone>
+          </ScrollView>
+        </View>
       </View>
     </View>
   );
@@ -5128,7 +5108,14 @@ const styles = StyleSheet.create({
   canvasZoneStartText: { ...typography.buttonSm, color: '#fff', fontWeight: '800' },
   // ── 모드 2: 코트 줄 / 대기 게임 줄 / 명단 3단 ──
   m2Wrap: { flex: 1 },
-  // 판(보드) 2단: 왼쪽 게임판 + 오른쪽 코트
+  // 일번 배치: 코트 위(가로) / 게임판 가운데(세로) / 대기 오른쪽
+  m2CourtTopRow: { flexDirection: 'row', gap: spacing.sm, paddingHorizontal: spacing.smd, paddingTop: spacing.sm },
+  m2CourtTop: { flex: 1, minWidth: 0, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 6, paddingHorizontal: spacing.md, paddingVertical: 10, borderWidth: 2, borderRadius: radius.md },
+  m2Body: { flex: 1, flexDirection: 'row', paddingTop: spacing.xs },
+  m2Center: { flex: 1, paddingLeft: spacing.smd },
+  m2CenterScroll: { paddingRight: spacing.smd, paddingBottom: spacing.xl },
+  m2PoolRight: { width: 300, borderLeftWidth: 1, paddingHorizontal: spacing.sm, paddingTop: spacing.xs },
+  // (이전 2단 스타일 — 일부 미사용)
   m2Board: { flex: 1, flexDirection: 'row' },
   m2Left: { flex: 1, paddingLeft: spacing.smd, paddingTop: spacing.sm },
   m2LeftScroll: { paddingRight: spacing.smd, paddingBottom: spacing.xl },
