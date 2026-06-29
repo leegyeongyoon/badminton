@@ -3736,9 +3736,11 @@ export default function OperateScreen() {
   const framesToRender = [...games, []]; // 끝에 빈 게임 1칸(여기로 끌면 새 게임)
   frameCountRef.current = framesToRender.length;
   const firstEmptyCourt = courts.find((c) => c.status === 'EMPTY' && !playingByCourtId.get(c.id));
+  // 게임 그리드 열 수(반응형): 넓으면 3열, 보통 2열, 좁으면 1열 — 40~50명도 덜 스크롤.
+  const gameColW: any = layout.width > 1680 ? '32.5%' : layout.width > 1080 ? '49%' : '100%';
 
   // 드래그 가능한 선수 칩(게임 슬롯/대기 공용). 릴리즈 시 게임/대기 드롭존으로 이동.
-  const PlayerTag = ({ player, fill }: { player: Player; fill?: boolean }) => {
+  const PlayerTag = ({ player, fill, compact }: { player: Player; fill?: boolean; compact?: boolean }) => {
     const skill = getSkillMeta(player.skillLevel);
     const g = getGenderMeta(player.gender);
     const busy = busySet.has(player.userId);
@@ -3764,8 +3766,9 @@ export default function OperateScreen() {
       >
         <View style={[styles.magnetSkill, { backgroundColor: skill.color }]}><Text style={styles.magnetSkillText}>{(player.skillLevel || '·').toUpperCase()}</Text></View>
         <Text style={[styles.magnetName, { color: colors.text }]} numberOfLines={1}>{player.userName}</Text>
-        {g && <GenderMarker meta={g} size={14} />}
-        <View style={[styles.magnetGames, { backgroundColor: colors.surfaceSecondary }]}><Text style={[styles.magnetGamesText, { color: colors.textSecondary }]}>{player.gamesPlayedToday ?? 0}</Text></View>
+        {/* 게임 칸 안(compact)에서는 이름 공간 확보 위해 성별·게임수 배지 생략 */}
+        {!compact && g && <GenderMarker meta={g} size={14} />}
+        {!compact && <View style={[styles.magnetGames, { backgroundColor: colors.surfaceSecondary }]}><Text style={[styles.magnetGamesText, { color: colors.textSecondary }]}>{player.gamesPlayedToday ?? 0}</Text></View>}
         {busy && <View style={[styles.conflictDot, { borderColor: colors.surface }]} />}
       </RNAnimated.View>
     );
@@ -3812,7 +3815,7 @@ export default function OperateScreen() {
   };
 
   // 게임 칸 — 'N번 게임' + 4명(드래그 가능). 'frame' 드롭존(여기로 끌면 이 게임에). 꽉 차면 코트 투입.
-  const GameFrame = ({ members, idx }: { members: string[]; idx: number }) => {
+  const GameFrame = ({ members, idx, colW }: { members: string[]; idx: number; colW: any }) => {
     const ref = useRef<View>(null);
     const dropId = `frame-${idx}`;
     const full = members.length === 4;
@@ -3821,7 +3824,7 @@ export default function OperateScreen() {
     }, [dropId, idx]);
     useEffect(() => { const t = setTimeout(measure, 0); return () => { clearTimeout(t); unregisterDrop(dropId); }; });
     return (
-      <View ref={ref} onLayout={measure} collapsable={false} style={[styles.gameFrame, { borderColor: full ? colors.primary : colors.border, backgroundColor: colors.surface }]}>
+      <View ref={ref} onLayout={measure} collapsable={false} style={[styles.gameFrame, { width: colW, borderColor: full ? colors.primary : colors.border, backgroundColor: colors.surface }]}>
         <View style={styles.gameFrameHead}>
           <Text style={[styles.gameFrameNo, { color: colors.text }]}>{idx + 1}번 게임 ({members.length}/4)</Text>
           {full && (firstEmptyCourt
@@ -3834,7 +3837,7 @@ export default function OperateScreen() {
           {[0, 1, 2, 3].map((s) => {
             const pid = members[s]; const p = pid ? getPlayer(pid) : null;
             return p ? (
-              <PlayerTag key={s} player={p} fill />
+              <PlayerTag key={s} player={p} fill compact />
             ) : (
               <View key={s} style={[styles.gameSlotEmpty, { borderColor: colors.border }]}><Text style={[styles.slotEmpty, { color: colors.textLight }]}>＋</Text></View>
             );
@@ -3862,7 +3865,9 @@ export default function OperateScreen() {
       <View style={styles.m2Left}>
         <Text style={[styles.m2PanelTitle, { color: colors.text }]}>게임판 · 자동 편성 · 선수를 끌어 조정</Text>
         <ScrollView style={{ flex: 1 }} contentContainerStyle={styles.m2LeftScroll} keyboardShouldPersistTaps="handled">
-          {framesToRender.map((f, i) => <GameFrame key={i} members={f} idx={i} />)}
+          <View style={styles.m2GameGrid}>
+            {framesToRender.map((f, i) => <GameFrame key={i} members={f} idx={i} colW={gameColW} />)}
+          </View>
           <Text style={[styles.m2SectionLabel, { color: colors.textSecondary, marginTop: spacing.sm }]}>대기 · 여기로 끌면 게임에서 빠짐(게임수 적은 순)</Text>
           <PoolDropZone>
             {benchedIds.length === 0
@@ -5059,18 +5064,19 @@ const styles = StyleSheet.create({
   // ── 모드2 게임판(번호 칸) + 풀 ──
   m2Scroll: { paddingHorizontal: spacing.smd, paddingBottom: spacing.xl },
   m2SectionLabel: { ...typography.caption, fontWeight: '800', marginBottom: 6 },
-  gameFrame: { borderWidth: 2, borderRadius: radius.lg, padding: spacing.sm, marginBottom: spacing.sm },
-  gameFrameHead: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 },
-  gameFrameNo: { ...typography.body2, fontWeight: '800' },
+  m2GameGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm },
+  gameFrame: { borderWidth: 2, borderRadius: radius.md, padding: 8 },
+  gameFrameHead: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 5 },
+  gameFrameNo: { ...typography.caption, fontWeight: '800' },
   gameFrameStart: { flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: spacing.md, paddingVertical: 5, borderRadius: radius.md },
   gameFrameStartT: { ...typography.buttonSm, color: '#fff', fontWeight: '800' },
   gameFrameWait: { ...typography.caption, fontWeight: '700' },
-  gameFrameSlots: { flexDirection: 'row', gap: 6 },
-  gameSlot: { flex: 1, minWidth: 0, flexDirection: 'row', alignItems: 'center', gap: 5, minHeight: 38, paddingHorizontal: 7, paddingVertical: 5, borderWidth: 1.5, borderRadius: radius.md },
-  gameSlotEmpty: { flex: 1, minWidth: 0, minHeight: 40, alignItems: 'center', justifyContent: 'center', borderWidth: 1.5, borderStyle: 'dashed', borderRadius: radius.md },
-  poolZone: { flexDirection: 'row', flexWrap: 'wrap', gap: MAG_GAP, minHeight: 56, padding: spacing.sm, borderWidth: 1.5, borderStyle: 'dashed', borderColor: 'transparent', borderRadius: radius.md },
-  poolWrap: { flexDirection: 'row', flexWrap: 'wrap', gap: MAG_GAP },
-  poolTag: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 9, paddingVertical: 9, borderWidth: 2, borderRadius: radius.md,
+  gameFrameSlots: { flexDirection: 'row', gap: 4 },
+  gameSlot: { flex: 1, minWidth: 0, flexDirection: 'row', alignItems: 'center', gap: 5, minHeight: 34, paddingHorizontal: 6, paddingVertical: 4, borderWidth: 1.5, borderRadius: radius.sm },
+  gameSlotEmpty: { flex: 1, minWidth: 0, minHeight: 34, alignItems: 'center', justifyContent: 'center', borderWidth: 1.5, borderStyle: 'dashed', borderRadius: radius.sm },
+  poolZone: { flexDirection: 'row', flexWrap: 'wrap', gap: 6, minHeight: 50, padding: spacing.sm, borderWidth: 1.5, borderStyle: 'dashed', borderColor: 'transparent', borderRadius: radius.md },
+  poolWrap: { flexDirection: 'row', flexWrap: 'wrap', gap: 6 },
+  poolTag: { flexDirection: 'row', alignItems: 'center', gap: 5, paddingHorizontal: 7, paddingVertical: 5, borderWidth: 2, borderRadius: radius.sm,
     ...(Platform.OS === 'web' ? ({ cursor: 'pointer', userSelect: 'none' } as any) : {}) },
   canvasZone: { position: 'absolute', borderWidth: 1.5, borderRadius: radius.lg, padding: spacing.sm },
   canvasZoneHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
