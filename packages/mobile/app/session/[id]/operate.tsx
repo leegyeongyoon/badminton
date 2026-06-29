@@ -3792,6 +3792,17 @@ export default function OperateScreen() {
     .filter((m) => matchesPoolFilters(m) && !inQueue.has(m.userId) && !playingSet.has(m.userId))
     .sort((a, b) => gamesOf(a.userId) - gamesOf(b.userId) || a.userName.localeCompare(b.userName));
   const poolIds = pool.map((m) => m.userId);
+  const poolSet = new Set(poolIds);
+  // 대기 명단 정렬: 방금 나온 게임에서 '같이 나온 4명'끼리 한 줄로 묶는다(최근 나온 게 위).
+  // 그래야 어떤 조합이 쳤는지 보고 그 4명을 다시 짜기 편함. 묶음에 안 든 사람은 뒤에 4명씩.
+  const poolGroups: string[][] = [];
+  const grouped = new Set<string>();
+  for (const r of recentlyOut) {
+    const m = r.playerIds.filter((id) => poolSet.has(id) && !grouped.has(id));
+    if (m.length > 0) { m.forEach((id) => grouped.add(id)); poolGroups.push(m); }
+  }
+  const restPool = pool.filter((m) => !grouped.has(m.userId)).map((m) => m.userId);
+  for (let i = 0; i < restPool.length; i += 4) poolGroups.push(restPool.slice(i, i + 4));
   // 번호 게임 = 서버 큐 순서 + 끝에 '새 게임' 칸(entryId null).
   const queueFrames: Array<{ id: string | null; players: string[] }> = [
     ...queuedEntries.map((e) => ({ id: e.id, players: e.playerIds })),
@@ -3995,22 +4006,23 @@ export default function OperateScreen() {
             ))}
           </View>
         </ScrollView>
-        {/* 오른쪽 대기판 = 대기 인원(탭→다음 게임) + 방금 나온(코트 들어갔던) 4명 묶음(이 조합 쳤구나 확인). */}
+        {/* 오른쪽 대기판 = 대기 명단을 '같이 나온 4명'끼리 한 줄로 정렬. 그 4명을 탭→다음 게임으로 재편성. */}
         <View style={[styles.m2PoolRight, { borderLeftColor: colors.border }]}>
-          <Text style={[styles.m2PanelTitle, { color: colors.text }]}>대기판 · 탭→다음 게임</Text>
+          <Text style={[styles.m2PanelTitle, { color: colors.text }]}>대기 명단 ({pool.length}) · 같이 나온 4명끼리</Text>
           <ScrollView style={{ flex: 1 }} keyboardShouldPersistTaps="handled">
-            <Text style={[styles.m2SectionLabel, { color: colors.textSecondary }]}>대기 인원 ({pool.length})</Text>
             <PoolDropZone>
               {pool.length === 0
-                ? <Text style={[styles.emptyPool, { color: colors.textLight }]}>없음</Text>
-                : pool.map((p) => <PlayerTag key={p.userId} player={p} />)}
+                ? <Text style={[styles.emptyPool, { color: colors.textLight }]}>대기 인원 없음</Text>
+                : (
+                  <View style={{ width: '100%', gap: 5 }}>
+                    {poolGroups.map((grp, gi) => (
+                      <View key={gi} style={styles.gameFrameSlots}>
+                        {grp.map((id) => { const p = getPlayer(id); return p ? <PlayerTag key={id} player={p} fill compact /> : null; })}
+                      </View>
+                    ))}
+                  </View>
+                )}
             </PoolDropZone>
-            {recentlyOut.length > 0 && (
-              <>
-                <Text style={[styles.m2SectionLabel, { color: colors.textSecondary, marginTop: spacing.md }]}>방금 나온 게임 · 이 조합이 쳤어요(재편성 참고)</Text>
-                {recentlyOut.map((r) => <CompletedGameRow key={r.id} rec={r} />)}
-              </>
-            )}
           </ScrollView>
         </View>
       </View>
