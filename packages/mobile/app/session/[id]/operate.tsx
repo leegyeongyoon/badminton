@@ -1160,6 +1160,12 @@ export default function OperateScreen() {
   // ─── 모드 2 = 서버 공유 '다음 게임 큐'(queuedEntries) 기반 — 모드1·다른 운영진과 연동 ───
   // 탭으로 옮기기: 선수 선택 → 옮길 게임/대기/코트 탭. 모든 변경은 서버 큐(updateEntry 등).
   const [selectedPlayer, setSelectedPlayer] = useState<string | null>(null);
+  // 대기로 '직접 내려놓은' 사람들 — 대기 명단 맨 아래에 이 순서대로 둔다(루미큐브식 재배치).
+  const [poolBottom, setPoolBottom] = useState<string[]>([]);
+  // 대기 명단 전용 검색/필터(이름 + 성별 + 급수). 가운데 게임은 그대로 두고 대기만 추린다.
+  const [poolQuery, setPoolQuery] = useState('');
+  const [poolGenderFilter, setPoolGenderFilter] = useState<'all' | 'M' | 'F'>('all');
+  const [poolSkillFilter, setPoolSkillFilter] = useState<string>('all');
   const autoFilledRef = useRef(false);
 
   // 선택 선수를 큐의 한 게임(entryId)으로 이동. 대상이 4명이면 마지막 1명을 대기로 밀어냄(스왑).
@@ -1183,22 +1189,26 @@ export default function OperateScreen() {
         if (tp.length >= 4) { bumped = tp[tp.length - 1]; tp = tp.slice(0, 3); }
         await updateEntry(entryId, [...tp, P]);
         const num = queuedEntries.findIndex((e) => e.id === entryId) + 1;
-        showSuccess(`${getPlayer(P)?.userName || '선수'} → ${num}번 게임${bumped ? ` · ${getPlayer(bumped)?.userName || ''} 대기로` : ''}`);
+        // 루미큐브식: 밀려난 사람은 그냥 대기로 흘리지 않고 '잡힌(선택)' 상태로 — 어디 놓을지 계속 정함.
+        if (bumped) { setSelectedPlayer(bumped); showSuccess(`${getPlayer(bumped)?.userName || '선수'} 밀려남 — 놓을 곳(게임/대기)을 탭/드래그`); }
+        else { showSuccess(`${getPlayer(P)?.userName || '선수'} → ${num}번째 게임`); }
       }
+      setPoolBottom((prev) => prev.filter((x) => x !== P)); // 게임에 들어갔으니 대기-맨아래 목록에서 제거
       loadBoard(); loadPool();
     } catch (err: any) { showAlert('오류', err?.response?.data?.error || '이동 실패'); loadBoard(); }
   }, [queuedEntries, updateEntry, deleteEntry, createQueueGame, loadBoard, loadPool]);
   const moveToPool = useCallback(async (P: string) => {
+    setPoolBottom((prev) => [...prev.filter((x) => x !== P), P]); // 대기 맨 아래로
     const cur = queuedEntries.find((e) => e.playerIds.includes(P));
-    if (!cur) return;
+    if (!cur) { showSuccess(`${getPlayer(P)?.userName || '선수'} → 대기 맨 아래`); return; }
     try {
       const rest = cur.playerIds.filter((x) => x !== P);
       if (rest.length === 0) await deleteEntry(cur.id); else await updateEntry(cur.id, rest);
-      showSuccess(`${getPlayer(P)?.userName || '선수'} → 대기`);
+      showSuccess(`${getPlayer(P)?.userName || '선수'} → 대기 맨 아래`);
       loadBoard(); loadPool();
     } catch (err: any) { showAlert('오류', err?.response?.data?.error || '빼기 실패'); loadBoard(); }
   }, [queuedEntries, updateEntry, deleteEntry, loadBoard, loadPool]);
-  // 탭(선택) 래퍼
+  // 탭(선택) 래퍼 — 게임 이동은 선택 유지하다 밀려난 사람으로 넘어감(체인), 대기로 내려놓으면 선택 해제.
   const moveSelectedToGame = useCallback((entryId: string | null) => { const P = selectedPlayer; if (!P) return; setSelectedPlayer(null); moveToGame(P, entryId); }, [selectedPlayer, moveToGame]);
   const removeSelectedToPool = useCallback(() => { const P = selectedPlayer; if (!P) return; setSelectedPlayer(null); moveToPool(P); }, [selectedPlayer, moveToPool]);
 
@@ -1792,9 +1802,12 @@ export default function OperateScreen() {
     );
     // Double-booking is fully allowed and visually CALM: no red tint, no red
     // border, no ⚠ — just the small corner dot above.
+    // 카드 색 = 성별(남=파랑/여=연노랑) — 모드2와 동일. 급수는 좌측 배지로.
     const chipStyle = [
       styles.gameChip,
-      { borderColor: colors.border, backgroundColor: colors.surface },
+      g
+        ? { borderColor: g.gender === 'M' ? '#2563EB' : '#CA8A04', backgroundColor: g.gender === 'M' ? '#EFF6FF' : '#FEFCE8' }
+        : { borderColor: colors.border, backgroundColor: colors.surface },
     ];
     if (!display) {
       // Empty slot. In edit mode (onPress provided) it becomes a "+ 추가"
@@ -3806,21 +3819,29 @@ export default function OperateScreen() {
   // 게임 중(코트 위) 게임들 — 게임판에 4명 1줄로 표시(조합 파악 + 다음 게임 편성에 도움).
   const liveGames = courts.filter((c) => c.status !== 'EMPTY' || !!playingByCourtId.get(c.id));
   // 대기 풀 = 큐에도 없고 게임 중도 아닌 출석자. 검색/필터 + 게임수 적은 순(친 사람 아래).
+  const poolQ = poolQuery.trim().toLowerCase();
   const pool = uniquePlayers
-    .filter((m) => matchesPoolFilters(m) && !inQueue.has(m.userId) && !playingSet.has(m.userId))
+    .filter((m) => matchesPoolFilters(m) && !inQueue.has(m.userId) && !playingSet.has(m.userId)
+      && (poolQ === '' || (m.userName || '').toLowerCase().includes(poolQ))
+      && (poolGenderFilter === 'all' || (getGenderMeta(m.gender)?.gender ?? null) === poolGenderFilter)
+      && (poolSkillFilter === 'all' || (m.skillLevel || '').toUpperCase() === poolSkillFilter))
     .sort((a, b) => gamesOf(a.userId) - gamesOf(b.userId) || a.userName.localeCompare(b.userName));
   const poolIds = pool.map((m) => m.userId);
   const poolSet = new Set(poolIds);
   // 대기 명단 정렬: 방금 나온 게임에서 '같이 나온 4명'끼리 한 줄로 묶는다(최근 나온 게 위).
   // 그래야 어떤 조합이 쳤는지 보고 그 4명을 다시 짜기 편함. 묶음에 안 든 사람은 뒤에 4명씩.
+  // 단, 대기로 직접 내려놓은 사람(poolBottom)은 맨 아래에 그 순서대로.
+  const bottomSet = new Set(poolBottom.filter((id) => poolSet.has(id)));
   const poolGroups: string[][] = [];
   const grouped = new Set<string>();
   for (const r of recentlyOut) {
-    const m = r.playerIds.filter((id) => poolSet.has(id) && !grouped.has(id));
+    const m = r.playerIds.filter((id) => poolSet.has(id) && !grouped.has(id) && !bottomSet.has(id));
     if (m.length > 0) { m.forEach((id) => grouped.add(id)); poolGroups.push(m); }
   }
-  const restPool = pool.filter((m) => !grouped.has(m.userId)).map((m) => m.userId);
+  const restPool = pool.filter((m) => !grouped.has(m.userId) && !bottomSet.has(m.userId)).map((m) => m.userId);
   for (let i = 0; i < restPool.length; i += 4) poolGroups.push(restPool.slice(i, i + 4));
+  const bottomOrdered = poolBottom.filter((id) => bottomSet.has(id));
+  for (let i = 0; i < bottomOrdered.length; i += 4) poolGroups.push(bottomOrdered.slice(i, i + 4));
   // 번호 게임 = 서버 큐 순서 + 끝에 '새 게임' 칸(entryId null).
   const queueFrames: Array<{ id: string | null; players: string[] }> = [
     ...queuedEntries.map((e) => ({ id: e.id, players: e.playerIds })),
@@ -3841,6 +3862,9 @@ export default function OperateScreen() {
     const g = getGenderMeta(player.gender);
     const busy = busySet.has(player.userId);
     const selected = selectedPlayer === player.userId;
+    // 카드 색 = 성별(남=파랑/여=연노랑). 빨강은 에러처럼 보여 피함. 안의 급수 배지만 급수 색.
+    const gCol = !g ? colors.border : g.gender === 'M' ? '#2563EB' : '#CA8A04';
+    const gBg = !g ? colors.surface : g.gender === 'M' ? '#EFF6FF' : '#FEFCE8';
     // 드래그(모드1처럼): 6px 이상 움직이면 beginPoolDrag — 게임/대기 칸에 끌어다 놓기. 탭은 onPress(선택/스왑) 그대로.
     const pan = useRef(PanResponder.create({
       onStartShouldSetPanResponder: () => false,
@@ -3890,8 +3914,10 @@ export default function OperateScreen() {
           if (queuedEntries.some((e) => e.playerIds.includes(player.userId))) swapSelectedWith(player.userId);
           else setSelectedPlayer(player.userId);
         }}
-        style={[styles.poolTag, fill ? { flex: 1, minWidth: 0 } : block ? { width: '100%' } : { width: MAG_W }, { borderColor: selected ? colors.primary : skill.color, borderWidth: selected ? 3 : 2, backgroundColor: selected ? 'rgba(16,185,129,0.14)' : colors.surface, zIndex: selected ? 9 : 1 }]}
-        accessibilityLabel={`${player.userName} ${selected ? '선택 해제' : '선택'}`}
+        onLongPress={() => setMatchupTarget({ userId: player.userId, name: player.userName, skillLevel: player.skillLevel, isGuest: (player as any).isGuest })}
+        delayLongPress={300}
+        style={[styles.poolTag, fill ? { flex: 1, minWidth: 0 } : block ? { width: '100%' } : { width: MAG_W }, { borderColor: selected ? colors.primary : gCol, borderWidth: selected ? 3 : 2, backgroundColor: selected ? 'rgba(16,185,129,0.14)' : gBg, zIndex: selected ? 9 : 1 }]}
+        accessibilityLabel={`${player.userName} ${g ? g.label : ''} ${selected ? '선택 해제' : '선택'} · 길게=정보·수정`}
       >
         {typeof order === 'number' && <View style={[styles.poolOrder, { backgroundColor: colors.surfaceSecondary }]}><Text style={[styles.poolOrderT, { color: colors.textSecondary }]}>{order}</Text></View>}
         <View style={[styles.magnetSkill, { backgroundColor: skill.color }]}><Text style={styles.magnetSkillText}>{(player.skillLevel || '·').toUpperCase()}</Text></View>
@@ -3917,9 +3943,9 @@ export default function OperateScreen() {
           <TouchableOpacity onPress={() => handleEndGame(court.id)} accessibilityLabel={`${court.name} 게임 종료`}><Text style={[styles.m2CourtState, { color: colors.danger }]}>종료</Text></TouchableOpacity>
         </View>
         <View style={styles.gameFrameSlots}>
-          {[0, 1, 2, 3].map((s) => { const pid = pids[s]; const p = pid ? getPlayer(pid) : null; const sk = getSkillMeta(p?.skillLevel); return (
-            <TouchableOpacity key={s} disabled={!pid || !turnId} activeOpacity={0.7} onPress={() => { if (turnId && pid) setRunningSwap({ turnId, outUserId: pid, courtName: court.name, currentIds: pids }); }} style={[styles.gameSlot, { borderColor: pid ? sk.color : colors.border, backgroundColor: colors.surface }]} accessibilityLabel={pid ? `${p?.userName ?? pnames[s] ?? ''} 교체` : '빈 칸'}>
-              {pid ? (<><View style={[styles.slotSkill, { backgroundColor: sk.color }]}><Text style={styles.slotSkillText}>{(p?.skillLevel || '·').toUpperCase()}</Text></View><Text style={[styles.slotName, { color: colors.text }]} numberOfLines={1}>{p?.userName ?? pnames[s] ?? '선수'}</Text>{p && getGenderMeta(p.gender) && <GenderMarker meta={getGenderMeta(p.gender)!} size={12} />}</>) : <Text style={[styles.slotEmpty, { color: colors.textLight }]}>·</Text>}
+          {[0, 1, 2, 3].map((s) => { const pid = pids[s]; const p = pid ? getPlayer(pid) : null; const sk = getSkillMeta(p?.skillLevel); const gm = getGenderMeta(p?.gender); return (
+            <TouchableOpacity key={s} disabled={!pid || !turnId} activeOpacity={0.7} onPress={() => { if (turnId && pid) setRunningSwap({ turnId, outUserId: pid, courtName: court.name, currentIds: pids }); }} style={[styles.gameSlot, { borderColor: pid ? (gm ? (gm.gender === 'M' ? '#2563EB' : '#CA8A04') : sk.color) : colors.border, backgroundColor: gm ? (gm.gender === 'M' ? '#EFF6FF' : '#FEFCE8') : colors.surface }]} accessibilityLabel={pid ? `${p?.userName ?? pnames[s] ?? ''} ${gm?.label ?? ''} 교체` : '빈 칸'}>
+              {pid ? (<><View style={[styles.slotSkill, { backgroundColor: sk.color }]}><Text style={styles.slotSkillText}>{(p?.skillLevel || '·').toUpperCase()}</Text></View><Text style={[styles.slotName, { color: colors.text }]} numberOfLines={1}>{p?.userName ?? pnames[s] ?? '선수'}</Text>{gm && <GenderMarker meta={gm} size={12} />}</>) : <Text style={[styles.slotEmpty, { color: colors.textLight }]}>·</Text>}
             </TouchableOpacity>
           ); })}
         </View>
@@ -4093,6 +4119,27 @@ export default function OperateScreen() {
         {/* 오른쪽 대기판 = 대기 명단을 '같이 나온 4명'끼리 한 줄로 정렬. 그 4명을 탭→다음 게임으로 재편성. */}
         <View style={[styles.m2PoolRight, { borderLeftColor: colors.border, width: m2RightWidth }]}>
           <Text style={[styles.m2PanelTitle, { color: colors.text }]}>대기 명단 ({pool.length}) · 같이 나온 4명끼리</Text>
+          {/* 대기 명단 검색 + 성별 필터 — 가운데 게임은 그대로, 대기만 추림 */}
+          <View style={styles.m2PoolSearchRow}>
+            <TextInput value={poolQuery} onChangeText={setPoolQuery} placeholder="대기 검색" placeholderTextColor={colors.textLight}
+              style={[styles.m2PoolSearch, { borderColor: colors.border, color: colors.text, backgroundColor: colors.surface }]} />
+            {poolQuery !== '' && <TouchableOpacity onPress={() => setPoolQuery('')} style={styles.m2PoolSearchClear}><Icon name="close" size={13} color={colors.textLight} /></TouchableOpacity>}
+            {(['all', 'M', 'F'] as const).map((gf) => (
+              <TouchableOpacity key={gf} onPress={() => setPoolGenderFilter(gf)}
+                style={[styles.m2GChip, { borderColor: poolGenderFilter === gf ? colors.primary : colors.border, backgroundColor: poolGenderFilter === gf ? 'rgba(16,185,129,0.12)' : colors.surface }]}>
+                <Text style={[styles.m2GChipT, { color: poolGenderFilter === gf ? colors.primary : colors.textSecondary }]}>{gf === 'all' ? '전체' : gf === 'M' ? '남' : '여'}</Text>
+              </TouchableOpacity>
+            ))}
+          </View>
+          {/* 급수 필터 — 전체 + S A B C D E F */}
+          <View style={[styles.m2PoolSearchRow, { flexWrap: 'wrap' }]}>
+            {(['all', 'S', 'A', 'B', 'C', 'D', 'E', 'F'] as const).map((sk) => (
+              <TouchableOpacity key={sk} onPress={() => setPoolSkillFilter(sk)}
+                style={[styles.m2SkChip, { borderColor: poolSkillFilter === sk ? colors.primary : colors.border, backgroundColor: poolSkillFilter === sk ? 'rgba(16,185,129,0.12)' : colors.surface }]}>
+                <Text style={[styles.m2GChipT, { color: poolSkillFilter === sk ? colors.primary : colors.textSecondary }]}>{sk === 'all' ? '전체' : sk}</Text>
+              </TouchableOpacity>
+            ))}
+          </View>
           <ScrollView style={{ flex: 1 }} keyboardShouldPersistTaps="handled">
             <PoolDropZone>
               {pool.length === 0
@@ -5258,6 +5305,12 @@ const styles = StyleSheet.create({
   m2Center: { flex: 1, paddingLeft: spacing.smd },
   m2CenterScroll: { paddingRight: spacing.smd, paddingBottom: spacing.xl },
   m2PoolRight: { width: 430, borderLeftWidth: 1, paddingHorizontal: spacing.sm, paddingTop: spacing.xs },
+  m2PoolSearchRow: { flexDirection: 'row', alignItems: 'center', gap: 5, marginBottom: 6 },
+  m2PoolSearch: { flex: 1, minWidth: 0, height: 30, borderWidth: 1, borderRadius: radius.md, paddingHorizontal: 8, ...typography.caption },
+  m2PoolSearchClear: { marginLeft: -28, marginRight: 16, padding: 2 },
+  m2GChip: { paddingHorizontal: 8, height: 30, borderRadius: radius.md, borderWidth: 1.5, alignItems: 'center', justifyContent: 'center' },
+  m2GChipT: { ...typography.caption, fontWeight: '800' },
+  m2SkChip: { minWidth: 28, height: 26, paddingHorizontal: 5, borderRadius: radius.sm, borderWidth: 1.5, alignItems: 'center', justifyContent: 'center' },
   m2Divider: { width: 16, alignSelf: 'stretch', alignItems: 'center', justifyContent: 'center' },
   m2DividerBar: { width: 4, alignSelf: 'stretch', borderRadius: 2, marginVertical: 6, opacity: 0.7 },
   // (이전 2단 스타일 — 일부 미사용)

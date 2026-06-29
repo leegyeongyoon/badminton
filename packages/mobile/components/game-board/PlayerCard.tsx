@@ -85,8 +85,13 @@ export function PlayerCard({
   // bigger letter), so keep the staged badge identical in both variants.
   const chipDim = isCourt ? 20 : 22;
 
-  const borderColor = highlighted ? colors.primary : colors.border;
-  const bg = highlighted ? colors.primaryLight : colors.surface;
+  // 카드 색 = 성별(남=파랑/여=연노랑) — 운영판 모드1/2와 동일. 급수는 좌측 배지로.
+  const borderColor = highlighted
+    ? colors.primary
+    : genderMeta ? (genderMeta.gender === 'M' ? '#2563EB' : '#CA8A04') : colors.border;
+  const bg = highlighted
+    ? colors.primaryLight
+    : genderMeta ? (genderMeta.gender === 'M' ? '#EFF6FF' : '#FEFCE8') : colors.surface;
 
   // ── "N게임" fairness chip ──────────────────────────────────
   // Tasteful at-a-glance cue: 0게임 reads as a soft "처음" (needs a game),
