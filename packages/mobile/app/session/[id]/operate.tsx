@@ -3843,39 +3843,15 @@ export default function OperateScreen() {
   const poolIds = pool.map((m) => m.userId);
   const poolSet = new Set(poolIds);
   const uniqueIdSet = new Set(uniquePlayers.map((m) => m.userId)); // 체크인된 전체(빈칸 유지 vs 제거 판단용)
-  // 대기(게임 중 아님) 정렬 = 급수(S>A>B>C>D>E>F) 1차 → 이름순. (게임수 기준 아님)
+  // 대기(게임 중 아님)는 '항상' 급수(S>A>B>C>D>E>F) → 이름순으로 정렬(일관). 게임판에서 대기로
+  // 옮긴 사람도 곧장 제자리(급수순)에 들어간다. 안정 슬롯(빈칸 유지)은 정렬을 깨서 폐기.
   const skillRank = (lv?: string | null) => (({ S: 0, A: 1, B: 2, C: 3, D: 4, E: 5, F: 6 } as Record<string, number>)[(lv || '').toUpperCase()] ?? 9);
-  const bottomSet = new Set(poolBottom.filter((id) => poolSet.has(id)));
   const sortedPool = pool
-    .filter((m) => !bottomSet.has(m.userId))
     .slice()
     .sort((a, b) => skillRank(a.skillLevel) - skillRank(b.skillLevel) || a.userName.localeCompare(b.userName))
     .map((m) => m.userId);
-  // 안정 슬롯: 한 명을 게임/코트로 빼도 그 자리는 '빈칸'으로 유지(나머지 안 밀림). 새로 대기 들어온 사람은
-  // 빈칸부터 채우고 없으면 끝에. 체크아웃한 사람은 제거. 끝의 빈칸은 정리. (시드 = 급수→이름 정렬)
-  {
-    const waitingSet = new Set(sortedPool);
-    const next: (string | null)[] = [];
-    const seen = new Set<string>();
-    for (const id of poolSlotsRef.current) {
-      if (id == null) { next.push(null); continue; }
-      if (waitingSet.has(id)) { next.push(id); seen.add(id); }
-      else if (uniqueIdSet.has(id)) { next.push(null); } // 게임/코트로 빠짐 → 빈칸 유지
-      // 체크아웃 → 제거
-    }
-    for (const id of sortedPool) {
-      if (seen.has(id)) continue; seen.add(id);
-      const g = next.indexOf(null);
-      if (g >= 0) next[g] = id; else next.push(id);
-    }
-    while (next.length && next[next.length - 1] == null) next.pop();
-    poolSlotsRef.current = next;
-  }
-  const poolGroups: Array<(string | null)[]> = [];
-  for (let i = 0; i < poolSlotsRef.current.length; i += 4) poolGroups.push(poolSlotsRef.current.slice(i, i + 4));
-  // 대기로 직접 내려놓은 사람(poolBottom)은 맨 아래에 그 순서대로.
-  const bottomOrdered = poolBottom.filter((id) => bottomSet.has(id));
-  for (let i = 0; i < bottomOrdered.length; i += 4) poolGroups.push(bottomOrdered.slice(i, i + 4));
+  const poolGroups: string[][] = [];
+  for (let i = 0; i < sortedPool.length; i += 4) poolGroups.push(sortedPool.slice(i, i + 4));
   // 코트에 들어간(게임 중) 묶음 — 대기 맨 아래에 묶음으로 보여 '게임 치는 동안 다음 게임 미리 편성'.
   const playingCols = courts
     .map((c) => ({ name: c.name, entry: playingByCourtId.get(c.id) }))
@@ -4190,8 +4166,8 @@ export default function OperateScreen() {
                     {poolGroups.map((grp, gi) => (
                       <View key={gi} style={styles.gameFrameSlots}>
                         {[0, 1, 2, 3].map((si) => {
-                          const id = grp[si]; // string=선수, null=뺀 빈칸(자리 유지), undefined=줄 채우기 패딩
-                          if (id == null) return <View key={si} style={[styles.poolGapSlot, id === null ? { borderWidth: 1.5, borderStyle: 'dashed', borderColor: colors.border, opacity: 0.4 } : null]} />;
+                          const id = grp[si]; // string=선수, undefined=마지막 줄 채우기 패딩(투명)
+                          if (!id) return <View key={si} style={styles.poolGapSlot} />;
                           const p = getPlayer(id); return p ? <PlayerTag key={id} player={p} fill compact /> : <View key={si} style={styles.poolGapSlot} />;
                         })}
                       </View>
