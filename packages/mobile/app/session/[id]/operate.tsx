@@ -3861,11 +3861,9 @@ export default function OperateScreen() {
     ...queuedEntries.map((e) => ({ id: e.id, players: e.playerIds })),
     { id: null, players: [] },
   ];
-  // 세로 컬럼으로 자른다(이름 안 깨지게 넓은 칸 유지 위해 2열, 좁으면 1열). 위→아래 순서.
-  const numGameCols = layout.width > 1300 ? 2 : 1;
-  const perCol = Math.max(1, Math.ceil(queueFrames.length / numGameCols));
+  // 4개씩 세로 컬럼(①②③④ 세로 → ⑤⑥⑦⑧ 다음 컬럼). 많으면 가로 스크롤로 옆으로 펼침.
   const gameColumns: Array<typeof queueFrames> = [];
-  for (let i = 0; i < queueFrames.length; i += perCol) gameColumns.push(queueFrames.slice(i, i + perCol));
+  for (let i = 0; i < queueFrames.length; i += 4) gameColumns.push(queueFrames.slice(i, i + 4));
   const firstEmptyCourt = courts.find((c) => c.status === 'EMPTY' && !playingByCourtId.get(c.id));
   // 게임 그리드 열 수(반응형) — 가운데 폭(전체 - 오른쪽 대기 300) 기준. 40~50명도 덜 스크롤.
   const centerW = layout.width - 320;
@@ -4116,16 +4114,16 @@ export default function OperateScreen() {
       )}
       {/* 아래: 게임판(가운데) + 대기=게임 기록(오른쪽) */}
       <View style={styles.m2Body}>
-        <ScrollView style={styles.m2Center} contentContainerStyle={styles.m2CenterScroll} keyboardShouldPersistTaps="handled">
-          <Text style={[styles.m2SectionLabel, { color: colors.textSecondary }]}>다음 게임 · 4개씩 세로 · 오른쪽 대기판에서 선수 탭→선택 후 여기 칸 탭, 4명 차면 ▶투입</Text>
-          <View style={styles.m2GameCols}>
+        <View style={styles.m2Center}>
+          <Text style={[styles.m2SectionLabel, { color: colors.textSecondary }]}>다음 게임 · 4개씩 세로 ↔ 많으면 옆으로 스크롤 · 선수 탭/드래그로 편성</Text>
+          <ScrollView horizontal showsHorizontalScrollIndicator style={{ flex: 1 }} contentContainerStyle={styles.m2GameCols} keyboardShouldPersistTaps="handled">
             {gameColumns.map((col, ci) => (
               <View key={ci} style={styles.m2GameCol}>
-                {col.map((f, j) => <GameFrame key={f.id ?? `new${ci}`} frame={f} idx={ci * perCol + j} colW="100%" />)}
+                {col.map((f, j) => <GameFrame key={f.id ?? `new${ci}`} frame={f} idx={ci * 4 + j} colW="100%" />)}
               </View>
             ))}
-          </View>
-        </ScrollView>
+          </ScrollView>
+        </View>
         {/* 분할 디바이더 — 끌어서 가운데 게임판 ↔ 오른쪽 대기판 크기 조절(모드1 분할처럼) */}
         <View style={[styles.m2Divider, Platform.OS === 'web' ? ({ cursor: 'col-resize' } as any) : null]} {...m2DividerPan.panHandlers}>
           <View style={[styles.m2DividerBar, { backgroundColor: colors.textLight }]} />
@@ -4154,24 +4152,23 @@ export default function OperateScreen() {
               </TouchableOpacity>
             ))}
           </View>
-          <ScrollView style={{ flex: 1 }} keyboardShouldPersistTaps="handled">
-            <PoolDropZone>
-              {pool.length === 0
-                ? <Text style={[styles.emptyPool, { color: colors.textLight }]}>대기 인원 없음</Text>
-                : (
-                  <View style={{ width: '100%', gap: 5 }}>
-                    {poolGroups.map((grp, gi) => (
-                      <View key={gi} style={styles.gameFrameSlots}>
-                        {grp.map((id, si) => {
-                          if (!id) return <View key={`gap${si}`} style={[styles.gameSlotEmpty, { flex: 1, opacity: 0.45, borderColor: colors.border }]} />;
-                          const p = getPlayer(id); return p ? <PlayerTag key={id} player={p} fill compact /> : <View key={`gap${si}`} style={{ flex: 1 }} />;
-                        })}
-                      </View>
-                    ))}
-                  </View>
-                )}
-            </PoolDropZone>
-          </ScrollView>
+          {/* 대기 = 묶음(같이 나온 4명)을 '세로 컬럼'으로, 옆으로 스크롤. 한 줄 full폭이라 이름 안 짤림. */}
+          <PoolDropZone>
+            {pool.length === 0
+              ? <Text style={[styles.emptyPool, { color: colors.textLight }]}>대기 인원 없음</Text>
+              : (
+                <ScrollView horizontal showsHorizontalScrollIndicator style={{ flex: 1 }} contentContainerStyle={styles.m2PoolCols} keyboardShouldPersistTaps="handled">
+                  {poolGroups.map((grp, gi) => (
+                    <View key={gi} style={styles.m2PoolCol}>
+                      {grp.map((id, si) => {
+                        if (!id) return <View key={`gap${si}`} style={[styles.gameSlotEmpty, { opacity: 0.4, borderColor: colors.border }]} />;
+                        const p = getPlayer(id); return p ? <PlayerTag key={id} player={p} block compact /> : null;
+                      })}
+                    </View>
+                  ))}
+                </ScrollView>
+              )}
+          </PoolDropZone>
         </View>
       </View>
     </View>
@@ -5376,7 +5373,7 @@ const styles = StyleSheet.create({
   m2GameGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm },
   // 다음 게임: 4개씩 세로 컬럼(여러 컬럼 가로로)
   m2GameCols: { flexDirection: 'row', alignItems: 'flex-start', gap: spacing.sm },
-  m2GameCol: { flex: 1, minWidth: 0, gap: spacing.sm },
+  m2GameCol: { width: 440, gap: spacing.sm },
   gameFrame: { borderWidth: 2, borderRadius: radius.md, padding: 8 },
   gameFrameHead: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 5 },
   gameFrameNoWrap: { flexDirection: 'row', alignItems: 'center', gap: 6, flex: 1 },
@@ -5393,7 +5390,9 @@ const styles = StyleSheet.create({
   gameFrameSlots: { flexDirection: 'row', gap: 4 },
   gameSlot: { flex: 1, minWidth: 0, flexDirection: 'row', alignItems: 'center', gap: 5, minHeight: 34, paddingHorizontal: 6, paddingVertical: 4, borderWidth: 1.5, borderRadius: radius.sm },
   gameSlotEmpty: { flex: 1, minWidth: 0, minHeight: 34, alignItems: 'center', justifyContent: 'center', borderWidth: 1.5, borderStyle: 'dashed', borderRadius: radius.sm },
-  poolZone: { flexDirection: 'row', flexWrap: 'wrap', gap: 6, minHeight: 44, padding: spacing.xs, borderWidth: 1.5, borderStyle: 'dashed', borderColor: 'transparent', borderRadius: radius.md },
+  poolZone: { flex: 1, padding: spacing.xs, borderWidth: 1.5, borderStyle: 'dashed', borderColor: 'transparent', borderRadius: radius.md },
+  m2PoolCols: { flexDirection: 'row', gap: 8, alignItems: 'flex-start', paddingBottom: 6 },
+  m2PoolCol: { width: 150, gap: 5 },
   poolOrder: { minWidth: 18, height: 18, borderRadius: 9, paddingHorizontal: 4, alignItems: 'center', justifyContent: 'center' },
   poolOrderT: { ...typography.caption, fontWeight: '800' },
   poolWrap: { flexDirection: 'row', flexWrap: 'wrap', gap: 6 },
