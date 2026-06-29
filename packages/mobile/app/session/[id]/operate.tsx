@@ -1171,7 +1171,7 @@ export default function OperateScreen() {
   // 선택 선수를 큐의 한 게임(entryId)으로 이동. 대상이 4명이면 마지막 1명을 대기로 밀어냄(스왑).
   // entryId===null 이면 새 게임 생성. 원래 게임에선 빠져 빈자리로 남는다(자동 안 채움).
   // 코어 이동(탭·드래그 공용): 선수 P를 큐 게임(entryId)으로. 4명이면 마지막 1명을 대기로(스왑). null=새 게임.
-  const moveToGame = useCallback(async (P: string, entryId: string | null) => {
+  const moveToGame = useCallback(async (P: string, entryId: string | null, dropSlot?: number) => {
     const cur = queuedEntries.find((e) => e.playerIds.includes(P));
     if (cur && cur.id === entryId) return;
     try {
@@ -1185,10 +1185,18 @@ export default function OperateScreen() {
         showSuccess(`${getPlayer(P)?.userName || '선수'} → 새 게임`);
       } else {
         const target = queuedEntries.find((e) => e.id === entryId); if (!target) { loadBoard(); return; }
-        let tp = target.playerIds.filter((x) => x !== P);
+        const without = target.playerIds.filter((x) => x !== P);
         let bumped: string | null = null;
-        if (tp.length >= 4) { bumped = tp[tp.length - 1]; tp = tp.slice(0, 3); }
-        await updateEntry(entryId, [...tp, P]);
+        let newIds: string[];
+        if (without.length >= 4) {
+          // 4명이면 '드롭한 그 자리' 사람을 밀어내고 그 자리를 P가 차지(드래그). 슬롯 없으면 마지막.
+          const slot = (dropSlot != null && dropSlot >= 0 && dropSlot < without.length) ? dropSlot : without.length - 1;
+          bumped = without[slot];
+          newIds = without.slice(); newIds[slot] = P;
+        } else {
+          newIds = [...without, P];
+        }
+        await updateEntry(entryId, newIds);
         const num = queuedEntries.findIndex((e) => e.id === entryId) + 1;
         // 루미큐브식: 밀려난 사람이 있으면 그 사람을 곧장 '잡힌(선택)' 상태로 — 어디 놓을지 계속 정함.
         // 밀려난 사람이 없으면(빈자리에 안착) 잡기 해제 → 체인 종료. (탭·드래그 경로 공통으로 정리)
@@ -1595,8 +1603,9 @@ export default function OperateScreen() {
       // 코트로 드롭: 선택된 그룹(staged)을 그 코트 draft 로. 선택이 없으면 끌어온 한 명만.
       draftCourt(hit.courtId, staged.length > 0 ? staged : [userId]);
     } else if (hit.kind === 'frame') {
-      // 모드2: 끌어온 선수를 이 게임(entryId)으로(null=새 게임). 4명이면 1명 대기로(스왑).
-      moveToGame(userId, hit.entryId ?? null);
+      // 모드2: 끌어온 선수를 이 게임으로. 드롭한 가로 위치로 슬롯(0~3)을 추정해 '그 자리' 사람을 밀어냄.
+      const slot = hit.rect.w > 0 ? Math.max(0, Math.min(3, Math.floor((pageX - hit.rect.x) / (hit.rect.w / 4)))) : undefined;
+      moveToGame(userId, hit.entryId ?? null, slot);
     } else if (hit.kind === 'pool') {
       // 모드2: 끌어온 선수를 대기로(게임에서 빼기).
       moveToPool(userId);
@@ -3834,12 +3843,14 @@ export default function OperateScreen() {
   // 대기 명단 정렬: 방금 나온 게임에서 '같이 나온 4명'끼리 한 줄로 묶는다(최근 나온 게 위).
   // 그래야 어떤 조합이 쳤는지 보고 그 4명을 다시 짜기 편함. 묶음에 안 든 사람은 뒤에 4명씩.
   // 단, 대기로 직접 내려놓은 사람(poolBottom)은 맨 아래에 그 순서대로.
+  // 방금 나온 게임 묶음은 '원래 4자리'를 고정으로 두고, 빠진 사람 자리는 빈칸(갭)으로 유지한다.
+  // (그 4명이 어떻게 쳤는지 자리 그대로 보여 새 게임 짜기 편하게. 밀려난 사람은 갭 안 채우고 맨 아래로.)
   const bottomSet = new Set(poolBottom.filter((id) => poolSet.has(id)));
-  const poolGroups: string[][] = [];
+  const poolGroups: Array<(string | null)[]> = [];
   const grouped = new Set<string>();
   for (const r of recentlyOut) {
-    const m = r.playerIds.filter((id) => poolSet.has(id) && !grouped.has(id) && !bottomSet.has(id));
-    if (m.length > 0) { m.forEach((id) => grouped.add(id)); poolGroups.push(m); }
+    const slots = r.playerIds.slice(0, 4).map((id) => (poolSet.has(id) && !bottomSet.has(id) && !grouped.has(id)) ? id : null);
+    if (slots.some((x) => x !== null)) { slots.forEach((id) => { if (id) grouped.add(id); }); poolGroups.push(slots); }
   }
   const restPool = pool.filter((m) => !grouped.has(m.userId) && !bottomSet.has(m.userId)).map((m) => m.userId);
   for (let i = 0; i < restPool.length; i += 4) poolGroups.push(restPool.slice(i, i + 4));
@@ -4151,7 +4162,10 @@ export default function OperateScreen() {
                   <View style={{ width: '100%', gap: 5 }}>
                     {poolGroups.map((grp, gi) => (
                       <View key={gi} style={styles.gameFrameSlots}>
-                        {grp.map((id) => { const p = getPlayer(id); return p ? <PlayerTag key={id} player={p} fill compact /> : null; })}
+                        {grp.map((id, si) => {
+                          if (!id) return <View key={`gap${si}`} style={[styles.gameSlotEmpty, { flex: 1, opacity: 0.45, borderColor: colors.border }]} />;
+                          const p = getPlayer(id); return p ? <PlayerTag key={id} player={p} fill compact /> : <View key={`gap${si}`} style={{ flex: 1 }} />;
+                        })}
                       </View>
                     ))}
                   </View>
