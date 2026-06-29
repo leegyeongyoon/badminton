@@ -1148,8 +1148,8 @@ export default function OperateScreen() {
   const [groupOf, setGroupOf] = useState<Record<string, string>>({}); // userId → 묶음id
   const groupOfRef = useRef<Record<string, string>>({});
   groupOfRef.current = groupOf;
-  // 드롭 핸들러(한 번 만든 PanResponder)에서 최신 위치/명단을 읽기 위한 ref(렌더에서 채움).
-  const tagPosEffRef = useRef<Record<string, { x: number; y: number }>>({});
+  // 드롭 핸들러(한 번 만든 PanResponder)에서 최신 위치(px)/명단을 읽기 위한 ref(렌더에서 채움).
+  const posByIdRef = useRef<Record<string, { x: number; y: number }>>({});
   const benchListRef = useRef<string[]>([]);
 
   // 묶음(4명)을 코트에 투입: createQueueGame→assignEntry. 성공 시 그 묶음 해제 + 갱신.
@@ -1167,10 +1167,16 @@ export default function OperateScreen() {
     }
   }, [courts, createQueueGame, assignEntry, loadBoard, loadCourts, loadPool]);
 
-  // 이름표 드롭: ①코트 위 + 4명 묶음이면 투입 ②근처 이름표(여유<4) 있으면 그 묶음에 합류
-  // (2x2 스냅) ③아무것도 없으면 묶음에서 빠지고 자유 위치. localX/Y·중심은 명단영역 px.
+  // 묶음 정리: 멤버 1명 이하(혼자) 남은 묶음은 해제. 새 객체 반환.
+  const cleanupGroups = (grp: Record<string, string>) => {
+    const counts: Record<string, number> = {};
+    for (const u in grp) counts[grp[u]] = (counts[grp[u]] || 0) + 1;
+    for (const u in grp) if (counts[grp[u]] <= 1) delete grp[u];
+    return grp;
+  };
+  // 이름표 드롭(위치는 파생 — px 비교): ①코트 위 + 4명 묶음 → 투입 ②근처 이름표(묶음 여유<4)
+  // → 그 묶음에 합류(렌더가 가로 한 줄로 스냅) ③아무것도 없음 → 묶음에서 빠짐(정렬 풀로 복귀).
   const handleTagDrop = useCallback((userId: string, localX: number, localY: number, pageX: number, pageY: number) => {
-    const bw = canvasSizeRef.current.w || 1, bh = canvasSizeRef.current.h || 1;
     const grp = { ...groupOfRef.current };
     // ① 코트 위 + 4명 묶음 → 투입
     const courtHit = hitTestDrop(pageX, pageY, ['court']);
@@ -1179,13 +1185,13 @@ export default function OperateScreen() {
       const members = gid ? Object.keys(grp).filter((u) => grp[u] === gid) : [];
       if (members.length === 4) { startGroupOnCourt(courtHit.courtId, members); return; }
     }
-    // ② 근처 이름표(묶음 여유<4) 찾기
+    // ② 근처 이름표(묶음 여유<4) 찾기 — posById 는 명단영역 px.
     const dcx = localX + MAG_W / 2, dcy = localY + MAG_H / 2;
     let best: string | null = null, bestD = SNAP_DIST;
     for (const u of benchListRef.current) {
       if (u === userId) continue;
-      const f = tagPosEffRef.current[u]; if (!f) continue;
-      const cx = f.x * bw + MAG_W / 2, cy = f.y * bh + MAG_H / 2;
+      const f = posByIdRef.current[u]; if (!f) continue;
+      const cx = f.x + MAG_W / 2, cy = f.y + MAG_H / 2;
       const d = Math.hypot(cx - dcx, cy - dcy);
       if (d < bestD) {
         const tg = grp[u];
@@ -1197,30 +1203,12 @@ export default function OperateScreen() {
       let gid = grp[best];
       if (!gid) { gid = best; grp[best] = gid; }
       grp[userId] = gid;
-      const aPos = tagPosEffRef.current[best] || { x: 0, y: 0 };
-      const ax = aPos.x * bw, ay = aPos.y * bh;
-      const members = Object.keys(grp).filter((u) => grp[u] === gid);
-      // 일자(가로 한 줄)로 4명 정렬. 오른쪽 끝을 넘으면 왼쪽으로 당겨 화면 안에 둔다.
-      const rowW = members.length * GRP_SLOT_W;
-      const startX = Math.max(BENCH_PAD, Math.min(ax, bw - BENCH_PAD - rowW));
-      const nextPos: Record<string, { x: number; y: number }> = {};
-      members.forEach((u, i) => {
-        nextPos[u] = { x: (startX + i * GRP_SLOT_W) / bw, y: ay / bh };
-      });
-      setGroupOf(grp);
-      setTagPos((prev) => ({ ...prev, ...nextPos }));
+      setGroupOf(cleanupGroups(grp));
       return;
     }
-    // ③ 아무것도 없음 → 묶음 해제 + 자유 위치(남은 묶음 1명뿐이면 그것도 해제)
-    if (grp[userId]) {
-      delete grp[userId];
-      const counts: Record<string, number> = {};
-      for (const u in grp) counts[grp[u]] = (counts[grp[u]] || 0) + 1;
-      for (const u in grp) if (counts[grp[u]] <= 1) delete grp[u];
-      setGroupOf(grp);
-    }
-    commitTagFrac(userId, localX / bw, localY / bh);
-  }, [hitTestDrop, startGroupOnCourt, commitTagFrac]);
+    // ③ 아무것도 없음 → 묶음에서 빠짐(정렬된 풀로 자동 복귀, 자유좌표 없음)
+    if (grp[userId]) { delete grp[userId]; setGroupOf(cleanupGroups(grp)); }
+  }, [hitTestDrop, startGroupOnCourt]);
   // 캔버스 코트 칸의 4명으로 실제 게임 시작(기존 createQueueGame→assignEntry 재사용).
   const handleStartCanvasGame = useCallback(async (courtId: string, userIds: string[]) => {
     if (userIds.length !== 4) { showAlert('알림', '코트 칸에 4명을 넣어주세요'); return; }
@@ -3753,57 +3741,56 @@ export default function OperateScreen() {
 
   // 넓은 화면=2열[게임판 | 코트·커스텀·레슨자], 좁으면 세로 스택. 기존 split/leftPane/
   // rightPane/stackedContent 스타일을 그대로 재사용한다.
-  // ─── 모드 2 = 대기 게임 편성판 ───
-  // 위: 코트 줄(게임중 | 빈=대기 게임 드롭). 가운데: 대기 게임 줄(미리 여러 개 + '새 게임'
-  // 컴포저). 아래: 명단(자유 배치 이름표). 명단→컴포저로 끌어 4명 채우면 대기 게임 등록,
-  // 대기 게임 카드를 빈 코트로 끌면 투입(assignEntry).
-  // 명단(자유 배치) 영역 측정 크기. 측정 전엔 윈도우 폭으로 폴백.
+  // ─── 모드 2 = 게임판(순번 묶음 + 정렬 풀) ───
+  // 위: 코트 줄(게임중 | 빈=묶음 드롭). 아래 명단: 위쪽에 '번호 붙은 4명 묶음'(가로 한 줄,
+  // 게임수 적은 묶음이 1번 → 먼저 투입), 그 아래 정렬된 풀(게임수 적은 순 = 친 사람 아래로).
+  // 이름표를 다른 이름표에 붙이면 그 묶음에 합류, 묶음(4명)을 코트로 끌면 투입. 위치는 파생.
   const bw = canvasSize.w || layout.width;
   const bh = canvasSize.h || 320;
   canvasSizeRef.current = { w: bw, h: bh };
-  const tagIndex = new Map<string, number>();
-  uniquePlayers.forEach((m, i) => tagIndex.set(m.userId, i));
-  const idxOf = (userId: string) => tagIndex.get(userId) ?? 0;
-  // 명단 = 출석자 중 진행/대기게임에 안 들어간 사람만(묶음 멤버는 캔버스에 남음). 검색/필터로 추림.
+  // 명단 = 출석자 중 진행/대기게임에 안 든 사람. 검색/필터로 추림. 게임수 적은 순(친 사람 아래로).
   const benchExcluded = new Set<string>();
   for (const e of queuedEntries) for (const id of e.playerIds) benchExcluded.add(id);
   playingByCourtId.forEach((e) => (e.playerIds || []).forEach((id) => benchExcluded.add(id)));
-  const benchPlayers = uniquePlayers.filter((m) => matchesPoolFilters(m) && !benchExcluded.has(m.userId));
-  const defaultFrac = (idx: number) => {
-    if (bw <= 0 || bh <= 0) return { x: 0, y: 0 };
-    const cols = Math.max(1, Math.floor((bw - BENCH_PAD * 2) / (MAG_W + MAG_GAP)));
-    const row = Math.floor(idx / cols), col = idx % cols;
-    return { x: (BENCH_PAD + col * (MAG_W + MAG_GAP)) / bw, y: (BENCH_PAD + row * (MAG_H + MAG_GAP)) / bh };
-  };
-  const fracOf = (userId: string, idx: number) => tagPos[userId] || defaultFrac(idx);
-  // 드롭 핸들러가 읽을 최신 명단/위치 ref 채우기(묶음 스냅·근접 탐색용).
-  benchListRef.current = benchPlayers.map((m) => m.userId);
-  const tagPosEff: Record<string, { x: number; y: number }> = {};
-  benchPlayers.forEach((m) => { tagPosEff[m.userId] = fracOf(m.userId, idxOf(m.userId)); });
-  tagPosEffRef.current = tagPosEff;
-  // 묶음(group) → 멤버 목록 (캔버스에 색 테두리로 표시).
+  const gamesOf = (uid: string) => getPlayer(uid)?.gamesPlayedToday ?? 0;
+  const benchPlayers = uniquePlayers
+    .filter((m) => matchesPoolFilters(m) && !benchExcluded.has(m.userId))
+    .sort((a, b) => gamesOf(a.userId) - gamesOf(b.userId) || a.userName.localeCompare(b.userName));
+  // 묶음 맵 + 순번(가장 적게 친 묶음이 1번). 풀 = 묶음에 안 든 사람.
   const groupsMap: Record<string, string[]> = {};
   for (const m of benchPlayers) { const gid = groupOf[m.userId]; if (gid) (groupsMap[gid] = groupsMap[gid] || []).push(m.userId); }
-  // 정렬: 흩어진 이름표를 게임수 적은 순으로 깔끔히 재배치(내 화면 기준 — 50명도 한눈에).
-  const tidyTags = () => {
-    if (bw <= 0 || bh <= 0) return;
-    animateNext();
-    const cols = Math.max(1, Math.floor((bw - BENCH_PAD * 2) / (MAG_W + MAG_GAP)));
-    const sorted = [...uniquePlayers].sort((a, b) => (a.gamesPlayedToday ?? 0) - (b.gamesPlayedToday ?? 0));
-    const next: Record<string, { x: number; y: number }> = {};
-    sorted.forEach((m, i) => {
-      const row = Math.floor(i / cols), col = i % cols;
-      next[m.userId] = { x: (BENCH_PAD + col * (MAG_W + MAG_GAP)) / bw, y: (BENCH_PAD + row * (MAG_H + MAG_GAP)) / bh };
-    });
-    setTagPos(next);
+  const groupIds = Object.keys(groupsMap).sort(
+    (g1, g2) => Math.min(...groupsMap[g1].map(gamesOf)) - Math.min(...groupsMap[g2].map(gamesOf)),
+  );
+  const groupNo: Record<string, number> = {};
+  groupIds.forEach((g, i) => { groupNo[g] = i + 1; });
+  const ungrouped = benchPlayers.filter((m) => !groupOf[m.userId]);
+  // 레이아웃(파생): 위에 묶음(번호 줄), 그 아래 정렬 풀(그리드).
+  const GROUP_ROW_H = MAG_H + 24;
+  const poolCols = Math.max(1, Math.floor((bw - BENCH_PAD * 2) / (MAG_W + MAG_GAP)));
+  const poolStartY = BENCH_PAD + groupIds.length * GROUP_ROW_H + (groupIds.length ? 14 : 0);
+  const posOf = (userId: string): { x: number; y: number } => {
+    const gid = groupOf[userId];
+    if (gid) {
+      const i = Math.max(0, groupsMap[gid].indexOf(userId));
+      return { x: BENCH_PAD + i * GRP_SLOT_W, y: BENCH_PAD + (groupNo[gid] - 1) * GROUP_ROW_H + 16 };
+    }
+    const idx = Math.max(0, ungrouped.findIndex((m) => m.userId === userId));
+    const r = Math.floor(idx / poolCols), c = idx % poolCols;
+    return { x: BENCH_PAD + c * (MAG_W + MAG_GAP), y: poolStartY + r * (MAG_H + MAG_GAP) };
   };
+  // 드롭 핸들러가 읽을 px 위치/명단 ref 채우기.
+  benchListRef.current = benchPlayers.map((m) => m.userId);
+  const posById: Record<string, { x: number; y: number }> = {};
+  benchPlayers.forEach((m) => { posById[m.userId] = posOf(m.userId); });
+  posByIdRef.current = posById;
 
   // 명단 자석 이름표 — 자유 드래그. 릴리즈 시 handleTagDrop: ①코트+4명묶음→투입
   // ②근처 이름표→묶음 스냅 ③아무것도없음→자유 위치/묶음 해제.
-  const MagnetTag = ({ player, idx }: { player: Player; idx: number }) => {
-    const f = fracOf(player.userId, idx);
-    const pan = useRef(new RNAnimated.ValueXY({ x: f.x * bw, y: f.y * bh })).current;
-    useEffect(() => { pan.setValue({ x: f.x * bw, y: f.y * bh }); }, [f.x, f.y, bw, bh]);
+  const MagnetTag = ({ player }: { player: Player }) => {
+    const p0 = posOf(player.userId);
+    const pan = useRef(new RNAnimated.ValueXY({ x: p0.x, y: p0.y })).current;
+    useEffect(() => { pan.setValue({ x: p0.x, y: p0.y }); }, [p0.x, p0.y]);
     const skill = getSkillMeta(player.skillLevel);
     const g = getGenderMeta(player.gender);
     const busy = busySet.has(player.userId);
@@ -3895,15 +3882,14 @@ export default function OperateScreen() {
     );
   };
 
-  // 묶음(group) 색 테두리 — 멤버들의 바운딩박스에 그림. 4명이면 강조 + '코트로 투입' 안내.
-  const GroupBoundary = ({ members }: { members: string[] }) => {
-    if (members.length < 2) return null;
+  // 묶음 번호 테두리 — 멤버 바운딩박스에 그림. 'N번 게임' 표시, 4명이면 강조 + 코트 투입 안내.
+  const GroupBoundary = ({ gid, members }: { gid: string; members: string[] }) => {
+    if (members.length < 1) return null;
     let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
     for (const u of members) {
-      const f = tagPosEff[u]; if (!f) continue;
-      const x = f.x * bw, y = f.y * bh;
-      minX = Math.min(minX, x); minY = Math.min(minY, y);
-      maxX = Math.max(maxX, x + MAG_W); maxY = Math.max(maxY, y + MAG_H);
+      const p = posOf(u);
+      minX = Math.min(minX, p.x); minY = Math.min(minY, p.y);
+      maxX = Math.max(maxX, p.x + MAG_W); maxY = Math.max(maxY, p.y + MAG_H);
     }
     if (!isFinite(minX)) return null;
     const full = members.length === 4;
@@ -3911,13 +3897,15 @@ export default function OperateScreen() {
       <View
         pointerEvents="none"
         style={[styles.m2Group, {
-          left: minX - 8, top: minY - 8 - (full ? 16 : 0),
-          width: maxX - minX + 16, height: maxY - minY + 16 + (full ? 16 : 0),
+          left: minX - 8, top: minY - 8 - 16,
+          width: maxX - minX + 16, height: maxY - minY + 16 + 16,
           borderColor: full ? colors.primary : colors.textLight,
           backgroundColor: full ? 'rgba(16,185,129,0.07)' : 'transparent',
         }]}
       >
-        {full && <Text style={[styles.m2GroupTag, { color: colors.primary }]}>✓ 코트로 끌면 투입</Text>}
+        <Text style={[styles.m2GroupTag, { color: full ? colors.primary : colors.textSecondary }]}>
+          {groupNo[gid]}번 게임 {full ? '· 코트로 끌면 투입' : `(${members.length}/4)`}
+        </Text>
       </View>
     );
   };
@@ -3930,12 +3918,12 @@ export default function OperateScreen() {
           ? <Text style={[styles.emptyPool, { color: colors.textLight }]}>코트가 없어요. "코트 관리"에서 추가하세요</Text>
           : courts.map((court) => <Mode2CourtCard key={court.id} court={court} />)}
       </View>
-      {/* 명단(자유 배치 캔버스) — 이름표를 붙이면 자동 묶음, 묶음을 코트로 끌면 투입 */}
+      {/* 명단 — 위쪽 '번호 붙은 묶음'(가로 한 줄) + 아래 정렬 풀(친 사람 아래로). 붙이면 묶음, 묶음을 코트로 */}
       <View style={styles.m2Bench} onLayout={onCanvasLayout}>
         {bw > 0 && (
           <>
-            {Object.entries(groupsMap).map(([gid, members]) => <GroupBoundary key={gid} members={members} />)}
-            {benchPlayers.map((m) => <MagnetTag key={m.userId} player={m} idx={idxOf(m.userId)} />)}
+            {groupIds.map((gid) => <GroupBoundary key={gid} gid={gid} members={groupsMap[gid]} />)}
+            {benchPlayers.map((m) => <MagnetTag key={m.userId} player={m} />)}
           </>
         )}
       </View>
@@ -3950,14 +3938,6 @@ export default function OperateScreen() {
         {ModeTabs}
         <View style={styles.mode2Toolbar}>
           <View style={{ flex: 1 }}>{PoolSearch}</View>
-          <TouchableOpacity
-            style={[styles.mode2TidyBtn, { borderColor: colors.border, backgroundColor: colors.surface }]}
-            onPress={tidyTags}
-            accessibilityLabel="이름표 정렬"
-          >
-            <Icon name="menu" size={15} color={colors.textSecondary} />
-            <Text style={[styles.mode2TidyText, { color: colors.text }]}>정렬</Text>
-          </TouchableOpacity>
         </View>
         {BoardMode2}
         {DragOverlay}
