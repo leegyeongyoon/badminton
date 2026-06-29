@@ -3840,26 +3840,18 @@ export default function OperateScreen() {
     .sort((a, b) => gamesOf(a.userId) - gamesOf(b.userId) || a.userName.localeCompare(b.userName));
   const poolIds = pool.map((m) => m.userId);
   const poolSet = new Set(poolIds);
-  // 대기 명단 정렬: 방금 나온 게임에서 '같이 나온 4명'끼리 한 줄로 묶는다(최근 나온 게 위).
-  // 그래야 어떤 조합이 쳤는지 보고 그 4명을 다시 짜기 편함. 묶음에 안 든 사람은 뒤에 4명씩.
-  // 단, 대기로 직접 내려놓은 사람(poolBottom)은 맨 아래에 그 순서대로.
-  // 방금 나온 게임 묶음은 '원래 4자리'를 고정으로 두고, 빠진 사람 자리는 빈칸(갭)으로 유지한다.
-  // (그 4명이 어떻게 쳤는지 자리 그대로 보여 새 게임 짜기 편하게. 밀려난 사람은 갭 안 채우고 맨 아래로.)
-  const bottomSet = new Set(poolBottom.filter((id) => poolSet.has(id)));
-  const poolGroups: Array<(string | null)[]> = [];
-  const grouped = new Set<string>();
-  for (const r of recentlyOut) {
-    const slots = r.playerIds.slice(0, 4).map((id) => (poolSet.has(id) && !bottomSet.has(id) && !grouped.has(id)) ? id : null);
-    if (slots.some((x) => x !== null)) { slots.forEach((id) => { if (id) grouped.add(id); }); poolGroups.push(slots); }
-  }
-  // 일반 대기(묶음에 안 든 미편성)는 급수순 1차 정렬(S>A>B>C>D>E>F), 그다음 게임수 적은 순.
+  // 대기(게임 중 아님)는 급수순 1차 정렬(S>A>B>C>D>E>F) → 게임수 적은 순 → 이름. 4명씩 한 줄.
+  // (예전 '같이 나온 4명' 묶음 폐기 — 급수순 평면 정렬. 게임 중 묶음만 따로 맨 아래.)
   const skillRank = (lv?: string | null) => (({ S: 0, A: 1, B: 2, C: 3, D: 4, E: 5, F: 6 } as Record<string, number>)[(lv || '').toUpperCase()] ?? 9);
-  const restPool = pool
-    .filter((m) => !grouped.has(m.userId) && !bottomSet.has(m.userId))
+  const bottomSet = new Set(poolBottom.filter((id) => poolSet.has(id)));
+  const sortedPool = pool
+    .filter((m) => !bottomSet.has(m.userId))
     .slice()
     .sort((a, b) => skillRank(a.skillLevel) - skillRank(b.skillLevel) || gamesOf(a.userId) - gamesOf(b.userId) || a.userName.localeCompare(b.userName))
     .map((m) => m.userId);
-  for (let i = 0; i < restPool.length; i += 4) poolGroups.push(restPool.slice(i, i + 4));
+  const poolGroups: Array<(string | null)[]> = [];
+  for (let i = 0; i < sortedPool.length; i += 4) poolGroups.push(sortedPool.slice(i, i + 4));
+  // 대기로 직접 내려놓은 사람(poolBottom)은 맨 아래에 그 순서대로.
   const bottomOrdered = poolBottom.filter((id) => bottomSet.has(id));
   for (let i = 0; i < bottomOrdered.length; i += 4) poolGroups.push(bottomOrdered.slice(i, i + 4));
   // 코트에 들어간(게임 중) 묶음 — 대기 맨 아래에 묶음으로 보여 '게임 치는 동안 다음 게임 미리 편성'.
@@ -3872,8 +3864,8 @@ export default function OperateScreen() {
     ...queuedEntries.map((e) => ({ id: e.id, players: e.playerIds })),
     { id: null, players: [] },
   ];
-  // 5개씩 세로 컬럼(①②③④⑤ 세로 → ⑥⑦⑧⑨⑩ 다음 컬럼). 많으면 가로 스크롤로 옆으로 펼침.
-  const GAME_COL = 5;
+  // 세로 컬럼당 게임 수: 보통 5개, 게임이 10개 넘으면 6개씩(외톨이 컬럼 안 생기게).
+  const GAME_COL = queueFrames.length > 10 ? 6 : 5;
   const gameColumns: Array<typeof queueFrames> = [];
   for (let i = 0; i < queueFrames.length; i += GAME_COL) gameColumns.push(queueFrames.slice(i, i + GAME_COL));
   const firstEmptyCourt = courts.find((c) => c.status === 'EMPTY' && !playingByCourtId.get(c.id));
@@ -3881,7 +3873,7 @@ export default function OperateScreen() {
   const centerW = layout.width - 320;
   const gameColW: any = centerW > 1380 ? '32.5%' : centerW > 860 ? '49%' : '100%';
   // 선수 칩 — 탭하면 선택(다시 탭=해제). 선택된 선수는 강조. 옮길 곳은 게임/대기 칸을 탭.
-  const PlayerTag = ({ player, fill, compact, block, order }: { player: Player; fill?: boolean; compact?: boolean; block?: boolean; order?: number }) => {
+  const PlayerTag = ({ player, fill, compact, block, order, big }: { player: Player; fill?: boolean; compact?: boolean; block?: boolean; order?: number; big?: boolean }) => {
     const skill = getSkillMeta(player.skillLevel);
     const g = getGenderMeta(player.gender);
     const busy = busySet.has(player.userId);
@@ -3940,15 +3932,15 @@ export default function OperateScreen() {
         }}
         onLongPress={() => setMatchupTarget({ userId: player.userId, name: player.userName, skillLevel: player.skillLevel, isGuest: (player as any).isGuest })}
         delayLongPress={300}
-        style={[styles.poolTag, compact && styles.poolTagCompact, fill ? { flex: 1, minWidth: 0 } : block ? { width: '100%' } : { width: MAG_W }, { borderColor: selected ? colors.primary : gCol, borderWidth: selected ? 3 : 2, backgroundColor: selected ? 'rgba(16,185,129,0.14)' : gBg, zIndex: selected ? 9 : 1 }]}
+        style={[styles.poolTag, compact && (big ? styles.poolTagBig : styles.poolTagCompact), fill ? { flex: 1, minWidth: 0 } : block ? { width: '100%' } : { width: MAG_W }, { borderColor: selected ? colors.primary : gCol, borderWidth: selected ? 3 : 2, backgroundColor: selected ? 'rgba(16,185,129,0.14)' : gBg, zIndex: selected ? 9 : 1 }]}
         accessibilityLabel={`${player.userName} ${g ? g.label : ''} ${selected ? '선택 해제' : '선택'} · 길게=정보·수정`}
       >
         {typeof order === 'number' && <View style={[styles.poolOrder, { backgroundColor: colors.surfaceSecondary }]}><Text style={[styles.poolOrderT, { color: colors.textSecondary }]}>{order}</Text></View>}
-        <View style={[styles.magnetSkill, compact && styles.magnetSkillCompact, { backgroundColor: skill.color }]}><Text style={[styles.magnetSkillText, compact && { fontSize: 11 }]}>{(player.skillLevel || '·').toUpperCase()}</Text></View>
-        <Text style={[styles.magnetName, compact && styles.magnetNameCompact, { color: colors.text }]} numberOfLines={1}>{player.userName}</Text>
-        {g && <GenderMarker meta={g} size={compact ? 12 : 14} />}
+        <View style={[styles.magnetSkill, compact && (big ? styles.magnetSkillBig : styles.magnetSkillCompact), { backgroundColor: skill.color }]}><Text style={[styles.magnetSkillText, compact && { fontSize: big ? 13 : 11 }]}>{(player.skillLevel || '·').toUpperCase()}</Text></View>
+        <Text style={[styles.magnetName, compact && (big ? styles.magnetNameBig : styles.magnetNameCompact), { color: colors.text }]} numberOfLines={1}>{player.userName}</Text>
+        {g && <GenderMarker meta={g} size={compact ? (big ? 14 : 12) : 14} />}
         {compact
-          ? <Text style={[styles.magnetGamesTiny, { color: colors.textLight }]}>{player.gamesPlayedToday ?? 0}</Text>
+          ? <Text style={[styles.magnetGamesTiny, big && { fontSize: 12 }, { color: colors.textLight }]}>{player.gamesPlayedToday ?? 0}</Text>
           : <View style={[styles.magnetGames, { backgroundColor: colors.surfaceSecondary }]}><Text style={[styles.magnetGamesText, { color: colors.textSecondary }]}>{player.gamesPlayedToday ?? 0}</Text></View>}
         {busy && <View style={[styles.conflictDot, { borderColor: colors.surface }]} />}
       </TouchableOpacity>
@@ -4068,7 +4060,7 @@ export default function OperateScreen() {
           {[0, 1, 2, 3].map((s) => {
             const pid = members[s]; const p = pid ? getPlayer(pid) : null;
             return p ? (
-              <PlayerTag key={s} player={p} fill compact />
+              <PlayerTag key={s} player={p} fill compact big />
             ) : (
               <TouchableOpacity key={s} disabled={!selectedPlayer} activeOpacity={0.6} onPress={() => { if (selectedPlayer) moveSelectedToGame(frame.id); }} style={[styles.gameSlotEmpty, { borderColor: target ? colors.primary : colors.border, backgroundColor: target ? 'rgba(16,185,129,0.10)' : 'transparent' }]}>
                 <Text style={[styles.slotEmpty, { color: target ? colors.primary : colors.textLight }]}>＋</Text>
@@ -4129,7 +4121,7 @@ export default function OperateScreen() {
       {/* 아래: 게임판(가운데) + 대기=게임 기록(오른쪽) */}
       <View style={styles.m2Body}>
         <ScrollView style={styles.m2Center} contentContainerStyle={styles.m2CenterScroll} keyboardShouldPersistTaps="handled">
-          <Text style={[styles.m2SectionLabel, { color: colors.textSecondary }]}>다음 게임 · 5개씩 세로 · 선수 탭/드래그로 편성</Text>
+          <Text style={[styles.m2SectionLabel, { color: colors.textSecondary }]}>다음 게임 · {GAME_COL}개씩 세로 · 선수 탭/드래그로 편성</Text>
           <View style={styles.m2GameCols}>
             {gameColumns.map((col, ci) => (
               <View key={ci} style={styles.m2GameCol}>
@@ -4144,7 +4136,7 @@ export default function OperateScreen() {
         </View>
         {/* 오른쪽 대기판 = 대기 명단을 '같이 나온 4명'끼리 한 줄로 정렬. 그 4명을 탭→다음 게임으로 재편성. */}
         <View style={[styles.m2PoolRight, { borderLeftColor: colors.border, width: m2RightWidth }]}>
-          <Text style={[styles.m2PanelTitle, { color: colors.text }]}>대기 명단 ({pool.length}) · 같이 나온 4명끼리</Text>
+          <Text style={[styles.m2PanelTitle, { color: colors.text }]}>대기 명단 ({pool.length}) · 급수순</Text>
           {/* 대기 명단 검색 + 성별 필터 — 가운데 게임은 그대로, 대기만 추림 */}
           <View style={styles.m2PoolSearchRow}>
             <TextInput value={poolQuery} onChangeText={setPoolQuery} placeholder="대기 검색" placeholderTextColor={colors.textLight}
@@ -5316,9 +5308,11 @@ const styles = StyleSheet.create({
   },
   magnetSkill: { width: 24, height: 24, borderRadius: 5, alignItems: 'center', justifyContent: 'center' },
   magnetSkillCompact: { width: 18, height: 18, borderRadius: 4 },
+  magnetSkillBig: { width: 23, height: 23, borderRadius: 5 },
   magnetSkillText: { color: '#fff', fontSize: 13, fontWeight: '700' },
   magnetName: { ...typography.body2, flex: 1, fontWeight: '700' },
   magnetNameCompact: { fontSize: 11.5, lineHeight: 14 },
+  magnetNameBig: { fontSize: 14, lineHeight: 17 },
   magnetGames: { minWidth: 20, paddingHorizontal: 5, paddingVertical: 1, borderRadius: 8, alignItems: 'center' },
   magnetGamesTiny: { fontSize: 10, fontWeight: '800', minWidth: 9, textAlign: 'right' },
   magnetGamesText: { ...typography.caption, fontWeight: '700' },
@@ -5429,6 +5423,7 @@ const styles = StyleSheet.create({
   poolTag: { flexDirection: 'row', alignItems: 'center', gap: 5, paddingHorizontal: 7, paddingVertical: 5, borderWidth: 2, borderRadius: radius.sm,
     ...(Platform.OS === 'web' ? ({ cursor: 'pointer', userSelect: 'none' } as any) : {}) },
   poolTagCompact: { gap: 3, paddingHorizontal: 4, paddingVertical: 4 },
+  poolTagBig: { gap: 5, paddingHorizontal: 7, paddingVertical: 7 },
   canvasZone: { position: 'absolute', borderWidth: 1.5, borderRadius: radius.lg, padding: spacing.sm },
   canvasZoneHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
   canvasZoneName: { ...typography.buttonSm, fontWeight: '700' },
