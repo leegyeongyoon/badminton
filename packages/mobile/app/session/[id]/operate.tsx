@@ -1165,9 +1165,11 @@ export default function OperateScreen() {
   // 대기 명단 '안정 슬롯' — 한 명 빼도 그 자리는 빈칸으로 유지(갑자기 재정렬 X). 급수→이름 시드.
   const poolSlotsRef = useRef<(string | null)[]>([]);
   // 대기 명단 전용 검색/필터(이름 + 성별 + 급수). 가운데 게임은 그대로 두고 대기만 추린다.
+  // 성별/급수는 '다중선택' — 빈 배열이면 전체. 칩 탭으로 토글, '전체'는 비움.
   const [poolQuery, setPoolQuery] = useState('');
-  const [poolGenderFilter, setPoolGenderFilter] = useState<'all' | 'M' | 'F'>('all');
-  const [poolSkillFilter, setPoolSkillFilter] = useState<string>('all');
+  const [poolGenders, setPoolGenders] = useState<string[]>([]);
+  const [poolSkills, setPoolSkills] = useState<string[]>([]);
+  const toggleIn = (arr: string[], v: string) => (arr.includes(v) ? arr.filter((x) => x !== v) : [...arr, v]);
   const autoFilledRef = useRef(false);
 
   // 선택 선수를 큐의 한 게임(entryId)으로 이동. 대상이 4명이면 마지막 1명을 대기로 밀어냄(스왑).
@@ -3837,8 +3839,8 @@ export default function OperateScreen() {
   const pool = uniquePlayers
     .filter((m) => matchesPoolFilters(m) && !inQueue.has(m.userId) && !playingSet.has(m.userId)
       && (poolQ === '' || (m.userName || '').toLowerCase().includes(poolQ))
-      && (poolGenderFilter === 'all' || (getGenderMeta(m.gender)?.gender ?? null) === poolGenderFilter)
-      && (poolSkillFilter === 'all' || (m.skillLevel || '').toUpperCase() === poolSkillFilter))
+      && (poolGenders.length === 0 || poolGenders.includes(getGenderMeta(m.gender)?.gender ?? ''))
+      && (poolSkills.length === 0 || poolSkills.includes((m.skillLevel || '').toUpperCase())))
     .sort((a, b) => gamesOf(a.userId) - gamesOf(b.userId) || a.userName.localeCompare(b.userName));
   const poolIds = pool.map((m) => m.userId);
   const poolSet = new Set(poolIds);
@@ -3848,11 +3850,11 @@ export default function OperateScreen() {
   const skillRank = (lv?: string | null) => (({ S: 0, A: 1, B: 2, C: 3, D: 4, E: 5, F: 6 } as Record<string, number>)[(lv || '').toUpperCase()] ?? 9);
   // 방금 끝난 게임 4명 묶음 — 정렬과 '별개로' 대기 명단 맨 아래에 그대로 한 줄로 쌓는다.
   // (최근에 끝난 게 맨 아래로 계속 쌓임. recentlyOut 은 최신이 앞 → reverse 로 오래된 게 위/최근이 아래.)
-  const finishedGroups: string[][] = [];
+  const finishedGroups: Array<{ ids: string[]; at: number }> = [];
   const finishedIds = new Set<string>();
   for (const r of [...recentlyOut].reverse()) {
     const m = r.playerIds.filter((id) => poolSet.has(id) && !finishedIds.has(id));
-    if (m.length > 0) { m.forEach((id) => finishedIds.add(id)); finishedGroups.push(m); }
+    if (m.length > 0) { m.forEach((id) => finishedIds.add(id)); finishedGroups.push({ ids: m, at: r.at }); }
   }
   // 위쪽: 아직 게임 안 친(또는 묶음에서 빠진) 사람 — 급수(S>A>...>F) → 이름순 정렬.
   const sortedPool = pool
@@ -4067,6 +4069,15 @@ export default function OperateScreen() {
             <Text style={[styles.gameFrameNo, { color: isNew ? colors.textLight : idx === 0 ? colors.primary : colors.text }]}>{isNew ? '새 게임' : idx === 0 ? '다음 차례' : `${idx + 1}번째`}</Text>
             <Text style={[styles.gameFrameCount, { color: target ? colors.primary : colors.textLight }]}>{target ? '여기로 ▼' : `${members.length}/4`}</Text>
           </View>
+          {/* 게임 삭제 — 편성된 게임을 지운다(4명은 대기로). 선수 선택 중이 아닐 때만. */}
+          {!isNew && !selectedPlayer && (
+            <TouchableOpacity
+              onPress={() => showConfirm('게임 삭제', '이 게임을 지울까요? 선수들은 대기로 갑니다.', async () => { try { await deleteEntry(frame.id!); loadBoard(); loadPool(); showSuccess('게임 삭제'); } catch (e: any) { showAlert('오류', '삭제 실패'); } })}
+              hitSlop={6} style={styles.gameDelBtn} accessibilityLabel={`${idx + 1}번째 게임 삭제`}
+              {...(Platform.OS === 'web' ? { onPointerDown: (e: any) => e.stopPropagation?.() } : {})}>
+              <Icon name="close" size={13} color={colors.textLight} />
+            </TouchableOpacity>
+          )}
         </TouchableOpacity>
         <View style={styles.gameFrameSlots}>
           {[0, 1, 2, 3].map((s) => {
@@ -4154,21 +4165,27 @@ export default function OperateScreen() {
             <TextInput value={poolQuery} onChangeText={setPoolQuery} placeholder="대기 검색" placeholderTextColor={colors.textLight}
               style={[styles.m2PoolSearch, { borderColor: colors.border, color: colors.text, backgroundColor: colors.surface }]} />
             {poolQuery !== '' && <TouchableOpacity onPress={() => setPoolQuery('')} style={styles.m2PoolSearchClear}><Icon name="close" size={13} color={colors.textLight} /></TouchableOpacity>}
-            {(['all', 'M', 'F'] as const).map((gf) => (
-              <TouchableOpacity key={gf} onPress={() => setPoolGenderFilter(gf)}
-                style={[styles.m2GChip, { borderColor: poolGenderFilter === gf ? colors.primary : colors.border, backgroundColor: poolGenderFilter === gf ? 'rgba(16,185,129,0.12)' : colors.surface }]}>
-                <Text style={[styles.m2GChipT, { color: poolGenderFilter === gf ? colors.primary : colors.textSecondary }]}>{gf === 'all' ? '전체' : gf === 'M' ? '남' : '여'}</Text>
-              </TouchableOpacity>
-            ))}
+            {(['all', 'M', 'F'] as const).map((gf) => {
+              const on = gf === 'all' ? poolGenders.length === 0 : poolGenders.includes(gf);
+              return (
+                <TouchableOpacity key={gf} onPress={() => (gf === 'all' ? setPoolGenders([]) : setPoolGenders((p) => toggleIn(p, gf)))}
+                  style={[styles.m2GChip, { borderColor: on ? colors.primary : colors.border, backgroundColor: on ? 'rgba(16,185,129,0.12)' : colors.surface }]}>
+                  <Text style={[styles.m2GChipT, { color: on ? colors.primary : colors.textSecondary }]}>{gf === 'all' ? '전체' : gf === 'M' ? '남' : '여'}</Text>
+                </TouchableOpacity>
+              );
+            })}
           </View>
-          {/* 급수 필터 — 전체 + S A B C D E F */}
+          {/* 급수 필터(다중선택) — 전체 + S A B C D E F */}
           <View style={[styles.m2PoolSearchRow, { flexWrap: 'wrap' }]}>
-            {(['all', 'S', 'A', 'B', 'C', 'D', 'E', 'F'] as const).map((sk) => (
-              <TouchableOpacity key={sk} onPress={() => setPoolSkillFilter(sk)}
-                style={[styles.m2SkChip, { borderColor: poolSkillFilter === sk ? colors.primary : colors.border, backgroundColor: poolSkillFilter === sk ? 'rgba(16,185,129,0.12)' : colors.surface }]}>
-                <Text style={[styles.m2GChipT, { color: poolSkillFilter === sk ? colors.primary : colors.textSecondary }]}>{sk === 'all' ? '전체' : sk}</Text>
-              </TouchableOpacity>
-            ))}
+            {(['all', 'S', 'A', 'B', 'C', 'D', 'E', 'F'] as const).map((sk) => {
+              const on = sk === 'all' ? poolSkills.length === 0 : poolSkills.includes(sk);
+              return (
+                <TouchableOpacity key={sk} onPress={() => (sk === 'all' ? setPoolSkills([]) : setPoolSkills((p) => toggleIn(p, sk)))}
+                  style={[styles.m2SkChip, { borderColor: on ? colors.primary : colors.border, backgroundColor: on ? 'rgba(16,185,129,0.12)' : colors.surface }]}>
+                  <Text style={[styles.m2GChipT, { color: on ? colors.primary : colors.textSecondary }]}>{sk === 'all' ? '전체' : sk}</Text>
+                </TouchableOpacity>
+              );
+            })}
           </View>
           {/* 대기 = 같이 나온 4명 묶음을 4명 한 줄로, 세로로 아래로 쌓는다(아래로 스크롤). 게임 중은 맨 밑. */}
           <ScrollView style={{ flex: 1 }} keyboardShouldPersistTaps="handled">
@@ -4188,15 +4205,21 @@ export default function OperateScreen() {
                     ))}
                     {/* 방금 끝난 게임 4명 묶음 — 정렬과 별개로 그대로 한 줄, 맨 아래에 계속 쌓인다(최근이 맨 아래). */}
                     {finishedGroups.length > 0 && <Text style={[styles.m2SectionLabel, { color: colors.textSecondary, marginTop: 6 }]}>방금 끝난 게임 (↓ 아래로 쌓임)</Text>}
-                    {finishedGroups.map((grp, gi) => (
-                      <View key={`fin${gi}`} style={styles.gameFrameSlots}>
-                        {[0, 1, 2, 3].map((si) => {
-                          const id = grp[si];
-                          if (!id) return <View key={si} style={styles.poolGapSlot} />;
-                          const p = getPlayer(id); return p ? <PlayerTag key={id} player={p} fill compact /> : <View key={si} style={styles.poolGapSlot} />;
-                        })}
-                      </View>
-                    ))}
+                    {finishedGroups.map((g, gi) => {
+                      const waitMin = Math.max(0, Math.floor((nowTs - g.at) / 60000));
+                      return (
+                        <View key={`fin${gi}`} style={{ gap: 2 }}>
+                          <Text style={[styles.finWait, { color: colors.textLight }]}>⏱ 게임 쉰 지 {waitMin < 1 ? '방금' : `${waitMin}분`}</Text>
+                          <View style={styles.gameFrameSlots}>
+                            {[0, 1, 2, 3].map((si) => {
+                              const id = g.ids[si];
+                              if (!id) return <View key={si} style={styles.poolGapSlot} />;
+                              const p = getPlayer(id); return p ? <PlayerTag key={id} player={p} fill compact /> : <View key={si} style={styles.poolGapSlot} />;
+                            })}
+                          </View>
+                        </View>
+                      );
+                    })}
                     {/* 코트에서 게임 중인 묶음 — 맨 밑에 4명 한 줄로. 끌어다 놓아 다음 게임 미리 편성. */}
                     {playingCols.length > 0 && <Text style={[styles.m2SectionLabel, { color: colors.warning, marginTop: 6 }]}>게임 중 · 끌어서 다음 게임 미리 편성</Text>}
                     {playingCols.map((pc, i) => (
@@ -5428,6 +5451,7 @@ const styles = StyleSheet.create({
   gameNoBadgeT: { color: '#fff', fontSize: 12, fontWeight: '900' },
   gameFrameNo: { ...typography.body2, fontWeight: '800' },
   gameFrameCount: { ...typography.caption, fontWeight: '800' },
+  gameDelBtn: { padding: 3, marginLeft: 4, borderRadius: radius.sm },
   m2LeftHead: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: spacing.sm, marginBottom: 8 },
   m2AutoBtn: { flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: spacing.md, paddingVertical: 6, borderWidth: 1.5, borderRadius: radius.lg },
   m2AutoBtnT: { ...typography.buttonSm, fontWeight: '800' },
@@ -5442,6 +5466,7 @@ const styles = StyleSheet.create({
   m2PoolCol: { width: 150, gap: 5 },
   poolGap: { height: 34, borderWidth: 1.5, borderStyle: 'dashed', borderRadius: radius.md, opacity: 0.4 },
   poolGapSlot: { flex: 1, minWidth: 0, minHeight: 31, borderRadius: radius.sm },
+  finWait: { ...typography.caption, fontSize: 11, fontWeight: '700' },
   poolOrder: { minWidth: 18, height: 18, borderRadius: 9, paddingHorizontal: 4, alignItems: 'center', justifyContent: 'center' },
   poolOrderT: { ...typography.caption, fontWeight: '800' },
   poolWrap: { flexDirection: 'row', flexWrap: 'wrap', gap: 6 },
