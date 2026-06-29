@@ -3862,8 +3862,9 @@ export default function OperateScreen() {
     ...queuedEntries.map((e) => ({ id: e.id, players: e.playerIds })),
     { id: null, players: [] },
   ];
-  // 세로 컬럼당 게임 수: 보통 5개, 게임이 10개 넘으면 6개씩(외톨이 컬럼 안 생기게).
-  const GAME_COL = queueFrames.length > 10 ? 6 : 5;
+  // 세로 컬럼당 게임 수 — 항상 '2줄(2열) 안에' 맞춘다. 기본 5, 게임이 늘면 ceil(개수/2)로 키워
+  // 10→5, 12→6, 14→7, 16→8… 두 열 균형. (외톨이 3번째 열 없이 2열에 꽉 차게)
+  const GAME_COL = Math.max(5, Math.ceil(queueFrames.length / 2));
   const gameColumns: Array<typeof queueFrames> = [];
   for (let i = 0; i < queueFrames.length; i += GAME_COL) gameColumns.push(queueFrames.slice(i, i + GAME_COL));
   const firstEmptyCourt = courts.find((c) => c.status === 'EMPTY' && !playingByCourtId.get(c.id));
@@ -3955,7 +3956,10 @@ export default function OperateScreen() {
     return occupied ? (
       <View style={[styles.m2CourtCard, { borderColor: colors.warning, backgroundColor: colors.warningLight }]}>
         <View style={styles.m2CourtHead}>
-          <Text style={[styles.m2CourtName, { color: colors.text }]} numberOfLines={1}>{court.name}</Text>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, flex: 1, minWidth: 0 }}>
+            <Text style={[styles.m2CourtName, { color: colors.text }]} numberOfLines={1}>{court.name}</Text>
+            <CourtElapsedBadge startedAt={court.currentTurn?.startedAt} />
+          </View>
           <TouchableOpacity onPress={() => handleEndGame(court.id)} accessibilityLabel={`${court.name} 게임 종료`}><Text style={[styles.m2CourtState, { color: colors.danger }]}>종료</Text></TouchableOpacity>
         </View>
         <View style={styles.gameFrameSlots}>
