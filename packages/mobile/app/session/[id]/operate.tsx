@@ -3866,9 +3866,10 @@ export default function OperateScreen() {
     ...queuedEntries.map((e) => ({ id: e.id, players: e.playerIds })),
     { id: null, players: [] },
   ];
-  // 4개씩 세로 컬럼(①②③④ 세로 → ⑤⑥⑦⑧ 다음 컬럼). 많으면 가로 스크롤로 옆으로 펼침.
+  // 5개씩 세로 컬럼(①②③④⑤ 세로 → ⑥⑦⑧⑨⑩ 다음 컬럼). 많으면 가로 스크롤로 옆으로 펼침.
+  const GAME_COL = 5;
   const gameColumns: Array<typeof queueFrames> = [];
-  for (let i = 0; i < queueFrames.length; i += 4) gameColumns.push(queueFrames.slice(i, i + 4));
+  for (let i = 0; i < queueFrames.length; i += GAME_COL) gameColumns.push(queueFrames.slice(i, i + GAME_COL));
   const firstEmptyCourt = courts.find((c) => c.status === 'EMPTY' && !playingByCourtId.get(c.id));
   // 게임 그리드 열 수(반응형) — 가운데 폭(전체 - 오른쪽 대기 300) 기준. 40~50명도 덜 스크롤.
   const centerW = layout.width - 320;
@@ -4119,12 +4120,12 @@ export default function OperateScreen() {
       )}
       {/* 아래: 게임판(가운데) + 대기=게임 기록(오른쪽) */}
       <View style={styles.m2Body}>
-        <View style={styles.m2Center}>
-          <Text style={[styles.m2SectionLabel, { color: colors.textSecondary }]}>다음 게임 · 4개씩 세로 ↔ 많으면 옆으로 스크롤 · 선수 탭/드래그로 편성</Text>
+        <View style={[styles.m2Center, { width: Math.max(320, layout.width - m2RightWidth - 24) }]}>
+          <Text style={[styles.m2SectionLabel, { color: colors.textSecondary }]}>다음 게임 · 5개씩 세로 ↔ 많으면 옆으로 스크롤 · 선수 탭/드래그로 편성</Text>
           <ScrollView horizontal showsHorizontalScrollIndicator style={{ flex: 1 }} contentContainerStyle={styles.m2GameCols} keyboardShouldPersistTaps="handled">
             {gameColumns.map((col, ci) => (
               <View key={ci} style={styles.m2GameCol}>
-                {col.map((f, j) => <GameFrame key={f.id ?? `new${ci}`} frame={f} idx={ci * 4 + j} colW="100%" />)}
+                {col.map((f, j) => <GameFrame key={f.id ?? `new${ci}`} frame={f} idx={ci * GAME_COL + j} colW="100%" />)}
               </View>
             ))}
           </ScrollView>
@@ -5328,9 +5329,10 @@ const styles = StyleSheet.create({
   m2CourtTop: { flex: 1, minWidth: 0, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 6, paddingHorizontal: spacing.md, paddingVertical: 10, borderWidth: 2, borderRadius: radius.md },
   m2CourtCard: { flex: 1, minWidth: 0, borderWidth: 2, borderRadius: radius.md, padding: spacing.sm },
   m2Body: { flex: 1, flexDirection: 'row', paddingTop: spacing.xs },
-  // flex:1 + minWidth:0 + overflow hidden — 대기(오른쪽)가 넓어지면 게임판이 자동으로 줄고
-  // 내부 가로 스크롤로 감싼다(밖으로 안 넘침). minWidth:0 이 없으면 콘텐츠 폭만큼 커져 대기를 밀어냄.
-  m2Center: { flex: 1, minWidth: 0, overflow: 'hidden', paddingLeft: spacing.smd },
+  // 명시적 폭(렌더에서 layout.width - 대기폭 - 디바이더)으로 고정 + overflow hidden.
+  // RN-Web에서 가로 스크롤 자식이 flex 축소를 막아 풀폭을 차지(대기 위로 넘침)하던 문제 해결.
+  // 대기(m2RightWidth)가 커지면 이 폭이 그만큼 줄어 게임판이 자동 축소되고 안쪽 가로 스크롤로 감싼다.
+  m2Center: { flexGrow: 0, flexShrink: 0, overflow: 'hidden', paddingLeft: spacing.smd },
   m2CenterScroll: { paddingRight: spacing.smd, paddingBottom: spacing.xl },
   m2PlayColHead: { ...typography.caption, fontWeight: '800', marginBottom: 2 },
   m2PoolRight: { width: 430, borderLeftWidth: 1, paddingHorizontal: spacing.sm, paddingTop: spacing.xs },
