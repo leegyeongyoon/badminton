@@ -4215,23 +4215,33 @@ export default function OperateScreen() {
                         })}
                       </View>
                     ))}
-                    {/* 방금 끝난 게임 4명 묶음 — 정렬과 별개로 그대로 한 줄, 맨 아래에 계속 쌓인다(최근이 맨 아래). */}
-                    {finishedGroups.length > 0 && <Text style={[styles.m2SectionLabel, { color: colors.textSecondary, marginTop: 6 }]}>방금 끝난 게임 (↓ 아래로 쌓임)</Text>}
-                    {finishedGroups.map((g, gi) => {
-                      const waitMin = Math.max(0, Math.floor((nowTs - g.at) / 60000));
-                      return (
-                        <View key={`fin${gi}`} style={{ gap: 2 }}>
-                          <Text style={[styles.finWait, { color: colors.textLight }]}>⏱ 게임 쉰 지 {waitMin < 1 ? '방금' : `${waitMin}분`}</Text>
-                          <View style={styles.gameFrameSlots}>
-                            {[0, 1, 2, 3].map((si) => {
-                              const id = g.slots[si];
-                              if (!id) return <View key={si} style={styles.poolGapSlot} />;
-                              const p = getPlayer(id); return p ? <PlayerTag key={id} player={p} fill compact /> : <View key={si} style={styles.poolGapSlot} />;
-                            })}
+                    {/* 방금 끝난 게임 — 묶음마다 'N분 전'이면 목록이 너무 길어 → 시간 구간(15/30/60분 이상
+                        편성 안 됨)으로 묶어 '헤더만' 표시. 오래 기다린(긴 구간) 묶음이 위, 최근이 아래로 쌓임. */}
+                    {(() => {
+                      const bucketOf = (min: number) =>
+                        min >= 60 ? { label: '⏱ 1시간 이상 편성 안 됨', color: colors.danger }
+                        : min >= 30 ? { label: '⏱ 30분 이상 편성 안 됨', color: colors.warning }
+                        : min >= 15 ? { label: '⏱ 15분 이상 편성 안 됨', color: '#CA8A04' }
+                        : { label: '방금 끝난 게임', color: colors.textSecondary };
+                      let lastLabel: string | null = null;
+                      return finishedGroups.map((g, gi) => {
+                        const waitMin = Math.max(0, Math.floor((nowTs - g.at) / 60000));
+                        const bk = bucketOf(waitMin);
+                        const showHeader = bk.label !== lastLabel; lastLabel = bk.label;
+                        return (
+                          <View key={`fin${gi}`} style={{ gap: 2 }}>
+                            {showHeader && <Text style={[styles.m2SectionLabel, { color: bk.color, marginTop: 6 }]}>{bk.label}</Text>}
+                            <View style={styles.gameFrameSlots}>
+                              {[0, 1, 2, 3].map((si) => {
+                                const id = g.slots[si];
+                                if (!id) return <View key={si} style={styles.poolGapSlot} />;
+                                const p = getPlayer(id); return p ? <PlayerTag key={id} player={p} fill compact /> : <View key={si} style={styles.poolGapSlot} />;
+                              })}
+                            </View>
                           </View>
-                        </View>
-                      );
-                    })}
+                        );
+                      });
+                    })()}
                     {/* 코트에서 게임 중인 묶음 — 맨 밑에 4명 한 줄로. 끌어다 놓아 다음 게임 미리 편성. */}
                     {playingCols.length > 0 && <Text style={[styles.m2SectionLabel, { color: colors.warning, marginTop: 6 }]}>게임 중 · 끌어서 다음 게임 미리 편성</Text>}
                     {playingCols.map((pc, i) => (
