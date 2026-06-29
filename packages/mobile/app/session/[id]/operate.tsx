@@ -1162,6 +1162,8 @@ export default function OperateScreen() {
   const [selectedPlayer, setSelectedPlayer] = useState<string | null>(null);
   // 대기로 '직접 내려놓은' 사람들 — 대기 명단 맨 아래에 이 순서대로 둔다(루미큐브식 재배치).
   const [poolBottom, setPoolBottom] = useState<string[]>([]);
+  // 대기 명단 '안정 슬롯' — 한 명 빼도 그 자리는 빈칸으로 유지(갑자기 재정렬 X). 급수→이름 시드.
+  const poolSlotsRef = useRef<(string | null)[]>([]);
   // 대기 명단 전용 검색/필터(이름 + 성별 + 급수). 가운데 게임은 그대로 두고 대기만 추린다.
   const [poolQuery, setPoolQuery] = useState('');
   const [poolGenderFilter, setPoolGenderFilter] = useState<'all' | 'M' | 'F'>('all');
@@ -3840,17 +3842,37 @@ export default function OperateScreen() {
     .sort((a, b) => gamesOf(a.userId) - gamesOf(b.userId) || a.userName.localeCompare(b.userName));
   const poolIds = pool.map((m) => m.userId);
   const poolSet = new Set(poolIds);
-  // 대기(게임 중 아님)는 급수순 1차 정렬(S>A>B>C>D>E>F) → 게임수 적은 순 → 이름. 4명씩 한 줄.
-  // (예전 '같이 나온 4명' 묶음 폐기 — 급수순 평면 정렬. 게임 중 묶음만 따로 맨 아래.)
+  const uniqueIdSet = new Set(uniquePlayers.map((m) => m.userId)); // 체크인된 전체(빈칸 유지 vs 제거 판단용)
+  // 대기(게임 중 아님) 정렬 = 급수(S>A>B>C>D>E>F) 1차 → 이름순. (게임수 기준 아님)
   const skillRank = (lv?: string | null) => (({ S: 0, A: 1, B: 2, C: 3, D: 4, E: 5, F: 6 } as Record<string, number>)[(lv || '').toUpperCase()] ?? 9);
   const bottomSet = new Set(poolBottom.filter((id) => poolSet.has(id)));
   const sortedPool = pool
     .filter((m) => !bottomSet.has(m.userId))
     .slice()
-    .sort((a, b) => skillRank(a.skillLevel) - skillRank(b.skillLevel) || gamesOf(a.userId) - gamesOf(b.userId) || a.userName.localeCompare(b.userName))
+    .sort((a, b) => skillRank(a.skillLevel) - skillRank(b.skillLevel) || a.userName.localeCompare(b.userName))
     .map((m) => m.userId);
+  // 안정 슬롯: 한 명을 게임/코트로 빼도 그 자리는 '빈칸'으로 유지(나머지 안 밀림). 새로 대기 들어온 사람은
+  // 빈칸부터 채우고 없으면 끝에. 체크아웃한 사람은 제거. 끝의 빈칸은 정리. (시드 = 급수→이름 정렬)
+  {
+    const waitingSet = new Set(sortedPool);
+    const next: (string | null)[] = [];
+    const seen = new Set<string>();
+    for (const id of poolSlotsRef.current) {
+      if (id == null) { next.push(null); continue; }
+      if (waitingSet.has(id)) { next.push(id); seen.add(id); }
+      else if (uniqueIdSet.has(id)) { next.push(null); } // 게임/코트로 빠짐 → 빈칸 유지
+      // 체크아웃 → 제거
+    }
+    for (const id of sortedPool) {
+      if (seen.has(id)) continue; seen.add(id);
+      const g = next.indexOf(null);
+      if (g >= 0) next[g] = id; else next.push(id);
+    }
+    while (next.length && next[next.length - 1] == null) next.pop();
+    poolSlotsRef.current = next;
+  }
   const poolGroups: Array<(string | null)[]> = [];
-  for (let i = 0; i < sortedPool.length; i += 4) poolGroups.push(sortedPool.slice(i, i + 4));
+  for (let i = 0; i < poolSlotsRef.current.length; i += 4) poolGroups.push(poolSlotsRef.current.slice(i, i + 4));
   // 대기로 직접 내려놓은 사람(poolBottom)은 맨 아래에 그 순서대로.
   const bottomOrdered = poolBottom.filter((id) => bottomSet.has(id));
   for (let i = 0; i < bottomOrdered.length; i += 4) poolGroups.push(bottomOrdered.slice(i, i + 4));
@@ -4167,9 +4189,10 @@ export default function OperateScreen() {
                   <View style={{ width: '100%', gap: 5 }}>
                     {poolGroups.map((grp, gi) => (
                       <View key={gi} style={styles.gameFrameSlots}>
-                        {grp.map((id, si) => {
-                          if (!id) return <View key={`gap${si}`} style={[styles.gameSlotEmpty, { flex: 1, opacity: 0.4, borderColor: colors.border }]} />;
-                          const p = getPlayer(id); return p ? <PlayerTag key={id} player={p} fill compact /> : <View key={`gap${si}`} style={{ flex: 1 }} />;
+                        {[0, 1, 2, 3].map((si) => {
+                          const id = grp[si]; // string=선수, null=뺀 빈칸(자리 유지), undefined=줄 채우기 패딩
+                          if (id == null) return <View key={si} style={[styles.poolGapSlot, id === null ? { borderWidth: 1.5, borderStyle: 'dashed', borderColor: colors.border, opacity: 0.4 } : null]} />;
+                          const p = getPlayer(id); return p ? <PlayerTag key={id} player={p} fill compact /> : <View key={si} style={styles.poolGapSlot} />;
                         })}
                       </View>
                     ))}
@@ -5307,11 +5330,11 @@ const styles = StyleSheet.create({
     }),
   },
   magnetSkill: { width: 24, height: 24, borderRadius: 5, alignItems: 'center', justifyContent: 'center' },
-  magnetSkillCompact: { width: 19, height: 19, borderRadius: 4 },
+  magnetSkillCompact: { width: 20, height: 20, borderRadius: 4 },
   magnetSkillBig: { width: 20, height: 20, borderRadius: 5 },
   magnetSkillText: { color: '#fff', fontSize: 13, fontWeight: '700' },
   magnetName: { ...typography.body2, flex: 1, fontWeight: '700' },
-  magnetNameCompact: { fontSize: 12, lineHeight: 15 },
+  magnetNameCompact: { fontSize: 12.5, lineHeight: 15 },
   magnetNameBig: { fontSize: 12.5, lineHeight: 15 },
   magnetGames: { minWidth: 20, paddingHorizontal: 5, paddingVertical: 1, borderRadius: 8, alignItems: 'center' },
   magnetGamesTiny: { fontSize: 10, fontWeight: '800', minWidth: 9, textAlign: 'right' },
@@ -5417,6 +5440,7 @@ const styles = StyleSheet.create({
   m2PoolCols: { flexDirection: 'row', gap: 8, alignItems: 'flex-start', paddingBottom: 6 },
   m2PoolCol: { width: 150, gap: 5 },
   poolGap: { height: 34, borderWidth: 1.5, borderStyle: 'dashed', borderRadius: radius.md, opacity: 0.4 },
+  poolGapSlot: { flex: 1, minWidth: 0, minHeight: 31, borderRadius: radius.sm },
   poolOrder: { minWidth: 18, height: 18, borderRadius: 9, paddingHorizontal: 4, alignItems: 'center', justifyContent: 'center' },
   poolOrderT: { ...typography.caption, fontWeight: '800' },
   poolWrap: { flexDirection: 'row', flexWrap: 'wrap', gap: 6 },
