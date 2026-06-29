@@ -3800,6 +3800,7 @@ export default function OperateScreen() {
   // 4개씩 세로 컬럼으로 자른다(①②③④ 세로 → ⑤⑥⑦⑧ 다음 컬럼).
   const gameColumns: Array<typeof queueFrames> = [];
   for (let i = 0; i < queueFrames.length; i += 4) gameColumns.push(queueFrames.slice(i, i + 4));
+  const firstEmptyCourt = courts.find((c) => c.status === 'EMPTY' && !playingByCourtId.get(c.id));
   // 게임 그리드 열 수(반응형) — 가운데 폭(전체 - 오른쪽 대기 300) 기준. 40~50명도 덜 스크롤.
   const centerW = layout.width - 320;
   const gameColW: any = centerW > 1380 ? '32.5%' : centerW > 860 ? '49%' : '100%';
@@ -3913,6 +3914,12 @@ export default function OperateScreen() {
             <View style={[styles.gameNoBadge, { backgroundColor: isNew ? colors.textLight : target ? colors.primary : colors.text }]}><Text style={styles.gameNoBadgeT}>{isNew ? '＋' : idx + 1}</Text></View>
             <Text style={[styles.gameFrameNo, { color: target ? colors.primary : colors.text }]}>{isNew ? '새 게임' : '번 게임'} ({members.length}/4){target ? ' · 여기로 ▼' : ''}</Text>
           </View>
+          {/* 찍어서 코트에 밀어넣기 — 4명 차고 빈 코트 있을 때 (넣으면 이 게임은 소모/초기화) */}
+          {!selectedPlayer && !isNew && full && (firstEmptyCourt
+            ? <TouchableOpacity style={[styles.gameFrameStart, { backgroundColor: colors.primary }]} onPress={() => assignQueueToCourt(firstEmptyCourt.id, frame.id ?? undefined)} accessibilityLabel={`${idx + 1}번 게임 코트 투입`}>
+                <Icon name="play" size={11} color="#fff" /><Text style={styles.gameFrameStartT}>투입</Text>
+              </TouchableOpacity>
+            : <Text style={[styles.gameFrameWait, { color: colors.textLight }]}>코트 비면 투입</Text>)}
         </TouchableOpacity>
         <View style={styles.gameFrameSlots}>
           {[0, 1, 2, 3].map((s) => {
@@ -3983,21 +3990,13 @@ export default function OperateScreen() {
               : pool.map((p) => <PlayerTag key={p.userId} player={p} />)}
           </PoolDropZone>
         </ScrollView>
-        {/* 오른쪽: 대기 = 코트에 들어간 게임 기록(4명 1줄, 진행+지난) — 전 게임 편성 확인용 */}
+        {/* 오른쪽: 진행 중 게임(현재 코트 위, 4명 1줄) — 선수 탭=교체. 지난 게임 기록은 두지 않음. */}
         <View style={[styles.m2PoolRight, { borderLeftColor: colors.border }]}>
-          <Text style={[styles.m2PanelTitle, { color: colors.text }]}>대기 · 게임 기록 (코트 들어간 순)</Text>
+          <Text style={[styles.m2PanelTitle, { color: colors.text }]}>진행 중 ({liveGames.length}) · 탭=교체</Text>
           <ScrollView style={{ flex: 1 }} keyboardShouldPersistTaps="handled">
-            {liveGames.length > 0 && (<>
-              <Text style={[styles.m2SectionLabel, { color: colors.warning }]}>진행 중 · 선수 탭=교체</Text>
-              {liveGames.map((c) => <LiveGameRow key={c.id} court={c} colW="100%" />)}
-            </>)}
-            {recentlyOut.length > 0 && (<>
-              <Text style={[styles.m2SectionLabel, { color: colors.textSecondary, marginTop: spacing.sm }]}>지난 게임 (최근 위)</Text>
-              {recentlyOut.map((r) => <CompletedGameRow key={r.id} rec={r} />)}
-            </>)}
-            {liveGames.length === 0 && recentlyOut.length === 0 && (
-              <Text style={[styles.emptyPool, { color: colors.textLight }]}>코트에 들어간 게임이 4명 1줄로 여기 쌓여요</Text>
-            )}
+            {liveGames.length > 0
+              ? liveGames.map((c) => <LiveGameRow key={c.id} court={c} colW="100%" />)
+              : <Text style={[styles.emptyPool, { color: colors.textLight }]}>진행 중 게임 없음</Text>}
           </ScrollView>
         </View>
       </View>
