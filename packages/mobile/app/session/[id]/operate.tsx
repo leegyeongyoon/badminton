@@ -472,7 +472,7 @@ export default function OperateScreen() {
       const x = ev.pageX; const y = ev.pageY;
       poolMovedRef.current = true;
       setPoolDrag((prev) => (prev ? { ...prev, x, y } : prev));
-      const hit = hitTestDrop(x, y, ['tray', 'queue', 'court']);
+      const hit = hitTestDrop(x, y, ['tray', 'queue', 'court', 'frame', 'pool']);
       setHoverDropId(hit ? hit.id : null);
     };
     const onUp = (ev: PointerEvent) => {
@@ -1152,8 +1152,8 @@ export default function OperateScreen() {
 
   // 선택 선수를 큐의 한 게임(entryId)으로 이동. 대상이 4명이면 마지막 1명을 대기로 밀어냄(스왑).
   // entryId===null 이면 새 게임 생성. 원래 게임에선 빠져 빈자리로 남는다(자동 안 채움).
-  const moveSelectedToGame = useCallback(async (entryId: string | null) => {
-    const P = selectedPlayer; if (!P) return; setSelectedPlayer(null);
+  // 코어 이동(탭·드래그 공용): 선수 P를 큐 게임(entryId)으로. 4명이면 마지막 1명을 대기로(스왑). null=새 게임.
+  const moveToGame = useCallback(async (P: string, entryId: string | null) => {
     const cur = queuedEntries.find((e) => e.playerIds.includes(P));
     if (cur && cur.id === entryId) return;
     try {
@@ -1168,18 +1168,15 @@ export default function OperateScreen() {
         const target = queuedEntries.find((e) => e.id === entryId); if (!target) { loadBoard(); return; }
         let tp = target.playerIds.filter((x) => x !== P);
         let bumped: string | null = null;
-        if (tp.length >= 4) { bumped = tp[tp.length - 1]; tp = tp.slice(0, 3); } // 4명이면 마지막을 대기로
+        if (tp.length >= 4) { bumped = tp[tp.length - 1]; tp = tp.slice(0, 3); }
         await updateEntry(entryId, [...tp, P]);
         const num = queuedEntries.findIndex((e) => e.id === entryId) + 1;
         showSuccess(`${getPlayer(P)?.userName || '선수'} → ${num}번 게임${bumped ? ` · ${getPlayer(bumped)?.userName || ''} 대기로` : ''}`);
       }
       loadBoard(); loadPool();
     } catch (err: any) { showAlert('오류', err?.response?.data?.error || '이동 실패'); loadBoard(); }
-  }, [selectedPlayer, queuedEntries, updateEntry, deleteEntry, createQueueGame, loadBoard, loadPool]);
-
-  // 선택 선수를 대기로(현재 게임에서 빼기). 게임이 비면 삭제.
-  const removeSelectedToPool = useCallback(async () => {
-    const P = selectedPlayer; if (!P) return; setSelectedPlayer(null);
+  }, [queuedEntries, updateEntry, deleteEntry, createQueueGame, loadBoard, loadPool]);
+  const moveToPool = useCallback(async (P: string) => {
     const cur = queuedEntries.find((e) => e.playerIds.includes(P));
     if (!cur) return;
     try {
@@ -1188,7 +1185,10 @@ export default function OperateScreen() {
       showSuccess(`${getPlayer(P)?.userName || '선수'} → 대기`);
       loadBoard(); loadPool();
     } catch (err: any) { showAlert('오류', err?.response?.data?.error || '빼기 실패'); loadBoard(); }
-  }, [selectedPlayer, queuedEntries, updateEntry, deleteEntry, loadBoard, loadPool]);
+  }, [queuedEntries, updateEntry, deleteEntry, loadBoard, loadPool]);
+  // 탭(선택) 래퍼
+  const moveSelectedToGame = useCallback((entryId: string | null) => { const P = selectedPlayer; if (!P) return; setSelectedPlayer(null); moveToGame(P, entryId); }, [selectedPlayer, moveToGame]);
+  const removeSelectedToPool = useCallback(() => { const P = selectedPlayer; if (!P) return; setSelectedPlayer(null); moveToPool(P); }, [selectedPlayer, moveToPool]);
 
   // 선택 선수 P를 '탭한 게임 선수 X' 자리와 스왑: P가 X 자리 차지, X는 대기로. P의 원래 게임은 빈자리.
   const swapSelectedWith = useCallback(async (targetUserId: string) => {
@@ -1560,7 +1560,7 @@ export default function OperateScreen() {
 
   // ─── Resolve a drop (called on pool-drag release) ───
   const resolveDrop = useCallback((userId: string, pageX: number, pageY: number) => {
-    const hit = hitTestDrop(pageX, pageY, ['tray', 'queue', 'court']);
+    const hit = hitTestDrop(pageX, pageY, ['tray', 'queue', 'court', 'frame', 'pool']);
     if (!hit) return;
     if (hit.kind === 'tray') {
       placeStagedAt(userId, hit.slotIndex);
@@ -1569,8 +1569,14 @@ export default function OperateScreen() {
     } else if (hit.kind === 'court' && hit.courtId) {
       // 코트로 드롭: 선택된 그룹(staged)을 그 코트 draft 로. 선택이 없으면 끌어온 한 명만.
       draftCourt(hit.courtId, staged.length > 0 ? staged : [userId]);
+    } else if (hit.kind === 'frame') {
+      // 모드2: 끌어온 선수를 이 게임(entryId)으로(null=새 게임). 4명이면 1명 대기로(스왑).
+      moveToGame(userId, hit.entryId ?? null);
+    } else if (hit.kind === 'pool') {
+      // 모드2: 끌어온 선수를 대기로(게임에서 빼기).
+      moveToPool(userId);
     }
-  }, [hitTestDrop, placeStagedAt, handleDropOnQueueSlot, draftCourt, staged]);
+  }, [hitTestDrop, placeStagedAt, handleDropOnQueueSlot, draftCourt, staged, moveToGame, moveToPool]);
   resolveDropRef.current = resolveDrop;
 
   // ─── Animate the card-sized gap open/closed for a given hover state ───
@@ -3823,9 +3829,49 @@ export default function OperateScreen() {
     const g = getGenderMeta(player.gender);
     const busy = busySet.has(player.userId);
     const selected = selectedPlayer === player.userId;
+    // 드래그(모드1처럼): 6px 이상 움직이면 beginPoolDrag — 게임/대기 칸에 끌어다 놓기. 탭은 onPress(선택/스왑) 그대로.
+    const pan = useRef(PanResponder.create({
+      onStartShouldSetPanResponder: () => false,
+      onMoveShouldSetPanResponder: (_e, gg) => Math.abs(gg.dx) > 6 || Math.abs(gg.dy) > 6,
+      onPanResponderGrant: (e) => beginPoolDrag(player.userId, player.userName, player.skillLevel, e.nativeEvent.pageX, e.nativeEvent.pageY),
+      onPanResponderMove: (e) => {
+        if (Platform.OS === 'web') return;
+        const { pageX, pageY } = e.nativeEvent;
+        setPoolDrag((prev) => (prev ? { ...prev, x: pageX, y: pageY } : prev));
+        const hit = hitTestDrop(pageX, pageY, ['frame', 'pool']);
+        setHoverDropId(hit ? hit.id : null);
+      },
+      onPanResponderRelease: (e) => {
+        if (Platform.OS === 'web') return;
+        const { pageX, pageY } = e.nativeEvent;
+        const dragged = poolDragRef.current?.userId;
+        poolDragRef.current = null; setPoolDrag(null); setHoverDropId(null);
+        if (dragged) resolveDrop(dragged, pageX, pageY);
+      },
+      onPanResponderTerminate: () => { poolDragRef.current = null; setPoolDrag(null); setHoverDropId(null); },
+    })).current;
+    const onPointerDownWeb = (ev: any) => {
+      if (Platform.OS !== 'web') return;
+      if (ev.button != null && ev.button !== 0) return;
+      const startX = ev.pageX, startY = ev.pageY; let started = false;
+      const w = window as any;
+      const onMove = (e: PointerEvent) => {
+        if (!started) {
+          if (Math.abs(e.pageX - startX) <= 6 && Math.abs(e.pageY - startY) <= 6) return;
+          started = true;
+          beginPoolDrag(player.userId, player.userName, player.skillLevel, e.pageX, e.pageY);
+        }
+        if (started) { w.removeEventListener('pointermove', onMove, true); w.removeEventListener('pointerup', onUp, true); }
+      };
+      const onUp = () => { w.removeEventListener('pointermove', onMove, true); w.removeEventListener('pointerup', onUp, true); };
+      w.addEventListener('pointermove', onMove, true);
+      w.addEventListener('pointerup', onUp, true);
+    };
     return (
       <TouchableOpacity
         activeOpacity={0.7}
+        {...pan.panHandlers}
+        {...(Platform.OS === 'web' ? { onPointerDown: onPointerDownWeb } : {})}
         onPress={() => {
           if (!selectedPlayer || selectedPlayer === player.userId) { setSelectedPlayer(selectedPlayer === player.userId ? null : player.userId); return; }
           // 선택 중 + 다른 선수 탭: 큐 게임 선수면 스왑(탭한 사람 대기로), 대기 선수면 선택 전환
@@ -3932,19 +3978,27 @@ export default function OperateScreen() {
     const full = members.length === 4;
     const isNew = frame.id === null;
     const target = !!selectedPlayer && !members.includes(selectedPlayer);
+    // 드롭존 등록(드래그한 선수를 이 게임으로). 위치는 보드/창 변할 때 다시 측정.
+    const frameRef = useRef<View>(null);
+    const dropId = `m2frame-${frame.id ?? 'new'}`;
+    const hovered = hoverDropId === dropId;
+    useEffect(() => {
+      const t = setTimeout(() => {
+        frameRef.current?.measureInWindow((x, y, w, h) => {
+          registerDrop({ id: dropId, kind: 'frame', entryId: frame.id ?? undefined, slotIndex: 0, rect: { x, y, w, h } });
+        });
+      }, 60);
+      return () => { clearTimeout(t); unregisterDrop(dropId); };
+    }, [dropId, queuedEntries.length, members.length, idx, layout.width]);
+    const lit = target || hovered;
     return (
-      <View style={[styles.gameFrame, { width: colW, borderColor: target ? colors.primary : full ? colors.primary : colors.border, borderWidth: target ? 3 : 2, backgroundColor: target ? 'rgba(16,185,129,0.10)' : colors.surface }]}>
+      <View ref={frameRef} style={[styles.gameFrame, { width: colW, borderColor: lit ? colors.primary : full ? colors.primary : colors.border, borderWidth: lit ? 3 : 2, backgroundColor: lit ? 'rgba(16,185,129,0.10)' : colors.surface }]}>
         <TouchableOpacity style={styles.gameFrameHead} activeOpacity={selectedPlayer ? 0.6 : 1} disabled={!selectedPlayer} onPress={() => { if (selectedPlayer) moveSelectedToGame(frame.id); }}>
           <View style={styles.gameFrameNoWrap}>
-            <View style={[styles.gameNoBadge, { backgroundColor: isNew ? colors.textLight : target ? colors.primary : colors.text }]}><Text style={styles.gameNoBadgeT}>{isNew ? '＋' : idx + 1}</Text></View>
-            <Text style={[styles.gameFrameNo, { color: target ? colors.primary : colors.text }]}>{isNew ? '새 게임' : '번 게임'} ({members.length}/4){target ? ' · 여기로 ▼' : ''}</Text>
+            <View style={[styles.gameNoBadge, { backgroundColor: isNew ? colors.textLight : idx === 0 ? colors.primary : colors.text }]}><Text style={styles.gameNoBadgeT}>{isNew ? '＋' : idx + 1}</Text></View>
+            <Text style={[styles.gameFrameNo, { color: isNew ? colors.textLight : idx === 0 ? colors.primary : colors.text }]}>{isNew ? '새 게임' : idx === 0 ? '다음 차례' : `${idx + 1}번째`}</Text>
+            <Text style={[styles.gameFrameCount, { color: target ? colors.primary : colors.textLight }]}>{target ? '여기로 ▼' : `${members.length}/4`}</Text>
           </View>
-          {/* 찍어서 코트에 밀어넣기 — 4명 차고 빈 코트 있을 때 (넣으면 이 게임은 소모/초기화) */}
-          {!selectedPlayer && !isNew && full && (firstEmptyCourt
-            ? <TouchableOpacity style={[styles.gameFrameStart, { backgroundColor: colors.primary }]} onPress={() => assignQueueToCourt(firstEmptyCourt.id, frame.id ?? undefined)} accessibilityLabel={`${idx + 1}번 게임 코트 투입`}>
-                <Icon name="play" size={11} color="#fff" /><Text style={styles.gameFrameStartT}>투입</Text>
-              </TouchableOpacity>
-            : <Text style={[styles.gameFrameWait, { color: colors.textLight }]}>코트 비면 투입</Text>)}
         </TouchableOpacity>
         <View style={styles.gameFrameSlots}>
           {[0, 1, 2, 3].map((s) => {
@@ -3962,13 +4016,25 @@ export default function OperateScreen() {
     );
   };
 
-  // 대기 영역 — 선수 선택 중이면 탭해서 그 선수를 게임에서 빼 대기로(서버).
+  // 대기 영역 — 선수 선택 중이면 탭해서(또는 끌어다 놓아) 그 선수를 게임에서 빼 대기로(서버).
   const PoolDropZone = ({ children }: { children: React.ReactNode }) => {
     const target = !!selectedPlayer;
+    const poolRef = useRef<View>(null);
+    const dropId = 'm2pool';
+    const hovered = hoverDropId === dropId;
+    useEffect(() => {
+      const t = setTimeout(() => {
+        poolRef.current?.measureInWindow((x, y, w, h) => {
+          registerDrop({ id: dropId, kind: 'pool', slotIndex: 0, rect: { x, y, w, h } });
+        });
+      }, 60);
+      return () => { clearTimeout(t); unregisterDrop(dropId); };
+    }, [pool.length, layout.width]);
+    const lit = target || hovered;
     return (
-      <TouchableOpacity activeOpacity={target ? 0.7 : 1} disabled={!target} onPress={() => removeSelectedToPool()}
-        style={[styles.poolZone, { borderColor: target ? colors.primary : 'transparent', backgroundColor: target ? 'rgba(16,185,129,0.08)' : 'transparent' }]}>
-        {target && <Text style={[styles.m2SectionLabel, { color: colors.primary, width: '100%' }]}>여기를 탭하면 대기로 ▼</Text>}
+      <TouchableOpacity ref={poolRef} activeOpacity={target ? 0.7 : 1} disabled={!target} onPress={() => removeSelectedToPool()}
+        style={[styles.poolZone, { borderColor: lit ? colors.primary : 'transparent', backgroundColor: lit ? 'rgba(16,185,129,0.08)' : 'transparent' }]}>
+        {lit && <Text style={[styles.m2SectionLabel, { color: colors.primary, width: '100%' }]}>여기에 놓으면 대기로 ▼</Text>}
         {children}
       </TouchableOpacity>
     );
@@ -5226,9 +5292,10 @@ const styles = StyleSheet.create({
   gameFrame: { borderWidth: 2, borderRadius: radius.md, padding: 8 },
   gameFrameHead: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 5 },
   gameFrameNoWrap: { flexDirection: 'row', alignItems: 'center', gap: 6, flex: 1 },
-  gameNoBadge: { minWidth: 22, height: 22, borderRadius: 11, paddingHorizontal: 5, alignItems: 'center', justifyContent: 'center' },
-  gameNoBadgeT: { color: '#fff', fontSize: 13, fontWeight: '900' },
-  gameFrameNo: { ...typography.caption, fontWeight: '800' },
+  gameNoBadge: { minWidth: 30, height: 30, borderRadius: 15, paddingHorizontal: 6, alignItems: 'center', justifyContent: 'center' },
+  gameNoBadgeT: { color: '#fff', fontSize: 17, fontWeight: '900' },
+  gameFrameNo: { ...typography.body1, fontWeight: '900' },
+  gameFrameCount: { ...typography.caption, fontWeight: '800' },
   m2LeftHead: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: spacing.sm, marginBottom: 8 },
   m2AutoBtn: { flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: spacing.md, paddingVertical: 6, borderWidth: 1.5, borderRadius: radius.lg },
   m2AutoBtnT: { ...typography.buttonSm, fontWeight: '800' },
