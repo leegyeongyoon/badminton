@@ -3797,6 +3797,9 @@ export default function OperateScreen() {
     ...queuedEntries.map((e) => ({ id: e.id, players: e.playerIds })),
     { id: null, players: [] },
   ];
+  // 4개씩 세로 컬럼으로 자른다(①②③④ 세로 → ⑤⑥⑦⑧ 다음 컬럼).
+  const gameColumns: Array<typeof queueFrames> = [];
+  for (let i = 0; i < queueFrames.length; i += 4) gameColumns.push(queueFrames.slice(i, i + 4));
   // 게임 그리드 열 수(반응형) — 가운데 폭(전체 - 오른쪽 대기 300) 기준. 40~50명도 덜 스크롤.
   const centerW = layout.width - 320;
   const gameColW: any = centerW > 1380 ? '32.5%' : centerW > 860 ? '49%' : '100%';
@@ -3952,9 +3955,13 @@ export default function OperateScreen() {
               </View>
             </>
           )}
-          <Text style={[styles.m2SectionLabel, { color: colors.textSecondary }]}>다음 게임 · 번호 순서대로 코트 투입</Text>
-          <View style={styles.m2GameGrid}>
-            {queueFrames.map((f, i) => <GameFrame key={f.id ?? 'new'} frame={f} idx={i} colW={gameColW} />)}
+          <Text style={[styles.m2SectionLabel, { color: colors.textSecondary }]}>다음 게임 · 위→아래 순서, 4개씩 세로 (선수 탭→선택, 옮길 게임/대기 탭)</Text>
+          <View style={styles.m2GameCols}>
+            {gameColumns.map((col, ci) => (
+              <View key={ci} style={styles.m2GameCol}>
+                {col.map((f, j) => <GameFrame key={f.id ?? `new${ci}`} frame={f} idx={ci * 4 + j} colW="100%" />)}
+              </View>
+            ))}
           </View>
         </ScrollView>
         {/* 오른쪽: 대기 — 게임과 같이 보며 마음대로 넣고/빼고(탭) */}
@@ -5160,6 +5167,9 @@ const styles = StyleSheet.create({
   m2Scroll: { paddingHorizontal: spacing.smd, paddingBottom: spacing.xl },
   m2SectionLabel: { ...typography.caption, fontWeight: '800', marginBottom: 6 },
   m2GameGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm },
+  // 다음 게임: 4개씩 세로 컬럼(여러 컬럼 가로로)
+  m2GameCols: { flexDirection: 'row', alignItems: 'flex-start', gap: spacing.sm },
+  m2GameCol: { flex: 1, minWidth: 0, gap: spacing.sm },
   gameFrame: { borderWidth: 2, borderRadius: radius.md, padding: 8 },
   gameFrameHead: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 5 },
   gameFrameNoWrap: { flexDirection: 'row', alignItems: 'center', gap: 6, flex: 1 },
