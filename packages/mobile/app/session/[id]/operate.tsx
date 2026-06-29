@@ -3853,9 +3853,14 @@ export default function OperateScreen() {
     if (slots.some((x) => x !== null)) { slots.forEach((id) => { if (id) grouped.add(id); }); poolGroups.push(slots); }
   }
   const restPool = pool.filter((m) => !grouped.has(m.userId) && !bottomSet.has(m.userId)).map((m) => m.userId);
-  for (let i = 0; i < restPool.length; i += 4) poolGroups.push(restPool.slice(i, i + 4));
+  for (let i = 0; i < restPool.length; i += 5) poolGroups.push(restPool.slice(i, i + 5));
   const bottomOrdered = poolBottom.filter((id) => bottomSet.has(id));
-  for (let i = 0; i < bottomOrdered.length; i += 4) poolGroups.push(bottomOrdered.slice(i, i + 4));
+  for (let i = 0; i < bottomOrdered.length; i += 5) poolGroups.push(bottomOrdered.slice(i, i + 5));
+  // 코트에 들어간(게임 중) 묶음 — 대기 맨 아래에 묶음으로 보여 '게임 치는 동안 다음 게임 미리 편성'.
+  const playingCols = courts
+    .map((c) => ({ name: c.name, entry: playingByCourtId.get(c.id) }))
+    .filter((x) => x.entry && (x.entry.playerIds?.length ?? 0) > 0)
+    .map((x) => ({ name: x.name, ids: x.entry!.playerIds as string[] }));
   // 번호 게임 = 서버 큐 순서 + 끝에 '새 게임' 칸(entryId null).
   const queueFrames: Array<{ id: string | null; players: string[] }> = [
     ...queuedEntries.map((e) => ({ id: e.id, players: e.playerIds })),
@@ -4154,16 +4159,23 @@ export default function OperateScreen() {
           </View>
           {/* 대기 = 묶음(같이 나온 4명)을 '세로 컬럼'으로, 옆으로 스크롤. 한 줄 full폭이라 이름 안 짤림. */}
           <PoolDropZone>
-            {pool.length === 0
+            {pool.length === 0 && playingCols.length === 0
               ? <Text style={[styles.emptyPool, { color: colors.textLight }]}>대기 인원 없음</Text>
               : (
                 <ScrollView horizontal showsHorizontalScrollIndicator style={{ flex: 1 }} contentContainerStyle={styles.m2PoolCols} keyboardShouldPersistTaps="handled">
                   {poolGroups.map((grp, gi) => (
                     <View key={gi} style={styles.m2PoolCol}>
                       {grp.map((id, si) => {
-                        if (!id) return <View key={`gap${si}`} style={[styles.gameSlotEmpty, { opacity: 0.4, borderColor: colors.border }]} />;
+                        if (!id) return <View key={`gap${si}`} style={[styles.poolGap, { borderColor: colors.border }]} />;
                         const p = getPlayer(id); return p ? <PlayerTag key={id} player={p} block compact /> : null;
                       })}
+                    </View>
+                  ))}
+                  {/* 게임 중(코트 들어간) 묶음 — 맨 뒤(오른쪽). 끌어다 놓아 그들의 다음 게임 미리 편성. */}
+                  {playingCols.map((pc, i) => (
+                    <View key={`play${i}`} style={[styles.m2PoolCol, { borderLeftWidth: 2, borderLeftColor: colors.warningLight, paddingLeft: 6 }]}>
+                      <Text style={[styles.m2PlayColHead, { color: colors.warning }]} numberOfLines={1}>{pc.name} · 게임 중</Text>
+                      {pc.ids.map((id) => { const p = getPlayer(id); return p ? <PlayerTag key={id} player={p} block compact /> : null; })}
                     </View>
                   ))}
                 </ScrollView>
@@ -5316,8 +5328,11 @@ const styles = StyleSheet.create({
   m2CourtTop: { flex: 1, minWidth: 0, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 6, paddingHorizontal: spacing.md, paddingVertical: 10, borderWidth: 2, borderRadius: radius.md },
   m2CourtCard: { flex: 1, minWidth: 0, borderWidth: 2, borderRadius: radius.md, padding: spacing.sm },
   m2Body: { flex: 1, flexDirection: 'row', paddingTop: spacing.xs },
-  m2Center: { flex: 1, paddingLeft: spacing.smd },
+  // flex:1 + minWidth:0 + overflow hidden — 대기(오른쪽)가 넓어지면 게임판이 자동으로 줄고
+  // 내부 가로 스크롤로 감싼다(밖으로 안 넘침). minWidth:0 이 없으면 콘텐츠 폭만큼 커져 대기를 밀어냄.
+  m2Center: { flex: 1, minWidth: 0, overflow: 'hidden', paddingLeft: spacing.smd },
   m2CenterScroll: { paddingRight: spacing.smd, paddingBottom: spacing.xl },
+  m2PlayColHead: { ...typography.caption, fontWeight: '800', marginBottom: 2 },
   m2PoolRight: { width: 430, borderLeftWidth: 1, paddingHorizontal: spacing.sm, paddingTop: spacing.xs },
   m2PoolSearchRow: { flexDirection: 'row', alignItems: 'center', gap: 5, marginBottom: 6 },
   m2PoolSearch: { flex: 1, minWidth: 0, height: 30, borderWidth: 1, borderRadius: radius.md, paddingHorizontal: 8, ...typography.caption },
@@ -5393,6 +5408,7 @@ const styles = StyleSheet.create({
   poolZone: { flex: 1, padding: spacing.xs, borderWidth: 1.5, borderStyle: 'dashed', borderColor: 'transparent', borderRadius: radius.md },
   m2PoolCols: { flexDirection: 'row', gap: 8, alignItems: 'flex-start', paddingBottom: 6 },
   m2PoolCol: { width: 150, gap: 5 },
+  poolGap: { height: 34, borderWidth: 1.5, borderStyle: 'dashed', borderRadius: radius.md, opacity: 0.4 },
   poolOrder: { minWidth: 18, height: 18, borderRadius: 9, paddingHorizontal: 4, alignItems: 'center', justifyContent: 'center' },
   poolOrderT: { ...typography.caption, fontWeight: '800' },
   poolWrap: { flexDirection: 'row', flexWrap: 'wrap', gap: 6 },
