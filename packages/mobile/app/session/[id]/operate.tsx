@@ -294,6 +294,18 @@ export default function OperateScreen() {
       },
     }),
   ).current;
+  // 모드2 오른쪽 '대기 명단' 폭 — 디바이더 드래그로 조절(모드1 분할처럼). 왼쪽으로 끌면 넓어짐.
+  const [m2RightWidth, setM2RightWidth] = useState(430);
+  const m2RightWidthRef = useRef(430); m2RightWidthRef.current = m2RightWidth;
+  const m2DragStartRef = useRef(430);
+  const m2DividerPan = useRef(
+    PanResponder.create({
+      onStartShouldSetPanResponder: () => true,
+      onMoveShouldSetPanResponder: () => true,
+      onPanResponderGrant: () => { m2DragStartRef.current = m2RightWidthRef.current; },
+      onPanResponderMove: (_e, g) => { setM2RightWidth(Math.max(280, Math.min(820, m2DragStartRef.current - g.dx))); },
+    }),
+  ).current;
   // 출석 풀 보기 전환: 'group' = 미편성/편성됨/게임중 3분할(기본), 'all' = 전체를
   // 가나다 한 줄 목록으로 묶고 각 카드에 편성 상태 배지를 붙인다. 'recent' = 방금
   // 끝난 게임들을 게임 단위(함께 친 4명)로 묶어 보여줘 새 조합으로 바로 다시 편성.
@@ -3884,7 +3896,7 @@ export default function OperateScreen() {
         {typeof order === 'number' && <View style={[styles.poolOrder, { backgroundColor: colors.surfaceSecondary }]}><Text style={[styles.poolOrderT, { color: colors.textSecondary }]}>{order}</Text></View>}
         <View style={[styles.magnetSkill, { backgroundColor: skill.color }]}><Text style={styles.magnetSkillText}>{(player.skillLevel || '·').toUpperCase()}</Text></View>
         <Text style={[styles.magnetName, { color: colors.text }]} numberOfLines={1}>{player.userName}</Text>
-        {!compact && g && <GenderMarker meta={g} size={14} />}
+        {g && <GenderMarker meta={g} size={compact ? 13 : 14} />}
         {!compact && <View style={[styles.magnetGames, { backgroundColor: colors.surfaceSecondary }]}><Text style={[styles.magnetGamesText, { color: colors.textSecondary }]}>{player.gamesPlayedToday ?? 0}</Text></View>}
         {busy && <View style={[styles.conflictDot, { borderColor: colors.surface }]} />}
       </TouchableOpacity>
@@ -3907,7 +3919,7 @@ export default function OperateScreen() {
         <View style={styles.gameFrameSlots}>
           {[0, 1, 2, 3].map((s) => { const pid = pids[s]; const p = pid ? getPlayer(pid) : null; const sk = getSkillMeta(p?.skillLevel); return (
             <TouchableOpacity key={s} disabled={!pid || !turnId} activeOpacity={0.7} onPress={() => { if (turnId && pid) setRunningSwap({ turnId, outUserId: pid, courtName: court.name, currentIds: pids }); }} style={[styles.gameSlot, { borderColor: pid ? sk.color : colors.border, backgroundColor: colors.surface }]} accessibilityLabel={pid ? `${p?.userName ?? pnames[s] ?? ''} 교체` : '빈 칸'}>
-              {pid ? (<><View style={[styles.slotSkill, { backgroundColor: sk.color }]}><Text style={styles.slotSkillText}>{(p?.skillLevel || '·').toUpperCase()}</Text></View><Text style={[styles.slotName, { color: colors.text }]} numberOfLines={1}>{p?.userName ?? pnames[s] ?? '선수'}</Text></>) : <Text style={[styles.slotEmpty, { color: colors.textLight }]}>·</Text>}
+              {pid ? (<><View style={[styles.slotSkill, { backgroundColor: sk.color }]}><Text style={styles.slotSkillText}>{(p?.skillLevel || '·').toUpperCase()}</Text></View><Text style={[styles.slotName, { color: colors.text }]} numberOfLines={1}>{p?.userName ?? pnames[s] ?? '선수'}</Text>{p && getGenderMeta(p.gender) && <GenderMarker meta={getGenderMeta(p.gender)!} size={12} />}</>) : <Text style={[styles.slotEmpty, { color: colors.textLight }]}>·</Text>}
             </TouchableOpacity>
           ); })}
         </View>
@@ -3943,7 +3955,7 @@ export default function OperateScreen() {
                 onPress={() => { if (turnId && pid) setRunningSwap({ turnId, outUserId: pid, courtName: court.name, currentIds: pids }); }}
                 style={[styles.gameSlot, { borderColor: pid ? sk.color : colors.border, backgroundColor: colors.surface }]}
                 accessibilityLabel={pid ? `${p?.userName ?? pnames[s] ?? ''} 교체` : '빈 칸'}>
-                {pid ? (<><View style={[styles.slotSkill, { backgroundColor: sk.color }]}><Text style={styles.slotSkillText}>{(p?.skillLevel || '·').toUpperCase()}</Text></View><Text style={[styles.slotName, { color: colors.text }]} numberOfLines={1}>{p?.userName ?? pnames[s] ?? '선수'}</Text></>) : <Text style={[styles.slotEmpty, { color: colors.textLight }]}>·</Text>}
+                {pid ? (<><View style={[styles.slotSkill, { backgroundColor: sk.color }]}><Text style={styles.slotSkillText}>{(p?.skillLevel || '·').toUpperCase()}</Text></View><Text style={[styles.slotName, { color: colors.text }]} numberOfLines={1}>{p?.userName ?? pnames[s] ?? '선수'}</Text>{p && getGenderMeta(p.gender) && <GenderMarker meta={getGenderMeta(p.gender)!} size={12} />}</>) : <Text style={[styles.slotEmpty, { color: colors.textLight }]}>·</Text>}
               </TouchableOpacity>
             );
           })}
@@ -4074,8 +4086,12 @@ export default function OperateScreen() {
             ))}
           </View>
         </ScrollView>
+        {/* 분할 디바이더 — 끌어서 가운데 게임판 ↔ 오른쪽 대기판 크기 조절(모드1 분할처럼) */}
+        <View style={[styles.m2Divider, Platform.OS === 'web' ? ({ cursor: 'col-resize' } as any) : null]} {...m2DividerPan.panHandlers}>
+          <View style={[styles.m2DividerBar, { backgroundColor: colors.textLight }]} />
+        </View>
         {/* 오른쪽 대기판 = 대기 명단을 '같이 나온 4명'끼리 한 줄로 정렬. 그 4명을 탭→다음 게임으로 재편성. */}
-        <View style={[styles.m2PoolRight, { borderLeftColor: colors.border }]}>
+        <View style={[styles.m2PoolRight, { borderLeftColor: colors.border, width: m2RightWidth }]}>
           <Text style={[styles.m2PanelTitle, { color: colors.text }]}>대기 명단 ({pool.length}) · 같이 나온 4명끼리</Text>
           <ScrollView style={{ flex: 1 }} keyboardShouldPersistTaps="handled">
             <PoolDropZone>
@@ -5242,6 +5258,8 @@ const styles = StyleSheet.create({
   m2Center: { flex: 1, paddingLeft: spacing.smd },
   m2CenterScroll: { paddingRight: spacing.smd, paddingBottom: spacing.xl },
   m2PoolRight: { width: 430, borderLeftWidth: 1, paddingHorizontal: spacing.sm, paddingTop: spacing.xs },
+  m2Divider: { width: 16, alignSelf: 'stretch', alignItems: 'center', justifyContent: 'center' },
+  m2DividerBar: { width: 4, alignSelf: 'stretch', borderRadius: 2, marginVertical: 6, opacity: 0.7 },
   // (이전 2단 스타일 — 일부 미사용)
   m2Board: { flex: 1, flexDirection: 'row' },
   m2Left: { flex: 1, paddingLeft: spacing.smd, paddingTop: spacing.sm },
