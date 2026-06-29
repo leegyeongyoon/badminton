@@ -1085,6 +1085,8 @@ export default function OperateScreen() {
   // device 로컬, Phase B 서버 동기화). court 소속은 좌표→칸 rect 히트테스트로 유도.
   const [tagPos, setTagPos] = useState<Record<string, { x: number; y: number }>>({});
   const [canvasSize, setCanvasSize] = useState({ w: 0, h: 0 });
+  // 자석 이름표 릴리즈(한 번 만든 PanResponder)에서 최신 캔버스 크기로 좌표 변환하기 위한 ref.
+  const canvasSizeRef = useRef({ w: 0, h: 0 });
   const tagPosKey = clubSessionId ? `operate_tags_${clubSessionId}` : null;
   const tagPosLoadedRef = useRef(false);
   useEffect(() => {
@@ -3682,8 +3684,11 @@ export default function OperateScreen() {
   const tagIndex = new Map<string, number>();
   uniquePlayers.forEach((m, i) => tagIndex.set(m.userId, i));
   const idxOf = (userId: string) => tagIndex.get(userId) ?? 0;
-  // 검색/필터로 캔버스에 보일 이름표만 추림(50명도 한눈에). 코트 칸 인원수는 전체 기준 계산.
-  const canvasPlayers = uniquePlayers.filter((m) => matchesPoolFilters(m));
+  canvasSizeRef.current = { w: cw, h: ch };
+  // 코트 틀(슬롯)에 들어간 사람은 명단에서 빠진다(그 슬롯에 보임). 검색/필터로 추림.
+  const draftedIds = new Set<string>();
+  for (const ids of Object.values(courtDrafts)) for (const id of ids) draftedIds.add(id);
+  const canvasPlayers = uniquePlayers.filter((m) => matchesPoolFilters(m) && !draftedIds.has(m.userId));
   const defaultFrac = (idx: number) => {
     if (cw <= 0 || ch <= 0) return { x: 0, y: 0 };
     const cols = Math.max(1, Math.floor((cw - CANVAS_PAD * 2) / (MAG_W + MAG_GAP)));
@@ -3730,11 +3735,19 @@ export default function OperateScreen() {
         onMoveShouldSetPanResponder: (_e, gs) => Math.abs(gs.dx) > 4 || Math.abs(gs.dy) > 4,
         onPanResponderGrant: () => { pan.extractOffset(); },
         onPanResponderMove: RNAnimated.event([null, { dx: pan.x, dy: pan.y }], { useNativeDriver: false }),
-        onPanResponderRelease: () => {
+        onPanResponderRelease: (e) => {
           pan.flattenOffset();
-          const nx = ((pan.x as any).__getValue?.() ?? 0) / (cw || 1);
-          const ny = ((pan.y as any).__getValue?.() ?? 0) / (ch || 1);
-          commitTagFrac(player.userId, nx, ny);
+          // 코트 틀 위에서 놓으면 그 코트 슬롯에 넣고(draftCourt), 아니면 자유 위치로 둔다.
+          const pageX = e.nativeEvent.pageX, pageY = e.nativeEvent.pageY;
+          const hit = hitTestDrop(pageX, pageY, ['court']);
+          if (hit && hit.kind === 'court' && hit.courtId) {
+            draftCourt(hit.courtId, [player.userId]);
+          } else {
+            const cw2 = canvasSizeRef.current.w || 1, ch2 = canvasSizeRef.current.h || 1;
+            const nx = ((pan.x as any).__getValue?.() ?? 0) / cw2;
+            const ny = ((pan.y as any).__getValue?.() ?? 0) / ch2;
+            commitTagFrac(player.userId, nx, ny);
+          }
         },
         onPanResponderTerminate: () => { pan.flattenOffset(); },
       }),
@@ -3757,30 +3770,51 @@ export default function OperateScreen() {
     );
   };
 
-  // 코트 칸(드롭존). 비어있으면 점선 칸(여기로 4명), 게임 중이면 진행 중 표시 + 게임 종료.
+  // 코트 = 4칸 슬롯 틀. 비어있으면 슬롯(이름표를 끌어다 놓으면 들어감) + 게임 시작,
+  // 게임 중이면 진행 선수(탭=교체) + 게임 종료. 빈 코트는 '코트' 드롭타깃으로 등록.
   const CanvasCourtZone = ({ court, idx }: { court: Court; idx: number }) => {
     const r = zoneRect(idx);
+    const ref = useRef<View>(null);
+    const dropId = `court-${court.id}`;
     const playingEntry = playingByCourtId.get(court.id);
     const occupied = court.status !== 'EMPTY' || !!playingEntry;
+    const draft = courtDrafts[court.id] || [];
     const pids = playingEntry?.playerIds ?? court.currentTurn?.playerIds ?? [];
     const pnames = playingEntry?.playerNames ?? court.currentTurn?.playerNames ?? [];
     const turnId = court.currentTurn?.id ?? playingEntry?.turnId ?? null;
+
+    const measure = useCallback(() => {
+      if (occupied) { unregisterDrop(dropId); return; }
+      ref.current?.measureInWindow((x, y, w, h) => registerDrop({ id: dropId, kind: 'court', courtId: court.id, slotIndex: 0, rect: { x, y, w, h } }));
+    }, [dropId, occupied, court.id]);
+    useEffect(() => {
+      if (occupied) { unregisterDrop(dropId); return; }
+      const t = setTimeout(measure, 0);
+      return () => { clearTimeout(t); unregisterDrop(dropId); };
+    });
+
     return (
       <View
-        pointerEvents={occupied ? 'box-none' : 'none'}
+        ref={ref}
+        onLayout={measure}
+        collapsable={false}
+        pointerEvents="box-none"
         style={[
           styles.canvasZone,
           { left: r.x, top: r.y, width: r.w, height: r.h,
-            borderColor: occupied ? colors.warning : colors.border,
-            borderStyle: occupied ? 'solid' : 'dashed',
+            borderColor: occupied ? colors.warning : draft.length === 4 ? colors.primary : colors.border,
+            borderStyle: occupied || draft.length > 0 ? 'solid' : 'dashed',
             backgroundColor: occupied ? colors.warningLight : colors.surfaceSecondary },
         ]}
       >
         <View style={styles.canvasZoneHeader}>
           <Text style={[styles.canvasZoneName, { color: colors.text }]} numberOfLines={1}>{court.name}</Text>
-          <Text style={[styles.canvasZoneState, { color: occupied ? colors.warning : colors.textLight }]}>{occupied ? '게임 중' : '여기로 4명'}</Text>
+          <Text style={[styles.canvasZoneState, { color: occupied ? colors.warning : draft.length === 4 ? colors.primary : colors.textLight }]}>
+            {occupied ? '게임 중' : `${draft.length}/4`}
+          </Text>
         </View>
-        {occupied && (
+
+        {occupied ? (
           <>
             <View style={styles.canvasZoneChips}>
               {pids.map((pid, i) => (
@@ -3794,9 +3828,45 @@ export default function OperateScreen() {
                 </TouchableOpacity>
               ))}
             </View>
-            <Text style={[styles.canvasZoneHintT, { color: colors.textLight }]}>선수 탭 = 교체</Text>
             <TouchableOpacity style={[styles.canvasZoneBtn, { borderColor: colors.danger }]} onPress={() => handleEndGame(court.id)} accessibilityLabel={`${court.name} 게임 종료`}>
-              <Text style={[styles.canvasZoneBtnText, { color: colors.danger }]}>게임 종료</Text>
+              <Text style={[styles.canvasZoneBtnText, { color: colors.danger }]}>게임 종료 · 선수 탭=교체</Text>
+            </TouchableOpacity>
+          </>
+        ) : (
+          <>
+            <View style={styles.canvasSlots}>
+              {[0, 1, 2, 3].map((i) => {
+                const pid = draft[i];
+                const p = pid ? getPlayer(pid) : null;
+                const sk = getSkillMeta(p?.skillLevel);
+                return (
+                  <TouchableOpacity
+                    key={i}
+                    disabled={!pid}
+                    onPress={() => pid && removeFromCourtDraft(court.id, i)}
+                    style={[styles.canvasSlot, { borderColor: pid ? sk.color : colors.border, backgroundColor: pid ? colors.surface : 'transparent', borderStyle: pid ? 'solid' : 'dashed' }]}
+                    accessibilityLabel={pid ? `${p?.userName} 빼기` : '빈 칸'}
+                  >
+                    {pid ? (
+                      <>
+                        <View style={[styles.slotSkill, { backgroundColor: sk.color }]}><Text style={styles.slotSkillText}>{(p?.skillLevel || '·').toUpperCase()}</Text></View>
+                        <Text style={[styles.slotName, { color: colors.text }]} numberOfLines={1}>{p?.userName}</Text>
+                      </>
+                    ) : (
+                      <Text style={[styles.slotEmpty, { color: colors.textLight }]}>＋</Text>
+                    )}
+                  </TouchableOpacity>
+                );
+              })}
+            </View>
+            <TouchableOpacity
+              style={[styles.canvasZoneStart, { backgroundColor: draft.length === 4 ? colors.primary : colors.textLight }]}
+              disabled={draft.length !== 4}
+              onPress={() => startCourtDraft(court.id)}
+              accessibilityLabel={`${court.name} 게임 시작`}
+            >
+              <Icon name="play" size={13} color="#fff" />
+              <Text style={styles.canvasZoneStartText}>게임 시작 ({draft.length}/4)</Text>
             </TouchableOpacity>
           </>
         )}
@@ -3810,26 +3880,6 @@ export default function OperateScreen() {
         <>
           {courts.map((court, i) => <CanvasCourtZone key={court.id} court={court} idx={i} />)}
           {canvasPlayers.map((m) => <MagnetTag key={m.userId} player={m} idx={idxOf(m.userId)} />)}
-          {courts.map((court, i) => {
-            const occupied = court.status !== 'EMPTY' || !!playingByCourtId.get(court.id);
-            if (occupied) return null;
-            const mem = zoneMembers(i);
-            const canStart = mem.length === 4;
-            const r = zoneRect(i);
-            return (
-              <TouchableOpacity
-                key={`start-${court.id}`}
-                style={[styles.canvasStartBtn, { left: r.x + 8, top: r.y + r.h - 40, width: r.w - 16, backgroundColor: canStart ? colors.primary : colors.textLight }]}
-                onPress={() => handleStartCanvasGame(court.id, mem)}
-                disabled={!canStart}
-                activeOpacity={0.85}
-                accessibilityLabel={`${court.name} 게임 시작`}
-              >
-                <Icon name="play" size={14} color="#fff" />
-                <Text style={styles.canvasStartBtnText}>게임 시작 ({mem.length}/4)</Text>
-              </TouchableOpacity>
-            );
-          })}
           {courts.length === 0 && (
             <Text style={[styles.emptyPool, { color: colors.textLight, position: 'absolute', top: 24, left: 20, right: 20 }]}>코트가 없어요. "코트 관리"에서 추가하세요</Text>
           )}
@@ -4972,6 +5022,15 @@ const styles = StyleSheet.create({
   mode2Toolbar: { flexDirection: 'row', alignItems: 'flex-start', gap: spacing.sm, paddingHorizontal: spacing.smd, paddingTop: spacing.sm },
   mode2TidyBtn: { flexDirection: 'row', alignItems: 'center', gap: 5, paddingHorizontal: spacing.md, paddingVertical: 9, borderWidth: 1, borderRadius: radius.lg },
   mode2TidyText: { ...typography.buttonSm, fontWeight: '700' },
+  // 코트 4칸 슬롯 틀
+  canvasSlots: { flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginTop: 6 },
+  canvasSlot: { flexDirection: 'row', alignItems: 'center', gap: 5, width: '47%', minHeight: 34, paddingHorizontal: 7, paddingVertical: 5, borderWidth: 1.5, borderRadius: radius.md },
+  slotSkill: { width: 20, height: 20, borderRadius: 4, alignItems: 'center', justifyContent: 'center' },
+  slotSkillText: { color: '#fff', fontSize: 11, fontWeight: '700' },
+  slotName: { ...typography.caption, flex: 1, fontWeight: '700' },
+  slotEmpty: { ...typography.body2, flex: 1, textAlign: 'center', fontWeight: '700' },
+  canvasZoneStart: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 5, marginTop: 7, paddingVertical: 8, borderRadius: radius.md },
+  canvasZoneStartText: { ...typography.buttonSm, color: '#fff', fontWeight: '800' },
   canvasZone: { position: 'absolute', borderWidth: 1.5, borderRadius: radius.lg, padding: spacing.sm },
   canvasZoneHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
   canvasZoneName: { ...typography.buttonSm, fontWeight: '700' },
