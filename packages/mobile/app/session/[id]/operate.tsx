@@ -89,6 +89,10 @@ const SUGGEST_MODES: {
 // queued game card registered as a reorder drop target (drag the card itself to
 // reorder the 다음 게임 대기열).
 type DropKind = 'tray' | 'queue' | 'queue-card' | 'court' | 'queue-compose';
+// 모드2 자석판 이름표/스냅 상수(드롭 핸들러와 렌더 공용 — 모듈 스코프).
+const MAG_W = 132, MAG_H = 54, MAG_GAP = 10, BENCH_PAD = 10;
+// 두 이름표 중심이 SNAP_DIST(px) 안이면 한 묶음으로 스냅. 묶음은 2x2(GRP_SLOT) 배치.
+const SNAP_DIST = 118, GRP_SLOT_W = 138, GRP_SLOT_H = 60;
 interface DropTarget {
   id: string;            // unique key
   kind: DropKind;
@@ -1079,39 +1083,7 @@ export default function OperateScreen() {
     }
   }, [courtDrafts, courts, createQueueGame, assignEntry, clearCourtDraft, loadBoard, loadCourts, loadPool]);
 
-  // 모드2 '새 게임' 대기 컴포저: 명단에서 끌어온 4명 초안. 4명 차면 createQueueGame 으로
-  // 대기 게임 등록(서버 큐) → 초안 비움. 그 대기 게임을 코트로 드래그하면 투입(assignEntry).
-  const [queueDraft, setQueueDraft] = useState<string[]>([]);
-  // 모드2 대기 컴포저: 명단 이름표를 끌어오면 '새 게임' 초안에 추가. 중복/4명초과 방지.
-  const addToQueueDraft = useCallback((userId: string) => {
-    setQueueDraft((prev) => (prev.includes(userId) || prev.length >= 4 ? prev : [...prev, userId]));
-  }, []);
-  const removeFromQueueDraft = useCallback((idx: number) => {
-    setQueueDraft((prev) => prev.filter((_, i) => i !== idx));
-  }, []);
-  // 초안이 4명이 되면 자동으로 대기 게임 등록(createQueueGame) 후 초안 비움.
-  const registeringRef = useRef(false);
-  useEffect(() => {
-    if (queueDraft.length !== 4 || registeringRef.current) return;
-    registeringRef.current = true;
-    const ids = queueDraft;
-    setQueueDraft([]);
-    createQueueGame(ids)
-      .then(() => loadBoard())
-      .catch((err: any) => { showAlert('오류', err?.response?.data?.error || '대기 등록 실패'); setQueueDraft(ids); })
-      .finally(() => { registeringRef.current = false; });
-  }, [queueDraft, createQueueGame, loadBoard]);
-  // 대기 게임(큐 엔트리)을 빈 코트로 투입: assignEntry. 성공 시 보드/코트/풀 갱신.
-  const assignQueueToCourt = useCallback(async (entryId: string, courtId: string) => {
-    const court = courts.find((c) => c.id === courtId);
-    try {
-      await assignEntry(entryId, courtId);
-      loadBoard(); loadCourts(); loadPool();
-      showSuccess(`${court?.name || '코트'} 게임 시작!`);
-    } catch (err: any) {
-      showAlert('오류', err?.response?.data?.error || '코트 투입에 실패했어요');
-    }
-  }, [courts, assignEntry, loadBoard, loadCourts, loadPool]);
+  // (모드2 자석판 묶음 핸들러는 commitTagFrac 정의 뒤로 이동 — 아래 참조)
 
   // ─── 모드 2: 자유 캔버스 자석판 ───
   // 이름표를 캔버스 아무 좌표에나 자유 배치(분수 x,y 저장). 상단 코트 칸(드롭존)에
@@ -1170,6 +1142,83 @@ export default function OperateScreen() {
     setTagPos((prev) => ({ ...prev, [msg.userId]: { x: msg.x, y: msg.y } }));
   }, []);
   useSocketEvent('gameBoard:layoutUpdated', handleLayoutUpdated);
+
+  // ─── 모드2 자석판: 이름표 4개를 가까이 붙이면 자동 묶음(틀 없이 스냅). 묶음(4명)을
+  // 코트로 끌면 투입(createQueueGame→assignEntry). 묶음에서 멀리 빼면 묶음 해제(수정). ───
+  const [groupOf, setGroupOf] = useState<Record<string, string>>({}); // userId → 묶음id
+  const groupOfRef = useRef<Record<string, string>>({});
+  groupOfRef.current = groupOf;
+  // 드롭 핸들러(한 번 만든 PanResponder)에서 최신 위치/명단을 읽기 위한 ref(렌더에서 채움).
+  const tagPosEffRef = useRef<Record<string, { x: number; y: number }>>({});
+  const benchListRef = useRef<string[]>([]);
+
+  // 묶음(4명)을 코트에 투입: createQueueGame→assignEntry. 성공 시 그 묶음 해제 + 갱신.
+  const startGroupOnCourt = useCallback(async (courtId: string, members: string[]) => {
+    const court = courts.find((c) => c.id === courtId);
+    try {
+      const entry = await createQueueGame(members);
+      if (!entry?.id) throw new Error('entry');
+      await assignEntry(entry.id, courtId);
+      setGroupOf((prev) => { const n = { ...prev }; members.forEach((u) => delete n[u]); return n; });
+      loadBoard(); loadCourts(); loadPool();
+      showSuccess(`${court?.name || '코트'} 게임 시작!`);
+    } catch (err: any) {
+      showAlert('오류', err?.response?.data?.error || '코트 투입에 실패했어요');
+    }
+  }, [courts, createQueueGame, assignEntry, loadBoard, loadCourts, loadPool]);
+
+  // 이름표 드롭: ①코트 위 + 4명 묶음이면 투입 ②근처 이름표(여유<4) 있으면 그 묶음에 합류
+  // (2x2 스냅) ③아무것도 없으면 묶음에서 빠지고 자유 위치. localX/Y·중심은 명단영역 px.
+  const handleTagDrop = useCallback((userId: string, localX: number, localY: number, pageX: number, pageY: number) => {
+    const bw = canvasSizeRef.current.w || 1, bh = canvasSizeRef.current.h || 1;
+    const grp = { ...groupOfRef.current };
+    // ① 코트 위 + 4명 묶음 → 투입
+    const courtHit = hitTestDrop(pageX, pageY, ['court']);
+    if (courtHit?.kind === 'court' && courtHit.courtId) {
+      const gid = grp[userId];
+      const members = gid ? Object.keys(grp).filter((u) => grp[u] === gid) : [];
+      if (members.length === 4) { startGroupOnCourt(courtHit.courtId, members); return; }
+    }
+    // ② 근처 이름표(묶음 여유<4) 찾기
+    const dcx = localX + MAG_W / 2, dcy = localY + MAG_H / 2;
+    let best: string | null = null, bestD = SNAP_DIST;
+    for (const u of benchListRef.current) {
+      if (u === userId) continue;
+      const f = tagPosEffRef.current[u]; if (!f) continue;
+      const cx = f.x * bw + MAG_W / 2, cy = f.y * bh + MAG_H / 2;
+      const d = Math.hypot(cx - dcx, cy - dcy);
+      if (d < bestD) {
+        const tg = grp[u];
+        const sz = tg ? Object.keys(grp).filter((x) => grp[x] === tg && x !== userId).length : 1;
+        if (sz < 4) { best = u; bestD = d; }
+      }
+    }
+    if (best) {
+      let gid = grp[best];
+      if (!gid) { gid = best; grp[best] = gid; }
+      grp[userId] = gid;
+      const aPos = tagPosEffRef.current[best] || { x: 0, y: 0 };
+      const ax = aPos.x * bw, ay = aPos.y * bh;
+      const members = Object.keys(grp).filter((u) => grp[u] === gid);
+      const nextPos: Record<string, { x: number; y: number }> = {};
+      members.forEach((u, i) => {
+        const col = i % 2, row = Math.floor(i / 2);
+        nextPos[u] = { x: (ax + col * GRP_SLOT_W) / bw, y: (ay + row * GRP_SLOT_H) / bh };
+      });
+      setGroupOf(grp);
+      setTagPos((prev) => ({ ...prev, ...nextPos }));
+      return;
+    }
+    // ③ 아무것도 없음 → 묶음 해제 + 자유 위치(남은 묶음 1명뿐이면 그것도 해제)
+    if (grp[userId]) {
+      delete grp[userId];
+      const counts: Record<string, number> = {};
+      for (const u in grp) counts[grp[u]] = (counts[grp[u]] || 0) + 1;
+      for (const u in grp) if (counts[grp[u]] <= 1) delete grp[u];
+      setGroupOf(grp);
+    }
+    commitTagFrac(userId, localX / bw, localY / bh);
+  }, [hitTestDrop, startGroupOnCourt, commitTagFrac]);
   // 캔버스 코트 칸의 4명으로 실제 게임 시작(기존 createQueueGame→assignEntry 재사용).
   const handleStartCanvasGame = useCallback(async (courtId: string, userIds: string[]) => {
     if (userIds.length !== 4) { showAlert('알림', '코트 칸에 4명을 넣어주세요'); return; }
@@ -3706,7 +3755,6 @@ export default function OperateScreen() {
   // 위: 코트 줄(게임중 | 빈=대기 게임 드롭). 가운데: 대기 게임 줄(미리 여러 개 + '새 게임'
   // 컴포저). 아래: 명단(자유 배치 이름표). 명단→컴포저로 끌어 4명 채우면 대기 게임 등록,
   // 대기 게임 카드를 빈 코트로 끌면 투입(assignEntry).
-  const MAG_W = 132, MAG_H = 54, MAG_GAP = 10, BENCH_PAD = 10;
   // 명단(자유 배치) 영역 측정 크기. 측정 전엔 윈도우 폭으로 폴백.
   const bw = canvasSize.w || layout.width;
   const bh = canvasSize.h || 320;
@@ -3714,9 +3762,8 @@ export default function OperateScreen() {
   const tagIndex = new Map<string, number>();
   uniquePlayers.forEach((m, i) => tagIndex.set(m.userId, i));
   const idxOf = (userId: string) => tagIndex.get(userId) ?? 0;
-  // 명단 = 출석자 중 대기게임/진행게임/새게임초안에 안 들어간 사람만. 검색/필터로 추림.
+  // 명단 = 출석자 중 진행/대기게임에 안 들어간 사람만(묶음 멤버는 캔버스에 남음). 검색/필터로 추림.
   const benchExcluded = new Set<string>();
-  for (const id of queueDraft) benchExcluded.add(id);
   for (const e of queuedEntries) for (const id of e.playerIds) benchExcluded.add(id);
   playingByCourtId.forEach((e) => (e.playerIds || []).forEach((id) => benchExcluded.add(id)));
   const benchPlayers = uniquePlayers.filter((m) => matchesPoolFilters(m) && !benchExcluded.has(m.userId));
@@ -3727,6 +3774,14 @@ export default function OperateScreen() {
     return { x: (BENCH_PAD + col * (MAG_W + MAG_GAP)) / bw, y: (BENCH_PAD + row * (MAG_H + MAG_GAP)) / bh };
   };
   const fracOf = (userId: string, idx: number) => tagPos[userId] || defaultFrac(idx);
+  // 드롭 핸들러가 읽을 최신 명단/위치 ref 채우기(묶음 스냅·근접 탐색용).
+  benchListRef.current = benchPlayers.map((m) => m.userId);
+  const tagPosEff: Record<string, { x: number; y: number }> = {};
+  benchPlayers.forEach((m) => { tagPosEff[m.userId] = fracOf(m.userId, idxOf(m.userId)); });
+  tagPosEffRef.current = tagPosEff;
+  // 묶음(group) → 멤버 목록 (캔버스에 색 테두리로 표시).
+  const groupsMap: Record<string, string[]> = {};
+  for (const m of benchPlayers) { const gid = groupOf[m.userId]; if (gid) (groupsMap[gid] = groupsMap[gid] || []).push(m.userId); }
   // 정렬: 흩어진 이름표를 게임수 적은 순으로 깔끔히 재배치(내 화면 기준 — 50명도 한눈에).
   const tidyTags = () => {
     if (bw <= 0 || bh <= 0) return;
@@ -3741,8 +3796,8 @@ export default function OperateScreen() {
     setTagPos(next);
   };
 
-  // 명단 자석 이름표 — 자유 드래그. 릴리즈 시 '새 게임' 컴포저 위면 거기에 넣고
-  // (addToQueueDraft), 아니면 자유 위치로 둔다(분수 좌표 persist).
+  // 명단 자석 이름표 — 자유 드래그. 릴리즈 시 handleTagDrop: ①코트+4명묶음→투입
+  // ②근처 이름표→묶음 스냅 ③아무것도없음→자유 위치/묶음 해제.
   const MagnetTag = ({ player, idx }: { player: Player; idx: number }) => {
     const f = fracOf(player.userId, idx);
     const pan = useRef(new RNAnimated.ValueXY({ x: f.x * bw, y: f.y * bh })).current;
@@ -3750,6 +3805,7 @@ export default function OperateScreen() {
     const skill = getSkillMeta(player.skillLevel);
     const g = getGenderMeta(player.gender);
     const busy = busySet.has(player.userId);
+    const grouped = !!groupOf[player.userId];
     const pr = useRef(
       PanResponder.create({
         onMoveShouldSetPanResponder: (_e, gs) => Math.abs(gs.dx) > 4 || Math.abs(gs.dy) > 4,
@@ -3757,13 +3813,8 @@ export default function OperateScreen() {
         onPanResponderMove: RNAnimated.event([null, { dx: pan.x, dy: pan.y }], { useNativeDriver: false }),
         onPanResponderRelease: (e) => {
           pan.flattenOffset();
-          const hit = hitTestDrop(e.nativeEvent.pageX, e.nativeEvent.pageY, ['queue-compose']);
-          if (hit && hit.kind === 'queue-compose') {
-            addToQueueDraft(player.userId);
-          } else {
-            const w = canvasSizeRef.current.w || 1, h = canvasSizeRef.current.h || 1;
-            commitTagFrac(player.userId, ((pan.x as any).__getValue?.() ?? 0) / w, ((pan.y as any).__getValue?.() ?? 0) / h);
-          }
+          const lx = (pan.x as any).__getValue?.() ?? 0, ly = (pan.y as any).__getValue?.() ?? 0;
+          handleTagDrop(player.userId, lx, ly, e.nativeEvent.pageX, e.nativeEvent.pageY);
         },
         onPanResponderTerminate: () => { pan.flattenOffset(); },
       }),
@@ -3771,7 +3822,7 @@ export default function OperateScreen() {
     return (
       <RNAnimated.View
         {...pr.panHandlers}
-        style={[styles.magnetTag, { width: MAG_W, borderColor: skill.color, backgroundColor: colors.surface, transform: pan.getTranslateTransform() }]}
+        style={[styles.magnetTag, { width: MAG_W, borderColor: grouped ? colors.primary : skill.color, borderWidth: grouped ? 2.5 : 2, backgroundColor: colors.surface, transform: pan.getTranslateTransform() }]}
       >
         <View style={[styles.magnetSkill, { backgroundColor: skill.color }]}>
           <Text style={styles.magnetSkillText}>{(player.skillLevel || '·').toUpperCase()}</Text>
@@ -3835,110 +3886,56 @@ export default function OperateScreen() {
           </>
         ) : (
           <View style={styles.m2CourtEmpty}>
-            <Text style={[styles.m2CourtEmptyT, { color: colors.textLight }]}>여기로 대기 게임을{'\n'}끌어다 놓기</Text>
+            <Text style={[styles.m2CourtEmptyT, { color: colors.textLight }]}>4명 묶음을{'\n'}여기로 끌어다 놓기</Text>
           </View>
         )}
       </View>
     );
   };
 
-  // 대기 게임 카드(4명 묶음). 카드를 빈 코트로 드래그하면 그 코트에 투입(assignQueueToCourt).
-  const QueueGameCard = ({ entry }: { entry: GameBoardEntry }) => {
-    const pan = useRef(new RNAnimated.ValueXY({ x: 0, y: 0 })).current;
-    const pr = useRef(
-      PanResponder.create({
-        onMoveShouldSetPanResponder: (_e, gs) => Math.abs(gs.dx) > 4 || Math.abs(gs.dy) > 4,
-        onPanResponderGrant: () => {},
-        onPanResponderMove: RNAnimated.event([null, { dx: pan.x, dy: pan.y }], { useNativeDriver: false }),
-        onPanResponderRelease: (e) => {
-          const hit = hitTestDrop(e.nativeEvent.pageX, e.nativeEvent.pageY, ['court']);
-          pan.setValue({ x: 0, y: 0 }); // 항상 제자리로(투입되면 큐에서 사라짐)
-          if (hit && hit.kind === 'court' && hit.courtId) assignQueueToCourt(entry.id, hit.courtId);
-        },
-        onPanResponderTerminate: () => { pan.setValue({ x: 0, y: 0 }); },
-      }),
-    ).current;
-    return (
-      <RNAnimated.View {...pr.panHandlers} style={[styles.m2QCard, { borderColor: colors.primary, backgroundColor: colors.surface, transform: pan.getTranslateTransform() }]}>
-        <Text style={[styles.m2QCardHint, { color: colors.primary }]}>대기 · 코트로 끌기</Text>
-        <View style={styles.m2QCardNames}>
-          {entry.playerIds.map((id, i) => {
-            const p = getPlayer(id); const sk = getSkillMeta(p?.skillLevel);
-            return (
-              <View key={id} style={styles.m2QName}>
-                <View style={[styles.m2QSkill, { backgroundColor: sk.color }]}><Text style={styles.m2QSkillT}>{(p?.skillLevel || '·').toUpperCase()}</Text></View>
-                <Text style={[styles.m2QNameT, { color: colors.text }]} numberOfLines={1}>{p?.userName ?? entry.playerNames?.[i] ?? '선수'}</Text>
-              </View>
-            );
-          })}
-        </View>
-      </RNAnimated.View>
-    );
-  };
-
-  // '새 게임' 컴포저 — 명단 이름표를 끌어다 4명 채우면 자동으로 대기 게임 등록. 'queue-compose' 드롭.
-  const QueueComposer = () => {
-    const ref = useRef<View>(null);
-    const dropId = 'queue-compose';
-    const measure = useCallback(() => {
-      ref.current?.measureInWindow((x, y, w, h) => registerDrop({ id: dropId, kind: 'queue-compose', slotIndex: 0, rect: { x, y, w, h } }));
-    }, []);
-    useEffect(() => {
-      const t = setTimeout(measure, 0);
-      return () => { clearTimeout(t); unregisterDrop(dropId); };
-    });
+  // 묶음(group) 색 테두리 — 멤버들의 바운딩박스에 그림. 4명이면 강조 + '코트로 투입' 안내.
+  const GroupBoundary = ({ members }: { members: string[] }) => {
+    if (members.length < 2) return null;
+    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+    for (const u of members) {
+      const f = tagPosEff[u]; if (!f) continue;
+      const x = f.x * bw, y = f.y * bh;
+      minX = Math.min(minX, x); minY = Math.min(minY, y);
+      maxX = Math.max(maxX, x + MAG_W); maxY = Math.max(maxY, y + MAG_H);
+    }
+    if (!isFinite(minX)) return null;
+    const full = members.length === 4;
     return (
       <View
-        ref={ref}
-        onLayout={measure}
-        collapsable={false}
-        style={[styles.m2Composer, { borderColor: queueDraft.length > 0 ? colors.primary : colors.border, backgroundColor: colors.surfaceSecondary }]}
+        pointerEvents="none"
+        style={[styles.m2Group, {
+          left: minX - 8, top: minY - 8 - (full ? 16 : 0),
+          width: maxX - minX + 16, height: maxY - minY + 16 + (full ? 16 : 0),
+          borderColor: full ? colors.primary : colors.textLight,
+          backgroundColor: full ? 'rgba(16,185,129,0.07)' : 'transparent',
+        }]}
       >
-        <Text style={[styles.m2ComposerHint, { color: colors.textLight }]}>새 게임 ({queueDraft.length}/4) · 명단 끌어다 놓기</Text>
-        <View style={styles.m2ComposerSlots}>
-          {[0, 1, 2, 3].map((i) => {
-            const pid = queueDraft[i]; const p = pid ? getPlayer(pid) : null; const sk = getSkillMeta(p?.skillLevel);
-            return (
-              <TouchableOpacity
-                key={i}
-                disabled={!pid}
-                onPress={() => pid && removeFromQueueDraft(i)}
-                style={[styles.m2CSlot, { borderColor: pid ? sk.color : colors.border, backgroundColor: pid ? colors.surface : 'transparent', borderStyle: pid ? 'solid' : 'dashed' }]}
-                accessibilityLabel={pid ? `${p?.userName} 빼기` : '빈 칸'}
-              >
-                {pid ? (
-                  <>
-                    <View style={[styles.slotSkill, { backgroundColor: sk.color }]}><Text style={styles.slotSkillText}>{(p?.skillLevel || '·').toUpperCase()}</Text></View>
-                    <Text style={[styles.slotName, { color: colors.text }]} numberOfLines={1}>{p?.userName}</Text>
-                  </>
-                ) : <Text style={[styles.slotEmpty, { color: colors.textLight }]}>＋</Text>}
-              </TouchableOpacity>
-            );
-          })}
-        </View>
+        {full && <Text style={[styles.m2GroupTag, { color: colors.primary }]}>✓ 코트로 끌면 투입</Text>}
       </View>
     );
   };
 
   const BoardMode2 = (
     <View style={styles.m2Wrap}>
-      {/* 코트 줄 — 게임중 | 빈(대기 게임 드롭) */}
+      {/* 코트 줄 — 게임중(탭=교체·종료) | 빈(4명 묶음 드롭) */}
       <View style={styles.m2CourtRow}>
         {courts.length === 0
           ? <Text style={[styles.emptyPool, { color: colors.textLight }]}>코트가 없어요. "코트 관리"에서 추가하세요</Text>
           : courts.map((court) => <Mode2CourtCard key={court.id} court={court} />)}
       </View>
-      {/* 대기 게임 줄 — 미리 편성한 대기 게임들 + '새 게임' 컴포저 */}
-      <View style={styles.m2QueueRow}>
-        <Text style={[styles.m2QueueLabel, { color: colors.textSecondary }]}>대기 게임 {queuedEntries.length > 0 ? `(${queuedEntries.length})` : ''}</Text>
-        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.m2QueueScroll}>
-          {queuedEntries.map((entry) => <QueueGameCard key={entry.id} entry={entry} />)}
-          <QueueComposer />
-        </ScrollView>
-      </View>
-      {/* 명단(자유 배치) */}
+      {/* 명단(자유 배치 캔버스) — 이름표를 붙이면 자동 묶음, 묶음을 코트로 끌면 투입 */}
       <View style={styles.m2Bench} onLayout={onCanvasLayout}>
-        {bw > 0 && benchPlayers.map((m) => <MagnetTag key={m.userId} player={m} idx={idxOf(m.userId)} />)}
+        {bw > 0 && (
+          <>
+            {Object.entries(groupsMap).map(([gid, members]) => <GroupBoundary key={gid} members={members} />)}
+            {benchPlayers.map((m) => <MagnetTag key={m.userId} player={m} idx={idxOf(m.userId)} />)}
+          </>
+        )}
       </View>
     </View>
   );
@@ -5115,6 +5112,9 @@ const styles = StyleSheet.create({
   m2ComposerSlots: { flexDirection: 'row', flexWrap: 'wrap', gap: 5 },
   m2CSlot: { flexDirection: 'row', alignItems: 'center', gap: 4, width: '47%', minHeight: 30, paddingHorizontal: 5, paddingVertical: 3, borderWidth: 1.5, borderRadius: radius.sm },
   m2Bench: { flex: 1, position: 'relative', marginTop: spacing.sm },
+  // 묶음 색 테두리(4명이면 강조)
+  m2Group: { position: 'absolute', borderWidth: 2.5, borderRadius: radius.lg, borderStyle: 'dashed', alignItems: 'center', justifyContent: 'flex-start', paddingTop: 1 },
+  m2GroupTag: { ...typography.caption, fontWeight: '800' },
   canvasZone: { position: 'absolute', borderWidth: 1.5, borderRadius: radius.lg, padding: spacing.sm },
   canvasZoneHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
   canvasZoneName: { ...typography.buttonSm, fontWeight: '700' },
