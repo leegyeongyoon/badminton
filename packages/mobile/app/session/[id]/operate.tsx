@@ -3852,7 +3852,13 @@ export default function OperateScreen() {
     const slots = r.playerIds.slice(0, 4).map((id) => (poolSet.has(id) && !bottomSet.has(id) && !grouped.has(id)) ? id : null);
     if (slots.some((x) => x !== null)) { slots.forEach((id) => { if (id) grouped.add(id); }); poolGroups.push(slots); }
   }
-  const restPool = pool.filter((m) => !grouped.has(m.userId) && !bottomSet.has(m.userId)).map((m) => m.userId);
+  // 일반 대기(묶음에 안 든 미편성)는 급수순 1차 정렬(S>A>B>C>D>E>F), 그다음 게임수 적은 순.
+  const skillRank = (lv?: string | null) => (({ S: 0, A: 1, B: 2, C: 3, D: 4, E: 5, F: 6 } as Record<string, number>)[(lv || '').toUpperCase()] ?? 9);
+  const restPool = pool
+    .filter((m) => !grouped.has(m.userId) && !bottomSet.has(m.userId))
+    .slice()
+    .sort((a, b) => skillRank(a.skillLevel) - skillRank(b.skillLevel) || gamesOf(a.userId) - gamesOf(b.userId) || a.userName.localeCompare(b.userName))
+    .map((m) => m.userId);
   for (let i = 0; i < restPool.length; i += 4) poolGroups.push(restPool.slice(i, i + 4));
   const bottomOrdered = poolBottom.filter((id) => bottomSet.has(id));
   for (let i = 0; i < bottomOrdered.length; i += 4) poolGroups.push(bottomOrdered.slice(i, i + 4));
@@ -3934,14 +3940,16 @@ export default function OperateScreen() {
         }}
         onLongPress={() => setMatchupTarget({ userId: player.userId, name: player.userName, skillLevel: player.skillLevel, isGuest: (player as any).isGuest })}
         delayLongPress={300}
-        style={[styles.poolTag, fill ? { flex: 1, minWidth: 0 } : block ? { width: '100%' } : { width: MAG_W }, { borderColor: selected ? colors.primary : gCol, borderWidth: selected ? 3 : 2, backgroundColor: selected ? 'rgba(16,185,129,0.14)' : gBg, zIndex: selected ? 9 : 1 }]}
+        style={[styles.poolTag, compact && styles.poolTagCompact, fill ? { flex: 1, minWidth: 0 } : block ? { width: '100%' } : { width: MAG_W }, { borderColor: selected ? colors.primary : gCol, borderWidth: selected ? 3 : 2, backgroundColor: selected ? 'rgba(16,185,129,0.14)' : gBg, zIndex: selected ? 9 : 1 }]}
         accessibilityLabel={`${player.userName} ${g ? g.label : ''} ${selected ? '선택 해제' : '선택'} · 길게=정보·수정`}
       >
         {typeof order === 'number' && <View style={[styles.poolOrder, { backgroundColor: colors.surfaceSecondary }]}><Text style={[styles.poolOrderT, { color: colors.textSecondary }]}>{order}</Text></View>}
-        <View style={[styles.magnetSkill, { backgroundColor: skill.color }]}><Text style={styles.magnetSkillText}>{(player.skillLevel || '·').toUpperCase()}</Text></View>
-        <Text style={[styles.magnetName, { color: colors.text }]} numberOfLines={1}>{player.userName}</Text>
-        {g && <GenderMarker meta={g} size={compact ? 13 : 14} />}
-        {!compact && <View style={[styles.magnetGames, { backgroundColor: colors.surfaceSecondary }]}><Text style={[styles.magnetGamesText, { color: colors.textSecondary }]}>{player.gamesPlayedToday ?? 0}</Text></View>}
+        <View style={[styles.magnetSkill, compact && styles.magnetSkillCompact, { backgroundColor: skill.color }]}><Text style={[styles.magnetSkillText, compact && { fontSize: 11 }]}>{(player.skillLevel || '·').toUpperCase()}</Text></View>
+        <Text style={[styles.magnetName, compact && styles.magnetNameCompact, { color: colors.text }]} numberOfLines={1}>{player.userName}</Text>
+        {g && <GenderMarker meta={g} size={compact ? 12 : 14} />}
+        {compact
+          ? <Text style={[styles.magnetGamesTiny, { color: colors.textLight }]}>{player.gamesPlayedToday ?? 0}</Text>
+          : <View style={[styles.magnetGames, { backgroundColor: colors.surfaceSecondary }]}><Text style={[styles.magnetGamesText, { color: colors.textSecondary }]}>{player.gamesPlayedToday ?? 0}</Text></View>}
         {busy && <View style={[styles.conflictDot, { borderColor: colors.surface }]} />}
       </TouchableOpacity>
     );
@@ -5307,9 +5315,12 @@ const styles = StyleSheet.create({
     }),
   },
   magnetSkill: { width: 24, height: 24, borderRadius: 5, alignItems: 'center', justifyContent: 'center' },
+  magnetSkillCompact: { width: 18, height: 18, borderRadius: 4 },
   magnetSkillText: { color: '#fff', fontSize: 13, fontWeight: '700' },
   magnetName: { ...typography.body2, flex: 1, fontWeight: '700' },
+  magnetNameCompact: { fontSize: 11.5, lineHeight: 14 },
   magnetGames: { minWidth: 20, paddingHorizontal: 5, paddingVertical: 1, borderRadius: 8, alignItems: 'center' },
+  magnetGamesTiny: { fontSize: 10, fontWeight: '800', minWidth: 9, textAlign: 'right' },
   magnetGamesText: { ...typography.caption, fontWeight: '700' },
   // 모드 2 상단 툴바: 검색/필터 + 정렬
   mode2Toolbar: { flexDirection: 'row', alignItems: 'flex-start', gap: spacing.sm, paddingHorizontal: spacing.smd, paddingTop: spacing.sm },
@@ -5417,6 +5428,7 @@ const styles = StyleSheet.create({
   poolWrap: { flexDirection: 'row', flexWrap: 'wrap', gap: 6 },
   poolTag: { flexDirection: 'row', alignItems: 'center', gap: 5, paddingHorizontal: 7, paddingVertical: 5, borderWidth: 2, borderRadius: radius.sm,
     ...(Platform.OS === 'web' ? ({ cursor: 'pointer', userSelect: 'none' } as any) : {}) },
+  poolTagCompact: { gap: 3, paddingHorizontal: 4, paddingVertical: 4 },
   canvasZone: { position: 'absolute', borderWidth: 1.5, borderRadius: radius.lg, padding: spacing.sm },
   canvasZoneHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
   canvasZoneName: { ...typography.buttonSm, fontWeight: '700' },
