@@ -88,7 +88,7 @@ const SUGGEST_MODES: {
 // 'tray'/'queue' = a player-tile drop slot (compose). 'queue-card' = a whole
 // queued game card registered as a reorder drop target (drag the card itself to
 // reorder the 다음 게임 대기열).
-type DropKind = 'tray' | 'queue' | 'queue-card' | 'court' | 'queue-compose';
+type DropKind = 'tray' | 'queue' | 'queue-card' | 'court' | 'queue-compose' | 'frame' | 'pool';
 // 모드2 자석판 이름표/스냅 상수(드롭 핸들러와 렌더 공용 — 모듈 스코프).
 const MAG_W = 132, MAG_H = 54, MAG_GAP = 10, BENCH_PAD = 10;
 // 두 이름표 중심이 SNAP_DIST(px) 안이면 한 묶음으로 스냅. 묶음은 가로 한 줄(GRP_SLOT_W 간격).
@@ -1145,30 +1145,24 @@ export default function OperateScreen() {
 
   // ─── 모드2 게임판: 번호 매겨진 게임 칸(틀)에 풀에서 탭으로 넣고/빼고. 친 사람은 풀 아래로.
   // 꽉 찬 칸을 코트에 투입(createQueueGame→assignEntry). gameFrames = 칸별 4명(클라 초안). ───
-  const [gameFrames, setGameFrames] = useState<string[][]>([]);
-  const [activeFrame, setActiveFrame] = useState(0);
+  // 게임은 풀(게임수 적은 순)에서 4명씩 자동 편성(파생). override = 운영자가 드래그로 조정한
+  // 강제 배치(userId → 게임번호, -1=풀로 빼기). 드롭 핸들러에서 최신 override 읽을 ref.
+  const [override, setOverride] = useState<Record<string, number>>({});
+  const overrideRef = useRef<Record<string, number>>({});
+  overrideRef.current = override;
+  // 드롭 핸들러(한 번 만든 PanResponder)에서 쓸 ref(렌더에서 채움).
+  const frameCountRef = useRef(0);
 
-  // 풀 선수 탭 → 활성 칸(없거나 꽉 차면 첫 여유 칸, 없으면 새 칸)에 추가.
-  const addToActiveFrame = useCallback((userId: string) => {
-    setGameFrames((prev) => {
-      const frames = prev.map((f) => [...f]);
-      if (frames.some((f) => f.includes(userId))) return prev; // 이미 어떤 칸에
-      let idx = activeFrame;
-      if (idx >= frames.length || frames[idx].length >= 4) {
-        idx = frames.findIndex((f) => f.length < 4);
-        if (idx < 0) { frames.push([]); idx = frames.length - 1; }
-      }
-      frames[idx].push(userId);
-      return frames;
-    });
-  }, [activeFrame]);
-
-  // 칸에서 선수 빼기(슬롯 탭) → 풀로 복귀. 빈 칸은 제거(번호 재정렬).
-  const removeFromFrame = useCallback((userId: string) => {
-    setGameFrames((prev) => prev.map((f) => f.filter((u) => u !== userId)).filter((f) => f.length > 0));
+  // 선수를 N번 게임으로 이동(드래그). 기존 강제 배치 덮어씀.
+  const assignToGame = useCallback((userId: string, gameIdx: number) => {
+    setOverride((prev) => ({ ...prev, [userId]: gameIdx }));
+  }, []);
+  // 선수를 풀로 빼기(드래그). override -1.
+  const assignToPool = useCallback((userId: string) => {
+    setOverride((prev) => ({ ...prev, [userId]: -1 }));
   }, []);
 
-  // 꽉 찬 칸(4명)을 코트에 투입: createQueueGame→assignEntry. 성공 시 그 칸 제거 + 갱신.
+  // 꽉 찬 게임(4명)을 코트에 투입: createQueueGame→assignEntry. 성공 시 그 4명 override 정리 + 갱신.
   const startFrameOnCourt = useCallback(async (members: string[], courtId: string) => {
     if (members.length !== 4) { showAlert('알림', '4명을 채워주세요'); return; }
     const court = courts.find((c) => c.id === courtId);
@@ -1176,8 +1170,7 @@ export default function OperateScreen() {
       const entry = await createQueueGame(members);
       if (!entry?.id) throw new Error('entry');
       await assignEntry(entry.id, courtId);
-      const key = [...members].sort().join('|');
-      setGameFrames((prev) => prev.filter((f) => [...f].sort().join('|') !== key));
+      setOverride((prev) => { const n = { ...prev }; members.forEach((u) => delete n[u]); return n; });
       loadBoard(); loadCourts(); loadPool();
       showSuccess(`${court?.name || '코트'} 게임 시작!`);
     } catch (err: any) {
@@ -3716,44 +3709,65 @@ export default function OperateScreen() {
 
   // 넓은 화면=2열[게임판 | 코트·커스텀·레슨자], 좁으면 세로 스택. 기존 split/leftPane/
   // rightPane/stackedContent 스타일을 그대로 재사용한다.
-  // ─── 모드 2 = 게임판(번호 게임 칸 + 정렬 풀) ───
-  // 코트 줄(게임중|빈) + 게임판(1번·2번… 칸: 풀에서 탭으로 넣고 슬롯 탭으로 빼기) + 명단 풀
-  // (게임수 적은 순 = 친 사람 아래로). 꽉 찬 칸은 '코트 투입'으로 게임 시작.
+  // ─── 모드 2 = 게임판(자동 편성 + 드래그 조정) ───
+  // 풀(게임수 적은 순=친 사람 아래로)에서 4명씩 자동으로 번호 게임에 편성. 운영자는 선수를
+  // 드래그해 다른 게임/대기로 옮겨 조정만. 꽉 찬 게임은 '코트 투입'으로 시작. override=강제배치.
   const gamesOf = (uid: string) => getPlayer(uid)?.gamesPlayedToday ?? 0;
-  const framedIds = new Set<string>();
-  for (const f of gameFrames) for (const id of f) framedIds.add(id);
   const poolExcluded = new Set<string>();
   for (const e of queuedEntries) for (const id of e.playerIds) poolExcluded.add(id);
   playingByCourtId.forEach((e) => (e.playerIds || []).forEach((id) => poolExcluded.add(id)));
-  const poolPlayers = uniquePlayers
-    .filter((m) => matchesPoolFilters(m) && !poolExcluded.has(m.userId) && !framedIds.has(m.userId))
+  const waiting = uniquePlayers
+    .filter((m) => matchesPoolFilters(m) && !poolExcluded.has(m.userId))
     .sort((a, b) => gamesOf(a.userId) - gamesOf(b.userId) || a.userName.localeCompare(b.userName));
-  const firstEmptyCourt = courts.find((c) => c.status === 'EMPTY' && !playingByCourtId.get(c.id));
-  // 항상 끝에 빈 칸 1개(새 게임). 활성 칸 = 사용자가 고른 칸(없거나 꽉 차면 첫 미완성 칸).
-  const framesToRender = [...gameFrames, []];
-  let computedActive = activeFrame;
-  if (computedActive >= framesToRender.length || framesToRender[computedActive].length >= 4) {
-    const fi = framesToRender.findIndex((f) => f.length < 4);
-    computedActive = fi >= 0 ? fi : framesToRender.length - 1;
+  // 파생 편성: ① override≥0 강제 배치 ② 나머지 우선순위대로 자동 채움 ③ override=-1 대기로.
+  const games: string[][] = [];
+  const ensure = (i: number) => { while (games.length <= i) games.push([]); return games[i]; };
+  for (const m of waiting) {
+    const o = override[m.userId];
+    if (o !== undefined && o >= 0) { const g = ensure(o); if (g.length < 4) g.push(m.userId); }
   }
+  let gi = 0;
+  for (const m of waiting) {
+    if (override[m.userId] !== undefined) continue;
+    while (games[gi] && games[gi].length >= 4) gi++;
+    ensure(gi).push(m.userId);
+  }
+  const benchedIds = waiting.filter((m) => override[m.userId] === -1).map((m) => m.userId);
+  const framesToRender = [...games, []]; // 끝에 빈 게임 1칸(여기로 끌면 새 게임)
+  frameCountRef.current = framesToRender.length;
+  const firstEmptyCourt = courts.find((c) => c.status === 'EMPTY' && !playingByCourtId.get(c.id));
 
-  // 풀 선수 칩 — 탭하면 현재(활성) 게임 칸에 추가.
-  const PoolTag = ({ player }: { player: Player }) => {
+  // 드래그 가능한 선수 칩(게임 슬롯/대기 공용). 릴리즈 시 게임/대기 드롭존으로 이동.
+  const PlayerTag = ({ player, fill }: { player: Player; fill?: boolean }) => {
     const skill = getSkillMeta(player.skillLevel);
     const g = getGenderMeta(player.gender);
     const busy = busySet.has(player.userId);
+    const pan = useRef(new RNAnimated.ValueXY({ x: 0, y: 0 })).current;
+    const pr = useRef(
+      PanResponder.create({
+        onMoveShouldSetPanResponder: (_e, gs) => Math.abs(gs.dx) > 6 || Math.abs(gs.dy) > 6,
+        onPanResponderGrant: () => {},
+        onPanResponderMove: RNAnimated.event([null, { dx: pan.x, dy: pan.y }], { useNativeDriver: false }),
+        onPanResponderRelease: (e) => {
+          const hit = hitTestDrop(e.nativeEvent.pageX, e.nativeEvent.pageY, ['frame', 'pool']);
+          pan.setValue({ x: 0, y: 0 });
+          if (hit?.kind === 'frame' && typeof hit.slotIndex === 'number') assignToGame(player.userId, hit.slotIndex);
+          else if (hit?.kind === 'pool') assignToPool(player.userId);
+        },
+        onPanResponderTerminate: () => { pan.setValue({ x: 0, y: 0 }); },
+      }),
+    ).current;
     return (
-      <TouchableOpacity
-        style={[styles.poolTag, { width: MAG_W, borderColor: skill.color, backgroundColor: colors.surface }]}
-        onPress={() => addToActiveFrame(player.userId)}
-        accessibilityLabel={`${player.userName} 게임 칸에 넣기`}
+      <RNAnimated.View
+        {...pr.panHandlers}
+        style={[styles.poolTag, fill ? { flex: 1, minWidth: 0 } : { width: MAG_W }, { borderColor: skill.color, backgroundColor: colors.surface, transform: pan.getTranslateTransform(), zIndex: 5 }]}
       >
         <View style={[styles.magnetSkill, { backgroundColor: skill.color }]}><Text style={styles.magnetSkillText}>{(player.skillLevel || '·').toUpperCase()}</Text></View>
         <Text style={[styles.magnetName, { color: colors.text }]} numberOfLines={1}>{player.userName}</Text>
         {g && <GenderMarker meta={g} size={14} />}
         <View style={[styles.magnetGames, { backgroundColor: colors.surfaceSecondary }]}><Text style={[styles.magnetGamesText, { color: colors.textSecondary }]}>{player.gamesPlayedToday ?? 0}</Text></View>
         {busy && <View style={[styles.conflictDot, { borderColor: colors.surface }]} />}
-      </TouchableOpacity>
+      </RNAnimated.View>
     );
   };
 
@@ -3797,41 +3811,48 @@ export default function OperateScreen() {
     );
   };
 
-  // 게임 칸(틀) — 'N번 게임' + 4 슬롯. 슬롯(채워진 것) 탭=빼기, 빈 슬롯/머리 탭=이 칸 활성.
-  // 꽉 차고 빈 코트 있으면 '코트 투입' 버튼.
-  const GameFrame = ({ members, idx, active }: { members: string[]; idx: number; active: boolean }) => {
+  // 게임 칸 — 'N번 게임' + 4명(드래그 가능). 'frame' 드롭존(여기로 끌면 이 게임에). 꽉 차면 코트 투입.
+  const GameFrame = ({ members, idx }: { members: string[]; idx: number }) => {
+    const ref = useRef<View>(null);
+    const dropId = `frame-${idx}`;
     const full = members.length === 4;
+    const measure = useCallback(() => {
+      ref.current?.measureInWindow((x, y, w, h) => registerDrop({ id: dropId, kind: 'frame', slotIndex: idx, rect: { x, y, w, h } }));
+    }, [dropId, idx]);
+    useEffect(() => { const t = setTimeout(measure, 0); return () => { clearTimeout(t); unregisterDrop(dropId); }; });
     return (
-      <View style={[styles.gameFrame, { borderColor: active ? colors.primary : full ? colors.primary : colors.border, backgroundColor: active ? 'rgba(16,185,129,0.06)' : colors.surface }]}>
-        <TouchableOpacity style={styles.gameFrameHead} activeOpacity={0.7} onPress={() => setActiveFrame(idx)}>
-          <Text style={[styles.gameFrameNo, { color: active ? colors.primary : colors.text }]}>{idx + 1}번 게임{active ? ' · 짜는 중' : ''} ({members.length}/4)</Text>
+      <View ref={ref} onLayout={measure} collapsable={false} style={[styles.gameFrame, { borderColor: full ? colors.primary : colors.border, backgroundColor: colors.surface }]}>
+        <View style={styles.gameFrameHead}>
+          <Text style={[styles.gameFrameNo, { color: colors.text }]}>{idx + 1}번 게임 ({members.length}/4)</Text>
           {full && (firstEmptyCourt
             ? <TouchableOpacity style={[styles.gameFrameStart, { backgroundColor: colors.primary }]} onPress={() => startFrameOnCourt(members, firstEmptyCourt.id)} accessibilityLabel={`${idx + 1}번 게임 코트 투입`}>
                 <Icon name="play" size={12} color="#fff" /><Text style={styles.gameFrameStartT}>코트 투입</Text>
               </TouchableOpacity>
             : <Text style={[styles.gameFrameWait, { color: colors.textLight }]}>코트 비면 투입</Text>)}
-        </TouchableOpacity>
-        <View style={styles.gameFrameSlots}>
+        </View>
+        <View style={styles.gameFrameSlots} pointerEvents="box-none">
           {[0, 1, 2, 3].map((s) => {
-            const pid = members[s]; const p = pid ? getPlayer(pid) : null; const sk = getSkillMeta(p?.skillLevel);
-            return (
-              <TouchableOpacity
-                key={s}
-                onPress={() => (pid ? removeFromFrame(pid) : setActiveFrame(idx))}
-                style={[styles.gameSlot, { borderColor: pid ? sk.color : colors.border, backgroundColor: pid ? colors.surface : 'transparent', borderStyle: pid ? 'solid' : 'dashed' }]}
-                accessibilityLabel={pid ? `${p?.userName} 빼기` : `${idx + 1}번 빈 칸`}
-              >
-                {pid ? (
-                  <>
-                    <View style={[styles.slotSkill, { backgroundColor: sk.color }]}><Text style={styles.slotSkillText}>{(p?.skillLevel || '·').toUpperCase()}</Text></View>
-                    <Text style={[styles.slotName, { color: colors.text }]} numberOfLines={1}>{p?.userName}</Text>
-                  </>
-                ) : <Text style={[styles.slotEmpty, { color: colors.textLight }]}>＋</Text>}
-              </TouchableOpacity>
+            const pid = members[s]; const p = pid ? getPlayer(pid) : null;
+            return p ? (
+              <PlayerTag key={s} player={p} fill />
+            ) : (
+              <View key={s} style={[styles.gameSlotEmpty, { borderColor: colors.border }]}><Text style={[styles.slotEmpty, { color: colors.textLight }]}>＋</Text></View>
             );
           })}
         </View>
       </View>
+    );
+  };
+
+  // 대기(빼둔 사람) 영역 — 'pool' 드롭존. 여기로 끌면 게임에서 빼서 대기로.
+  const PoolDropZone = ({ children }: { children: React.ReactNode }) => {
+    const ref = useRef<View>(null);
+    const measure = useCallback(() => {
+      ref.current?.measureInWindow((x, y, w, h) => registerDrop({ id: 'pool-zone', kind: 'pool', slotIndex: -1, rect: { x, y, w, h } }));
+    }, []);
+    useEffect(() => { const t = setTimeout(measure, 0); return () => { clearTimeout(t); unregisterDrop('pool-zone'); }; });
+    return (
+      <View ref={ref} onLayout={measure} collapsable={false} style={styles.poolZone}>{children}</View>
     );
   };
 
@@ -3843,14 +3864,14 @@ export default function OperateScreen() {
           : courts.map((court) => <Mode2CourtCard key={court.id} court={court} />)}
       </View>
       <ScrollView style={{ flex: 1 }} contentContainerStyle={styles.m2Scroll} keyboardShouldPersistTaps="handled">
-        <Text style={[styles.m2SectionLabel, { color: colors.textSecondary }]}>게임판 · 풀에서 탭=넣기, 슬롯 탭=빼기</Text>
-        {framesToRender.map((f, i) => <GameFrame key={i} members={f} idx={i} active={computedActive === i} />)}
-        <Text style={[styles.m2SectionLabel, { color: colors.textSecondary, marginTop: spacing.md }]}>명단 · 게임수 적은 순(친 사람 아래로)</Text>
-        <View style={styles.poolWrap}>
-          {poolPlayers.length === 0
-            ? <Text style={[styles.emptyPool, { color: colors.textLight }]}>대기 인원이 없어요</Text>
-            : poolPlayers.map((m) => <PoolTag key={m.userId} player={m} />)}
-        </View>
+        <Text style={[styles.m2SectionLabel, { color: colors.textSecondary }]}>게임판 · 자동 편성됨 · 선수를 끌어 다른 게임으로 조정</Text>
+        {framesToRender.map((f, i) => <GameFrame key={i} members={f} idx={i} />)}
+        <Text style={[styles.m2SectionLabel, { color: colors.textSecondary, marginTop: spacing.md }]}>대기 · 여기로 끌면 게임에서 빠짐(게임수 적은 순)</Text>
+        <PoolDropZone>
+          {benchedIds.length === 0
+            ? <Text style={[styles.emptyPool, { color: colors.textLight }]}>비움 — 모두 게임에 편성됨</Text>
+            : benchedIds.map((uid) => { const p = getPlayer(uid); return p ? <PlayerTag key={uid} player={p} /> : null; })}
+        </PoolDropZone>
       </ScrollView>
     </View>
   );
@@ -5033,6 +5054,8 @@ const styles = StyleSheet.create({
   gameFrameWait: { ...typography.caption, fontWeight: '700' },
   gameFrameSlots: { flexDirection: 'row', gap: 6 },
   gameSlot: { flex: 1, minWidth: 0, flexDirection: 'row', alignItems: 'center', gap: 5, minHeight: 38, paddingHorizontal: 7, paddingVertical: 5, borderWidth: 1.5, borderRadius: radius.md },
+  gameSlotEmpty: { flex: 1, minWidth: 0, minHeight: 40, alignItems: 'center', justifyContent: 'center', borderWidth: 1.5, borderStyle: 'dashed', borderRadius: radius.md },
+  poolZone: { flexDirection: 'row', flexWrap: 'wrap', gap: MAG_GAP, minHeight: 56, padding: spacing.sm, borderWidth: 1.5, borderStyle: 'dashed', borderColor: 'transparent', borderRadius: radius.md },
   poolWrap: { flexDirection: 'row', flexWrap: 'wrap', gap: MAG_GAP },
   poolTag: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 9, paddingVertical: 9, borderWidth: 2, borderRadius: radius.md,
     ...(Platform.OS === 'web' ? ({ cursor: 'pointer', userSelect: 'none' } as any) : {}) },
