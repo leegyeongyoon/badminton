@@ -3669,7 +3669,7 @@ export default function OperateScreen() {
   // ─── 모드 2 = 자유 캔버스 자석판 ───
   // 출석 전원(게임 중 포함)을 이름표로 캔버스에 자유 배치. 상단 코트 칸(드롭존)에
   // 이름표를 끌어넣어 4명 차면 "게임 시작". court 소속은 좌표→칸 히트테스트로 유도.
-  const CANVAS_PAD = 10, ZONE_H = 150, ZONE_GAP = 8, MAG_W = 88, MAG_H = 40, MAG_GAP = 8;
+  const CANVAS_PAD = 10, ZONE_H = 178, ZONE_GAP = 10, MAG_W = 132, MAG_H = 54, MAG_GAP = 10;
   // 측정 전엔 윈도우 크기로 폴백(웹에서 빈 flex:1 + onLayout 치킨-에그 회피). 측정되면 그 값 사용.
   const cw = canvasSize.w || layout.width;
   const ch = canvasSize.h || Math.max(360, layout.height - 170);
@@ -3678,7 +3678,12 @@ export default function OperateScreen() {
   const zoneW = (zoneAreaW - ZONE_GAP * (nZones - 1)) / nZones;
   const zoneRect = (i: number) => ({ x: CANVAS_PAD + i * (zoneW + ZONE_GAP), y: CANVAS_PAD, w: zoneW, h: ZONE_H });
   const benchTopPx = CANVAS_PAD + ZONE_H + 16;
-  const canvasPlayers = uniquePlayers; // 게임 중 포함 — 운영진이 게임중 선수도 만질 수 있게
+  // 게임 중 포함(운영진이 게임중도 만짐). idxOf = uniquePlayers 안정 인덱스(필터해도 위치 안 흔들림).
+  const tagIndex = new Map<string, number>();
+  uniquePlayers.forEach((m, i) => tagIndex.set(m.userId, i));
+  const idxOf = (userId: string) => tagIndex.get(userId) ?? 0;
+  // 검색/필터로 캔버스에 보일 이름표만 추림(50명도 한눈에). 코트 칸 인원수는 전체 기준 계산.
+  const canvasPlayers = uniquePlayers.filter((m) => matchesPoolFilters(m));
   const defaultFrac = (idx: number) => {
     if (cw <= 0 || ch <= 0) return { x: 0, y: 0 };
     const cols = Math.max(1, Math.floor((cw - CANVAS_PAD * 2) / (MAG_W + MAG_GAP)));
@@ -3697,7 +3702,20 @@ export default function OperateScreen() {
     return null;
   };
   const zoneMembers = (i: number): string[] =>
-    canvasPlayers.filter((m, idx) => zoneOfTag(m.userId, idx) === i).map((m) => m.userId);
+    uniquePlayers.filter((m) => zoneOfTag(m.userId, idxOf(m.userId)) === i).map((m) => m.userId);
+  // 정렬: 흩어진 이름표를 게임수 적은 순으로 깔끔히 재배치(내 화면 기준 — 50명도 한눈에).
+  const tidyTags = () => {
+    if (cw <= 0 || ch <= 0) return;
+    animateNext();
+    const cols = Math.max(1, Math.floor((cw - CANVAS_PAD * 2) / (MAG_W + MAG_GAP)));
+    const sorted = [...uniquePlayers].sort((a, b) => (a.gamesPlayedToday ?? 0) - (b.gamesPlayedToday ?? 0));
+    const next: Record<string, { x: number; y: number }> = {};
+    sorted.forEach((m, i) => {
+      const row = Math.floor(i / cols), col = i % cols;
+      next[m.userId] = { x: (CANVAS_PAD + col * (MAG_W + MAG_GAP)) / cw, y: (benchTopPx + row * (MAG_H + MAG_GAP)) / ch };
+    });
+    setTagPos(next);
+  };
 
   // 자석 이름표 — Animated 자유 드래그. 릴리즈 시 분수 좌표 확정(persist).
   const MagnetTag = ({ player, idx }: { player: Player; idx: number }) => {
@@ -3730,7 +3748,10 @@ export default function OperateScreen() {
           <Text style={styles.magnetSkillText}>{(player.skillLevel || '·').toUpperCase()}</Text>
         </View>
         <Text style={[styles.magnetName, { color: colors.text }]} numberOfLines={1}>{player.userName}</Text>
-        {g && <GenderMarker meta={g} size={12} />}
+        {g && <GenderMarker meta={g} size={14} />}
+        <View style={[styles.magnetGames, { backgroundColor: colors.surfaceSecondary }]}>
+          <Text style={[styles.magnetGamesText, { color: colors.textSecondary }]}>{player.gamesPlayedToday ?? 0}</Text>
+        </View>
         {busy && <View style={[styles.conflictDot, { borderColor: colors.surface }]} />}
       </RNAnimated.View>
     );
@@ -3788,22 +3809,24 @@ export default function OperateScreen() {
       {cw > 0 && (
         <>
           {courts.map((court, i) => <CanvasCourtZone key={court.id} court={court} idx={i} />)}
-          {canvasPlayers.map((m, idx) => <MagnetTag key={m.userId} player={m} idx={idx} />)}
+          {canvasPlayers.map((m) => <MagnetTag key={m.userId} player={m} idx={idxOf(m.userId)} />)}
           {courts.map((court, i) => {
             const occupied = court.status !== 'EMPTY' || !!playingByCourtId.get(court.id);
             if (occupied) return null;
             const mem = zoneMembers(i);
-            if (mem.length !== 4) return null;
+            const canStart = mem.length === 4;
             const r = zoneRect(i);
             return (
               <TouchableOpacity
                 key={`start-${court.id}`}
-                style={[styles.canvasStartBtn, { left: r.x + 8, top: r.y + r.h - 36, width: r.w - 16, backgroundColor: colors.primary }]}
+                style={[styles.canvasStartBtn, { left: r.x + 8, top: r.y + r.h - 40, width: r.w - 16, backgroundColor: canStart ? colors.primary : colors.textLight }]}
                 onPress={() => handleStartCanvasGame(court.id, mem)}
+                disabled={!canStart}
+                activeOpacity={0.85}
                 accessibilityLabel={`${court.name} 게임 시작`}
               >
                 <Icon name="play" size={14} color="#fff" />
-                <Text style={styles.canvasStartBtnText}>{court.name} 게임 시작</Text>
+                <Text style={styles.canvasStartBtnText}>게임 시작 ({mem.length}/4)</Text>
               </TouchableOpacity>
             );
           })}
@@ -3821,6 +3844,17 @@ export default function OperateScreen() {
       <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]}>
         {Header}
         {ModeTabs}
+        <View style={styles.mode2Toolbar}>
+          <View style={{ flex: 1 }}>{PoolSearch}</View>
+          <TouchableOpacity
+            style={[styles.mode2TidyBtn, { borderColor: colors.border, backgroundColor: colors.surface }]}
+            onPress={tidyTags}
+            accessibilityLabel="이름표 정렬"
+          >
+            <Icon name="menu" size={15} color={colors.textSecondary} />
+            <Text style={[styles.mode2TidyText, { color: colors.text }]}>정렬</Text>
+          </TouchableOpacity>
+        </View>
         {BoardMode2}
         {DragOverlay}
         {QueueDragOverlay}
@@ -4923,15 +4957,21 @@ const styles = StyleSheet.create({
   canvas: { flex: 1, position: 'relative', overflow: 'hidden' },
   magnetTag: {
     position: 'absolute', left: 0, top: 0,
-    flexDirection: 'row', alignItems: 'center', gap: 5,
-    paddingHorizontal: 7, paddingVertical: 6, borderWidth: 1.5, borderRadius: radius.md,
+    flexDirection: 'row', alignItems: 'center', gap: 6,
+    paddingHorizontal: 9, paddingVertical: 9, borderWidth: 2, borderRadius: radius.md,
     ...(Platform.OS === 'web' ? ({ cursor: 'grab', userSelect: 'none' } as any) : {
-      shadowColor: '#000', shadowOpacity: 0.12, shadowRadius: 3, shadowOffset: { width: 0, height: 1 }, elevation: 3,
+      shadowColor: '#000', shadowOpacity: 0.14, shadowRadius: 3, shadowOffset: { width: 0, height: 1 }, elevation: 3,
     }),
   },
-  magnetSkill: { width: 18, height: 18, borderRadius: 4, alignItems: 'center', justifyContent: 'center' },
-  magnetSkillText: { color: '#fff', fontSize: 11, fontWeight: '700' },
-  magnetName: { ...typography.caption, flexShrink: 1, fontWeight: '600' },
+  magnetSkill: { width: 24, height: 24, borderRadius: 5, alignItems: 'center', justifyContent: 'center' },
+  magnetSkillText: { color: '#fff', fontSize: 13, fontWeight: '700' },
+  magnetName: { ...typography.body2, flex: 1, fontWeight: '700' },
+  magnetGames: { minWidth: 20, paddingHorizontal: 5, paddingVertical: 1, borderRadius: 8, alignItems: 'center' },
+  magnetGamesText: { ...typography.caption, fontWeight: '700' },
+  // 모드 2 상단 툴바: 검색/필터 + 정렬
+  mode2Toolbar: { flexDirection: 'row', alignItems: 'flex-start', gap: spacing.sm, paddingHorizontal: spacing.smd, paddingTop: spacing.sm },
+  mode2TidyBtn: { flexDirection: 'row', alignItems: 'center', gap: 5, paddingHorizontal: spacing.md, paddingVertical: 9, borderWidth: 1, borderRadius: radius.lg },
+  mode2TidyText: { ...typography.buttonSm, fontWeight: '700' },
   canvasZone: { position: 'absolute', borderWidth: 1.5, borderRadius: radius.lg, padding: spacing.sm },
   canvasZoneHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
   canvasZoneName: { ...typography.buttonSm, fontWeight: '700' },
