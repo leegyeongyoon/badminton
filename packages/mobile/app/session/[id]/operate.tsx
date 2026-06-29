@@ -1150,6 +1150,8 @@ export default function OperateScreen() {
   const [override, setOverride] = useState<Record<string, number>>({});
   const overrideRef = useRef<Record<string, number>>({});
   overrideRef.current = override;
+  // 탭으로 옮기기: 선수 선택 → 옮길 게임/대기 탭. 선택된 선수는 강조, 게임 칸은 '여기로' 표시.
+  const [selectedPlayer, setSelectedPlayer] = useState<string | null>(null);
   // 드롭 핸들러(한 번 만든 PanResponder)에서 쓸 ref(렌더에서 채움).
   const frameCountRef = useRef(0);
 
@@ -3740,37 +3742,33 @@ export default function OperateScreen() {
   const gameColW: any = layout.width > 1680 ? '32.5%' : layout.width > 1080 ? '49%' : '100%';
 
   // 드래그 가능한 선수 칩(게임 슬롯/대기 공용). 릴리즈 시 게임/대기 드롭존으로 이동.
+  // 선택한 선수를 N번 게임(또는 -1=대기)으로 이동 + 안내 + 선택 해제.
+  const placeSelected = (gameIdx: number) => {
+    if (!selectedPlayer) return;
+    const name = getPlayer(selectedPlayer)?.userName || '선수';
+    if (gameIdx === -1) { assignToPool(selectedPlayer); showSuccess(`${name} → 대기`); }
+    else { assignToGame(selectedPlayer, gameIdx); showSuccess(`${name} → ${gameIdx + 1}번 게임`); }
+    setSelectedPlayer(null);
+  };
+  // 선수 칩 — 탭하면 선택(다시 탭=해제). 선택된 선수는 강조. 옮길 곳은 게임/대기 칸을 탭.
   const PlayerTag = ({ player, fill, compact }: { player: Player; fill?: boolean; compact?: boolean }) => {
     const skill = getSkillMeta(player.skillLevel);
     const g = getGenderMeta(player.gender);
     const busy = busySet.has(player.userId);
-    const pan = useRef(new RNAnimated.ValueXY({ x: 0, y: 0 })).current;
-    const pr = useRef(
-      PanResponder.create({
-        onMoveShouldSetPanResponder: (_e, gs) => Math.abs(gs.dx) > 6 || Math.abs(gs.dy) > 6,
-        onPanResponderGrant: () => {},
-        onPanResponderMove: RNAnimated.event([null, { dx: pan.x, dy: pan.y }], { useNativeDriver: false }),
-        onPanResponderRelease: (e) => {
-          const hit = hitTestDrop(e.nativeEvent.pageX, e.nativeEvent.pageY, ['frame', 'pool']);
-          pan.setValue({ x: 0, y: 0 });
-          if (hit?.kind === 'frame' && typeof hit.slotIndex === 'number') assignToGame(player.userId, hit.slotIndex);
-          else if (hit?.kind === 'pool') assignToPool(player.userId);
-        },
-        onPanResponderTerminate: () => { pan.setValue({ x: 0, y: 0 }); },
-      }),
-    ).current;
+    const selected = selectedPlayer === player.userId;
     return (
-      <RNAnimated.View
-        {...pr.panHandlers}
-        style={[styles.poolTag, fill ? { flex: 1, minWidth: 0 } : { width: MAG_W }, { borderColor: skill.color, backgroundColor: colors.surface, transform: pan.getTranslateTransform(), zIndex: 5 }]}
+      <TouchableOpacity
+        activeOpacity={0.7}
+        onPress={() => setSelectedPlayer((cur) => (cur === player.userId ? null : player.userId))}
+        style={[styles.poolTag, fill ? { flex: 1, minWidth: 0 } : { width: MAG_W }, { borderColor: selected ? colors.primary : skill.color, borderWidth: selected ? 3 : 2, backgroundColor: selected ? 'rgba(16,185,129,0.14)' : colors.surface, zIndex: selected ? 9 : 1 }]}
+        accessibilityLabel={`${player.userName} ${selected ? '선택 해제' : '선택'}`}
       >
         <View style={[styles.magnetSkill, { backgroundColor: skill.color }]}><Text style={styles.magnetSkillText}>{(player.skillLevel || '·').toUpperCase()}</Text></View>
         <Text style={[styles.magnetName, { color: colors.text }]} numberOfLines={1}>{player.userName}</Text>
-        {/* 게임 칸 안(compact)에서는 이름 공간 확보 위해 성별·게임수 배지 생략 */}
         {!compact && g && <GenderMarker meta={g} size={14} />}
         {!compact && <View style={[styles.magnetGames, { backgroundColor: colors.surfaceSecondary }]}><Text style={[styles.magnetGamesText, { color: colors.textSecondary }]}>{player.gamesPlayedToday ?? 0}</Text></View>}
         {busy && <View style={[styles.conflictDot, { borderColor: colors.surface }]} />}
-      </RNAnimated.View>
+      </TouchableOpacity>
     );
   };
 
@@ -3814,32 +3812,30 @@ export default function OperateScreen() {
     );
   };
 
-  // 게임 칸 — 'N번 게임' + 4명(드래그 가능). 'frame' 드롭존(여기로 끌면 이 게임에). 꽉 차면 코트 투입.
+  // 게임 칸 — 'N번 게임' + 4명. 선수 선택 중이면 칸이 '여기로' 대상으로 강조되고 탭하면 이동.
+  // 꽉 차고 빈 코트 있으면 '코트 투입'(선택 중 아닐 때).
   const GameFrame = ({ members, idx, colW }: { members: string[]; idx: number; colW: any }) => {
-    const ref = useRef<View>(null);
-    const dropId = `frame-${idx}`;
     const full = members.length === 4;
-    const measure = useCallback(() => {
-      ref.current?.measureInWindow((x, y, w, h) => registerDrop({ id: dropId, kind: 'frame', slotIndex: idx, rect: { x, y, w, h } }));
-    }, [dropId, idx]);
-    useEffect(() => { const t = setTimeout(measure, 0); return () => { clearTimeout(t); unregisterDrop(dropId); }; });
+    const target = !!selectedPlayer && !members.includes(selectedPlayer); // 선택 중 + 이 게임에 없으면 이동 대상
     return (
-      <View ref={ref} onLayout={measure} collapsable={false} style={[styles.gameFrame, { width: colW, borderColor: full ? colors.primary : colors.border, backgroundColor: colors.surface }]}>
-        <View style={styles.gameFrameHead}>
-          <Text style={[styles.gameFrameNo, { color: colors.text }]}>{idx + 1}번 게임 ({members.length}/4)</Text>
-          {full && (firstEmptyCourt
+      <View style={[styles.gameFrame, { width: colW, borderColor: target ? colors.primary : full ? colors.primary : colors.border, borderWidth: target ? 3 : 2, backgroundColor: target ? 'rgba(16,185,129,0.10)' : colors.surface }]}>
+        <TouchableOpacity style={styles.gameFrameHead} activeOpacity={selectedPlayer ? 0.6 : 1} disabled={!selectedPlayer} onPress={() => { if (selectedPlayer) placeSelected(idx); }}>
+          <Text style={[styles.gameFrameNo, { color: target ? colors.primary : colors.text }]}>{idx + 1}번 게임 ({members.length}/4){target ? ' · 여기로 ▼' : ''}</Text>
+          {!selectedPlayer && full && (firstEmptyCourt
             ? <TouchableOpacity style={[styles.gameFrameStart, { backgroundColor: colors.primary }]} onPress={() => startFrameOnCourt(members, firstEmptyCourt.id)} accessibilityLabel={`${idx + 1}번 게임 코트 투입`}>
                 <Icon name="play" size={12} color="#fff" /><Text style={styles.gameFrameStartT}>코트 투입</Text>
               </TouchableOpacity>
             : <Text style={[styles.gameFrameWait, { color: colors.textLight }]}>코트 비면 투입</Text>)}
-        </View>
-        <View style={styles.gameFrameSlots} pointerEvents="box-none">
+        </TouchableOpacity>
+        <View style={styles.gameFrameSlots}>
           {[0, 1, 2, 3].map((s) => {
             const pid = members[s]; const p = pid ? getPlayer(pid) : null;
             return p ? (
               <PlayerTag key={s} player={p} fill compact />
             ) : (
-              <View key={s} style={[styles.gameSlotEmpty, { borderColor: colors.border }]}><Text style={[styles.slotEmpty, { color: colors.textLight }]}>＋</Text></View>
+              <TouchableOpacity key={s} disabled={!selectedPlayer} activeOpacity={0.6} onPress={() => { if (selectedPlayer) placeSelected(idx); }} style={[styles.gameSlotEmpty, { borderColor: target ? colors.primary : colors.border, backgroundColor: target ? 'rgba(16,185,129,0.10)' : 'transparent' }]}>
+                <Text style={[styles.slotEmpty, { color: target ? colors.primary : colors.textLight }]}>＋</Text>
+              </TouchableOpacity>
             );
           })}
         </View>
@@ -3847,28 +3843,35 @@ export default function OperateScreen() {
     );
   };
 
-  // 대기(빼둔 사람) 영역 — 'pool' 드롭존. 여기로 끌면 게임에서 빼서 대기로.
+  // 대기(빼둔 사람) 영역 — 선수 선택 중이면 탭해서 그 선수를 게임에서 빼 대기로.
   const PoolDropZone = ({ children }: { children: React.ReactNode }) => {
-    const ref = useRef<View>(null);
-    const measure = useCallback(() => {
-      ref.current?.measureInWindow((x, y, w, h) => registerDrop({ id: 'pool-zone', kind: 'pool', slotIndex: -1, rect: { x, y, w, h } }));
-    }, []);
-    useEffect(() => { const t = setTimeout(measure, 0); return () => { clearTimeout(t); unregisterDrop('pool-zone'); }; });
+    const target = !!selectedPlayer;
     return (
-      <View ref={ref} onLayout={measure} collapsable={false} style={styles.poolZone}>{children}</View>
+      <TouchableOpacity activeOpacity={target ? 0.7 : 1} disabled={!target} onPress={() => placeSelected(-1)}
+        style={[styles.poolZone, { borderColor: target ? colors.primary : 'transparent', backgroundColor: target ? 'rgba(16,185,129,0.08)' : 'transparent' }]}>
+        {target && <Text style={[styles.m2SectionLabel, { color: colors.primary, width: '100%' }]}>여기를 탭하면 대기로 ▼</Text>}
+        {children}
+      </TouchableOpacity>
     );
   };
 
   const BoardMode2 = (
     <View style={styles.m2Board}>
-      {/* 왼쪽: 게임판(자동 편성 + 드래그 조정) */}
+      {/* 왼쪽: 게임판(자동 편성 + 탭으로 조정) */}
       <View style={styles.m2Left}>
-        <Text style={[styles.m2PanelTitle, { color: colors.text }]}>게임판 · 자동 편성 · 선수를 끌어 조정</Text>
+        {selectedPlayer ? (
+          <View style={[styles.m2SelectBar, { backgroundColor: colors.primary }]}>
+            <Text style={styles.m2SelectBarT} numberOfLines={1}>{getPlayer(selectedPlayer)?.userName || '선수'} 선택됨 · 옮길 게임/대기를 누르세요</Text>
+            <TouchableOpacity onPress={() => setSelectedPlayer(null)} style={styles.m2SelectCancel}><Text style={styles.m2SelectCancelT}>취소</Text></TouchableOpacity>
+          </View>
+        ) : (
+          <Text style={[styles.m2PanelTitle, { color: colors.text }]}>게임판 · 자동 편성 · 선수 탭→선택, 옮길 게임 탭</Text>
+        )}
         <ScrollView style={{ flex: 1 }} contentContainerStyle={styles.m2LeftScroll} keyboardShouldPersistTaps="handled">
           <View style={styles.m2GameGrid}>
             {framesToRender.map((f, i) => <GameFrame key={i} members={f} idx={i} colW={gameColW} />)}
           </View>
-          <Text style={[styles.m2SectionLabel, { color: colors.textSecondary, marginTop: spacing.sm }]}>대기 · 여기로 끌면 게임에서 빠짐(게임수 적은 순)</Text>
+          <Text style={[styles.m2SectionLabel, { color: colors.textSecondary, marginTop: spacing.sm }]}>대기 · 선수 선택 후 여기를 탭하면 게임에서 빠짐(게임수 적은 순)</Text>
           <PoolDropZone>
             {benchedIds.length === 0
               ? <Text style={[styles.emptyPool, { color: colors.textLight }]}>비움 — 모두 게임에 편성됨</Text>
@@ -5031,6 +5034,10 @@ const styles = StyleSheet.create({
   m2LeftScroll: { paddingRight: spacing.smd, paddingBottom: spacing.xl },
   m2Right: { width: 340, borderLeftWidth: 1, paddingHorizontal: spacing.sm, paddingTop: spacing.sm },
   m2PanelTitle: { ...typography.body2, fontWeight: '800', marginBottom: 8 },
+  m2SelectBar: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: spacing.sm, paddingHorizontal: spacing.md, paddingVertical: 8, borderRadius: radius.md, marginBottom: 8 },
+  m2SelectBarT: { ...typography.body2, color: '#fff', fontWeight: '800', flex: 1 },
+  m2SelectCancel: { paddingHorizontal: spacing.md, paddingVertical: 4, borderRadius: radius.sm, backgroundColor: 'rgba(255,255,255,0.25)' },
+  m2SelectCancelT: { ...typography.buttonSm, color: '#fff', fontWeight: '800' },
   m2CourtGrid: { gap: spacing.sm, paddingBottom: spacing.xl },
   m2Court: { width: '100%', minWidth: 0, borderWidth: 2, borderRadius: radius.lg, padding: spacing.sm },
   m2CourtHead: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 },
