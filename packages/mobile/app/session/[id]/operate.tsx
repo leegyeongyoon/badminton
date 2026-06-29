@@ -3872,9 +3872,9 @@ export default function OperateScreen() {
     ...queuedEntries.map((e) => ({ id: e.id, players: e.playerIds })),
     { id: null, players: [] },
   ];
-  // 세로 컬럼당 게임 수 — 항상 '2줄(2열) 안에' 맞춘다. 기본 5, 게임이 늘면 ceil(개수/2)로 키워
-  // 10→5, 12→6, 14→7, 16→8… 두 열 균형. (외톨이 3번째 열 없이 2열에 꽉 차게)
-  const GAME_COL = Math.max(5, Math.ceil(queueFrames.length / 2));
+  // 게임판은 '항상 2분할(2열)' 유지 — 게임이 적어도 2열로 균형 있게(가독성). 컬럼당 = ceil(개수/2).
+  // 4→2/2, 6→3/3, 10→5/5, 12→6/6, 14→7/7… (게임이 1개뿐이면 1열)
+  const GAME_COL = Math.max(1, Math.ceil(queueFrames.length / 2));
   const gameColumns: Array<typeof queueFrames> = [];
   for (let i = 0; i < queueFrames.length; i += GAME_COL) gameColumns.push(queueFrames.slice(i, i + GAME_COL));
   const firstEmptyCourt = courts.find((c) => c.status === 'EMPTY' && !playingByCourtId.get(c.id));
