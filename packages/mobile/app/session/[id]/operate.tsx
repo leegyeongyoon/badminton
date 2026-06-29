@@ -91,8 +91,8 @@ const SUGGEST_MODES: {
 type DropKind = 'tray' | 'queue' | 'queue-card' | 'court' | 'queue-compose';
 // 모드2 자석판 이름표/스냅 상수(드롭 핸들러와 렌더 공용 — 모듈 스코프).
 const MAG_W = 132, MAG_H = 54, MAG_GAP = 10, BENCH_PAD = 10;
-// 두 이름표 중심이 SNAP_DIST(px) 안이면 한 묶음으로 스냅. 묶음은 2x2(GRP_SLOT) 배치.
-const SNAP_DIST = 118, GRP_SLOT_W = 138, GRP_SLOT_H = 60;
+// 두 이름표 중심이 SNAP_DIST(px) 안이면 한 묶음으로 스냅. 묶음은 가로 한 줄(GRP_SLOT_W 간격).
+const SNAP_DIST = 118, GRP_SLOT_W = 138;
 interface DropTarget {
   id: string;            // unique key
   kind: DropKind;
@@ -1200,10 +1200,12 @@ export default function OperateScreen() {
       const aPos = tagPosEffRef.current[best] || { x: 0, y: 0 };
       const ax = aPos.x * bw, ay = aPos.y * bh;
       const members = Object.keys(grp).filter((u) => grp[u] === gid);
+      // 일자(가로 한 줄)로 4명 정렬. 오른쪽 끝을 넘으면 왼쪽으로 당겨 화면 안에 둔다.
+      const rowW = members.length * GRP_SLOT_W;
+      const startX = Math.max(BENCH_PAD, Math.min(ax, bw - BENCH_PAD - rowW));
       const nextPos: Record<string, { x: number; y: number }> = {};
       members.forEach((u, i) => {
-        const col = i % 2, row = Math.floor(i / 2);
-        nextPos[u] = { x: (ax + col * GRP_SLOT_W) / bw, y: (ay + row * GRP_SLOT_H) / bh };
+        nextPos[u] = { x: (startX + i * GRP_SLOT_W) / bw, y: ay / bh };
       });
       setGroupOf(grp);
       setTagPos((prev) => ({ ...prev, ...nextPos }));
