@@ -3801,7 +3801,7 @@ export default function OperateScreen() {
   const centerW = layout.width - 320;
   const gameColW: any = centerW > 1380 ? '32.5%' : centerW > 860 ? '49%' : '100%';
   // 선수 칩 — 탭하면 선택(다시 탭=해제). 선택된 선수는 강조. 옮길 곳은 게임/대기 칸을 탭.
-  const PlayerTag = ({ player, fill, compact }: { player: Player; fill?: boolean; compact?: boolean }) => {
+  const PlayerTag = ({ player, fill, compact, block, order }: { player: Player; fill?: boolean; compact?: boolean; block?: boolean; order?: number }) => {
     const skill = getSkillMeta(player.skillLevel);
     const g = getGenderMeta(player.gender);
     const busy = busySet.has(player.userId);
@@ -3815,9 +3815,10 @@ export default function OperateScreen() {
           if (queuedEntries.some((e) => e.playerIds.includes(player.userId))) swapSelectedWith(player.userId);
           else setSelectedPlayer(player.userId);
         }}
-        style={[styles.poolTag, fill ? { flex: 1, minWidth: 0 } : { width: MAG_W }, { borderColor: selected ? colors.primary : skill.color, borderWidth: selected ? 3 : 2, backgroundColor: selected ? 'rgba(16,185,129,0.14)' : colors.surface, zIndex: selected ? 9 : 1 }]}
+        style={[styles.poolTag, fill ? { flex: 1, minWidth: 0 } : block ? { width: '100%' } : { width: MAG_W }, { borderColor: selected ? colors.primary : skill.color, borderWidth: selected ? 3 : 2, backgroundColor: selected ? 'rgba(16,185,129,0.14)' : colors.surface, zIndex: selected ? 9 : 1 }]}
         accessibilityLabel={`${player.userName} ${selected ? '선택 해제' : '선택'}`}
       >
+        {typeof order === 'number' && <View style={[styles.poolOrder, { backgroundColor: colors.surfaceSecondary }]}><Text style={[styles.poolOrderT, { color: colors.textSecondary }]}>{order}</Text></View>}
         <View style={[styles.magnetSkill, { backgroundColor: skill.color }]}><Text style={styles.magnetSkillText}>{(player.skillLevel || '·').toUpperCase()}</Text></View>
         <Text style={[styles.magnetName, { color: colors.text }]} numberOfLines={1}>{player.userName}</Text>
         {!compact && g && <GenderMarker meta={g} size={14} />}
@@ -3963,7 +3964,7 @@ export default function OperateScreen() {
             <PoolDropZone>
               {pool.length === 0
                 ? <Text style={[styles.emptyPool, { color: colors.textLight }]}>대기 인원 없음</Text>
-                : pool.map((p) => <PlayerTag key={p.userId} player={p} />)}
+                : pool.map((p, i) => <PlayerTag key={p.userId} player={p} block order={i + 1} />)}
             </PoolDropZone>
           </ScrollView>
         </View>
@@ -5174,7 +5175,9 @@ const styles = StyleSheet.create({
   gameFrameSlots: { flexDirection: 'row', gap: 4 },
   gameSlot: { flex: 1, minWidth: 0, flexDirection: 'row', alignItems: 'center', gap: 5, minHeight: 34, paddingHorizontal: 6, paddingVertical: 4, borderWidth: 1.5, borderRadius: radius.sm },
   gameSlotEmpty: { flex: 1, minWidth: 0, minHeight: 34, alignItems: 'center', justifyContent: 'center', borderWidth: 1.5, borderStyle: 'dashed', borderRadius: radius.sm },
-  poolZone: { flexDirection: 'row', flexWrap: 'wrap', gap: 6, minHeight: 50, padding: spacing.sm, borderWidth: 1.5, borderStyle: 'dashed', borderColor: 'transparent', borderRadius: radius.md },
+  poolZone: { flexDirection: 'column', gap: 5, minHeight: 50, padding: spacing.xs, borderWidth: 1.5, borderStyle: 'dashed', borderColor: 'transparent', borderRadius: radius.md },
+  poolOrder: { minWidth: 18, height: 18, borderRadius: 9, paddingHorizontal: 4, alignItems: 'center', justifyContent: 'center' },
+  poolOrderT: { ...typography.caption, fontWeight: '800' },
   poolWrap: { flexDirection: 'row', flexWrap: 'wrap', gap: 6 },
   poolTag: { flexDirection: 'row', alignItems: 'center', gap: 5, paddingHorizontal: 7, paddingVertical: 5, borderWidth: 2, borderRadius: radius.sm,
     ...(Platform.OS === 'web' ? ({ cursor: 'pointer', userSelect: 'none' } as any) : {}) },
