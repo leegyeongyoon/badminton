@@ -3880,6 +3880,26 @@ export default function OperateScreen() {
     );
   };
 
+  // 지난 게임 줄(대기 기록) — 코트에서 끝난 4명 묶음. 어떻게 편성됐는지 확인용(읽기).
+  const CompletedGameRow = ({ rec }: { rec: { id: string; playerIds: string[]; names: Record<string, string> } }) => (
+    <View style={[styles.gameFrame, { width: '100%', borderColor: colors.border, backgroundColor: colors.surfaceSecondary }]}>
+      <View style={styles.gameFrameHead}>
+        <View style={styles.gameFrameNoWrap}>
+          <View style={[styles.gameNoBadge, { backgroundColor: colors.textLight }]}><Icon name="history" size={10} color="#fff" /></View>
+          <Text style={[styles.gameFrameNo, { color: colors.textLight }]}>지난 게임</Text>
+        </View>
+      </View>
+      <View style={styles.gameFrameSlots}>
+        {rec.playerIds.slice(0, 4).map((id, s) => { const p = getPlayer(id); const nm = p?.userName ?? rec.names[id] ?? '선수'; const sk = getSkillMeta(p?.skillLevel); return (
+          <View key={`${id}-${s}`} style={[styles.gameSlot, { borderColor: sk.color, backgroundColor: colors.surface }]}>
+            <View style={[styles.slotSkill, { backgroundColor: sk.color }]}><Text style={styles.slotSkillText}>{(p?.skillLevel || '·').toUpperCase()}</Text></View>
+            <Text style={[styles.slotName, { color: colors.text }]} numberOfLines={1}>{nm}</Text>
+          </View>
+        ); })}
+      </View>
+    </View>
+  );
+
   // 게임 칸 — 번호 배지 + 'N번 게임' + 4명. 선수 선택 중이면 '여기로' 대상으로 강조, 탭하면 이동.
   const GameFrame = ({ frame, idx, colW }: { frame: { id: string | null; players: string[] }; idx: number; colW: any }) => {
     const members = frame.players;
@@ -3944,17 +3964,9 @@ export default function OperateScreen() {
           </TouchableOpacity>
         </View>
       )}
-      {/* 아래: 게임판(가운데, 세로로 내려감) + 대기(오른쪽) */}
+      {/* 아래: 게임판(가운데) + 대기=게임 기록(오른쪽) */}
       <View style={styles.m2Body}>
         <ScrollView style={styles.m2Center} contentContainerStyle={styles.m2CenterScroll} keyboardShouldPersistTaps="handled">
-          {liveGames.length > 0 && (
-            <>
-              <Text style={[styles.m2SectionLabel, { color: colors.warning }]}>게임 중 ({liveGames.length}) · 선수 탭=교체</Text>
-              <View style={[styles.m2GameGrid, { marginBottom: spacing.sm }]}>
-                {liveGames.map((c) => <LiveGameRow key={c.id} court={c} colW={gameColW} />)}
-              </View>
-            </>
-          )}
           <Text style={[styles.m2SectionLabel, { color: colors.textSecondary }]}>다음 게임 · 위→아래 순서, 4개씩 세로 (선수 탭→선택, 옮길 게임/대기 탭)</Text>
           <View style={styles.m2GameCols}>
             {gameColumns.map((col, ci) => (
@@ -3963,16 +3975,29 @@ export default function OperateScreen() {
               </View>
             ))}
           </View>
+          {/* 미편성 대기(아직 게임에 안 든 개인) — 선택→게임으로, 게임에서 빼면 여기로 */}
+          <Text style={[styles.m2SectionLabel, { color: colors.textSecondary, marginTop: spacing.md }]}>미편성 ({pool.length}) · 선수 선택 후 여기 탭=게임에서 빼기</Text>
+          <PoolDropZone>
+            {pool.length === 0
+              ? <Text style={[styles.emptyPool, { color: colors.textLight }]}>없음 — 모두 게임에 편성됨</Text>
+              : pool.map((p) => <PlayerTag key={p.userId} player={p} />)}
+          </PoolDropZone>
         </ScrollView>
-        {/* 오른쪽: 대기 — 게임과 같이 보며 마음대로 넣고/빼고(탭) */}
+        {/* 오른쪽: 대기 = 코트에 들어간 게임 기록(4명 1줄, 진행+지난) — 전 게임 편성 확인용 */}
         <View style={[styles.m2PoolRight, { borderLeftColor: colors.border }]}>
-          <Text style={[styles.m2PanelTitle, { color: colors.text }]}>대기 ({pool.length})</Text>
+          <Text style={[styles.m2PanelTitle, { color: colors.text }]}>대기 · 게임 기록 (코트 들어간 순)</Text>
           <ScrollView style={{ flex: 1 }} keyboardShouldPersistTaps="handled">
-            <PoolDropZone>
-              {pool.length === 0
-                ? <Text style={[styles.emptyPool, { color: colors.textLight }]}>대기 인원 없음</Text>
-                : pool.map((p, i) => <PlayerTag key={p.userId} player={p} block order={i + 1} />)}
-            </PoolDropZone>
+            {liveGames.length > 0 && (<>
+              <Text style={[styles.m2SectionLabel, { color: colors.warning }]}>진행 중 · 선수 탭=교체</Text>
+              {liveGames.map((c) => <LiveGameRow key={c.id} court={c} colW="100%" />)}
+            </>)}
+            {recentlyOut.length > 0 && (<>
+              <Text style={[styles.m2SectionLabel, { color: colors.textSecondary, marginTop: spacing.sm }]}>지난 게임 (최근 위)</Text>
+              {recentlyOut.map((r) => <CompletedGameRow key={r.id} rec={r} />)}
+            </>)}
+            {liveGames.length === 0 && recentlyOut.length === 0 && (
+              <Text style={[styles.emptyPool, { color: colors.textLight }]}>코트에 들어간 게임이 4명 1줄로 여기 쌓여요</Text>
+            )}
           </ScrollView>
         </View>
       </View>
@@ -5122,7 +5147,7 @@ const styles = StyleSheet.create({
   m2Body: { flex: 1, flexDirection: 'row', paddingTop: spacing.xs },
   m2Center: { flex: 1, paddingLeft: spacing.smd },
   m2CenterScroll: { paddingRight: spacing.smd, paddingBottom: spacing.xl },
-  m2PoolRight: { width: 300, borderLeftWidth: 1, paddingHorizontal: spacing.sm, paddingTop: spacing.xs },
+  m2PoolRight: { width: 360, borderLeftWidth: 1, paddingHorizontal: spacing.sm, paddingTop: spacing.xs },
   // (이전 2단 스타일 — 일부 미사용)
   m2Board: { flex: 1, flexDirection: 'row' },
   m2Left: { flex: 1, paddingLeft: spacing.smd, paddingTop: spacing.sm },
@@ -5185,7 +5210,7 @@ const styles = StyleSheet.create({
   gameFrameSlots: { flexDirection: 'row', gap: 4 },
   gameSlot: { flex: 1, minWidth: 0, flexDirection: 'row', alignItems: 'center', gap: 5, minHeight: 34, paddingHorizontal: 6, paddingVertical: 4, borderWidth: 1.5, borderRadius: radius.sm },
   gameSlotEmpty: { flex: 1, minWidth: 0, minHeight: 34, alignItems: 'center', justifyContent: 'center', borderWidth: 1.5, borderStyle: 'dashed', borderRadius: radius.sm },
-  poolZone: { flexDirection: 'column', gap: 5, minHeight: 50, padding: spacing.xs, borderWidth: 1.5, borderStyle: 'dashed', borderColor: 'transparent', borderRadius: radius.md },
+  poolZone: { flexDirection: 'row', flexWrap: 'wrap', gap: 6, minHeight: 44, padding: spacing.xs, borderWidth: 1.5, borderStyle: 'dashed', borderColor: 'transparent', borderRadius: radius.md },
   poolOrder: { minWidth: 18, height: 18, borderRadius: 9, paddingHorizontal: 4, alignItems: 'center', justifyContent: 'center' },
   poolOrderT: { ...typography.caption, fontWeight: '800' },
   poolWrap: { flexDirection: 'row', flexWrap: 'wrap', gap: 6 },
