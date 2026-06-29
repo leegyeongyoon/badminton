@@ -1181,6 +1181,7 @@ export default function OperateScreen() {
       }
       if (entryId === null) {
         await createQueueGame([P]);
+        setSelectedPlayer(null); // 새 게임에 안착 → 잡기 해제(체인 종료)
         showSuccess(`${getPlayer(P)?.userName || '선수'} → 새 게임`);
       } else {
         const target = queuedEntries.find((e) => e.id === entryId); if (!target) { loadBoard(); return; }
@@ -1189,15 +1190,17 @@ export default function OperateScreen() {
         if (tp.length >= 4) { bumped = tp[tp.length - 1]; tp = tp.slice(0, 3); }
         await updateEntry(entryId, [...tp, P]);
         const num = queuedEntries.findIndex((e) => e.id === entryId) + 1;
-        // 루미큐브식: 밀려난 사람은 그냥 대기로 흘리지 않고 '잡힌(선택)' 상태로 — 어디 놓을지 계속 정함.
-        if (bumped) { setSelectedPlayer(bumped); showSuccess(`${getPlayer(bumped)?.userName || '선수'} 밀려남 — 놓을 곳(게임/대기)을 탭/드래그`); }
-        else { showSuccess(`${getPlayer(P)?.userName || '선수'} → ${num}번째 게임`); }
+        // 루미큐브식: 밀려난 사람이 있으면 그 사람을 곧장 '잡힌(선택)' 상태로 — 어디 놓을지 계속 정함.
+        // 밀려난 사람이 없으면(빈자리에 안착) 잡기 해제 → 체인 종료. (탭·드래그 경로 공통으로 정리)
+        if (bumped) { setSelectedPlayer(bumped); showSuccess(`${getPlayer(bumped)?.userName || '선수'} 밀려남 — 이어서 놓을 곳(게임/대기)을 탭/드래그`); }
+        else { setSelectedPlayer(null); showSuccess(`${getPlayer(P)?.userName || '선수'} → ${num}번째 게임`); }
       }
       setPoolBottom((prev) => prev.filter((x) => x !== P)); // 게임에 들어갔으니 대기-맨아래 목록에서 제거
       loadBoard(); loadPool();
     } catch (err: any) { showAlert('오류', err?.response?.data?.error || '이동 실패'); loadBoard(); }
   }, [queuedEntries, updateEntry, deleteEntry, createQueueGame, loadBoard, loadPool]);
   const moveToPool = useCallback(async (P: string) => {
+    setSelectedPlayer(null); // 대기에 내려놓음 → 잡기 해제(체인 종료)
     setPoolBottom((prev) => [...prev.filter((x) => x !== P), P]); // 대기 맨 아래로
     const cur = queuedEntries.find((e) => e.playerIds.includes(P));
     if (!cur) { showSuccess(`${getPlayer(P)?.userName || '선수'} → 대기 맨 아래`); return; }
@@ -4089,7 +4092,7 @@ export default function OperateScreen() {
       {/* 선택 배너 / 안내 + 자동 편성 */}
       {selectedPlayer ? (
         <View style={[styles.m2SelectBar, { backgroundColor: colors.primary }]}>
-          <Text style={styles.m2SelectBarT} numberOfLines={1}>{getPlayer(selectedPlayer)?.userName || '선수'} 선택됨 · 옮길 게임/대기를 누르세요</Text>
+          <Text style={styles.m2SelectBarT} numberOfLines={1}>✋ {getPlayer(selectedPlayer)?.userName || '선수'} 들고 있음 · 놓을 게임/대기를 탭(또는 드래그) — 4명이면 그 자리 사람이 다시 들립니다</Text>
           <TouchableOpacity onPress={() => setSelectedPlayer(null)} style={styles.m2SelectCancel}><Text style={styles.m2SelectCancelT}>취소</Text></TouchableOpacity>
         </View>
       ) : (
