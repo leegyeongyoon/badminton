@@ -3850,11 +3850,16 @@ export default function OperateScreen() {
   const skillRank = (lv?: string | null) => (({ S: 0, A: 1, B: 2, C: 3, D: 4, E: 5, F: 6 } as Record<string, number>)[(lv || '').toUpperCase()] ?? 9);
   // 방금 끝난 게임 4명 묶음 — 정렬과 '별개로' 대기 명단 맨 아래에 그대로 한 줄로 쌓는다.
   // (최근에 끝난 게 맨 아래로 계속 쌓임. recentlyOut 은 최신이 앞 → reverse 로 오래된 게 위/최근이 아래.)
-  const finishedGroups: Array<{ ids: string[]; at: number }> = [];
+  // '원래 4자리'를 고정으로 둔다 — 게임에 빼낸 사람 자리는 빈칸(갭)으로 유지하고, 그 사람을 다시
+  // 빼면(대기로) recentlyOut 에 그대로 있어 '그 자리'로 돌아온다. (한판도 안 친 사람은 위 급수 정렬로.)
+  const finishedGroups: Array<{ slots: (string | null)[]; at: number }> = [];
   const finishedIds = new Set<string>();
   for (const r of [...recentlyOut].reverse()) {
-    const m = r.playerIds.filter((id) => poolSet.has(id) && !finishedIds.has(id));
-    if (m.length > 0) { m.forEach((id) => finishedIds.add(id)); finishedGroups.push({ ids: m, at: r.at }); }
+    const slots = r.playerIds.slice(0, 4).map((id) => (poolSet.has(id) && !finishedIds.has(id)) ? id : null);
+    if (slots.some((x) => x !== null)) {
+      slots.forEach((id) => { if (id) finishedIds.add(id); });
+      finishedGroups.push({ slots, at: r.at });
+    }
   }
   // 위쪽: 아직 게임 안 친(또는 묶음에서 빠진) 사람 — 급수(S>A>...>F) → 이름순 정렬.
   const sortedPool = pool
@@ -4069,14 +4074,21 @@ export default function OperateScreen() {
             <Text style={[styles.gameFrameNo, { color: isNew ? colors.textLight : idx === 0 ? colors.primary : colors.text }]}>{isNew ? '새 게임' : idx === 0 ? '다음 차례' : `${idx + 1}번째`}</Text>
             <Text style={[styles.gameFrameCount, { color: target ? colors.primary : colors.textLight }]}>{target ? '여기로 ▼' : `${members.length}/4`}</Text>
           </View>
-          {/* 게임 삭제 — 편성된 게임을 지운다(4명은 대기로). 선수 선택 중이 아닐 때만. */}
+          {/* 게임 순서(게임 하는 순서) 이동 ▲▼ + 삭제 × — 선수 선택 중이 아닐 때만. */}
           {!isNew && !selectedPlayer && (
-            <TouchableOpacity
-              onPress={() => showConfirm('게임 삭제', '이 게임을 지울까요? 선수들은 대기로 갑니다.', async () => { try { await deleteEntry(frame.id!); loadBoard(); loadPool(); showSuccess('게임 삭제'); } catch (e: any) { showAlert('오류', '삭제 실패'); } })}
-              hitSlop={6} style={styles.gameDelBtn} accessibilityLabel={`${idx + 1}번째 게임 삭제`}
-              {...(Platform.OS === 'web' ? { onPointerDown: (e: any) => e.stopPropagation?.() } : {})}>
-              <Icon name="close" size={13} color={colors.textLight} />
-            </TouchableOpacity>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 1 }} {...(Platform.OS === 'web' ? { onPointerDown: (e: any) => e.stopPropagation?.() } : {})}>
+              <TouchableOpacity disabled={idx === 0} onPress={() => moveQueueItem(idx, idx - 1)} hitSlop={4} style={styles.gameOrderBtn} accessibilityLabel={`${idx + 1}번째 게임 앞으로`}>
+                <Text style={[styles.gameOrderT, { color: idx === 0 ? colors.border : colors.textSecondary }]}>▲</Text>
+              </TouchableOpacity>
+              <TouchableOpacity disabled={idx >= queuedEntries.length - 1} onPress={() => moveQueueItem(idx, idx + 1)} hitSlop={4} style={styles.gameOrderBtn} accessibilityLabel={`${idx + 1}번째 게임 뒤로`}>
+                <Text style={[styles.gameOrderT, { color: idx >= queuedEntries.length - 1 ? colors.border : colors.textSecondary }]}>▼</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                onPress={() => showConfirm('게임 삭제', '이 게임을 지울까요? 선수들은 대기로 갑니다.', async () => { try { await deleteEntry(frame.id!); loadBoard(); loadPool(); showSuccess('게임 삭제'); } catch (e: any) { showAlert('오류', '삭제 실패'); } })}
+                hitSlop={6} style={styles.gameDelBtn} accessibilityLabel={`${idx + 1}번째 게임 삭제`}>
+                <Icon name="close" size={13} color={colors.textLight} />
+              </TouchableOpacity>
+            </View>
           )}
         </TouchableOpacity>
         <View style={styles.gameFrameSlots}>
@@ -4212,7 +4224,7 @@ export default function OperateScreen() {
                           <Text style={[styles.finWait, { color: colors.textLight }]}>⏱ 게임 쉰 지 {waitMin < 1 ? '방금' : `${waitMin}분`}</Text>
                           <View style={styles.gameFrameSlots}>
                             {[0, 1, 2, 3].map((si) => {
-                              const id = g.ids[si];
+                              const id = g.slots[si];
                               if (!id) return <View key={si} style={styles.poolGapSlot} />;
                               const p = getPlayer(id); return p ? <PlayerTag key={id} player={p} fill compact /> : <View key={si} style={styles.poolGapSlot} />;
                             })}
@@ -5452,6 +5464,8 @@ const styles = StyleSheet.create({
   gameFrameNo: { ...typography.body2, fontWeight: '800' },
   gameFrameCount: { ...typography.caption, fontWeight: '800' },
   gameDelBtn: { padding: 3, marginLeft: 4, borderRadius: radius.sm },
+  gameOrderBtn: { paddingHorizontal: 3, paddingVertical: 1 },
+  gameOrderT: { fontSize: 11, fontWeight: '900', lineHeight: 13 },
   m2LeftHead: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: spacing.sm, marginBottom: 8 },
   m2AutoBtn: { flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: spacing.md, paddingVertical: 6, borderWidth: 1.5, borderRadius: radius.lg },
   m2AutoBtnT: { ...typography.buttonSm, fontWeight: '800' },
