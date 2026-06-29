@@ -3857,22 +3857,29 @@ export default function OperateScreen() {
   };
 
   const BoardMode2 = (
-    <View style={styles.m2Wrap}>
-      <View style={styles.m2CourtRow}>
-        {courts.length === 0
-          ? <Text style={[styles.emptyPool, { color: colors.textLight }]}>코트가 없어요. "코트 관리"에서 추가하세요</Text>
-          : courts.map((court) => <Mode2CourtCard key={court.id} court={court} />)}
+    <View style={styles.m2Board}>
+      {/* 왼쪽: 게임판(자동 편성 + 드래그 조정) */}
+      <View style={styles.m2Left}>
+        <Text style={[styles.m2PanelTitle, { color: colors.text }]}>게임판 · 자동 편성 · 선수를 끌어 조정</Text>
+        <ScrollView style={{ flex: 1 }} contentContainerStyle={styles.m2LeftScroll} keyboardShouldPersistTaps="handled">
+          {framesToRender.map((f, i) => <GameFrame key={i} members={f} idx={i} />)}
+          <Text style={[styles.m2SectionLabel, { color: colors.textSecondary, marginTop: spacing.sm }]}>대기 · 여기로 끌면 게임에서 빠짐(게임수 적은 순)</Text>
+          <PoolDropZone>
+            {benchedIds.length === 0
+              ? <Text style={[styles.emptyPool, { color: colors.textLight }]}>비움 — 모두 게임에 편성됨</Text>
+              : benchedIds.map((uid) => { const p = getPlayer(uid); return p ? <PlayerTag key={uid} player={p} /> : null; })}
+          </PoolDropZone>
+        </ScrollView>
       </View>
-      <ScrollView style={{ flex: 1 }} contentContainerStyle={styles.m2Scroll} keyboardShouldPersistTaps="handled">
-        <Text style={[styles.m2SectionLabel, { color: colors.textSecondary }]}>게임판 · 자동 편성됨 · 선수를 끌어 다른 게임으로 조정</Text>
-        {framesToRender.map((f, i) => <GameFrame key={i} members={f} idx={i} />)}
-        <Text style={[styles.m2SectionLabel, { color: colors.textSecondary, marginTop: spacing.md }]}>대기 · 여기로 끌면 게임에서 빠짐(게임수 적은 순)</Text>
-        <PoolDropZone>
-          {benchedIds.length === 0
-            ? <Text style={[styles.emptyPool, { color: colors.textLight }]}>비움 — 모두 게임에 편성됨</Text>
-            : benchedIds.map((uid) => { const p = getPlayer(uid); return p ? <PlayerTag key={uid} player={p} /> : null; })}
-        </PoolDropZone>
-      </ScrollView>
+      {/* 오른쪽: 코트 패널 */}
+      <View style={[styles.m2Right, { borderLeftColor: colors.border }]}>
+        <Text style={[styles.m2PanelTitle, { color: colors.text }]}>코트</Text>
+        <ScrollView contentContainerStyle={styles.m2CourtGrid} keyboardShouldPersistTaps="handled">
+          {courts.length === 0
+            ? <Text style={[styles.emptyPool, { color: colors.textLight }]}>코트가 없어요. "코트 관리"에서 추가</Text>
+            : courts.map((court) => <Mode2CourtCard key={court.id} court={court} />)}
+        </ScrollView>
+      </View>
     </View>
   );
 
@@ -5013,8 +5020,14 @@ const styles = StyleSheet.create({
   canvasZoneStartText: { ...typography.buttonSm, color: '#fff', fontWeight: '800' },
   // ── 모드 2: 코트 줄 / 대기 게임 줄 / 명단 3단 ──
   m2Wrap: { flex: 1 },
-  m2CourtRow: { flexDirection: 'row', gap: spacing.sm, paddingHorizontal: spacing.smd, paddingTop: spacing.sm, minHeight: 96 },
-  m2Court: { flex: 1, minWidth: 0, borderWidth: 2, borderRadius: radius.lg, padding: spacing.sm },
+  // 판(보드) 2단: 왼쪽 게임판 + 오른쪽 코트
+  m2Board: { flex: 1, flexDirection: 'row' },
+  m2Left: { flex: 1, paddingLeft: spacing.smd, paddingTop: spacing.sm },
+  m2LeftScroll: { paddingRight: spacing.smd, paddingBottom: spacing.xl },
+  m2Right: { width: 340, borderLeftWidth: 1, paddingHorizontal: spacing.sm, paddingTop: spacing.sm },
+  m2PanelTitle: { ...typography.body2, fontWeight: '800', marginBottom: 8 },
+  m2CourtGrid: { gap: spacing.sm, paddingBottom: spacing.xl },
+  m2Court: { width: '100%', minWidth: 0, borderWidth: 2, borderRadius: radius.lg, padding: spacing.sm },
   m2CourtHead: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 },
   m2CourtName: { ...typography.body2, fontWeight: '800', flexShrink: 1 },
   m2CourtState: { ...typography.caption, fontWeight: '800' },
