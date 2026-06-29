@@ -1190,6 +1190,22 @@ export default function OperateScreen() {
     } catch (err: any) { showAlert('오류', err?.response?.data?.error || '빼기 실패'); loadBoard(); }
   }, [selectedPlayer, queuedEntries, updateEntry, deleteEntry, loadBoard, loadPool]);
 
+  // 선택 선수 P를 '탭한 게임 선수 X' 자리와 스왑: P가 X 자리 차지, X는 대기로. P의 원래 게임은 빈자리.
+  const swapSelectedWith = useCallback(async (targetUserId: string) => {
+    const P = selectedPlayer; if (!P || P === targetUserId) { setSelectedPlayer(null); return; }
+    setSelectedPlayer(null);
+    const pGame = queuedEntries.find((e) => e.playerIds.includes(P));
+    const xGame = queuedEntries.find((e) => e.playerIds.includes(targetUserId));
+    if (!xGame) return; // 타깃이 큐 게임에 없으면(대기/게임중) 스왑 대상 아님
+    if (pGame && pGame.id === xGame.id) return; // 같은 게임 내 — 무시
+    try {
+      if (pGame) await updateEntry(pGame.id, pGame.playerIds.filter((u) => u !== P)); // P 원래 게임 빈자리(3명)
+      await updateEntry(xGame.id, xGame.playerIds.map((u) => (u === targetUserId ? P : u))); // X 자리에 P
+      showSuccess(`${getPlayer(P)?.userName || ''} ↔ ${getPlayer(targetUserId)?.userName || ''}(대기로)`);
+      loadBoard(); loadPool();
+    } catch (err: any) { showAlert('오류', err?.response?.data?.error || '스왑 실패'); loadBoard(); }
+  }, [selectedPlayer, queuedEntries, updateEntry, loadBoard, loadPool]);
+
   // 자동 편성: 주어진 대기 인원을 4명씩 큐 게임으로 생성.
   const autoFillQueue = useCallback(async (poolUserIds: string[]) => {
     if (poolUserIds.length < 4) { showAlert('알림', '편성할 4명이 부족해요'); return; }
@@ -3769,15 +3785,13 @@ export default function OperateScreen() {
   // 큐에 든 사람(=다음 게임 편성됨). 서버 공유(모드1과 동일).
   const inQueue = new Set<string>();
   for (const e of queuedEntries) for (const id of e.playerIds) inQueue.add(id);
-  // 대기 풀 = 큐에 없는 출석자(게임중 포함, 맨 뒤). 검색/필터 + 게임수 적은 순.
+  // 게임 중(코트 위) 게임들 — 게임판에 4명 1줄로 표시(조합 파악 + 다음 게임 편성에 도움).
+  const liveGames = courts.filter((c) => c.status !== 'EMPTY' || !!playingByCourtId.get(c.id));
+  // 대기 풀 = 큐에도 없고 게임 중도 아닌 출석자. 검색/필터 + 게임수 적은 순(친 사람 아래).
   const pool = uniquePlayers
-    .filter((m) => matchesPoolFilters(m) && !inQueue.has(m.userId))
-    .sort((a, b) => {
-      const pa = playingSet.has(a.userId) ? 1 : 0, pb = playingSet.has(b.userId) ? 1 : 0;
-      if (pa !== pb) return pa - pb; // 게임중은 뒤로
-      return gamesOf(a.userId) - gamesOf(b.userId) || a.userName.localeCompare(b.userName);
-    });
-  const poolIds = pool.filter((m) => !playingSet.has(m.userId)).map((m) => m.userId); // 자동편성용(게임중 제외)
+    .filter((m) => matchesPoolFilters(m) && !inQueue.has(m.userId) && !playingSet.has(m.userId))
+    .sort((a, b) => gamesOf(a.userId) - gamesOf(b.userId) || a.userName.localeCompare(b.userName));
+  const poolIds = pool.map((m) => m.userId);
   // 번호 게임 = 서버 큐 순서 + 끝에 '새 게임' 칸(entryId null).
   const queueFrames: Array<{ id: string | null; players: string[] }> = [
     ...queuedEntries.map((e) => ({ id: e.id, players: e.playerIds })),
@@ -3794,7 +3808,12 @@ export default function OperateScreen() {
     return (
       <TouchableOpacity
         activeOpacity={0.7}
-        onPress={() => setSelectedPlayer((cur) => (cur === player.userId ? null : player.userId))}
+        onPress={() => {
+          if (!selectedPlayer || selectedPlayer === player.userId) { setSelectedPlayer(selectedPlayer === player.userId ? null : player.userId); return; }
+          // 선택 중 + 다른 선수 탭: 큐 게임 선수면 스왑(탭한 사람 대기로), 대기 선수면 선택 전환
+          if (queuedEntries.some((e) => e.playerIds.includes(player.userId))) swapSelectedWith(player.userId);
+          else setSelectedPlayer(player.userId);
+        }}
         style={[styles.poolTag, fill ? { flex: 1, minWidth: 0 } : { width: MAG_W }, { borderColor: selected ? colors.primary : skill.color, borderWidth: selected ? 3 : 2, backgroundColor: selected ? 'rgba(16,185,129,0.14)' : colors.surface, zIndex: selected ? 9 : 1 }]}
         accessibilityLabel={`${player.userName} ${selected ? '선택 해제' : '선택'}`}
       >
@@ -3844,6 +3863,38 @@ export default function OperateScreen() {
             <Text style={[styles.m2CourtEmptyT, { color: colors.primary }]}>탭하면 다음 게임 투입</Text>
           </TouchableOpacity>
         )}
+      </View>
+    );
+  };
+
+  // 게임 중(코트 위) 게임 줄 — 코트명 + 4명. 선수 탭=교체, 종료 버튼. 조합 파악용(읽기).
+  const LiveGameRow = ({ court, colW }: { court: Court; colW: any }) => {
+    const e = playingByCourtId.get(court.id);
+    const pids = e?.playerIds ?? court.currentTurn?.playerIds ?? [];
+    const pnames = e?.playerNames ?? court.currentTurn?.playerNames ?? [];
+    const turnId = court.currentTurn?.id ?? e?.turnId ?? null;
+    return (
+      <View style={[styles.gameFrame, { width: colW, borderColor: colors.warning, backgroundColor: colors.warningLight }]}>
+        <View style={styles.gameFrameHead}>
+          <View style={styles.gameFrameNoWrap}>
+            <View style={[styles.gameNoBadge, { backgroundColor: colors.warning }]}><Icon name="play" size={11} color="#fff" /></View>
+            <Text style={[styles.gameFrameNo, { color: colors.warning }]} numberOfLines={1}>{court.name} · 게임 중</Text>
+          </View>
+          <TouchableOpacity onPress={() => handleEndGame(court.id)} accessibilityLabel={`${court.name} 게임 종료`}><Text style={[styles.gameFrameWait, { color: colors.danger }]}>종료</Text></TouchableOpacity>
+        </View>
+        <View style={styles.gameFrameSlots}>
+          {[0, 1, 2, 3].map((s) => {
+            const pid = pids[s]; const p = pid ? getPlayer(pid) : null; const sk = getSkillMeta(p?.skillLevel);
+            return (
+              <TouchableOpacity key={s} disabled={!pid || !turnId} activeOpacity={0.7}
+                onPress={() => { if (turnId && pid) setRunningSwap({ turnId, outUserId: pid, courtName: court.name, currentIds: pids }); }}
+                style={[styles.gameSlot, { borderColor: pid ? sk.color : colors.border, backgroundColor: colors.surface }]}
+                accessibilityLabel={pid ? `${p?.userName ?? pnames[s] ?? ''} 교체` : '빈 칸'}>
+                {pid ? (<><View style={[styles.slotSkill, { backgroundColor: sk.color }]}><Text style={styles.slotSkillText}>{(p?.skillLevel || '·').toUpperCase()}</Text></View><Text style={[styles.slotName, { color: colors.text }]} numberOfLines={1}>{p?.userName ?? pnames[s] ?? '선수'}</Text></>) : <Text style={[styles.slotEmpty, { color: colors.textLight }]}>·</Text>}
+              </TouchableOpacity>
+            );
+          })}
+        </View>
       </View>
     );
   };
@@ -3908,6 +3959,15 @@ export default function OperateScreen() {
           </View>
         )}
         <ScrollView style={{ flex: 1 }} contentContainerStyle={styles.m2LeftScroll} keyboardShouldPersistTaps="handled">
+          {liveGames.length > 0 && (
+            <>
+              <Text style={[styles.m2SectionLabel, { color: colors.warning }]}>게임 중 ({liveGames.length}) · 선수 탭=교체</Text>
+              <View style={[styles.m2GameGrid, { marginBottom: spacing.sm }]}>
+                {liveGames.map((c) => <LiveGameRow key={c.id} court={c} colW={gameColW} />)}
+              </View>
+            </>
+          )}
+          <Text style={[styles.m2SectionLabel, { color: colors.textSecondary }]}>다음 게임 · 번호 순서대로 코트 투입</Text>
           <View style={styles.m2GameGrid}>
             {queueFrames.map((f, i) => <GameFrame key={f.id ?? 'new'} frame={f} idx={i} colW={gameColW} />)}
           </View>
