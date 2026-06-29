@@ -3808,9 +3808,11 @@ export default function OperateScreen() {
     ...queuedEntries.map((e) => ({ id: e.id, players: e.playerIds })),
     { id: null, players: [] },
   ];
-  // 4개씩 세로 컬럼으로 자른다(①②③④ 세로 → ⑤⑥⑦⑧ 다음 컬럼).
+  // 세로 컬럼으로 자른다(이름 안 깨지게 넓은 칸 유지 위해 2열, 좁으면 1열). 위→아래 순서.
+  const numGameCols = layout.width > 1300 ? 2 : 1;
+  const perCol = Math.max(1, Math.ceil(queueFrames.length / numGameCols));
   const gameColumns: Array<typeof queueFrames> = [];
-  for (let i = 0; i < queueFrames.length; i += 4) gameColumns.push(queueFrames.slice(i, i + 4));
+  for (let i = 0; i < queueFrames.length; i += perCol) gameColumns.push(queueFrames.slice(i, i + perCol));
   const firstEmptyCourt = courts.find((c) => c.status === 'EMPTY' && !playingByCourtId.get(c.id));
   // 게임 그리드 열 수(반응형) — 가운데 폭(전체 - 오른쪽 대기 300) 기준. 40~50명도 덜 스크롤.
   const centerW = layout.width - 320;
@@ -4001,7 +4003,7 @@ export default function OperateScreen() {
           <View style={styles.m2GameCols}>
             {gameColumns.map((col, ci) => (
               <View key={ci} style={styles.m2GameCol}>
-                {col.map((f, j) => <GameFrame key={f.id ?? `new${ci}`} frame={f} idx={ci * 4 + j} colW="100%" />)}
+                {col.map((f, j) => <GameFrame key={f.id ?? `new${ci}`} frame={f} idx={ci * perCol + j} colW="100%" />)}
               </View>
             ))}
           </View>
@@ -5173,7 +5175,7 @@ const styles = StyleSheet.create({
   m2Body: { flex: 1, flexDirection: 'row', paddingTop: spacing.xs },
   m2Center: { flex: 1, paddingLeft: spacing.smd },
   m2CenterScroll: { paddingRight: spacing.smd, paddingBottom: spacing.xl },
-  m2PoolRight: { width: 360, borderLeftWidth: 1, paddingHorizontal: spacing.sm, paddingTop: spacing.xs },
+  m2PoolRight: { width: 430, borderLeftWidth: 1, paddingHorizontal: spacing.sm, paddingTop: spacing.xs },
   // (이전 2단 스타일 — 일부 미사용)
   m2Board: { flex: 1, flexDirection: 'row' },
   m2Left: { flex: 1, paddingLeft: spacing.smd, paddingTop: spacing.sm },
