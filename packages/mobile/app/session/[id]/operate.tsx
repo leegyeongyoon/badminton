@@ -1191,6 +1191,12 @@ export default function OperateScreen() {
   // 평소엔 접어두고(작은 버튼) 탭하면 입력창이 올라온다(공간 적게).
   const [cmd, setCmd] = useState('');
   const [cmdOpen, setCmdOpen] = useState(false);
+  // 채팅형 명령 로그 — 입력한 명령(user)과 결과/AI응답(bot)을 메시지처럼 쌓는다(최근 40개).
+  const [cmdLog, setCmdLog] = useState<Array<{ role: 'user' | 'bot'; text: string; ok: boolean }>>([]);
+  const pushLog = useCallback((role: 'user' | 'bot', text: string, ok = true) => {
+    setCmdLog((prev) => [...prev, { role, text, ok }].slice(-40));
+  }, []);
+  const chatScrollRef = useRef<any>(null);
   const [poolGenders, setPoolGenders] = useState<string[]>([]);
   const [poolSkills, setPoolSkills] = useState<string[]>([]);
   const toggleIn = (arr: string[], v: string) => (arr.includes(v) ? arr.filter((x) => x !== v) : [...arr, v]);
@@ -1449,6 +1455,9 @@ export default function OperateScreen() {
   // 키워드로 먼저 파싱 → 못 알아들은 자유 문장만 AI(OpenAI)로 해석해 같은 핸들러로 실행(하이브리드).
   const runParse = async (raw: string, allowAI: boolean): Promise<void> => {
     if (!raw) return;
+    // 이 함수 안의 결과/오류 메시지는 채팅 로그(bot)로 남긴다 — showAlert/showSuccess 를 로그로 가로챔.
+    const showSuccess = (m: string) => pushLog('bot', m, true);
+    const showAlert = (_t: string, m: string) => pushLog('bot', m, false);
     const tokens = raw.split(/[\s,]+/).filter(Boolean);
     // 한글 초성 추출(가-힣 → ㄱ..ㅎ). "ㅅㅇㅈ" 같은 초성 입력으로도 이름 검색.
     const CHO = 'ㄱㄲㄴㄷㄸㄹㅁㅂㅃㅅㅆㅇㅈㅉㅊㅋㅌㅍㅎ';
@@ -1601,7 +1610,7 @@ export default function OperateScreen() {
         try {
           const { data } = await clubSessionApi.parseCommand(clubSessionId, raw);
           const canon = actionToText(data?.action);
-          if (canon) { await runParse(canon, false); return; }
+          if (canon) { pushLog('bot', `🤖 ${canon}`, true); await runParse(canon, false); return; }
           showAlert('명령', data?.action?.reason || errs.join('\n')); return;
         } catch (e: any) { showAlert('명령', `${errs.join('\n')}\n(AI 해석 실패: ${e?.response?.data?.error || '오류'})`); return; }
       }
@@ -1613,7 +1622,7 @@ export default function OperateScreen() {
         try {
           const { data } = await clubSessionApi.parseCommand(clubSessionId, raw);
           const canon = actionToText(data?.action);
-          if (canon) { await runParse(canon, false); return; }
+          if (canon) { pushLog('bot', `🤖 ${canon}`, true); await runParse(canon, false); return; }
           showAlert('명령', data?.action?.reason || '이름을 입력하세요'); return;
         } catch { showAlert('명령', '이름을 입력하세요 (예: 신예준 김도윤 이지유 강수아)'); return; }
       }
@@ -1626,7 +1635,7 @@ export default function OperateScreen() {
       showSuccess(courtId ? `코트 투입 (${ids.length}명)` : `편성 (${ids.length}명)`);
     } catch (e: any) { showAlert('오류', e?.response?.data?.error || '편성 실패'); loadBoard(); }
   };
-  const runCommand = () => { runParse(cmd.trim(), true); };
+  const runCommand = () => { const raw = cmd.trim(); if (raw) pushLog('user', raw); runParse(raw, true); };
 
   // ─── 정모 종료 (end the whole session) ───
   // Confirms, ends the session on the server, then navigates back out of the
@@ -4383,42 +4392,10 @@ export default function OperateScreen() {
         </View>
       ) : (
         <View style={styles.m2LeftHead}>
-          {/* 텍스트 명령 — 평소엔 작은 버튼, 탭하면 입력창이 올라온다. 이름=편성, '코트N 이름…'=투입, '이름 급수 X'=수정 */}
-          {cmdOpen ? (
-            <View style={[styles.m2CmdWrap, { borderColor: colors.primary, backgroundColor: colors.surface }]}>
-              <Icon name="edit" size={14} color={colors.textLight} />
-              <TextInput
-                autoFocus value={cmd} onChangeText={setCmd} onSubmitEditing={runCommand} returnKeyType="go"
-                placeholder="이름들=편성 · 코트1 …=투입 · 또는 자유롭게: 오시우랑 현우 바꿔줘"
-                placeholderTextColor={colors.textLight}
-                style={[styles.m2CmdInput, { color: colors.text }]} />
-              <TouchableOpacity onPress={runCommand} disabled={!cmd.trim()} style={[styles.m2CmdBtn, { backgroundColor: cmd.trim() ? colors.primary : colors.surfaceSecondary }]} accessibilityLabel="명령 실행">
-                <Text style={[styles.m2CmdBtnT, { color: cmd.trim() ? '#fff' : colors.textLight }]}>실행</Text>
-              </TouchableOpacity>
-              <TouchableOpacity onPress={() => { setCmdOpen(false); setCmd(''); }} hitSlop={6} style={{ paddingHorizontal: 2 }} accessibilityLabel="명령창 닫기"><Icon name="close" size={15} color={colors.textLight} /></TouchableOpacity>
-            </View>
-          ) : (
-            <TouchableOpacity onPress={() => setCmdOpen(true)} style={[styles.m2CmdToggle, { backgroundColor: colors.primary, borderColor: colors.primary }]} accessibilityLabel="텍스트 명령창 열기">
-              <Icon name="edit" size={15} color="#fff" /><Text style={[styles.m2CmdToggleT, { color: '#fff' }]}>⌨ 키보드 명령</Text>
-            </TouchableOpacity>
-          )}
+          <Text style={[styles.m2PanelTitle, { color: colors.text, marginBottom: 0 }]} numberOfLines={1}>게임판 · 선수 탭/드래그로 편성</Text>
           <TouchableOpacity style={[styles.m2AutoBtn, { borderColor: colors.primary }]} onPress={() => autoFillQueue(poolIds)} accessibilityLabel="대기 인원 자동 편성">
             <Icon name="rotation" size={13} color={colors.primary} /><Text style={[styles.m2AutoBtnT, { color: colors.primary }]}>자동 편성</Text>
           </TouchableOpacity>
-        </View>
-      )}
-      {/* 명령 치트시트 — 명령창 열면 보임. 탭하면 예시가 입력창에 채워진다(이름만 바꿔 실행). */}
-      {cmdOpen && !selectedPlayer && (
-        <View style={[styles.m2CmdHelp, { borderColor: colors.primary, backgroundColor: colors.surfaceSecondary }]}>
-          <Text style={[styles.m2CmdHelpTitle, { color: colors.textSecondary }]}>⌨ 탭하면 채워져요 (이름만 바꿔 Enter) · 또는 “오시우랑 현우 바꿔”처럼 자유롭게 말해도 AI가 알아들어요 🤖</Text>
-          <View style={styles.m2CmdHelpRow}>
-            {CMD_HELP.map((c) => (
-              <TouchableOpacity key={c.k} onPress={() => { setCmd(c.ex); setCmdOpen(true); }} style={[styles.m2CmdHelpChip, { borderColor: colors.border, backgroundColor: colors.surface }]} accessibilityLabel={`${c.k} 예시 입력`}>
-                <Text style={[styles.m2CmdHelpK, { color: colors.primary }]}>{c.k}</Text>
-                <Text style={[styles.m2CmdHelpEx, { color: colors.textSecondary }]}>{c.ex}</Text>
-              </TouchableOpacity>
-            ))}
-          </View>
         </View>
       )}
       {/* 아래: 게임판(가운데) + 대기=게임 기록(오른쪽) */}
@@ -4468,7 +4445,7 @@ export default function OperateScreen() {
             })}
           </View>
           {/* 대기 = 같이 나온 4명 묶음을 4명 한 줄로, 세로로 아래로 쌓는다(아래로 스크롤). 게임 중은 맨 밑. */}
-          <ScrollView style={{ flex: 1 }} keyboardShouldPersistTaps="handled">
+          <ScrollView style={{ flex: 1 }} contentContainerStyle={{ paddingBottom: 56 }} keyboardShouldPersistTaps="handled">
             <PoolDropZone>
               {pool.length === 0 && playingCols.length === 0
                 ? <Text style={[styles.emptyPool, { color: colors.textLight }]}>대기 인원 없음</Text>
@@ -4523,6 +4500,50 @@ export default function OperateScreen() {
           </ScrollView>
         </View>
       </View>
+      {/* ── 하단 채팅형 명령 패널 (absolute · 아코디언) — 선택 중이 아닐 때만 ── */}
+      {!selectedPlayer && (
+        <View pointerEvents="box-none" style={styles.m2ChatAnchor}>
+          {cmdOpen ? (
+            <View style={[styles.m2ChatPanel, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+              <View style={[styles.m2ChatHead, { borderBottomColor: colors.border }]}>
+                <Text style={[styles.m2ChatTitle, { color: colors.text }]} numberOfLines={1}>⌨ 명령 채팅 · 자유롭게 말해도 AI가 알아들어요 🤖</Text>
+                {cmdLog.length > 0 && <TouchableOpacity onPress={() => setCmdLog([])} hitSlop={6} style={{ paddingHorizontal: 6 }}><Text style={[styles.m2ChatClear, { color: colors.textLight }]}>지우기</Text></TouchableOpacity>}
+                <TouchableOpacity onPress={() => setCmdOpen(false)} hitSlop={8} accessibilityLabel="명령 채팅 닫기"><Text style={[styles.m2ChatChevron, { color: colors.textSecondary }]}>▾</Text></TouchableOpacity>
+              </View>
+              <ScrollView ref={chatScrollRef} onContentSizeChange={() => chatScrollRef.current?.scrollToEnd({ animated: true })} style={styles.m2ChatLog} contentContainerStyle={{ padding: 8, gap: 6 }} keyboardShouldPersistTaps="handled">
+                {cmdLog.length === 0 ? (
+                  <Text style={[styles.m2ChatEmpty, { color: colors.textLight }]}>예: "혼복 초심들이랑 짜줘" · "코트2에 비슷한 사람들로" · "오시우랑 현우 바꿔" · "안지민 급수 A" · "1번에 홍길동 넣어줘"</Text>
+                ) : cmdLog.map((m, i) => (
+                  <View key={i} style={[styles.m2ChatBubble, m.role === 'user' ? styles.m2ChatUser : styles.m2ChatBot, { backgroundColor: m.role === 'user' ? colors.primary : (m.ok ? colors.surfaceSecondary : colors.dangerBg) }]}>
+                    <Text style={[styles.m2ChatBubbleT, { color: m.role === 'user' ? '#fff' : (m.ok ? colors.text : colors.danger) }]}>{m.text}</Text>
+                  </View>
+                ))}
+              </ScrollView>
+              <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.m2ChatChips} contentContainerStyle={{ gap: 5, paddingHorizontal: 8, alignItems: 'center' }} keyboardShouldPersistTaps="handled">
+                {CMD_HELP.map((c) => (
+                  <TouchableOpacity key={c.k} onPress={() => setCmd(c.ex)} style={[styles.m2CmdHelpChip, { borderColor: colors.border, backgroundColor: colors.surfaceSecondary }]} accessibilityLabel={`${c.k} 예시 입력`}>
+                    <Text style={[styles.m2CmdHelpK, { color: colors.primary }]}>{c.k}</Text>
+                  </TouchableOpacity>
+                ))}
+              </ScrollView>
+              <View style={[styles.m2ChatInputRow, { borderTopColor: colors.border }]}>
+                <TextInput autoFocus value={cmd} onChangeText={setCmd} onSubmitEditing={runCommand} returnKeyType="send" blurOnSubmit={false}
+                  placeholder='명령 입력… (예: 혼복 초심들이랑 짜줘)' placeholderTextColor={colors.textLight}
+                  style={[styles.m2ChatInput, { color: colors.text, backgroundColor: colors.surfaceSecondary }]} />
+                <TouchableOpacity onPress={runCommand} disabled={!cmd.trim()} style={[styles.m2ChatSend, { backgroundColor: cmd.trim() ? colors.primary : colors.surfaceSecondary }]} accessibilityLabel="명령 실행">
+                  <Text style={[styles.m2ChatSendT, { color: cmd.trim() ? '#fff' : colors.textLight }]}>전송</Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+          ) : (
+            <TouchableOpacity onPress={() => setCmdOpen(true)} style={[styles.m2ChatBar, { backgroundColor: colors.primary }]} accessibilityLabel="명령 채팅 열기">
+              <Icon name="edit" size={16} color="#fff" />
+              <Text style={styles.m2ChatBarT} numberOfLines={1}>명령 입력 · "혼복 초심들이랑 짜줘"처럼 자유롭게 (AI 🤖)</Text>
+              <Text style={styles.m2ChatChevronUp}>▴</Text>
+            </TouchableOpacity>
+          )}
+        </View>
+      )}
     </View>
   );
 
@@ -5676,7 +5697,7 @@ const styles = StyleSheet.create({
   // flex:1 + minWidth:0 — 세로 스크롤. 대기(m2RightWidth)가 넓어지면 게임판이 자동 축소된다
   // (세로 스크롤은 가로폭을 강제하지 않아 flex 축소가 정상 동작 → 넘침 없음).
   m2Center: { flex: 1, minWidth: 0, paddingLeft: spacing.smd },
-  m2CenterScroll: { paddingRight: spacing.smd, paddingBottom: spacing.xl },
+  m2CenterScroll: { paddingRight: spacing.smd, paddingBottom: 56 },
   m2PlayColHead: { ...typography.caption, fontWeight: '800', marginBottom: 2 },
   m2PoolRight: { width: 430, borderLeftWidth: 1, paddingHorizontal: spacing.sm, paddingTop: spacing.xs },
   m2PoolSearchRow: { flexDirection: 'row', alignItems: 'center', gap: 5, marginBottom: 6 },
@@ -5757,6 +5778,27 @@ const styles = StyleSheet.create({
   m2CmdHelpChip: { flexDirection: 'row', alignItems: 'baseline', gap: 6, paddingHorizontal: 8, paddingVertical: 5, borderWidth: 1, borderRadius: radius.sm },
   m2CmdHelpK: { ...typography.caption, fontWeight: '800' },
   m2CmdHelpEx: { fontSize: 11 },
+  // 하단 채팅형 명령 패널
+  m2ChatAnchor: { position: 'absolute', left: 0, right: 0, bottom: 0 },
+  m2ChatBar: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 14, height: 46, borderTopLeftRadius: radius.lg, borderTopRightRadius: radius.lg, shadowColor: '#000', shadowOpacity: 0.18, shadowRadius: 8, shadowOffset: { width: 0, height: -2 }, elevation: 8 },
+  m2ChatBarT: { flex: 1, color: '#fff', ...typography.body2, fontWeight: '700' },
+  m2ChatChevronUp: { color: '#fff', fontSize: 16, fontWeight: '900' },
+  m2ChatPanel: { borderTopLeftRadius: radius.lg, borderTopRightRadius: radius.lg, borderWidth: 1, borderBottomWidth: 0, overflow: 'hidden', shadowColor: '#000', shadowOpacity: 0.2, shadowRadius: 12, shadowOffset: { width: 0, height: -3 }, elevation: 12 },
+  m2ChatHead: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 12, height: 40, borderBottomWidth: 1 },
+  m2ChatTitle: { flex: 1, ...typography.body2, fontWeight: '800' },
+  m2ChatClear: { ...typography.caption, fontWeight: '700' },
+  m2ChatChevron: { fontSize: 18, fontWeight: '900' },
+  m2ChatLog: { maxHeight: 240 },
+  m2ChatEmpty: { ...typography.caption, lineHeight: 18 },
+  m2ChatBubble: { maxWidth: '88%', paddingHorizontal: 10, paddingVertical: 6, borderRadius: radius.md },
+  m2ChatUser: { alignSelf: 'flex-end', borderBottomRightRadius: 3 },
+  m2ChatBot: { alignSelf: 'flex-start', borderBottomLeftRadius: 3 },
+  m2ChatBubbleT: { ...typography.body2 },
+  m2ChatChips: { maxHeight: 40, paddingVertical: 4 },
+  m2ChatInputRow: { flexDirection: 'row', alignItems: 'center', gap: 8, padding: 8, borderTopWidth: 1 },
+  m2ChatInput: { flex: 1, height: 40, borderRadius: radius.md, paddingHorizontal: 12, ...typography.body2 },
+  m2ChatSend: { paddingHorizontal: 16, height: 40, borderRadius: radius.md, alignItems: 'center', justifyContent: 'center' },
+  m2ChatSendT: { ...typography.body2, fontWeight: '800' },
   m2AutoBtn: { flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: spacing.md, paddingVertical: 6, borderWidth: 1.5, borderRadius: radius.lg },
   m2AutoBtnT: { ...typography.buttonSm, fontWeight: '800' },
   gameFrameStart: { flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: spacing.md, paddingVertical: 5, borderRadius: radius.md },
