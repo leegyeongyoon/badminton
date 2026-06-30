@@ -4224,9 +4224,9 @@ export default function OperateScreen() {
           </View>
           <TouchableOpacity onPress={() => handleEndGame(court.id)} accessibilityLabel={`${court.name} 게임 종료`}><Text style={[styles.m2CourtState, { color: colors.danger }]}>종료</Text></TouchableOpacity>
         </View>
-        <View style={styles.gameFrameSlots}>
+        <View style={styles.m2CourtSlots}>
           {[0, 1, 2, 3].map((s) => { const pid = pids[s]; const p = pid ? getPlayer(pid) : null; const sk = getSkillMeta(p?.skillLevel); const gm = getGenderMeta(p?.gender); return (
-            <TouchableOpacity key={s} disabled={!pid || !turnId} activeOpacity={0.7} onPress={() => { if (turnId && pid) setRunningSwap({ turnId, outUserId: pid, courtName: court.name, currentIds: pids }); }} style={[styles.gameSlot, { borderColor: pid ? (gm ? (gm.gender === 'M' ? '#2563EB' : '#CA8A04') : sk.color) : colors.border, backgroundColor: gm ? (gm.gender === 'M' ? '#EFF6FF' : '#FEFCE8') : colors.surface }]} accessibilityLabel={pid ? `${p?.userName ?? pnames[s] ?? ''} ${gm?.label ?? ''} 교체` : '빈 칸'}>
+            <TouchableOpacity key={s} disabled={!pid || !turnId} activeOpacity={0.7} onPress={() => { if (turnId && pid) setRunningSwap({ turnId, outUserId: pid, courtName: court.name, currentIds: pids }); }} style={[styles.gameSlot, styles.m2CourtSlotItem, { borderColor: pid ? (gm ? (gm.gender === 'M' ? '#2563EB' : '#CA8A04') : sk.color) : colors.border, backgroundColor: gm ? (gm.gender === 'M' ? '#EFF6FF' : '#FEFCE8') : colors.surface }]} accessibilityLabel={pid ? `${p?.userName ?? pnames[s] ?? ''} ${gm?.label ?? ''} 교체` : '빈 칸'}>
               {pid ? (<><View style={[styles.slotSkill, { backgroundColor: sk.color }]}><Text style={styles.slotSkillText}>{(p?.skillLevel || '·').toUpperCase()}</Text></View><Text style={[styles.slotName, { color: colors.text }]} numberOfLines={1}>{p?.userName ?? pnames[s] ?? '선수'}</Text>{gm && <GenderMarker meta={gm} size={12} />}</>) : <Text style={[styles.slotEmpty, { color: colors.textLight }]}>·</Text>}
             </TouchableOpacity>
           ); })}
@@ -5803,6 +5803,9 @@ const styles = StyleSheet.create({
   gameFrameStartT: { ...typography.buttonSm, color: '#fff', fontWeight: '800' },
   gameFrameWait: { ...typography.caption, fontWeight: '700' },
   gameFrameSlots: { flexDirection: 'row', gap: 4 },
+  // 코트 카드(위 가로줄, 좁음)는 4명을 2x2로 — 한 줄 4명이면 이름이 1글자로 잘림.
+  m2CourtSlots: { flexDirection: 'row', flexWrap: 'wrap', gap: 4 },
+  m2CourtSlotItem: { flexBasis: '47%', flexGrow: 1 },
   gameSlot: { flex: 1, minWidth: 0, flexDirection: 'row', alignItems: 'center', gap: 5, minHeight: 34, paddingHorizontal: 6, paddingVertical: 4, borderWidth: 1.5, borderRadius: radius.sm },
   gameSlotEmpty: { flex: 1, minWidth: 0, minHeight: 34, alignItems: 'center', justifyContent: 'center', borderWidth: 1.5, borderStyle: 'dashed', borderRadius: radius.sm },
   poolZone: { width: '100%', padding: spacing.xs, borderWidth: 1.5, borderStyle: 'dashed', borderColor: 'transparent', borderRadius: radius.md },
