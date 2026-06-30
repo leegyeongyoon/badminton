@@ -1272,52 +1272,7 @@ export default function OperateScreen() {
     } catch (err: any) { showAlert('오류', err?.response?.data?.error || '코트 투입 실패'); loadBoard(); }
   }, [queuedEntries, playingByCourtId, courts, assignEntry, loadBoard, loadCourts, loadPool]);
 
-  // ─── 텍스트 명령 ───  "이름 이름 …"=편성 · "코트N 이름 …"=투입 · "이름 급수 X"=급수 수정
-  // 이름은 출석자 명단과 완전일치 우선→부분일치. 0명/여러 명이면 알려주고 실행 안 함.
-  const runCommand = useCallback(async () => {
-    const raw = cmd.trim();
-    if (!raw) return;
-    const tokens = raw.split(/[\s,]+/).filter(Boolean);
-    const matchName = (tk: string): { id?: string; err?: string } => {
-      const t = tk.toLowerCase();
-      const ex = uniquePlayers.filter((m) => (m.userName || '').toLowerCase() === t);
-      if (ex.length === 1) return { id: ex[0].userId };
-      const pa = uniquePlayers.filter((m) => (m.userName || '').toLowerCase().includes(t));
-      if (pa.length === 1) return { id: pa[0].userId };
-      if (pa.length === 0) return { err: `'${tk}' 없음` };
-      return { err: `'${tk}' 여러 명(${pa.slice(0, 4).map((m) => m.userName).join('/')}) — 더 정확히` };
-    };
-    // 1) 급수 수정: "이름 급수 X"
-    const gi = tokens.findIndex((t) => t === '급수');
-    if (gi > 0 && tokens[gi + 1]) {
-      const r = matchName(tokens[gi - 1]);
-      if (r.err) { showAlert('명령', r.err); return; }
-      const lvl = tokens[gi + 1].toUpperCase();
-      try { await clubSessionApi.editPlayer(clubSessionId, r.id!, { skillLevel: lvl }); loadPool(); loadBoard(); setCmd(''); showSuccess(`급수 수정 → ${lvl}`); }
-      catch (e: any) { showAlert('오류', e?.response?.data?.error || '수정 실패'); }
-      return;
-    }
-    // 2) 코트 투입: 첫 토큰이 "코트N"/"cN"
-    let courtId: string | null = null;
-    let names = tokens;
-    const cm = tokens[0].match(/^코트\s*(\d+)$/) || tokens[0].match(/^c(\d+)$/i);
-    if (cm) {
-      const court = courts.find((c) => (c.name || '').replace(/\s/g, '') === `코트${cm[1]}`);
-      if (!court) { showAlert('명령', `'${tokens[0]}' 코트가 없어요`); return; }
-      courtId = court.id; names = tokens.slice(1);
-    }
-    // 3) 이름들 → 편성(+투입)
-    const ids: string[] = []; const errs: string[] = [];
-    for (const tk of names) { const r = matchName(tk); if (r.id) { if (!ids.includes(r.id)) ids.push(r.id); } else errs.push(r.err!); }
-    if (errs.length) { showAlert('명령', errs.join('\n')); return; }
-    if (ids.length === 0) { showAlert('명령', '이름을 입력하세요 (예: 신예준 김도윤 이지유 강수아)'); return; }
-    try {
-      const entry: any = await createQueueGame(ids);
-      if (courtId && entry?.id) await assignEntry(entry.id, courtId);
-      loadBoard(); loadPool(); loadCourts(); setCmd('');
-      showSuccess(courtId ? `코트 투입 (${ids.length}명)` : `편성 (${ids.length}명)`);
-    } catch (e: any) { showAlert('오류', e?.response?.data?.error || '편성 실패'); loadBoard(); }
-  }, [cmd, uniquePlayers, courts, createQueueGame, assignEntry, loadBoard, loadPool, loadCourts, clubSessionId]);
+  // 텍스트 명령(runCommand)은 뒤에서 정의 — handleEndGame/handleDeleteQueued 등 핸들러를 쓰기 때문.
 
   // 첫 진입 시 큐가 비어있고 대기 인원 4명+면 자동 편성 1회(이후엔 '자동 편성' 버튼). 큐가 있으면 안 함.
   useEffect(() => {
@@ -1442,6 +1397,105 @@ export default function OperateScreen() {
       }, '삭제', '취소', 'danger'),
     [deleteEntry, loadBoard],
   );
+
+  // ─── 텍스트 명령 (드래그/탭에 더해 키보드로도 같은 동작) ───
+  //  이름들           → 한 게임 편성        · 코트N 이름…  → 편성+투입 · 코트N(단독) → 다음게임 투입
+  //  교체 A B         → A↔B 교체(게임중/큐) · 빼 A / 대기 A → 대기로
+  //  종료 코트N       → 게임 종료           · 삭제 N(번)    → N번째 큐 게임 삭제
+  //  이름 급수 X      → 급수 수정           · 자동          → 자동 편성
+  // 이름은 출석자 명단 완전일치→부분일치. 0명/여러 명이면 안내하고 실행 안 함. 모두 기존 핸들러 호출.
+  const runCommand = useCallback(async () => {
+    const raw = cmd.trim();
+    if (!raw) return;
+    const tokens = raw.split(/[\s,]+/).filter(Boolean);
+    const matchName = (tk: string): { id?: string; err?: string } => {
+      const t = tk.toLowerCase();
+      const ex = uniquePlayers.filter((m) => (m.userName || '').toLowerCase() === t);
+      if (ex.length === 1) return { id: ex[0].userId };
+      const pa = uniquePlayers.filter((m) => (m.userName || '').toLowerCase().includes(t));
+      if (pa.length === 1) return { id: pa[0].userId };
+      if (pa.length === 0) return { err: `'${tk}' 없음` };
+      return { err: `'${tk}' 여러 명(${pa.slice(0, 4).map((m) => m.userName).join('/')}) — 더 정확히` };
+    };
+    const courtByNum = (tk: string) => {
+      const m = tk.match(/^코트\s*(\d+)$/) || tk.match(/^c(\d+)$/i);
+      return m ? courts.find((c) => (c.name || '').replace(/\s/g, '') === `코트${m[1]}`) : undefined;
+    };
+    const head = tokens[0];
+    const done = () => setCmd('');
+
+    // 자동 편성
+    if (head === '자동' && tokens.length === 1) {
+      const playing = new Set<string>();
+      playingByCourtId.forEach((e) => (e.playerIds || []).forEach((id) => playing.add(id)));
+      const inQ = new Set(queuedEntries.flatMap((e) => e.playerIds));
+      autoFillQueue(uniquePlayers.filter((m) => !playing.has(m.userId) && !inQ.has(m.userId)).map((m) => m.userId));
+      done(); return;
+    }
+    // 교체 A B — A가 게임 중이면 replacePlayer, 큐에 있으면 그 자리만 B로 교체
+    if (head === '교체' && tokens[1] && tokens[2]) {
+      const a = matchName(tokens[1]); if (a.err) { showAlert('명령', a.err); return; }
+      const b = matchName(tokens[2]); if (b.err) { showAlert('명령', b.err); return; }
+      const court = courts.find((c) => (c.currentTurn?.playerIds || []).includes(a.id!));
+      try {
+        if (court?.currentTurn?.id) {
+          await clubSessionApi.replacePlayer(court.currentTurn.id, a.id!, b.id!);
+        } else {
+          const e = queuedEntries.find((en) => en.playerIds.includes(a.id!));
+          if (!e) { showAlert('명령', '그 선수가 게임에 없어요'); return; }
+          await updateEntry(e.id!, e.playerIds.map((x) => (x === a.id ? b.id! : x)));
+        }
+        loadBoard(); loadCourts(); loadPool(); done(); showSuccess('교체 완료');
+      } catch (er: any) { showAlert('오류', er?.response?.data?.error || '교체 실패'); }
+      return;
+    }
+    // 빼 A / 대기 A → 대기로 (게임 중이면 불가 안내)
+    if ((head === '빼' || head === '대기') && tokens[1]) {
+      const a = matchName(tokens[1]); if (a.err) { showAlert('명령', a.err); return; }
+      if (courts.some((c) => (c.currentTurn?.playerIds || []).includes(a.id!))) { showAlert('명령', '게임 중이라 못 빼요 (교체/종료를 쓰세요)'); return; }
+      moveToPool(a.id!); done(); return;
+    }
+    // 종료 코트N (확인창 — 웹은 window.confirm)
+    if (head === '종료' && tokens[1]) {
+      const court = courtByNum(tokens[1]);
+      if (!court) { showAlert('명령', `'${tokens[1]}' 코트가 없어요`); return; }
+      done(); handleEndGame(court.id); return;
+    }
+    // 삭제 N(번) — 큐 순번(1-base, 확인창)
+    if (head === '삭제' && tokens[1]) {
+      const n = parseInt(tokens[1].replace(/[^0-9]/g, ''), 10);
+      if (!n || n < 1 || n > queuedEntries.length) { showAlert('명령', `${tokens[1]} 번째 게임이 없어요`); return; }
+      done(); handleDeleteQueued(queuedEntries[n - 1].id!); return;
+    }
+    // 급수 수정: "이름 급수 X"
+    const gi = tokens.findIndex((t) => t === '급수');
+    if (gi > 0 && tokens[gi + 1]) {
+      const r = matchName(tokens[gi - 1]); if (r.err) { showAlert('명령', r.err); return; }
+      const lvl = tokens[gi + 1].toUpperCase();
+      try { await clubSessionApi.editPlayer(clubSessionId, r.id!, { skillLevel: lvl }); loadPool(); loadBoard(); done(); showSuccess(`급수 수정 → ${lvl}`); }
+      catch (e: any) { showAlert('오류', e?.response?.data?.error || '수정 실패'); }
+      return;
+    }
+    // 코트N (단독) → 다음 게임 투입
+    if (tokens.length === 1) {
+      const court = courtByNum(tokens[0]);
+      if (court) { assignQueueToCourt(court.id); done(); return; }
+    }
+    // 코트N 이름… → 편성+투입 / 이름… → 편성
+    let courtId: string | null = null; let names = tokens;
+    const c0 = courtByNum(tokens[0]);
+    if (c0) { courtId = c0.id; names = tokens.slice(1); }
+    const ids: string[] = []; const errs: string[] = [];
+    for (const tk of names) { const r = matchName(tk); if (r.id) { if (!ids.includes(r.id)) ids.push(r.id); } else errs.push(r.err!); }
+    if (errs.length) { showAlert('명령', errs.join('\n')); return; }
+    if (ids.length === 0) { showAlert('명령', '이름을 입력하세요 (예: 신예준 김도윤 이지유 강수아)'); return; }
+    try {
+      const entry: any = await createQueueGame(ids);
+      if (courtId && entry?.id) await assignEntry(entry.id, courtId);
+      loadBoard(); loadPool(); loadCourts(); done();
+      showSuccess(courtId ? `코트 투입 (${ids.length}명)` : `편성 (${ids.length}명)`);
+    } catch (e: any) { showAlert('오류', e?.response?.data?.error || '편성 실패'); loadBoard(); }
+  }, [cmd, uniquePlayers, courts, queuedEntries, playingByCourtId, createQueueGame, assignEntry, updateEntry, moveToPool, autoFillQueue, handleEndGame, handleDeleteQueued, assignQueueToCourt, loadBoard, loadPool, loadCourts, clubSessionId]);
 
   // ─── 정모 종료 (end the whole session) ───
   // Confirms, ends the session on the server, then navigates back out of the
