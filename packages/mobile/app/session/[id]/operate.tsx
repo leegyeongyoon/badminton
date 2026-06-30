@@ -236,7 +236,7 @@ export default function OperateScreen() {
   // 운영자마다 편한 UI가 달라 탭으로 전환. 두 모드는 같은 서버 보드 상태의 두 '뷰'라
   // (board/courts/players + 소켓 구독·핸들러 공유) 전환만으로 계속 sync 된다. 정모별로
   // 마지막 선택을 저장(웹 localStorage / 네이티브 SecureStore)해 새로고침에도 유지.
-  const [boardMode, setBoardMode] = useState<1 | 2>(1);
+  const [boardMode, setBoardMode] = useState<1 | 2>(2);
   const boardModeKey = clubSessionId ? `operate_board_mode_${clubSessionId}` : null;
   const boardModeLoadedRef = useRef(false);
   useEffect(() => {

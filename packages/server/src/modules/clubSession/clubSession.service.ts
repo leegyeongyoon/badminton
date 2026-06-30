@@ -1438,7 +1438,7 @@ export async function parseCommand(
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` },
       body: JSON.stringify({
-        model: process.env.OPENAI_MODEL || 'gpt-4o',
+        model: process.env.OPENAI_MODEL || 'gpt-4o-mini',
         messages: [
           { role: 'system', content: sys },
           { role: 'user', content: text },
