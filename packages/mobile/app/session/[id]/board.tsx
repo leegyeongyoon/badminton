@@ -165,7 +165,9 @@ export default function ViewBoardScreen() {
   const queuedEntries = useMemo(
     () => (board?.entries || [])
       .filter((e) => e.status === 'QUEUED')
-      .sort((a, b) => a.position - b.position),
+      // 운영판과 동일하게 queueOrder 로 정렬 — position 으로 정렬하면 '순서 바꾸기'(reorder)가
+      // queueOrder 만 바꿔서 현황판이 옛 순서를 보여줘(운영판과 다음게임 순서가 어긋남).
+      .sort((a, b) => ((a as any).queueOrder ?? a.position) - ((b as any).queueOrder ?? b.position)),
     [board],
   );
 
