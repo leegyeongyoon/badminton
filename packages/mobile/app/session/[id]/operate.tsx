@@ -106,6 +106,25 @@ interface DropTarget {
 // 쌓여야 해서 넉넉히 보관(한 정모 분량). 너무 오래된 것만 떨궈 무한 증가 방지.
 const RECENT_OUT_MAX = 50;
 
+// 키보드 명령 치트시트 — 명령창을 열면 보이고, 탭하면 예시가 입력창에 채워진다(이름만 바꿔 실행).
+const CMD_HELP: Array<{ k: string; ex: string }> = [
+  { k: '편성', ex: '홍길동 김철수 이영희 박민수' },
+  { k: '코트 투입', ex: '코트1 홍길동 김철수 이영희 박민수' },
+  { k: '다음게임→코트', ex: '코트1' },
+  { k: '교체', ex: '교체 홍길동 김철수' },
+  { k: '대기로 빼기', ex: '빼 홍길동' },
+  { k: '게임 종료', ex: '종료 코트1' },
+  { k: '게임 삭제', ex: '삭제 2' },
+  { k: '급수 수정', ex: '홍길동 급수 A' },
+  { k: '이름 변경', ex: '홍길동 이름 홍길순' },
+  { k: '출석(전체)', ex: '출석 전체' },
+  { k: '퇴장', ex: '퇴장 홍길동' },
+  { k: '레슨 토글', ex: '레슨 홍길동' },
+  { k: '게스트 추가', ex: '게스트 홍길동 B' },
+  { k: '자동 편성', ex: '자동' },
+  { k: '초성 검색', ex: 'ㅎㄱㄷ (→ 홍길동)' },
+];
+
 // Safe LayoutAnimation (web treats it as a no-op but guard anyway)
 function animateNext() {
   if (Platform.OS === 'web') return;
@@ -1408,14 +1427,24 @@ export default function OperateScreen() {
     const raw = cmd.trim();
     if (!raw) return;
     const tokens = raw.split(/[\s,]+/).filter(Boolean);
+    // 한글 초성 추출(가-힣 → ㄱ..ㅎ). "ㅅㅇㅈ" 같은 초성 입력으로도 이름 검색.
+    const CHO = 'ㄱㄲㄴㄷㄸㄹㅁㅂㅃㅅㅆㅇㅈㅉㅊㅋㅌㅍㅎ';
+    const toCho = (s: string) => Array.from(s).map((ch) => {
+      const c = ch.charCodeAt(0);
+      return (c >= 0xAC00 && c <= 0xD7A3) ? CHO[Math.floor((c - 0xAC00) / 588)] : ch;
+    }).join('');
     const matchName = (tk: string): { id?: string; err?: string } => {
       const t = tk.toLowerCase();
       const ex = uniquePlayers.filter((m) => (m.userName || '').toLowerCase() === t);
       if (ex.length === 1) return { id: ex[0].userId };
-      const pa = uniquePlayers.filter((m) => (m.userName || '').toLowerCase().includes(t));
+      let pa = uniquePlayers.filter((m) => (m.userName || '').toLowerCase().includes(t));
+      // 부분일치 0건이고 토큰이 초성만이면 초성으로 재검색
+      if (pa.length === 0 && /^[ㄱ-ㅎ]+$/.test(tk)) {
+        pa = uniquePlayers.filter((m) => toCho(m.userName || '').includes(tk));
+      }
       if (pa.length === 1) return { id: pa[0].userId };
       if (pa.length === 0) return { err: `'${tk}' 없음` };
-      return { err: `'${tk}' 여러 명(${pa.slice(0, 4).map((m) => m.userName).join('/')}) — 더 정확히` };
+      return { err: `'${tk}' 여러 명(${pa.slice(0, 5).map((m) => `${m.userName}${m.skillLevel ? `·${m.skillLevel}` : ''}`).join(' / ')}) — 더 정확히` };
     };
     const courtByNum = (tk: string) => {
       const m = tk.match(/^코트\s*(\d+)$/) || tk.match(/^c(\d+)$/i);
@@ -1467,12 +1496,53 @@ export default function OperateScreen() {
       if (!n || n < 1 || n > queuedEntries.length) { showAlert('명령', `${tokens[1]} 번째 게임이 없어요`); return; }
       done(); handleDeleteQueued(queuedEntries[n - 1].id!); return;
     }
+    // 출석 전체 (아직 체크인 안 된 모임원 일괄 체크인)
+    if (head === '출석' && tokens[1] === '전체') {
+      try { const { data }: any = await clubSessionApi.checkInAllMembers(clubSessionId); loadPool(); done(); showSuccess(`전체 체크인 (${data?.checkedInCount ?? 0}명)`); }
+      catch (e: any) { showAlert('오류', e?.response?.data?.error || '체크인 실패'); }
+      return;
+    }
+    // 게스트 추가: "게스트 이름 [급수]"
+    if (head === '게스트' && tokens[1]) {
+      const gname = tokens[1]; const gsk = tokens[2] ? tokens[2].toUpperCase() : undefined;
+      try { await clubSessionApi.addGuest(clubSessionId, { name: gname, skillLevel: gsk }); loadPool(); done(); showSuccess(`게스트 추가: ${gname}`); }
+      catch (e: any) { showAlert('오류', e?.response?.data?.error || '게스트 추가 실패'); }
+      return;
+    }
+    // 퇴장: "퇴장 이름" (확인창)
+    if (head === '퇴장' && tokens[1]) {
+      const r = matchName(tokens[1]); if (r.err) { showAlert('명령', r.err); return; }
+      const nm = uniquePlayers.find((m) => m.userId === r.id)?.userName || '';
+      done();
+      showConfirm('퇴장', `${nm} 님을 정모에서 퇴장시킬까요?`, async () => {
+        try { await clubSessionApi.checkoutPlayer(clubSessionId, r.id!); loadPool(); loadBoard(); showSuccess('퇴장 완료'); }
+        catch (e: any) { showAlert('오류', e?.response?.data?.error || '퇴장 실패'); }
+      }, '퇴장', '취소', 'danger');
+      return;
+    }
+    // 레슨 토글: "레슨 이름"
+    if (head === '레슨' && tokens[1]) {
+      const r = matchName(tokens[1]); if (r.err) { showAlert('명령', r.err); return; }
+      const pl = uniquePlayers.find((m) => m.userId === r.id); const make = !pl?.isInLesson;
+      try { await clubSessionApi.setPlayerLesson(clubSessionId, r.id!, make); loadPool(); done(); showSuccess(make ? '레슨 중으로' : '레슨 해제'); }
+      catch (e: any) { showAlert('오류', e?.response?.data?.error || '레슨 변경 실패'); }
+      return;
+    }
     // 급수 수정: "이름 급수 X"
     const gi = tokens.findIndex((t) => t === '급수');
     if (gi > 0 && tokens[gi + 1]) {
       const r = matchName(tokens[gi - 1]); if (r.err) { showAlert('명령', r.err); return; }
       const lvl = tokens[gi + 1].toUpperCase();
       try { await clubSessionApi.editPlayer(clubSessionId, r.id!, { skillLevel: lvl }); loadPool(); loadBoard(); done(); showSuccess(`급수 수정 → ${lvl}`); }
+      catch (e: any) { showAlert('오류', e?.response?.data?.error || '수정 실패'); }
+      return;
+    }
+    // 이름 변경: "이름 OO 새이름" (OO=현재 이름, 그 뒤=새 이름)
+    const ni = tokens.findIndex((t) => t === '이름');
+    if (ni > 0 && tokens[ni + 1]) {
+      const r = matchName(tokens[ni - 1]); if (r.err) { showAlert('명령', r.err); return; }
+      const newName = tokens.slice(ni + 1).join(' ');
+      try { await clubSessionApi.editPlayer(clubSessionId, r.id!, { name: newName }); loadPool(); loadBoard(); done(); showSuccess(`이름 변경 → ${newName}`); }
       catch (e: any) { showAlert('오류', e?.response?.data?.error || '수정 실패'); }
       return;
     }
@@ -4267,13 +4337,27 @@ export default function OperateScreen() {
               <TouchableOpacity onPress={() => { setCmdOpen(false); setCmd(''); }} hitSlop={6} style={{ paddingHorizontal: 2 }} accessibilityLabel="명령창 닫기"><Icon name="close" size={15} color={colors.textLight} /></TouchableOpacity>
             </View>
           ) : (
-            <TouchableOpacity onPress={() => setCmdOpen(true)} style={[styles.m2CmdToggle, { borderColor: colors.border, backgroundColor: colors.surface }]} accessibilityLabel="텍스트 명령창 열기">
-              <Icon name="edit" size={13} color={colors.primary} /><Text style={[styles.m2CmdToggleT, { color: colors.primary }]}>명령</Text>
+            <TouchableOpacity onPress={() => setCmdOpen(true)} style={[styles.m2CmdToggle, { backgroundColor: colors.primary, borderColor: colors.primary }]} accessibilityLabel="텍스트 명령창 열기">
+              <Icon name="edit" size={15} color="#fff" /><Text style={[styles.m2CmdToggleT, { color: '#fff' }]}>⌨ 키보드 명령</Text>
             </TouchableOpacity>
           )}
           <TouchableOpacity style={[styles.m2AutoBtn, { borderColor: colors.primary }]} onPress={() => autoFillQueue(poolIds)} accessibilityLabel="대기 인원 자동 편성">
             <Icon name="rotation" size={13} color={colors.primary} /><Text style={[styles.m2AutoBtnT, { color: colors.primary }]}>자동 편성</Text>
           </TouchableOpacity>
+        </View>
+      )}
+      {/* 명령 치트시트 — 명령창 열면 보임. 탭하면 예시가 입력창에 채워진다(이름만 바꿔 실행). */}
+      {cmdOpen && !selectedPlayer && (
+        <View style={[styles.m2CmdHelp, { borderColor: colors.primary, backgroundColor: colors.surfaceSecondary }]}>
+          <Text style={[styles.m2CmdHelpTitle, { color: colors.textSecondary }]}>⌨ 명령 예시 — 탭하면 입력창에 채워져요 (이름만 바꿔 Enter)</Text>
+          <View style={styles.m2CmdHelpRow}>
+            {CMD_HELP.map((c) => (
+              <TouchableOpacity key={c.k} onPress={() => { setCmd(c.ex); setCmdOpen(true); }} style={[styles.m2CmdHelpChip, { borderColor: colors.border, backgroundColor: colors.surface }]} accessibilityLabel={`${c.k} 예시 입력`}>
+                <Text style={[styles.m2CmdHelpK, { color: colors.primary }]}>{c.k}</Text>
+                <Text style={[styles.m2CmdHelpEx, { color: colors.textSecondary }]}>{c.ex}</Text>
+              </TouchableOpacity>
+            ))}
+          </View>
         </View>
       )}
       {/* 아래: 게임판(가운데) + 대기=게임 기록(오른쪽) */}
@@ -5604,8 +5688,14 @@ const styles = StyleSheet.create({
   m2CmdInput: { flex: 1, minWidth: 0, ...typography.body2 },
   m2CmdBtn: { paddingHorizontal: 9, height: 26, borderRadius: radius.sm, alignItems: 'center', justifyContent: 'center' },
   m2CmdBtnT: { ...typography.caption, fontWeight: '800' },
-  m2CmdToggle: { flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 10, height: 30, borderWidth: 1.5, borderRadius: radius.md },
-  m2CmdToggleT: { ...typography.caption, fontWeight: '800' },
+  m2CmdToggle: { flexDirection: 'row', alignItems: 'center', gap: 5, paddingHorizontal: 14, height: 34, borderWidth: 1.5, borderRadius: radius.md },
+  m2CmdToggleT: { ...typography.body2, fontWeight: '800' },
+  m2CmdHelp: { marginBottom: 8, padding: 8, borderWidth: 1, borderRadius: radius.md, gap: 6 },
+  m2CmdHelpTitle: { ...typography.caption, fontWeight: '700' },
+  m2CmdHelpRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 6 },
+  m2CmdHelpChip: { flexDirection: 'row', alignItems: 'baseline', gap: 6, paddingHorizontal: 8, paddingVertical: 5, borderWidth: 1, borderRadius: radius.sm },
+  m2CmdHelpK: { ...typography.caption, fontWeight: '800' },
+  m2CmdHelpEx: { fontSize: 11 },
   m2AutoBtn: { flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: spacing.md, paddingVertical: 6, borderWidth: 1.5, borderRadius: radius.lg },
   m2AutoBtnT: { ...typography.buttonSm, fontWeight: '800' },
   gameFrameStart: { flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: spacing.md, paddingVertical: 5, borderRadius: radius.md },
