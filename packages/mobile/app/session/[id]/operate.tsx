@@ -1495,19 +1495,23 @@ export default function OperateScreen() {
       autoFillQueue(uniquePlayers.filter((m) => !playing.has(m.userId) && !inQ.has(m.userId)).map((m) => m.userId));
       done(); return;
     }
-    // 교체 A B — A가 게임 중이면 replacePlayer, 큐에 있으면 그 자리만 B로 교체
+    // 교체 A B — 둘 중 "게임(코트/대기 게임)에 있는" 쪽을 빼고 다른 쪽(대기자 등)을 넣는다.
+    // 순서 무관: "교체 코트선수 대기선수"든 "교체 대기선수 코트선수"든 모두 동작.
     if (head === '교체' && tokens[1] && tokens[2]) {
       const a = matchName(tokens[1]); if (a.err) { showAlert('명령', a.err); return; }
       const b = matchName(tokens[2]); if (b.err) { showAlert('명령', b.err); return; }
-      const court = courts.find((c) => (c.currentTurn?.playerIds || []).includes(a.id!));
+      const findInGame = (id: string): { courtTurn?: string; entry?: any } | null => {
+        const c = courts.find((ct) => (ct.currentTurn?.playerIds || []).includes(id));
+        if (c?.currentTurn?.id) return { courtTurn: c.currentTurn.id };
+        const e = queuedEntries.find((en) => en.playerIds.includes(id));
+        return e ? { entry: e } : null;
+      };
+      let outId = a.id!, inId = b.id!; let loc = findInGame(a.id!);
+      if (!loc) { loc = findInGame(b.id!); if (loc) { outId = b.id!; inId = a.id!; } }
+      if (!loc) { showAlert('명령', '한 명은 게임 중(또는 대기 게임)이어야 바꿔요'); return; }
       try {
-        if (court?.currentTurn?.id) {
-          await clubSessionApi.replacePlayer(court.currentTurn.id, a.id!, b.id!);
-        } else {
-          const e = queuedEntries.find((en) => en.playerIds.includes(a.id!));
-          if (!e) { showAlert('명령', '그 선수가 게임에 없어요'); return; }
-          await updateEntry(e.id!, e.playerIds.map((x) => (x === a.id ? b.id! : x)));
-        }
+        if (loc.courtTurn) await clubSessionApi.replacePlayer(loc.courtTurn, outId, inId);
+        else await updateEntry(loc.entry.id!, loc.entry.playerIds.map((x: string) => (x === outId ? inId : x)));
         loadBoard(); loadCourts(); loadPool(); done(); showSuccess('교체 완료');
       } catch (er: any) { showAlert('오류', er?.response?.data?.error || '교체 실패'); }
       return;
