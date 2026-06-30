@@ -111,6 +111,7 @@ const CMD_HELP: Array<{ k: string; ex: string }> = [
   { k: '편성', ex: '홍길동 김철수 이영희 박민수' },
   { k: '코트 투입', ex: '코트1 홍길동 김철수 이영희 박민수' },
   { k: '다음게임→코트', ex: '코트1' },
+  { k: '게임에 추가', ex: '추가 1 홍길동 김철수' },
   { k: '교체', ex: '교체 홍길동 김철수' },
   { k: '대기로 빼기', ex: '빼 홍길동' },
   { k: '게임 종료', ex: '종료 코트1' },
@@ -1430,6 +1431,7 @@ export default function OperateScreen() {
     switch (a.action) {
       case 'compose': return (a.names || []).join(' ');
       case 'assign': return `코트${nm(a.court)} ${(a.names || []).join(' ')}`.trim();
+      case 'addToGame': return `추가 ${nm(a.gameNo)} ${(a.names || []).join(' ')}`.trim();
       case 'swap': return `교체 ${nm(a.out)} ${nm(a.in)}`;
       case 'remove': return `빼 ${nm(a.name)}`;
       case 'end': return `종료 코트${nm(a.court)}`;
@@ -1516,6 +1518,21 @@ export default function OperateScreen() {
       const n = parseInt(tokens[1].replace(/[^0-9]/g, ''), 10);
       if (!n || n < 1 || n > queuedEntries.length) { showAlert('명령', `${tokens[1]} 번째 게임이 없어요`); return; }
       done(); handleDeleteQueued(queuedEntries[n - 1].id!); return;
+    }
+    // 추가 N(번) 이름… — 기존 N번째 대기 게임에 사람 넣기(최대 4명)
+    if (head === '추가' && tokens[1]) {
+      const n = parseInt(tokens[1].replace(/[^0-9]/g, ''), 10);
+      if (!n || n < 1 || n > queuedEntries.length) { showAlert('명령', `${tokens[1]} 번째 게임이 없어요`); return; }
+      const entry = queuedEntries[n - 1];
+      const addIds: string[] = []; const aerrs: string[] = [];
+      for (const tk of tokens.slice(2)) { const r = matchName(tk); if (r.id) { if (!addIds.includes(r.id)) addIds.push(r.id); } else aerrs.push(r.err!); }
+      if (aerrs.length) { showAlert('명령', aerrs.join('\n')); return; }
+      if (!addIds.length) { showAlert('명령', '넣을 사람을 입력하세요'); return; }
+      const merged = [...entry.playerIds]; for (const id of addIds) if (!merged.includes(id)) merged.push(id);
+      if (merged.length > 4) { showAlert('명령', '한 게임은 4명까지예요 (지금 ' + entry.playerIds.length + '명)'); return; }
+      try { await updateEntry(entry.id!, merged); loadBoard(); loadPool(); done(); showSuccess(`${n}번 게임에 ${addIds.length}명 추가`); }
+      catch (e: any) { showAlert('오류', e?.response?.data?.error || '추가 실패'); }
+      return;
     }
     // 출석 전체 (아직 체크인 안 된 모임원 일괄 체크인)
     if (head === '출석' && tokens[1] === '전체') {
