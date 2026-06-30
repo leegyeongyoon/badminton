@@ -4536,10 +4536,9 @@ export default function OperateScreen() {
               </View>
             </View>
           ) : (
-            <TouchableOpacity onPress={() => setCmdOpen(true)} style={[styles.m2ChatBar, { backgroundColor: colors.primary }]} accessibilityLabel="명령 채팅 열기">
-              <Icon name="edit" size={16} color="#fff" />
-              <Text style={styles.m2ChatBarT} numberOfLines={1}>명령 입력 · "혼복 초심들이랑 짜줘"처럼 자유롭게 (AI 🤖)</Text>
-              <Text style={styles.m2ChatChevronUp}>▴</Text>
+            <TouchableOpacity onPress={() => setCmdOpen(true)} style={[styles.m2ChatFab, { backgroundColor: colors.primary }]} accessibilityLabel="명령 채팅 열기">
+              <Icon name="edit" size={17} color="#fff" />
+              <Text style={styles.m2ChatFabT}>명령</Text>
             </TouchableOpacity>
           )}
         </View>
@@ -5779,11 +5778,10 @@ const styles = StyleSheet.create({
   m2CmdHelpK: { ...typography.caption, fontWeight: '800' },
   m2CmdHelpEx: { fontSize: 11 },
   // 하단 채팅형 명령 패널
-  m2ChatAnchor: { position: 'absolute', left: 0, right: 0, bottom: 0 },
-  m2ChatBar: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 14, height: 46, borderTopLeftRadius: radius.lg, borderTopRightRadius: radius.lg, shadowColor: '#000', shadowOpacity: 0.18, shadowRadius: 8, shadowOffset: { width: 0, height: -2 }, elevation: 8 },
-  m2ChatBarT: { flex: 1, color: '#fff', ...typography.body2, fontWeight: '700' },
-  m2ChatChevronUp: { color: '#fff', fontSize: 16, fontWeight: '900' },
-  m2ChatPanel: { borderTopLeftRadius: radius.lg, borderTopRightRadius: radius.lg, borderWidth: 1, borderBottomWidth: 0, overflow: 'hidden', shadowColor: '#000', shadowOpacity: 0.2, shadowRadius: 12, shadowOffset: { width: 0, height: -3 }, elevation: 12 },
+  m2ChatAnchor: { position: 'absolute', right: 14, bottom: 14, alignItems: 'flex-end' },
+  m2ChatFab: { flexDirection: 'row', alignItems: 'center', gap: 6, height: 44, paddingHorizontal: 16, borderRadius: 22, shadowColor: '#000', shadowOpacity: 0.22, shadowRadius: 8, shadowOffset: { width: 0, height: 2 }, elevation: 8 },
+  m2ChatFabT: { color: '#fff', ...typography.body2, fontWeight: '800' },
+  m2ChatPanel: { width: 380, borderRadius: radius.lg, borderWidth: 1, overflow: 'hidden', shadowColor: '#000', shadowOpacity: 0.22, shadowRadius: 16, shadowOffset: { width: 0, height: 4 }, elevation: 14 },
   m2ChatHead: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 12, height: 40, borderBottomWidth: 1 },
   m2ChatTitle: { flex: 1, ...typography.body2, fontWeight: '800' },
   m2ChatClear: { ...typography.caption, fontWeight: '700' },
