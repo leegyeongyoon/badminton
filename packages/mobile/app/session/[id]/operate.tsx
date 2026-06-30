@@ -1544,9 +1544,19 @@ export default function OperateScreen() {
       if (aerrs.length) { showAlert('명령', aerrs.join('\n')); return; }
       if (!addIds.length) { showAlert('명령', '넣을 사람을 입력하세요'); return; }
       const merged = [...entry.playerIds]; for (const id of addIds) if (!merged.includes(id)) merged.push(id);
-      if (merged.length > 4) { showAlert('명령', '한 게임은 4명까지예요 (지금 ' + entry.playerIds.length + '명)'); return; }
-      try { await updateEntry(entry.id!, merged); loadBoard(); loadPool(); done(); showSuccess(`${n}번 게임에 ${addIds.length}명 추가`); }
-      catch (e: any) { showAlert('오류', e?.response?.data?.error || '추가 실패'); }
+      if (merged.length > 4) { showAlert('명령', `한 게임은 4명까지예요 (지금 ${entry.playerIds.length}명)`); return; }
+      // 옮기는 사람이 "다른 대기 게임"에 있으면 거기서 먼저 뺀다(복사 아니라 이동 = 중복 편성 방지).
+      const removals = new Map<string, string[]>();
+      for (const id of addIds) {
+        const cur = queuedEntries.find((e) => e.id !== entry.id && e.playerIds.includes(id));
+        if (cur) { const base = removals.get(cur.id!) ?? [...cur.playerIds]; removals.set(cur.id!, base.filter((x) => x !== id)); }
+      }
+      const moved = removals.size > 0;
+      try {
+        for (const [eid, ids] of removals) { if (ids.length === 0) await deleteEntry(eid); else await updateEntry(eid, ids); }
+        await updateEntry(entry.id!, merged);
+        loadBoard(); loadPool(); done(); showSuccess(`${n}번 게임${moved ? '으로' : '에'} ${addIds.length}명 ${moved ? '이동' : '추가'}`);
+      } catch (e: any) { showAlert('오류', e?.response?.data?.error || '이동 실패'); }
       return;
     }
     // 순서 N M — N번째 대기 게임을 M번째 순서로 이동(게임 하는 순서 변경)
