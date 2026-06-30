@@ -1407,6 +1407,7 @@ export async function parseCommand(
     '- compose {names:[]}            // 그 사람들로 새 게임 편성',
     '- assign {court:번호, names:[]}  // 편성+코트 투입 (names 비면 다음 게임 투입)',
     '- addToGame {gameNo:번호, names:[]}  // 기존 N번째 "대기 게임"에 사람 추가(넣어줘). 예: "1번에 홍길동 넣어줘"',
+    '- reorder {from:번호, to:번호}  // 대기 게임 순서 이동. 예: "3번 게임 맨 앞으로" → {from:3,to:1}',
     '- swap {out, in}                // 선수 교체',
     '- remove {name}                 // 대기로 빼기',
     '- end {court:번호}              // 코트 게임 종료',

@@ -112,6 +112,7 @@ const CMD_HELP: Array<{ k: string; ex: string }> = [
   { k: '코트 투입', ex: '코트1 홍길동 김철수 이영희 박민수' },
   { k: '다음게임→코트', ex: '코트1' },
   { k: '게임에 추가', ex: '추가 1 홍길동 김철수' },
+  { k: '순서 바꾸기', ex: '순서 3 1' },
   { k: '교체', ex: '교체 홍길동 김철수' },
   { k: '대기로 빼기', ex: '빼 홍길동' },
   { k: '게임 종료', ex: '종료 코트1' },
@@ -1438,6 +1439,7 @@ export default function OperateScreen() {
       case 'compose': return (a.names || []).join(' ');
       case 'assign': return `코트${nm(a.court)} ${(a.names || []).join(' ')}`.trim();
       case 'addToGame': return `추가 ${nm(a.gameNo)} ${(a.names || []).join(' ')}`.trim();
+      case 'reorder': return `순서 ${nm(a.from)} ${nm(a.to)}`;
       case 'swap': return `교체 ${nm(a.out)} ${nm(a.in)}`;
       case 'remove': return `빼 ${nm(a.name)}`;
       case 'end': return `종료 코트${nm(a.court)}`;
@@ -1541,6 +1543,17 @@ export default function OperateScreen() {
       if (merged.length > 4) { showAlert('명령', '한 게임은 4명까지예요 (지금 ' + entry.playerIds.length + '명)'); return; }
       try { await updateEntry(entry.id!, merged); loadBoard(); loadPool(); done(); showSuccess(`${n}번 게임에 ${addIds.length}명 추가`); }
       catch (e: any) { showAlert('오류', e?.response?.data?.error || '추가 실패'); }
+      return;
+    }
+    // 순서 N M — N번째 대기 게임을 M번째 순서로 이동(게임 하는 순서 변경)
+    if (head === '순서' && tokens[1] && tokens[2]) {
+      const from = parseInt(tokens[1].replace(/[^0-9]/g, ''), 10);
+      const to = parseInt(tokens[2].replace(/[^0-9]/g, ''), 10);
+      const L = queuedEntries.length;
+      if (!from || !to || from < 1 || to < 1 || from > L || to > L) { showAlert('명령', `순서는 1~${L} 범위여야 해요`); return; }
+      if (from === to) { showAlert('명령', '같은 순서예요'); return; }
+      try { await moveQueueItem(from - 1, to - 1); loadBoard(); done(); showSuccess(`${from}번 → ${to}번으로 이동`); }
+      catch (e: any) { showAlert('오류', e?.response?.data?.error || '순서 변경 실패'); }
       return;
     }
     // 출석 전체 (아직 체크인 안 된 모임원 일괄 체크인)
