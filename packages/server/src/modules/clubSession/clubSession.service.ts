@@ -1391,13 +1391,16 @@ export async function parseCommand(
     /* 보드 없음 → 빈 큐 */
   }
   const roster = players
-    .map((p: any) => (p.skillLevel ? `${p.userName}(${p.skillLevel})` : p.userName))
+    .map(
+      (p: any) =>
+        `${p.userName}(${p.skillLevel || '-'},${p.gender === 'M' ? '남' : p.gender === 'F' ? '여' : '?'},${p.gamesPlayedToday ?? 0}판${p.isInLesson ? ',레슨중' : ''})`,
+    )
     .join(', ');
   const courtNames = courts.map((c: any) => c.name).join(', ');
 
   const sys = [
     '너는 배드민턴 정모 운영판의 명령 파서다. 운영자가 한국어 자유 문장으로 말하면 정확히 하나의 동작을 JSON으로만 출력한다.',
-    `출석자(급수): ${roster || '(없음)'}`,
+    `출석자(이름·급수·성별·오늘 판수): ${roster || '(없음)'}`,
     `코트: ${courtNames || '(없음)'}`,
     `대기 게임: ${queueLines.join(' | ') || '(없음)'}`,
     '가능한 action 과 필드:',
@@ -1415,7 +1418,10 @@ export async function parseCommand(
     '- addGuest {guestName, skill?}  // 게스트 추가',
     '- autoFill {}                   // 자동 편성',
     '- unknown {reason}              // 못 알아듣거나 애매함',
-    '수준 맞추기: "OO한테 비슷한 상대 붙여서 짜줘", "조금 더 잘하는 사람들로", "급수 맞춰서" 처럼 부탁하면 출석자 급수(S>A>B>C>D>E>F, S가 최상)를 보고 적절한 사람을 직접 골라 compose.names(또는 assign)에 4명을 넣어라(지정한 사람 포함). 같이 칠 사람 수가 모자라면 가장 가까운 급수로 채운다.',
+    '편성(compose/assign)에서 사람을 고를 때 names 에 4명을 채워라(사용자가 일부만 말하면 나머지는 네가 골라 4명, 말한 사람은 반드시 포함).',
+    '고르는 기본 원칙: ① 급수를 비슷하게 — 특히 이름이 주어지면(예: "안지민 게임 짜줘", 안지민=C) 그 사람과 급수 차가 작은 사람들로 채운다(C면 B~D 위주). 급수가 멀리 떨어진 조합(예: C와 F, A와 F를 한 게임)은 피한다. ② 오늘 판수가 적어 오래 기다린 사람 우선 ③ 레슨중이거나 이미 위 "대기 게임"에 든 사람은 제외. (명단 앞에서부터 그냥 4명 집지 마라 — 반드시 급수를 보고 골라라.)',
+    '단, 사용자 요청 뉘앙스를 항상 우선(융통성): "덜 빡세게/가볍게"=급수 낮추거나 섞어서, "빡세게/잘하는 사람들로"=높은 급수, "초심/입문이랑"=낮은 급수(E·F 위주), "OO랑 같이/OO 포함"=그 사람 반드시 포함. 딱 맞는 급수가 모자라면 가장 가까운 걸로 융통성 있게 — 완벽을 억지로 맞추진 마라.',
+    '혼복(혼합복식) 처리(중요): "혼복"이 들어가면 출석자의 남/여 표시를 직접 세서 남자 정확히 2명 + 여자 정확히 2명을 골라 names 에 넣어라(급수는 서로 비슷하게). 한 성별이 3명 이상이면 안 된다. 예) names=["남자A","남자B","여자C","여자D"].',
     '출력 형식: 반드시 {"action":"<위 이름 중 하나>", ...나머지필드} — action 은 문자열 한 개. 필드는 같은 레벨에 둔다(중첩 금지).',
     '예) {"action":"compose","names":["홍길동","김철수","이영희","박민수"]}',
     '예) {"action":"swap","out":"홍길동","in":"김철수"}',
@@ -1430,7 +1436,7 @@ export async function parseCommand(
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` },
       body: JSON.stringify({
-        model: process.env.OPENAI_MODEL || 'gpt-4o-mini',
+        model: process.env.OPENAI_MODEL || 'gpt-4o',
         messages: [
           { role: 'system', content: sys },
           { role: 'user', content: text },
