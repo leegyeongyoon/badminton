@@ -1167,6 +1167,10 @@ export default function OperateScreen() {
   // 대기 명단 전용 검색/필터(이름 + 성별 + 급수). 가운데 게임은 그대로 두고 대기만 추린다.
   // 성별/급수는 '다중선택' — 빈 배열이면 전체. 칩 탭으로 토글, '전체'는 비움.
   const [poolQuery, setPoolQuery] = useState('');
+  // 텍스트 명령창 — "신예준 김도윤 이지유 강수아"(편성) / "코트1 …"(투입) / "신예준 급수 A"(수정).
+  // 평소엔 접어두고(작은 버튼) 탭하면 입력창이 올라온다(공간 적게).
+  const [cmd, setCmd] = useState('');
+  const [cmdOpen, setCmdOpen] = useState(false);
   const [poolGenders, setPoolGenders] = useState<string[]>([]);
   const [poolSkills, setPoolSkills] = useState<string[]>([]);
   const toggleIn = (arr: string[], v: string) => (arr.includes(v) ? arr.filter((x) => x !== v) : [...arr, v]);
@@ -1267,6 +1271,53 @@ export default function OperateScreen() {
       showSuccess(`${court?.name || '코트'} 게임 시작!`);
     } catch (err: any) { showAlert('오류', err?.response?.data?.error || '코트 투입 실패'); loadBoard(); }
   }, [queuedEntries, playingByCourtId, courts, assignEntry, loadBoard, loadCourts, loadPool]);
+
+  // ─── 텍스트 명령 ───  "이름 이름 …"=편성 · "코트N 이름 …"=투입 · "이름 급수 X"=급수 수정
+  // 이름은 출석자 명단과 완전일치 우선→부분일치. 0명/여러 명이면 알려주고 실행 안 함.
+  const runCommand = useCallback(async () => {
+    const raw = cmd.trim();
+    if (!raw) return;
+    const tokens = raw.split(/[\s,]+/).filter(Boolean);
+    const matchName = (tk: string): { id?: string; err?: string } => {
+      const t = tk.toLowerCase();
+      const ex = uniquePlayers.filter((m) => (m.userName || '').toLowerCase() === t);
+      if (ex.length === 1) return { id: ex[0].userId };
+      const pa = uniquePlayers.filter((m) => (m.userName || '').toLowerCase().includes(t));
+      if (pa.length === 1) return { id: pa[0].userId };
+      if (pa.length === 0) return { err: `'${tk}' 없음` };
+      return { err: `'${tk}' 여러 명(${pa.slice(0, 4).map((m) => m.userName).join('/')}) — 더 정확히` };
+    };
+    // 1) 급수 수정: "이름 급수 X"
+    const gi = tokens.findIndex((t) => t === '급수');
+    if (gi > 0 && tokens[gi + 1]) {
+      const r = matchName(tokens[gi - 1]);
+      if (r.err) { showAlert('명령', r.err); return; }
+      const lvl = tokens[gi + 1].toUpperCase();
+      try { await clubSessionApi.editPlayer(clubSessionId, r.id!, { skillLevel: lvl }); loadPool(); loadBoard(); setCmd(''); showSuccess(`급수 수정 → ${lvl}`); }
+      catch (e: any) { showAlert('오류', e?.response?.data?.error || '수정 실패'); }
+      return;
+    }
+    // 2) 코트 투입: 첫 토큰이 "코트N"/"cN"
+    let courtId: string | null = null;
+    let names = tokens;
+    const cm = tokens[0].match(/^코트\s*(\d+)$/) || tokens[0].match(/^c(\d+)$/i);
+    if (cm) {
+      const court = courts.find((c) => (c.name || '').replace(/\s/g, '') === `코트${cm[1]}`);
+      if (!court) { showAlert('명령', `'${tokens[0]}' 코트가 없어요`); return; }
+      courtId = court.id; names = tokens.slice(1);
+    }
+    // 3) 이름들 → 편성(+투입)
+    const ids: string[] = []; const errs: string[] = [];
+    for (const tk of names) { const r = matchName(tk); if (r.id) { if (!ids.includes(r.id)) ids.push(r.id); } else errs.push(r.err!); }
+    if (errs.length) { showAlert('명령', errs.join('\n')); return; }
+    if (ids.length === 0) { showAlert('명령', '이름을 입력하세요 (예: 신예준 김도윤 이지유 강수아)'); return; }
+    try {
+      const entry: any = await createQueueGame(ids);
+      if (courtId && entry?.id) await assignEntry(entry.id, courtId);
+      loadBoard(); loadPool(); loadCourts(); setCmd('');
+      showSuccess(courtId ? `코트 투입 (${ids.length}명)` : `편성 (${ids.length}명)`);
+    } catch (e: any) { showAlert('오류', e?.response?.data?.error || '편성 실패'); loadBoard(); }
+  }, [cmd, uniquePlayers, courts, createQueueGame, assignEntry, loadBoard, loadPool, loadCourts, clubSessionId]);
 
   // 첫 진입 시 큐가 비어있고 대기 인원 4명+면 자동 편성 1회(이후엔 '자동 편성' 버튼). 큐가 있으면 안 함.
   useEffect(() => {
@@ -4147,7 +4198,25 @@ export default function OperateScreen() {
         </View>
       ) : (
         <View style={styles.m2LeftHead}>
-          <Text style={[styles.m2PanelTitle, { color: colors.text, marginBottom: 0 }]} numberOfLines={1}>게임판 · 선수 탭→선택, 옮길 게임/대기 탭 (모드1 연동)</Text>
+          {/* 텍스트 명령 — 평소엔 작은 버튼, 탭하면 입력창이 올라온다. 이름=편성, '코트N 이름…'=투입, '이름 급수 X'=수정 */}
+          {cmdOpen ? (
+            <View style={[styles.m2CmdWrap, { borderColor: colors.primary, backgroundColor: colors.surface }]}>
+              <Icon name="edit" size={14} color={colors.textLight} />
+              <TextInput
+                autoFocus value={cmd} onChangeText={setCmd} onSubmitEditing={runCommand} returnKeyType="go"
+                placeholder="신예준 김도윤 이지유 강수아 · 코트1 … · 신예준 급수 A"
+                placeholderTextColor={colors.textLight}
+                style={[styles.m2CmdInput, { color: colors.text }]} />
+              <TouchableOpacity onPress={runCommand} disabled={!cmd.trim()} style={[styles.m2CmdBtn, { backgroundColor: cmd.trim() ? colors.primary : colors.surfaceSecondary }]} accessibilityLabel="명령 실행">
+                <Text style={[styles.m2CmdBtnT, { color: cmd.trim() ? '#fff' : colors.textLight }]}>실행</Text>
+              </TouchableOpacity>
+              <TouchableOpacity onPress={() => { setCmdOpen(false); setCmd(''); }} hitSlop={6} style={{ paddingHorizontal: 2 }} accessibilityLabel="명령창 닫기"><Icon name="close" size={15} color={colors.textLight} /></TouchableOpacity>
+            </View>
+          ) : (
+            <TouchableOpacity onPress={() => setCmdOpen(true)} style={[styles.m2CmdToggle, { borderColor: colors.border, backgroundColor: colors.surface }]} accessibilityLabel="텍스트 명령창 열기">
+              <Icon name="edit" size={13} color={colors.primary} /><Text style={[styles.m2CmdToggleT, { color: colors.primary }]}>명령</Text>
+            </TouchableOpacity>
+          )}
           <TouchableOpacity style={[styles.m2AutoBtn, { borderColor: colors.primary }]} onPress={() => autoFillQueue(poolIds)} accessibilityLabel="대기 인원 자동 편성">
             <Icon name="rotation" size={13} color={colors.primary} /><Text style={[styles.m2AutoBtnT, { color: colors.primary }]}>자동 편성</Text>
           </TouchableOpacity>
@@ -5477,6 +5546,12 @@ const styles = StyleSheet.create({
   gameOrderBtn: { paddingHorizontal: 3, paddingVertical: 1 },
   gameOrderT: { fontSize: 11, fontWeight: '900', lineHeight: 13 },
   m2LeftHead: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: spacing.sm, marginBottom: 8 },
+  m2CmdWrap: { flex: 1, flexDirection: 'row', alignItems: 'center', gap: 5, paddingHorizontal: 8, height: 34, borderWidth: 1.5, borderRadius: radius.md },
+  m2CmdInput: { flex: 1, minWidth: 0, ...typography.body2 },
+  m2CmdBtn: { paddingHorizontal: 9, height: 26, borderRadius: radius.sm, alignItems: 'center', justifyContent: 'center' },
+  m2CmdBtnT: { ...typography.caption, fontWeight: '800' },
+  m2CmdToggle: { flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 10, height: 30, borderWidth: 1.5, borderRadius: radius.md },
+  m2CmdToggleT: { ...typography.caption, fontWeight: '800' },
   m2AutoBtn: { flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: spacing.md, paddingVertical: 6, borderWidth: 1.5, borderRadius: radius.lg },
   m2AutoBtnT: { ...typography.buttonSm, fontWeight: '800' },
   gameFrameStart: { flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: spacing.md, paddingVertical: 5, borderRadius: radius.md },
