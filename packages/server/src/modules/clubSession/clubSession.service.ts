@@ -1,7 +1,8 @@
 import { prisma } from '../../utils/prisma';
-import { NotFoundError, BadRequestError, ForbiddenError } from '../../utils/errors';
+import { NotFoundError, BadRequestError, ForbiddenError, AppError } from '../../utils/errors';
 import { getIO } from '../../socket/index';
-import { emitPlayersUpdated } from '../checkin/checkin.service';
+import { emitPlayersUpdated, getAvailablePlayers } from '../checkin/checkin.service';
+import { getGameBoard } from '../gameBoard/gameBoard.service';
 import { UserRole, ClubSessionStatus } from '@badminton/shared';
 import { sendPushToUser } from '../notification/notification.service';
 import { openSession } from '../session/session.service';
@@ -1352,4 +1353,101 @@ export async function getMyStatus(userId: string): Promise<MyStatusResponse | nu
     etaGames: null,
     turnId: null,
   };
+}
+
+// ─── AI 명령 파싱 (운영판 키보드 명령의 자유 문장 폴백) ───
+// 운영자가 자유로운 한국어 문장으로 말하면 OpenAI가 "하나의 구조화된 동작(JSON)"으로 바꿔준다.
+// 모바일은 이 action 을 받아 기존 핸들러(편성/투입/교체/…)로 실행한다. LEADER/STAFF 전용.
+export async function parseCommand(
+  sessionId: string,
+  userId: string,
+  input: { text?: string },
+) {
+  const session = await prisma.clubSession.findUnique({
+    where: { id: sessionId },
+    include: { facility: true },
+  });
+  if (!session) throw new NotFoundError('모임 세션');
+  await verifyClubStaff(session.clubId, userId);
+
+  const apiKey = process.env.OPENAI_API_KEY;
+  if (!apiKey) throw new AppError(503, 'AI 명령이 설정되지 않았어요 (OPENAI_API_KEY 없음)');
+  const text = (input?.text || '').trim();
+  if (!text) throw new BadRequestError('명령을 입력하세요');
+
+  // 맥락: 출석자(급수)·코트·대기 게임 — LLM이 이름/코트/게임번호를 정확히 매칭하도록
+  const players = await getAvailablePlayers(session.facilityId, sessionId);
+  const courts = await getSessionCourts(sessionId);
+  const nameById = new Map<string, string>(players.map((p: any) => [p.userId, p.userName]));
+  let queueLines: string[] = [];
+  try {
+    const board: any = await getGameBoard(sessionId);
+    const q = (board?.entries || []).filter((e: any) => e.status === 'QUEUED');
+    queueLines = q.map(
+      (e: any, i: number) =>
+        `${i + 1}번: ${(e.playerIds || []).map((id: string) => nameById.get(id) || '?').join(',')}`,
+    );
+  } catch {
+    /* 보드 없음 → 빈 큐 */
+  }
+  const roster = players
+    .map((p: any) => (p.skillLevel ? `${p.userName}(${p.skillLevel})` : p.userName))
+    .join(', ');
+  const courtNames = courts.map((c: any) => c.name).join(', ');
+
+  const sys = [
+    '너는 배드민턴 정모 운영판의 명령 파서다. 운영자가 한국어 자유 문장으로 말하면 정확히 하나의 동작을 JSON으로만 출력한다.',
+    `출석자(급수): ${roster || '(없음)'}`,
+    `코트: ${courtNames || '(없음)'}`,
+    `대기 게임: ${queueLines.join(' | ') || '(없음)'}`,
+    '가능한 action 과 필드:',
+    '- compose {names:[]}            // 그 사람들로 한 게임 편성',
+    '- assign {court:번호, names:[]}  // 편성+코트 투입 (names 비면 다음 게임 투입)',
+    '- swap {out, in}                // 선수 교체',
+    '- remove {name}                 // 대기로 빼기',
+    '- end {court:번호}              // 코트 게임 종료',
+    '- delete {gameNo:번호}          // N번째 대기 게임 삭제',
+    '- editSkill {name, skill}       // 급수 변경 (S/A/B/C/D/E/F)',
+    '- editName {name, newName}      // 이름 변경',
+    '- checkInAll {}                 // 전체 출석',
+    '- checkout {name}               // 퇴장',
+    '- lesson {name}                 // 레슨 토글',
+    '- addGuest {guestName, skill?}  // 게스트 추가',
+    '- autoFill {}                   // 자동 편성',
+    '- unknown {reason}              // 못 알아듣거나 애매함',
+    '규칙: names/name/out/in 의 사람 이름은 반드시 위 출석자 명단의 "정확한 이름"으로 출력(급수 괄호 제외). 명단에 없거나 애매하면 unknown + reason(후보 안내). court/gameNo 는 숫자. 설명 없이 JSON 객체 하나만 출력.',
+  ].join('\n');
+
+  let res: globalThis.Response;
+  try {
+    res = await fetch('https://api.openai.com/v1/chat/completions', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` },
+      body: JSON.stringify({
+        model: process.env.OPENAI_MODEL || 'gpt-4o-mini',
+        messages: [
+          { role: 'system', content: sys },
+          { role: 'user', content: text },
+        ],
+        response_format: { type: 'json_object' },
+        temperature: 0,
+        max_tokens: 200,
+      }),
+    });
+  } catch {
+    throw new AppError(502, 'AI 호출에 실패했어요');
+  }
+  if (!res.ok) {
+    const t = await res.text().catch(() => '');
+    throw new AppError(502, `AI 파싱 실패 (${res.status})${t ? `: ${t.slice(0, 120)}` : ''}`);
+  }
+  const data: any = await res.json();
+  const content = data?.choices?.[0]?.message?.content || '{}';
+  let action: any;
+  try {
+    action = JSON.parse(content);
+  } catch {
+    throw new AppError(502, 'AI 응답 형식 오류');
+  }
+  return { action };
 }

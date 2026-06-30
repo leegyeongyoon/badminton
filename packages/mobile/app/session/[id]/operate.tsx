@@ -1423,8 +1423,29 @@ export default function OperateScreen() {
   //  종료 코트N       → 게임 종료           · 삭제 N(번)    → N번째 큐 게임 삭제
   //  이름 급수 X      → 급수 수정           · 자동          → 자동 편성
   // 이름은 출석자 명단 완전일치→부분일치. 0명/여러 명이면 안내하고 실행 안 함. 모두 기존 핸들러 호출.
-  const runCommand = useCallback(async () => {
-    const raw = cmd.trim();
+  // AI가 돌려준 구조화된 동작 → 기존 키워드 명령 문자열로 변환(그대로 재실행해 같은 핸들러 사용).
+  const actionToText = (a: any): string | null => {
+    if (!a || typeof a !== 'object') return null;
+    const nm = (x: any) => (x == null ? '' : String(x));
+    switch (a.action) {
+      case 'compose': return (a.names || []).join(' ');
+      case 'assign': return `코트${nm(a.court)} ${(a.names || []).join(' ')}`.trim();
+      case 'swap': return `교체 ${nm(a.out)} ${nm(a.in)}`;
+      case 'remove': return `빼 ${nm(a.name)}`;
+      case 'end': return `종료 코트${nm(a.court)}`;
+      case 'delete': return `삭제 ${nm(a.gameNo)}`;
+      case 'editSkill': return `${nm(a.name)} 급수 ${nm(a.skill)}`;
+      case 'editName': return `${nm(a.name)} 이름 ${nm(a.newName)}`;
+      case 'checkInAll': return '출석 전체';
+      case 'checkout': return `퇴장 ${nm(a.name)}`;
+      case 'lesson': return `레슨 ${nm(a.name)}`;
+      case 'addGuest': return `게스트 ${nm(a.guestName)}${a.skill ? ` ${nm(a.skill)}` : ''}`;
+      case 'autoFill': return '자동';
+      default: return null;
+    }
+  };
+  // 키워드로 먼저 파싱 → 못 알아들은 자유 문장만 AI(OpenAI)로 해석해 같은 핸들러로 실행(하이브리드).
+  const runParse = async (raw: string, allowAI: boolean): Promise<void> => {
     if (!raw) return;
     const tokens = raw.split(/[\s,]+/).filter(Boolean);
     // 한글 초성 추출(가-힣 → ㄱ..ㅎ). "ㅅㅇㅈ" 같은 초성 입력으로도 이름 검색.
@@ -1557,15 +1578,38 @@ export default function OperateScreen() {
     if (c0) { courtId = c0.id; names = tokens.slice(1); }
     const ids: string[] = []; const errs: string[] = [];
     for (const tk of names) { const r = matchName(tk); if (r.id) { if (!ids.includes(r.id)) ids.push(r.id); } else errs.push(r.err!); }
-    if (errs.length) { showAlert('명령', errs.join('\n')); return; }
-    if (ids.length === 0) { showAlert('명령', '이름을 입력하세요 (예: 신예준 김도윤 이지유 강수아)'); return; }
+    if (errs.length) {
+      // 키워드/이름으로 못 풀면 = 자유 문장 → AI(OpenAI)로 해석해 같은 핸들러로 실행(allowAI일 때 1회).
+      if (allowAI) {
+        try {
+          const { data } = await clubSessionApi.parseCommand(clubSessionId, raw);
+          const canon = actionToText(data?.action);
+          if (canon) { await runParse(canon, false); return; }
+          showAlert('명령', data?.action?.reason || errs.join('\n')); return;
+        } catch (e: any) { showAlert('명령', `${errs.join('\n')}\n(AI 해석 실패: ${e?.response?.data?.error || '오류'})`); return; }
+      }
+      showAlert('명령', errs.join('\n')); return;
+    }
+    if (ids.length === 0) {
+      // 이름이 하나도 안 들어왔는데 자유 문장일 수 있으니 AI 폴백 시도.
+      if (allowAI && tokens.length > 0) {
+        try {
+          const { data } = await clubSessionApi.parseCommand(clubSessionId, raw);
+          const canon = actionToText(data?.action);
+          if (canon) { await runParse(canon, false); return; }
+          showAlert('명령', data?.action?.reason || '이름을 입력하세요'); return;
+        } catch { showAlert('명령', '이름을 입력하세요 (예: 신예준 김도윤 이지유 강수아)'); return; }
+      }
+      showAlert('명령', '이름을 입력하세요 (예: 신예준 김도윤 이지유 강수아)'); return;
+    }
     try {
       const entry: any = await createQueueGame(ids);
       if (courtId && entry?.id) await assignEntry(entry.id, courtId);
       loadBoard(); loadPool(); loadCourts(); done();
       showSuccess(courtId ? `코트 투입 (${ids.length}명)` : `편성 (${ids.length}명)`);
     } catch (e: any) { showAlert('오류', e?.response?.data?.error || '편성 실패'); loadBoard(); }
-  }, [cmd, uniquePlayers, courts, queuedEntries, playingByCourtId, createQueueGame, assignEntry, updateEntry, moveToPool, autoFillQueue, handleEndGame, handleDeleteQueued, assignQueueToCourt, loadBoard, loadPool, loadCourts, clubSessionId]);
+  };
+  const runCommand = () => { runParse(cmd.trim(), true); };
 
   // ─── 정모 종료 (end the whole session) ───
   // Confirms, ends the session on the server, then navigates back out of the
@@ -4328,7 +4372,7 @@ export default function OperateScreen() {
               <Icon name="edit" size={14} color={colors.textLight} />
               <TextInput
                 autoFocus value={cmd} onChangeText={setCmd} onSubmitEditing={runCommand} returnKeyType="go"
-                placeholder="신예준 김도윤 이지유 강수아 · 코트1 … · 신예준 급수 A"
+                placeholder="이름들=편성 · 코트1 …=투입 · 또는 자유롭게: 오시우랑 현우 바꿔줘"
                 placeholderTextColor={colors.textLight}
                 style={[styles.m2CmdInput, { color: colors.text }]} />
               <TouchableOpacity onPress={runCommand} disabled={!cmd.trim()} style={[styles.m2CmdBtn, { backgroundColor: cmd.trim() ? colors.primary : colors.surfaceSecondary }]} accessibilityLabel="명령 실행">
@@ -4349,7 +4393,7 @@ export default function OperateScreen() {
       {/* 명령 치트시트 — 명령창 열면 보임. 탭하면 예시가 입력창에 채워진다(이름만 바꿔 실행). */}
       {cmdOpen && !selectedPlayer && (
         <View style={[styles.m2CmdHelp, { borderColor: colors.primary, backgroundColor: colors.surfaceSecondary }]}>
-          <Text style={[styles.m2CmdHelpTitle, { color: colors.textSecondary }]}>⌨ 명령 예시 — 탭하면 입력창에 채워져요 (이름만 바꿔 Enter)</Text>
+          <Text style={[styles.m2CmdHelpTitle, { color: colors.textSecondary }]}>⌨ 탭하면 채워져요 (이름만 바꿔 Enter) · 또는 “오시우랑 현우 바꿔”처럼 자유롭게 말해도 AI가 알아들어요 🤖</Text>
           <View style={styles.m2CmdHelpRow}>
             {CMD_HELP.map((c) => (
               <TouchableOpacity key={c.k} onPress={() => { setCmd(c.ex); setCmdOpen(true); }} style={[styles.m2CmdHelpChip, { borderColor: colors.border, backgroundColor: colors.surface }]} accessibilityLabel={`${c.k} 예시 입력`}>

@@ -229,6 +229,11 @@ export const clubSessionApi = {
       `/club-sessions/${clubSessionId}/members/check-in-all`,
     ),
 
+  // ─── 운영자: 자유 문장 명령을 AI(OpenAI)로 구조화된 동작으로 파싱 (LEADER/STAFF) ───
+  // 키워드로 못 알아들은 자유 문장을 서버가 OpenAI에 보내 {action,...} 으로 돌려준다.
+  parseCommand: (clubSessionId: string, text: string) =>
+    api.post<{ action: any }>(`/club-sessions/${clubSessionId}/parse-command`, { text }),
+
   // ─── 매치업: 한 선수가 이 정모에서 함께 친 사람 목록 (모든 모임원 조회 가능) ───
   getMatchups: (clubSessionId: string, userId: string) =>
     api.get<PlayerMatchups>(`/club-sessions/${clubSessionId}/players/${userId}/matchups`),

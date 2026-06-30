@@ -264,6 +264,24 @@ router.post(
   },
 );
 
+// POST /api/v1/club-sessions/:id/parse-command - 자유 문장 명령을 AI(OpenAI)로 구조화된 동작으로 파싱 (LEADER/STAFF)
+router.post(
+  '/:id/parse-command',
+  authenticate,
+  async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const result = await clubSessionService.parseCommand(
+        req.params.id as string,
+        req.user!.userId,
+        req.body,
+      );
+      res.json(result);
+    } catch (err) {
+      next(err);
+    }
+  },
+);
+
 // POST /api/v1/club-sessions/:id/guests/bulk-random - operator generates N random
 // SAMPLE guests (테스트/데모용) and checks them into the 정모. LEADER/STAFF only
 // (enforced in the service). EPHEMERAL — vanish on 정모 종료 like any guest.
