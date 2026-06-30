@@ -1416,7 +1416,12 @@ export async function parseCommand(
     '- autoFill {}                   // 자동 편성',
     '- unknown {reason}              // 못 알아듣거나 애매함',
     '수준 맞추기: "OO한테 비슷한 상대 붙여서 짜줘", "조금 더 잘하는 사람들로", "급수 맞춰서" 처럼 부탁하면 출석자 급수(S>A>B>C>D>E>F, S가 최상)를 보고 적절한 사람을 직접 골라 compose.names(또는 assign)에 4명을 넣어라(지정한 사람 포함). 같이 칠 사람 수가 모자라면 가장 가까운 급수로 채운다.',
-    '규칙: names/name/out/in 의 사람 이름은 반드시 위 출석자 명단의 "정확한 이름"으로 출력(급수 괄호 제외). 명단에 없거나 애매하면 unknown + reason(후보 안내). court/gameNo 는 숫자. 설명 없이 JSON 객체 하나만 출력.',
+    '출력 형식: 반드시 {"action":"<위 이름 중 하나>", ...나머지필드} — action 은 문자열 한 개. 필드는 같은 레벨에 둔다(중첩 금지).',
+    '예) {"action":"compose","names":["홍길동","김철수","이영희","박민수"]}',
+    '예) {"action":"swap","out":"홍길동","in":"김철수"}',
+    '예) {"action":"assign","court":3,"names":["홍길동","김철수","이영희","박민수"]}',
+    '예) {"action":"delete","gameNo":2}   예) {"action":"checkInAll"}   예) {"action":"autoFill"}',
+    '규칙: names/name/out/in 의 사람 이름은 반드시 위 출석자 명단의 "정확한 이름"으로 출력(급수 괄호 제외). 명단에 없거나 애매하면 {"action":"unknown","reason":"..."}. court/gameNo 는 숫자. 설명 없이 JSON 객체 하나만 출력.',
   ].join('\n');
 
   let res: globalThis.Response;
@@ -1449,6 +1454,14 @@ export async function parseCommand(
     action = JSON.parse(content);
   } catch {
     throw new AppError(502, 'AI 응답 형식 오류');
+  }
+  // 정규화: AI가 {"compose":{"names":[]}} 처럼 중첩으로 주면 {"action":"compose","names":[]} 로 평탄화.
+  if (action && typeof action === 'object' && typeof action.action !== 'string') {
+    const keys = Object.keys(action);
+    if (keys.length === 1) {
+      const inner = action[keys[0]];
+      action = inner && typeof inner === 'object' ? { action: keys[0], ...inner } : { action: keys[0] };
+    }
   }
   return { action };
 }
