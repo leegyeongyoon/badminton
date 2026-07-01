@@ -8,7 +8,8 @@ export interface MetricPoint {
   key: string;
   label: string; // 화면 표시용 짧은 라벨
   dau: number;
-  newUsers: number;
+  newUsers: number; // 신규 회원(게스트 제외)
+  cumulativeMembers: number; // 기간 말 누적 회원(성장 추세)
   checkins: number;
   sessions: number;
   games: number;

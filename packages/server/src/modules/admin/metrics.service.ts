@@ -122,7 +122,8 @@ export interface MetricPoint {
   key: string; // 버킷 키(day: YYYY-MM-DD, week: 시작일 YYYY-MM-DD, month: YYYY-MM)
   label: string; // 화면 표시용 짧은 라벨
   dau: number; // 그 기간에 체크인한 순 사용자 수
-  newUsers: number; // 그 기간 신규 가입
+  newUsers: number; // 그 기간 신규 가입(회원, 게스트 제외)
+  cumulativeMembers: number; // 그 기간 말 기준 누적 회원 수(성장 추세)
   checkins: number; // 그 기간 체크인 건수
   sessions: number; // 그 기간 시작된 정모 수
   games: number; // 그 기간 완료된 게임(턴) 수
@@ -200,7 +201,7 @@ export async function getAdminMetrics(granularity: Granularity = 'day', count?: 
 
   const [users, checkins, sessions, turns, metricRows, totalMembers, totalGuests, totalClubs, totalFacilities, activeSessions, checkedInNow] =
     await Promise.all([
-      prisma.user.findMany({ where: { createdAt: { gte: windowStart } }, select: { createdAt: true } }),
+      prisma.user.findMany({ where: { createdAt: { gte: windowStart }, isGuest: false }, select: { createdAt: true } }),
       prisma.checkIn.findMany({ where: { checkedInAt: { gte: windowStart } }, select: { userId: true, checkedInAt: true } }),
       prisma.clubSession.findMany({ where: { startedAt: { gte: windowStart } }, select: { startedAt: true } }),
       prisma.courtTurn.findMany({ where: { completedAt: { gte: windowStart } }, select: { completedAt: true } }),
@@ -217,7 +218,7 @@ export async function getAdminMetrics(granularity: Granularity = 'day', count?: 
   const hourly = new Array(24).fill(0) as number[];
   for (const c of checkins) hourly[c.checkedInAt.getHours()] += 1;
 
-  const series: MetricPoint[] = buckets.map((b) => ({ key: b.key, label: b.label, dau: 0, newUsers: 0, checkins: 0, sessions: 0, games: 0, peakConnections: 0, requestCount: 0 }));
+  const series: MetricPoint[] = buckets.map((b) => ({ key: b.key, label: b.label, dau: 0, newUsers: 0, cumulativeMembers: 0, checkins: 0, sessions: 0, games: 0, peakConnections: 0, requestCount: 0 }));
   const dauSets = buckets.map(() => new Set<string>());
 
   for (const u of users) { const i = idxOf(u.createdAt); if (i !== undefined) series[i].newUsers += 1; }
@@ -233,6 +234,11 @@ export async function getAdminMetrics(granularity: Granularity = 'day', count?: 
       series[i].peakConnections = Math.max(series[i].peakConnections, m.peakConnections);
     }
   }
+
+  // 회원 성장(누적): windowStart 이전 회원 baseline + 기간별 신규 누적 → 각 기간 말 누적 회원.
+  const newInWindow = series.reduce((a, s) => a + s.newUsers, 0);
+  let running = Math.max(0, totalMembers - newInWindow);
+  for (const s of series) { running += s.newUsers; s.cumulativeMembers = running; }
 
   // 현재 기간(마지막 버킷) 막대에 아직 flush 안 된 오늘 요청/피크를 반영.
   const last = series[series.length - 1];
