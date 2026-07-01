@@ -4580,13 +4580,26 @@ export default function OperateScreen() {
                         ))}
                       </View>
                     ))}
-                    {/* 코트에서 게임 중인 묶음 — 맨 밑에 4명 한 줄로. 끌어다 놓아 다음 게임 미리 편성. */}
-                    {playingCols.length > 0 && <Text style={[styles.m2SectionLabel, { color: colors.warning, marginTop: 6 }]}>게임 중 · 끌어서 다음 게임 미리 편성</Text>}
-                    {playingCols.map((pc, i) => (
-                      <View key={`play${i}`} style={[styles.gameFrameSlots, { borderTopWidth: 1, borderTopColor: colors.warningLight, paddingTop: 4 }]}>
-                        {pc.ids.map((id) => { const p = getPlayer(id); return p ? <PlayerTag key={id} player={p} fill compact /> : null; })}
-                      </View>
-                    ))}
+                    {/* 코트에서 게임 중인 묶음 — 맨 밑에 4명 한 줄로. 끌어다 놓아 다음 게임 미리 편성.
+                        이미 다음 게임으로 편성된(inQueue) 선수는 '방금 끝난 게임'처럼 그 자리만 빈칸으로
+                        비운다(이름표가 남지 않도록). 자리는 유지돼 빼면 다시 채워짐. 4명 다 편성된 코트 줄은 숨김. */}
+                    {(() => {
+                      const visiblePlaying = playingCols.filter((pc) => pc.ids.some((id) => !inQueue.has(id)));
+                      if (visiblePlaying.length === 0) return null;
+                      return (
+                        <>
+                          <Text style={[styles.m2SectionLabel, { color: colors.warning, marginTop: 6 }]}>게임 중 · 끌어서 다음 게임 미리 편성</Text>
+                          {visiblePlaying.map((pc, i) => (
+                            <View key={`play${i}`} style={[styles.gameFrameSlots, { borderTopWidth: 1, borderTopColor: colors.warningLight, paddingTop: 4 }]}>
+                              {pc.ids.map((id) => {
+                                if (inQueue.has(id)) return <View key={id} style={styles.poolGapSlot} />; // 편성됨 → 자리 비움
+                                const p = getPlayer(id); return p ? <PlayerTag key={id} player={p} fill compact /> : <View key={id} style={styles.poolGapSlot} />;
+                              })}
+                            </View>
+                          ))}
+                        </>
+                      );
+                    })()}
                   </View>
                 )}
             </PoolDropZone>
