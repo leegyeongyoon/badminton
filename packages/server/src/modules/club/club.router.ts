@@ -25,7 +25,7 @@ function parsePeriod(raw: unknown) {
   if (raw === undefined || raw === '') return 'all' as const;
   const result = attendancePeriodSchema.safeParse(raw);
   if (!result.success) {
-    throw new BadRequestError('지원하지 않는 기간입니다 (month, year, all)');
+    throw new BadRequestError('지원하지 않는 기간입니다 (month, year, all, 또는 YYYY-MM)');
   }
   return result.data;
 }

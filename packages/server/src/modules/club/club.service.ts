@@ -718,18 +718,24 @@ async function verifyClubMember(clubId: string, userId: string) {
   return member;
 }
 
-// Returns the inclusive start Date for a period, or null for 'all'.
-function periodStart(period: AttendancePeriod): Date | null {
+// Returns the [start, end) Date range for a period (server-local calendar).
+//  - 'all'         → 무제한
+//  - 'year'        → 올해 1/1 ~ (상한 없음)
+//  - 'month'       → 이번 달 1일 ~ (상한 없음, 하위호환)
+//  - 'YYYY-MM'     → 그 달 1일 ~ 다음 달 1일(미포함) — 특정 월만 집계
+function periodRange(period: AttendancePeriod): { start: Date | null; end: Date | null } {
   const now = new Date();
-  if (period === 'month') {
-    // current calendar month: 1st of this month → now
-    return new Date(now.getFullYear(), now.getMonth(), 1, 0, 0, 0, 0);
+  if (period === 'all') return { start: null, end: null };
+  if (period === 'year') return { start: new Date(now.getFullYear(), 0, 1, 0, 0, 0, 0), end: null };
+  if (period === 'month') return { start: new Date(now.getFullYear(), now.getMonth(), 1, 0, 0, 0, 0), end: null };
+  const m = /^(\d{4})-(\d{2})$/.exec(period);
+  if (m) {
+    const y = Number(m[1]);
+    const mo = Number(m[2]) - 1; // 0-based
+    // new Date(y, mo+1, 1) 는 12월이면 자동으로 다음 해 1월로 넘어간다.
+    return { start: new Date(y, mo, 1, 0, 0, 0, 0), end: new Date(y, mo + 1, 1, 0, 0, 0, 0) };
   }
-  if (period === 'year') {
-    // current calendar year: Jan 1 of this year → now
-    return new Date(now.getFullYear(), 0, 1, 0, 0, 0, 0);
-  }
-  return null; // 'all'
+  return { start: null, end: null };
 }
 
 const LEADERBOARD_LIMIT = 50;
@@ -743,7 +749,7 @@ export async function getAttendanceLeaderboard(
   if (!club) throw new NotFoundError('모임');
   await verifyClubMember(clubId, userId);
 
-  const start = periodStart(period);
+  const { start, end } = periodRange(period);
 
   // Only members of this club, excluding guests.
   const members = await prisma.clubMember.findMany({
@@ -759,7 +765,9 @@ export async function getAttendanceLeaderboard(
       userId: { in: memberIds },
       clubSessionId: { not: null },
       clubSession: { clubId },
-      ...(start ? { checkedInAt: { gte: start } } : {}),
+      ...(start || end
+        ? { checkedInAt: { ...(start ? { gte: start } : {}), ...(end ? { lt: end } : {}) } }
+        : {}),
     },
     select: { userId: true, clubSessionId: true },
   });

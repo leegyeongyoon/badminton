@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useState } from 'react';
-import { View, Text, Pressable, StyleSheet } from 'react-native';
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import { View, Text, Pressable, ScrollView, StyleSheet } from 'react-native';
 import { useTheme } from '../../hooks/useTheme';
 import { useAuthStore } from '../../store/authStore';
 import { typography, spacing, radius, palette } from '../../constants/theme';
@@ -24,11 +24,28 @@ interface AttendanceLeaderboardProps {
   maxRows?: number;
 }
 
-const PERIODS: { key: AttendancePeriod; label: string }[] = [
-  { key: 'month', label: '이번 달' },
-  { key: 'year', label: '올해' },
-  { key: 'all', label: '전체' },
+// 상단 세그먼트 프리셋. '월별'은 특정 월(YYYY-MM)을 고르는 모드로, 선택 시 아래에 월 칩이 뜬다.
+const PRESETS = [
+  { key: 'month' as const, label: '월별' },
+  { key: 'year' as const, label: '올해' },
+  { key: 'all' as const, label: '전체' },
 ];
+
+// YYYY-MM 키 <-> 표시용 헬퍼.
+const monthKey = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+const isMonthKey = (p: string) => /^\d{4}-\d{2}$/.test(p);
+// 최근 12개월(이번 달 → 과거) 키 목록.
+function recentMonths(count = 12): string[] {
+  const now = new Date();
+  return Array.from({ length: count }, (_, i) => monthKey(new Date(now.getFullYear(), now.getMonth() - i, 1)));
+}
+// 칩 라벨: 이번 달은 '이번 달', 그 외엔 'YYYY.M'.
+function monthLabel(key: string): string {
+  const now = new Date();
+  if (key === monthKey(now)) return '이번 달';
+  const [y, m] = key.split('-');
+  return `${y}.${Number(m)}`;
+}
 
 const MEDALS: Record<number, string> = { 1: '🥇', 2: '🥈', 3: '🥉' };
 
@@ -43,7 +60,10 @@ export function AttendanceLeaderboard({ clubId, maxRows }: AttendanceLeaderboard
   const { colors, shadows } = useTheme();
   const { user } = useAuthStore();
 
-  const [period, setPeriod] = useState<AttendancePeriod>('month');
+  // 기본값 = 이번 달(구체 월 키). '월별' 모드일 때 선택된 월을 그대로 period 로 쓴다.
+  const months = useMemo(() => recentMonths(12), []);
+  const [period, setPeriod] = useState<AttendancePeriod>(() => months[0]);
+  const monthMode = isMonthKey(period as string);
   const [data, setData] = useState<Leaderboard | null>(null);
   const [loading, setLoading] = useState(true);
   const [errored, setErrored] = useState(false);
@@ -76,6 +96,9 @@ export function AttendanceLeaderboard({ clubId, maxRows }: AttendanceLeaderboard
 
   const me = data?.me ?? null;
   const entries = data?.entries ?? [];
+  // 서버는 빈 달에도 전원(0회)을 내려준다. 아무도 출석 안 했으면 '0회 순위' 대신
+  // 안내를 띄운다(0회를 1위로 보여주는 이상한 화면 방지).
+  const hasAny = entries.some((e) => e.attendanceCount > 0);
   // Collapse to top-N rows unless expanded (only when maxRows is provided).
   const collapsible = maxRows != null && entries.length > maxRows;
   const visibleEntries = collapsible && !expanded ? entries.slice(0, maxRows) : entries;
@@ -84,14 +107,15 @@ export function AttendanceLeaderboard({ clubId, maxRows }: AttendanceLeaderboard
     <View style={styles.container}>
       <SectionHeader title="🏆 출석왕" />
 
-      {/* Period segmented toggle */}
+      {/* Period segmented toggle — 월별 / 올해 / 전체 */}
       <View style={[styles.segment, { backgroundColor: colors.surface2 }]}>
-        {PERIODS.map((p) => {
-          const active = p.key === period;
+        {PRESETS.map((p) => {
+          const active = p.key === 'month' ? monthMode : p.key === period;
           return (
             <Pressable
               key={p.key}
-              onPress={() => setPeriod(p.key)}
+              // '월별'을 누르면 최근 월(이번 달)로, 올해/전체는 그대로.
+              onPress={() => setPeriod(p.key === 'month' ? months[0] : p.key)}
               style={({ pressed }) => [
                 styles.segmentBtn,
                 active && [styles.segmentBtnActive, { backgroundColor: colors.surface }, shadows.sm],
@@ -111,8 +135,37 @@ export function AttendanceLeaderboard({ clubId, maxRows }: AttendanceLeaderboard
         })}
       </View>
 
-      {/* My attendance pill */}
-      {!loading && me && (
+      {/* 월별 모드: 특정 월을 가로 스크롤로 선택 */}
+      {monthMode && (
+        <ScrollView
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          contentContainerStyle={styles.monthRow}
+          style={styles.monthScroll}
+        >
+          {months.map((mk) => {
+            const active = mk === period;
+            return (
+              <Pressable
+                key={mk}
+                onPress={() => setPeriod(mk)}
+                style={({ pressed }) => [
+                  styles.monthChip,
+                  { borderColor: active ? colors.primary : colors.divider, backgroundColor: active ? colors.primaryBg : colors.surface },
+                  pressed && !active && { opacity: 0.7 },
+                ]}
+              >
+                <Text style={[styles.monthChipText, { color: active ? colors.primary : colors.textSecondary }]}>
+                  {monthLabel(mk)}
+                </Text>
+              </Pressable>
+            );
+          })}
+        </ScrollView>
+      )}
+
+      {/* My attendance pill — 집계가 의미 있을 때만(아무도 출석 안 한 달엔 숨김) */}
+      {!loading && me && hasAny && (
         <View style={[styles.mePill, { backgroundColor: colors.primaryBg, borderColor: colors.primaryLight }]}>
           <Text style={[styles.mePillLabel, { color: colors.primary }]}>내 출석</Text>
           <Text style={[styles.mePillValue, { color: colors.primary }]}>
@@ -144,13 +197,13 @@ export function AttendanceLeaderboard({ clubId, maxRows }: AttendanceLeaderboard
             action={{ label: '다시 시도', onPress: () => load(period) }}
           />
         </View>
-      ) : entries.length === 0 ? (
+      ) : entries.length === 0 || !hasAny ? (
         <View style={[styles.card, { backgroundColor: colors.surface }, shadows.md]}>
           <EmptyState
             icon="trophy"
             compact
-            title="아직 출석 기록이 없어요"
-            description="정모에 참여하면 출석왕 순위가 채워져요"
+            title={monthMode ? '이 달엔 정모 기록이 없어요' : '아직 출석 기록이 없어요'}
+            description={monthMode ? '위에서 다른 달을 골라보세요' : '정모에 참여하면 출석왕 순위가 채워져요'}
           />
         </View>
       ) : (
@@ -281,6 +334,26 @@ const styles = StyleSheet.create({
   segmentBtnActive: {},
   segmentText: {
     ...typography.subtitle2,
+  },
+
+  // 월 선택 가로 스크롤
+  monthScroll: {
+    marginBottom: spacing.md,
+  },
+  monthRow: {
+    flexDirection: 'row',
+    gap: spacing.sm,
+    paddingVertical: spacing.xs,
+  },
+  monthChip: {
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.xs,
+    borderRadius: radius.pill,
+    borderWidth: 1,
+  },
+  monthChipText: {
+    ...typography.caption,
+    fontWeight: '700',
   },
 
   // My attendance pill

@@ -1,7 +1,8 @@
 import api from './api';
 
 // ─── Attendance leaderboard (출석왕) ─────────────────────────
-export type AttendancePeriod = 'month' | 'year' | 'all';
+// 'month'=이번 달, 'year'=올해, 'all'=전체, "YYYY-MM"=특정 월(예: '2026-06').
+export type AttendancePeriod = 'month' | 'year' | 'all' | (string & {});
 
 export interface AttendanceEntry {
   userId: string;

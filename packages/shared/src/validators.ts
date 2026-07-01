@@ -230,8 +230,12 @@ export const bulkAddManagedMembersSchema = z.object({
 export type ManagedMemberInput = z.infer<typeof managedMemberInputSchema>;
 export type BulkAddManagedMembersInput = z.infer<typeof bulkAddManagedMembersSchema>;
 
-// Attendance leaderboard period: current calendar month | current calendar year | all-time
-export const attendancePeriodSchema = z.enum(['month', 'year', 'all']);
+// Attendance leaderboard period: current calendar month | current calendar year |
+// all-time | a SPECIFIC month ("YYYY-MM", 01~12). 특정 월을 골라 그 달 출석왕을 본다.
+export const attendancePeriodSchema = z.union([
+  z.enum(['month', 'year', 'all']),
+  z.string().regex(/^\d{4}-(0[1-9]|1[0-2])$/, 'YYYY-MM'),
+]);
 export type AttendancePeriodInput = z.infer<typeof attendancePeriodSchema>;
 
 // Club

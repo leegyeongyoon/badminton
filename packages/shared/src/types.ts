@@ -405,7 +405,9 @@ export interface AvailablePlayerResponse {
 
 // --- Attendance leaderboard (출석왕) ---
 
-export type AttendancePeriod = 'month' | 'year' | 'all';
+// 'month'=이번 달, 'year'=올해, 'all'=전체, "YYYY-MM"=특정 월(예: '2026-06').
+// (string & {}) 는 리터럴 자동완성을 유지하면서 'YYYY-MM' 문자열도 허용하는 트릭.
+export type AttendancePeriod = 'month' | 'year' | 'all' | (string & {});
 
 export interface AttendanceLeaderboardEntry {
   userId: string;
