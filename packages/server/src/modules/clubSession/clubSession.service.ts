@@ -1473,3 +1473,41 @@ export async function parseCommand(
   }
   return { action };
 }
+
+// ─────────────────────────────────────────────────────────────
+// 운영 공유 메모 (실시간) — 여러 운영진이 같은 화면에서 편성 히스토리·
+// 파트너 조합 등 맥락을 공유하기 위한 자유 텍스트 메모. 운영진(LEADER/STAFF)만
+// 조회·수정 가능하며, 수정 시 facility 룸으로 소켓 브로드캐스트.
+const OPERATOR_MEMO_MAX = 4000;
+
+export async function getOperatorMemo(sessionId: string, userId: string) {
+  const session = await prisma.clubSession.findUnique({
+    where: { id: sessionId },
+    select: { clubId: true, operatorMemo: true },
+  });
+  if (!session) throw new NotFoundError('모임 세션');
+  await verifyClubStaff(session.clubId, userId);
+  return { operatorMemo: session.operatorMemo ?? '' };
+}
+
+export async function updateOperatorMemo(sessionId: string, userId: string, memo: string) {
+  const session = await prisma.clubSession.findUnique({
+    where: { id: sessionId },
+    select: { clubId: true, facilityId: true },
+  });
+  if (!session) throw new NotFoundError('모임 세션');
+  await verifyClubStaff(session.clubId, userId);
+  const clean = (memo ?? '').slice(0, OPERATOR_MEMO_MAX);
+  await prisma.clubSession.update({
+    where: { id: sessionId },
+    data: { operatorMemo: clean },
+  });
+  try {
+    getIO()
+      .to(`facility:${session.facilityId}`)
+      .emit('clubSession:memoUpdated', { clubSessionId: sessionId, operatorMemo: clean });
+  } catch {
+    /* 소켓 미연결 시 무시 — 다음 조회에서 최신값을 받음 */
+  }
+  return { operatorMemo: clean };
+}

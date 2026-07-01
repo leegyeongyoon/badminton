@@ -493,6 +493,7 @@ model ClubSession {
   status            ClubSessionStatus @default(ACTIVE)
   courtIds          String[]
   title             String?
+  operatorMemo      String?           @db.Text // 운영자 공유 메모(실시간) — 여러 운영자 협업용
   scheduledStartAt  DateTime?
   checkInOpensAt    DateTime?
   checkInClosesAt   DateTime?

@@ -663,6 +663,55 @@ export default function OperateScreen() {
   }, [clubId]);
   useSocketEvent('clubMessage:new', handleClubMessage);
 
+  // ─── 운영 노트: 초기 로드 + 실시간 반영 ───
+  // 입력 중 텍스트는 lineInput(따로 관리)에 있으므로, 원격 변경이 와도 덮을 걱정 없이 memo만 갱신.
+  useEffect(() => {
+    if (!clubSessionId || roleState !== 'allowed') return;
+    let alive = true;
+    clubSessionApi.getOperatorMemo(clubSessionId).then(({ data }) => {
+      if (alive) setMemo(data?.operatorMemo ?? '');
+    }).catch(() => {});
+    return () => { alive = false; };
+  }, [clubSessionId, roleState]);
+
+  const handleMemoUpdated = useCallback((payload: any) => {
+    if (!payload || payload.clubSessionId !== clubSessionId) return;
+    setMemo(payload.operatorMemo ?? '');
+  }, [clubSessionId]);
+  useSocketEvent('clubSession:memoUpdated', handleMemoUpdated);
+
+  // 줄 추가/삭제/수정 → 문자열로 합쳐 즉시 저장(서버가 소켓으로 다른 운영자에게 브로드캐스트).
+  const saveMemoLines = useCallback((lines: string[]) => {
+    if (!clubSessionId) return;
+    const next = lines.join('\n');
+    setMemo(next); // 낙관적 반영
+    setMemoSaving(true);
+    clubSessionApi.updateOperatorMemo(clubSessionId, next)
+      .then(({ data }) => setMemo(data?.operatorMemo ?? next))
+      .catch(() => {})
+      .finally(() => setMemoSaving(false));
+  }, [clubSessionId]);
+
+  const addMemoLine = () => {
+    const body = lineInput.trim();
+    if (!body) { setLineTag(null); return; }
+    // 이미 #태그로 시작하면 그대로, 아니면 선택한 칩 태그를 앞에 붙임.
+    const line = /^#/.test(body) ? body : `${lineTag ? `#${lineTag} ` : ''}${body}`;
+    saveMemoLines([...memoLines, line]);
+    setLineInput('');
+    setLineTag(null);
+    memoInputRef.current?.focus?.();
+  };
+  const removeMemoLine = (i: number) => saveMemoLines(memoLines.filter((_, idx) => idx !== i));
+  const editMemoLine = (i: number) => {
+    // 줄을 입력창으로 되가져와 수정(리스트에선 제거) → 고치고 다시 추가.
+    const { tag, rest } = parseMemoLine(memoLines[i]);
+    setLineTag(tag);
+    setLineInput(rest);
+    saveMemoLines(memoLines.filter((_, idx) => idx !== i));
+    memoInputRef.current?.focus?.();
+  };
+
   // ─── Ensure board exists ───
   useEffect(() => {
     if (roleState === 'allowed' && !board && !loading && clubSessionId && !error) {
@@ -1198,6 +1247,30 @@ export default function OperateScreen() {
     setCmdLog((prev) => [...prev, { role, text, ok }].slice(-40));
   }, []);
   const chatScrollRef = useRef<any>(null);
+  // ─── 운영 노트 (실시간) — 편성 히스토리·파트너 조합·주의사항을 '한 줄씩' 공유 ───
+  // 자유 텍스트 한 칸 대신 줄 단위로 관리한다. 서버엔 그대로 문자열(줄바꿈 구분)로 저장/브로드캐스트.
+  // memo=서버 확정 문자열, memoLines=렌더용 줄 배열, lineInput/lineTag=지금 추가 중인 한 줄.
+  const [memoOpen, setMemoOpen] = useState(false);
+  const [memo, setMemo] = useState('');
+  const [memoSaving, setMemoSaving] = useState(false);
+  const [lineInput, setLineInput] = useState('');
+  const [lineTag, setLineTag] = useState<string | null>(null);
+  const memoInputRef = useRef<any>(null);
+  const MEMO_TAGS: Array<{ key: string; color: string }> = [
+    { key: '주의', color: colors.danger },
+    { key: '파트너', color: colors.primary },
+    { key: '결석', color: colors.warning },
+    { key: '일반', color: colors.textSecondary },
+  ];
+  const memoLines = useMemo(
+    () => memo.split('\n').map((s) => s.trim()).filter(Boolean),
+    [memo],
+  );
+  const parseMemoLine = (l: string): { tag: string | null; rest: string } => {
+    const m = l.match(/^#(\S+)\s*([\s\S]*)$/);
+    return m ? { tag: m[1], rest: m[2] } : { tag: null, rest: l };
+  };
+  const memoTagColor = (tag: string | null) => MEMO_TAGS.find((t) => t.key === tag)?.color ?? colors.textSecondary;
   const [poolGenders, setPoolGenders] = useState<string[]>([]);
   const [poolSkills, setPoolSkills] = useState<string[]>([]);
   const toggleIn = (arr: string[], v: string) => (arr.includes(v) ? arr.filter((x) => x !== v) : [...arr, v]);
@@ -4530,6 +4603,69 @@ export default function OperateScreen() {
       {/* ── 하단 채팅형 명령 패널 (absolute · 아코디언) — 선택 중이 아닐 때만 ── */}
       {!selectedPlayer && (
         <View pointerEvents="box-none" style={styles.m2ChatAnchor}>
+          {/* ── 운영 노트 (실시간) — 편성 맥락을 한 줄씩 #태그로 공유 ── */}
+          {memoOpen ? (
+            <View style={[styles.m2MemoPanel, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+              <View style={[styles.m2ChatHead, { borderBottomColor: colors.border }]}>
+                <Text style={[styles.m2ChatTitle, { color: colors.text }]} numberOfLines={1}>🗒 운영 노트 · 실시간</Text>
+                <Text style={[styles.m2MemoStatus, { color: colors.textLight }]}>{memoSaving ? '저장 중…' : '자동 저장'}</Text>
+                <TouchableOpacity onPress={() => setMemoOpen(false)} hitSlop={8} accessibilityLabel="운영 노트 닫기"><Text style={[styles.m2ChatChevron, { color: colors.textSecondary }]}>▾</Text></TouchableOpacity>
+              </View>
+              <ScrollView style={styles.m2MemoList} contentContainerStyle={{ padding: 8, gap: 5 }} keyboardShouldPersistTaps="handled">
+                {memoLines.length === 0 ? (
+                  <Text style={[styles.m2MemoEmpty, { color: colors.textLight }]}>아직 노트가 없어요. 아래 #태그를 누르고 한 줄씩 남겨보세요.{'\n'}예) #파트너 김철수·이영희 · #주의 3코트 라인 · #결석 오지우</Text>
+                ) : memoLines.map((l, i) => {
+                  const { tag, rest } = parseMemoLine(l);
+                  return (
+                    <View key={i} style={[styles.m2MemoRow, { backgroundColor: colors.surfaceSecondary }]}>
+                      <TouchableOpacity style={styles.m2MemoRowMain} onPress={() => editMemoLine(i)} accessibilityLabel={`노트 수정: ${rest}`}>
+                        {!!tag && <View style={[styles.m2MemoTagBadge, { backgroundColor: memoTagColor(tag) }]}><Text style={styles.m2MemoTagBadgeT}>{tag}</Text></View>}
+                        <Text style={[styles.m2MemoRowT, { color: colors.text }]}>{rest || (tag ? '' : l)}</Text>
+                      </TouchableOpacity>
+                      <TouchableOpacity onPress={() => removeMemoLine(i)} hitSlop={8} style={styles.m2MemoDel} accessibilityLabel="노트 줄 삭제">
+                        <Text style={[styles.m2MemoDelT, { color: colors.textLight }]}>✕</Text>
+                      </TouchableOpacity>
+                    </View>
+                  );
+                })}
+              </ScrollView>
+              <View style={styles.m2MemoTagsRow}>
+                {MEMO_TAGS.map((t) => {
+                  const on = lineTag === t.key;
+                  return (
+                    <TouchableOpacity key={t.key} onPress={() => { setLineTag(on ? null : t.key); memoInputRef.current?.focus?.(); }}
+                      style={[styles.m2MemoTagChip, { borderColor: t.color, backgroundColor: on ? t.color : 'transparent' }]}>
+                      <Text style={[styles.m2MemoTagChipT, { color: on ? '#fff' : t.color }]}>#{t.key}</Text>
+                    </TouchableOpacity>
+                  );
+                })}
+              </View>
+              <View style={[styles.m2ChatInputRow, { borderTopColor: colors.border }]}>
+                <TextInput
+                  ref={memoInputRef}
+                  testID="memoLineInput"
+                  value={lineInput}
+                  onChangeText={setLineInput}
+                  onSubmitEditing={addMemoLine}
+                  returnKeyType="done"
+                  blurOnSubmit={false}
+                  placeholder={lineTag ? `#${lineTag} 내용 입력…` : '한 줄 메모 입력…'}
+                  placeholderTextColor={colors.textLight}
+                  style={[styles.m2ChatInput, { color: colors.text, backgroundColor: colors.surfaceSecondary }]}
+                />
+                <TouchableOpacity onPress={addMemoLine} disabled={!lineInput.trim()} style={[styles.m2ChatSend, { backgroundColor: lineInput.trim() ? colors.primary : colors.surfaceSecondary }]} accessibilityLabel="노트 줄 추가">
+                  <Text style={[styles.m2ChatSendT, { color: lineInput.trim() ? '#fff' : colors.textLight }]}>추가</Text>
+                </TouchableOpacity>
+              </View>
+              <Text style={[styles.m2MemoHint, { color: colors.textLight }]}>운영진 모두에게 실시간 공유 · 줄 눌러 수정, ✕ 삭제</Text>
+            </View>
+          ) : (
+            <TouchableOpacity onPress={() => setMemoOpen(true)} style={[styles.m2MemoFab, { backgroundColor: colors.surface, borderColor: colors.border }]} accessibilityLabel="운영 노트 열기">
+              <Text style={styles.m2MemoFabIcon}>🗒</Text>
+              <Text style={[styles.m2MemoFabT, { color: colors.text }]}>노트{memoLines.length > 0 ? ` ${memoLines.length}` : ''}</Text>
+              {memoLines.length > 0 && <View style={[styles.m2MemoDot, { backgroundColor: colors.primary }]} />}
+            </TouchableOpacity>
+          )}
           {cmdOpen ? (
             <View style={[styles.m2ChatPanel, { backgroundColor: colors.surface, borderColor: colors.border }]}>
               <View style={[styles.m2ChatHead, { borderBottomColor: colors.border }]}>
@@ -5805,9 +5941,29 @@ const styles = StyleSheet.create({
   m2CmdHelpK: { ...typography.caption, fontWeight: '800' },
   m2CmdHelpEx: { fontSize: 11 },
   // 하단 채팅형 명령 패널
-  m2ChatAnchor: { position: 'absolute', right: 14, bottom: 14, alignItems: 'flex-end' },
+  m2ChatAnchor: { position: 'absolute', right: 14, bottom: 14, alignItems: 'flex-end', gap: 10 },
   m2ChatFab: { flexDirection: 'row', alignItems: 'center', gap: 6, height: 44, paddingHorizontal: 16, borderRadius: 22, shadowColor: '#000', shadowOpacity: 0.22, shadowRadius: 8, shadowOffset: { width: 0, height: 2 }, elevation: 8 },
   m2ChatFabT: { color: '#fff', ...typography.body2, fontWeight: '800' },
+  // ── 운영 공유 메모 (실시간) ──
+  m2MemoFab: { flexDirection: 'row', alignItems: 'center', gap: 6, height: 40, paddingHorizontal: 14, borderRadius: 20, borderWidth: 1, shadowColor: '#000', shadowOpacity: 0.16, shadowRadius: 7, shadowOffset: { width: 0, height: 2 }, elevation: 6 },
+  m2MemoFabIcon: { fontSize: 15 },
+  m2MemoFabT: { ...typography.body2, fontWeight: '800' },
+  m2MemoDot: { width: 7, height: 7, borderRadius: 4, marginLeft: 1 },
+  m2MemoPanel: { width: 340, borderRadius: radius.lg, borderWidth: 1, overflow: 'hidden', shadowColor: '#000', shadowOpacity: 0.22, shadowRadius: 16, shadowOffset: { width: 0, height: 4 }, elevation: 14 },
+  m2MemoStatus: { ...typography.caption, fontWeight: '700' },
+  m2MemoList: { maxHeight: 240 },
+  m2MemoEmpty: { ...typography.caption, lineHeight: 18, paddingVertical: 6, paddingHorizontal: 2 },
+  m2MemoRow: { flexDirection: 'row', alignItems: 'center', borderRadius: radius.sm, paddingLeft: 8, paddingRight: 2, minHeight: 32 },
+  m2MemoRowMain: { flex: 1, flexDirection: 'row', alignItems: 'center', gap: 6, paddingVertical: 6 },
+  m2MemoTagBadge: { paddingHorizontal: 6, paddingVertical: 2, borderRadius: 5 },
+  m2MemoTagBadgeT: { color: '#fff', fontSize: 11, fontWeight: '800' },
+  m2MemoRowT: { flex: 1, ...typography.body2, lineHeight: 18 },
+  m2MemoDel: { paddingHorizontal: 8, paddingVertical: 6 },
+  m2MemoDelT: { fontSize: 13, fontWeight: '700' },
+  m2MemoTagsRow: { flexDirection: 'row', gap: 6, paddingHorizontal: 10, paddingTop: 6, paddingBottom: 2 },
+  m2MemoTagChip: { paddingHorizontal: 9, paddingVertical: 4, borderRadius: 13, borderWidth: 1.5 },
+  m2MemoTagChipT: { ...typography.caption, fontWeight: '800' },
+  m2MemoHint: { ...typography.caption, paddingHorizontal: 12, paddingBottom: 10, paddingTop: 2 },
   m2ChatPanel: { width: 380, borderRadius: radius.lg, borderWidth: 1, overflow: 'hidden', shadowColor: '#000', shadowOpacity: 0.22, shadowRadius: 16, shadowOffset: { width: 0, height: 4 }, elevation: 14 },
   m2ChatHead: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 12, height: 40, borderBottomWidth: 1 },
   m2ChatTitle: { flex: 1, ...typography.body2, fontWeight: '800' },

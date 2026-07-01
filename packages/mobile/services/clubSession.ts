@@ -234,6 +234,12 @@ export const clubSessionApi = {
   parseCommand: (clubSessionId: string, text: string) =>
     api.post<{ action: any }>(`/club-sessions/${clubSessionId}/parse-command`, { text }),
 
+  // ─── 운영 공유 메모 (실시간) — 여러 운영진이 편성 히스토리·파트너 조합 등 맥락 공유 (LEADER/STAFF) ───
+  getOperatorMemo: (clubSessionId: string) =>
+    api.get<{ operatorMemo: string }>(`/club-sessions/${clubSessionId}/memo`),
+  updateOperatorMemo: (clubSessionId: string, memo: string) =>
+    api.patch<{ operatorMemo: string }>(`/club-sessions/${clubSessionId}/memo`, { memo }),
+
   // ─── 매치업: 한 선수가 이 정모에서 함께 친 사람 목록 (모든 모임원 조회 가능) ───
   getMatchups: (clubSessionId: string, userId: string) =>
     api.get<PlayerMatchups>(`/club-sessions/${clubSessionId}/players/${userId}/matchups`),

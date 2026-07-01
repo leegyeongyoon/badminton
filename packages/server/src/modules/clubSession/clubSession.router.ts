@@ -282,6 +282,41 @@ router.post(
   },
 );
 
+// GET /api/v1/club-sessions/:id/memo - 운영 공유 메모 조회 (LEADER/STAFF)
+router.get(
+  '/:id/memo',
+  authenticate,
+  async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const result = await clubSessionService.getOperatorMemo(
+        req.params.id as string,
+        req.user!.userId,
+      );
+      res.json(result);
+    } catch (err) {
+      next(err);
+    }
+  },
+);
+
+// PATCH /api/v1/club-sessions/:id/memo - 운영 공유 메모 수정 + 소켓 브로드캐스트 (LEADER/STAFF)
+router.patch(
+  '/:id/memo',
+  authenticate,
+  async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const result = await clubSessionService.updateOperatorMemo(
+        req.params.id as string,
+        req.user!.userId,
+        req.body?.memo ?? '',
+      );
+      res.json(result);
+    } catch (err) {
+      next(err);
+    }
+  },
+);
+
 // POST /api/v1/club-sessions/:id/guests/bulk-random - operator generates N random
 // SAMPLE guests (테스트/데모용) and checks them into the 정모. LEADER/STAFF only
 // (enforced in the service). EPHEMERAL — vanish on 정모 종료 like any guest.
