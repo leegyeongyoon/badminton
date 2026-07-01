@@ -2,6 +2,7 @@ import { Server as HttpServer } from 'http';
 import { Server } from 'socket.io';
 import type { ServerToClientEvents, ClientToServerEvents } from '@badminton/shared';
 import { logger } from '../utils/logger';
+import { noteConnect, noteDisconnect } from '../modules/admin/metrics.service';
 
 let io: Server<ClientToServerEvents, ServerToClientEvents>;
 
@@ -17,6 +18,7 @@ export function initSocketIO(httpServer: HttpServer) {
   });
 
   io.on('connection', (socket) => {
+    noteConnect(); // 동시접속 집계(슈퍼관리자 대시보드)
     logger.debug(`Socket connected: ${socket.id}`);
 
     socket.on('facility:join', (facilityId: string) => {
@@ -65,6 +67,7 @@ export function initSocketIO(httpServer: HttpServer) {
     });
 
     socket.on('disconnect', () => {
+      noteDisconnect(); // 동시접속 집계
       logger.debug(`Socket disconnected: ${socket.id}`);
     });
 

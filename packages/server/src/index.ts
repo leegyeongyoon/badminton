@@ -12,6 +12,7 @@ import { initSocketIO } from './socket';
 import { prisma } from './utils/prisma';
 import { initScheduler, stopScheduler } from './modules/scheduler/scheduler.service';
 import { registerAllHandlers } from './modules/scheduler/handlers';
+import { initMetrics, stopMetrics, flushMetrics } from './modules/admin/metrics.service';
 
 const PORT = process.env.PORT || 3000;
 
@@ -22,6 +23,7 @@ httpServer.listen(PORT, () => {
   logger.info(`Server running on port ${PORT}`);
   registerAllHandlers();
   initScheduler();
+  initMetrics();
 });
 
 // Last-resort crash handlers. Without these, an uncaught exception or rejected
@@ -59,6 +61,8 @@ async function gracefulShutdown(signal: string) {
 
   try {
     stopScheduler();
+    stopMetrics();
+    await flushMetrics(); // 종료 전 마지막 지표 반영(best-effort)
     httpServer.close();
     await prisma.$disconnect();
     clearTimeout(forceExit);

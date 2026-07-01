@@ -2,7 +2,36 @@ import api from './api';
 
 const silent = { _silent: true } as any;
 
+// ─── 슈퍼관리자 운영 지표(대시보드) ───
+export interface AdminDailyMetric {
+  date: string; // "YYYY-MM-DD"
+  dau: number;
+  newUsers: number;
+  checkins: number;
+  sessions: number;
+  games: number;
+  peakConnections: number;
+  requestCount: number;
+}
+export interface AdminMetrics {
+  live: {
+    currentConnections: number;
+    todayPeakConnections: number;
+    todayRequests: number;
+    todayDau: number;
+    activeSessions: number;
+    checkedInNow: number;
+  };
+  totals: { users: number; clubs: number; facilities: number };
+  daily: AdminDailyMetric[]; // 오래된→최신
+}
+
 export const adminStatsApi = {
+  getMetrics: async (days = 14): Promise<AdminMetrics> => {
+    const { data } = await api.get('/admin/metrics', { params: { days } });
+    return data;
+  },
+
   getWeeklyTrends: async (facilityId: string): Promise<{ day: string; count: number }[]> => {
     const { data } = await api.get(`/facilities/${facilityId}/stats/weekly`, silent);
     return data || [];

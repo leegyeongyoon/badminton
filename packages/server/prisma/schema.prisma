@@ -512,3 +512,16 @@ model ClubSession {
   @@index([clubId, status])
   @@index([facilityId, status])
 }
+
+// 일단위 운영 지표 스냅샷(슈퍼관리자 대시보드용). 나중에 소급 계산이 불가능한
+// 값(동시접속 피크·API 요청수)만 여기에 누적 기록한다. DAU·정모·체크인·게임 같은
+// 활동량은 기존 타임스탬프로 조회 시 계산하므로 저장하지 않는다.
+// date 는 서버 로컬(KST) 기준 "YYYY-MM-DD" 문자열 — 하루 버킷 키.
+model DailyMetric {
+  id              String   @id @default(uuid())
+  date            String   @unique
+  peakConnections Int      @default(0) // 하루 중 최대 동시 소켓 연결(피크)
+  requestCount    Int      @default(0) // 하루 API 요청 수(누적)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+}

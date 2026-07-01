@@ -18,6 +18,8 @@ import gameBoardRouter from './modules/gameBoard/gameBoard.router';
 import chatRouter from './modules/chat/chat.router';
 import operatorRequestRouter from './modules/operatorRequest/operatorRequest.router';
 import clientErrorRouter from './modules/clientError/clientError.router';
+import adminRouter from './modules/admin/admin.router';
+import { noteRequest } from './modules/admin/metrics.service';
 
 const app = express();
 
@@ -32,6 +34,13 @@ app.use(express.json());
 
 app.get('/api/v1/health', (_req, res) => {
   res.json({ status: 'ok' });
+});
+
+// 트래픽 집계 — health/정적을 제외한 API 요청 수를 하루 단위로 카운트(슈퍼관리자 대시보드).
+// 가벼운 카운터만 증가(동기, DB 접근 없음). 실제 저장은 metrics 서비스가 주기적으로 flush.
+app.use('/api/v1', (req, _res, next) => {
+  if (req.path !== '/health') noteRequest();
+  next();
 });
 
 app.use('/api/v1/auth', authRouter);
@@ -53,6 +62,7 @@ app.use('/api/v1/club-sessions', clubSessionRouter);   // /club-sessions/:id/*
 app.use('/api/v1/club-sessions', gameBoardRouter);     // /club-sessions/:id/game-board
 app.use('/api/v1/game-boards', gameBoardRouter);       // /game-boards/:id/entries/*
 app.use('/api/v1/operator-requests', operatorRequestRouter);
+app.use('/api/v1/admin', adminRouter);                 // /admin/metrics (슈퍼관리자)
 // Client crash/error sink. Use a tight body limit so a runtime error report
 // (message + stack) can't carry an oversized payload. Mounted before the
 // errorHandler. The global express.json() above already parsed the body; the

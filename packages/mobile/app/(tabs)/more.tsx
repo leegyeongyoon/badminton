@@ -257,6 +257,14 @@ export default function MoreScreen() {
             <Text style={[styles.menuItemText, { color: colors.text }]}>운영자 신청 관리</Text>
           </TouchableOpacity>
         )}
+
+        {/* SUPER_ADMIN → 운영 지표 대시보드(트래픽·접속·활동량). */}
+        {isSuperAdmin && (
+          <TouchableOpacity style={styles.menuItem} onPress={() => router.push('/admin/metrics')}>
+            <Icon name="stats" size={18} color={colors.primary} />
+            <Text style={[styles.menuItemText, { color: colors.text }]}>운영 지표 대시보드</Text>
+          </TouchableOpacity>
+        )}
       </View>
 
       {/* App settings */}
