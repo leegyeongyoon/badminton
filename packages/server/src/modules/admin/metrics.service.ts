@@ -141,7 +141,8 @@ export interface AdminMetricsResponse {
     checkedInNow: number; // 지금 체크인(미퇴장) 인원
   };
   totals: {
-    members: number; // 실회원(게스트 제외)
+    members: number; // 실가입 회원 — 앱에 직접 가입(게스트X, 운영자 명단추가X)
+    managed: number; // 운영자가 명단으로 추가한 관리형 멤버(로그인 없음)
     guests: number; // 누적 게스트 레코드
     clubs: number;
     facilities: number;
@@ -199,19 +200,20 @@ export async function getAdminMetrics(granularity: Granularity = 'day', count?: 
   }
   const idxOf = (ts: Date): number | undefined => dayToIdx.get(dayKeyOf(ts));
 
-  const [users, checkins, sessions, turns, metricRows, totalMembers, totalGuests, totalClubs, totalFacilities, activeSessions, checkedInNow] =
+  const [users, checkins, sessions, turns, metricRows, totalMembers, totalGuests, totalClubs, totalFacilities, activeSessions, checkedInNow, totalManaged] =
     await Promise.all([
-      prisma.user.findMany({ where: { createdAt: { gte: windowStart }, isGuest: false }, select: { createdAt: true } }),
+      prisma.user.findMany({ where: { createdAt: { gte: windowStart }, isGuest: false, isManaged: false }, select: { createdAt: true } }),
       prisma.checkIn.findMany({ where: { checkedInAt: { gte: windowStart } }, select: { userId: true, checkedInAt: true } }),
       prisma.clubSession.findMany({ where: { startedAt: { gte: windowStart } }, select: { startedAt: true } }),
       prisma.courtTurn.findMany({ where: { completedAt: { gte: windowStart } }, select: { completedAt: true } }),
       prisma.dailyMetric.findMany({ where: { date: { gte: dayKeyOf(windowStart) } } }),
-      prisma.user.count({ where: { isGuest: false } }), // 실회원(게스트 제외)
+      prisma.user.count({ where: { isGuest: false, isManaged: false } }), // 실가입 회원
       prisma.user.count({ where: { isGuest: true } }),
       prisma.club.count(),
       prisma.facility.count(),
       prisma.clubSession.count({ where: { status: 'ACTIVE' } }),
       prisma.checkIn.count({ where: { checkedOutAt: null } }),
+      prisma.user.count({ where: { isManaged: true } }), // 관리형 명단(로그인 없음)
     ]);
 
   // 시간대별(0~23시) 체크인 분포 — 조회 구간 기준 피크타임.
@@ -262,7 +264,7 @@ export async function getAdminMetrics(granularity: Granularity = 'day', count?: 
       activeSessions,
       checkedInNow,
     },
-    totals: { members: totalMembers, guests: totalGuests, clubs: totalClubs, facilities: totalFacilities },
+    totals: { members: totalMembers, managed: totalManaged, guests: totalGuests, clubs: totalClubs, facilities: totalFacilities },
     granularity,
     series,
     hourly,

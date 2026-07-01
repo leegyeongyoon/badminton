@@ -25,7 +25,7 @@ export interface AdminMetrics {
     activeSessions: number;
     checkedInNow: number;
   };
-  totals: { members: number; guests: number; clubs: number; facilities: number };
+  totals: { members: number; managed: number; guests: number; clubs: number; facilities: number };
   granularity: MetricGranularity;
   series: MetricPoint[]; // 오래된→최신
   hourly: number[]; // 0~23시 체크인 분포(피크타임)

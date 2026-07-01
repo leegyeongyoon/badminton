@@ -187,14 +187,16 @@ export default function AdminMetricsScreen() {
             <StatCard label="오늘 요청수" value={(live?.todayRequests ?? 0).toLocaleString()} />
           </View>
 
-          {/* 누적 */}
+          {/* 누적 — '회원'=앱에 직접 가입한 실회원(게스트·명단추가 제외) */}
           <Text style={[styles.section, { color: colors.text, marginTop: spacing.xl }]}>누적</Text>
           <View style={styles.grid}>
-            <StatCard label="회원" value={(totals?.members ?? 0).toLocaleString()} />
+            <StatCard label="가입 회원" value={(totals?.members ?? 0).toLocaleString()} accent />
+            <StatCard label="명단 회원" value={(totals?.managed ?? 0).toLocaleString()} />
             <StatCard label="게스트(누적)" value={(totals?.guests ?? 0).toLocaleString()} />
             <StatCard label="모임" value={totals?.clubs ?? 0} />
             <StatCard label="시설" value={totals?.facilities ?? 0} />
           </View>
+          <Text style={[styles.subNote, { color: colors.textLight }]}>가입 회원 = 앱에 직접 가입 · 명단 회원 = 운영자가 명단으로 추가(로그인 없음) · 게스트 = 임시 참여</Text>
 
           {/* 기간 전환 */}
           <View style={[styles.sectionRow, { marginTop: spacing.xl }]}>
@@ -232,8 +234,8 @@ export default function AdminMetricsScreen() {
             </View>
           </ScrollView>
 
-          {/* 회원 성장(누적) — 히어로 */}
-          <Card title="회원 성장 (누적)" hint={memberDelta ? `기간 +${memberDelta.toLocaleString()}명` : ''}>
+          {/* 가입 회원 성장(누적) — 히어로 */}
+          <Card title="가입 회원 성장 (누적)" hint={memberDelta ? `기간 +${memberDelta.toLocaleString()}명` : ''}>
             <TrendChart values={growthVals} labels={labels} color={colors.primary} unit="명" height={168} />
           </Card>
 
@@ -339,6 +341,7 @@ const styles = StyleSheet.create({
   colPeriod: { width: 60, textAlign: 'left', paddingLeft: 10 },
   colNum: { width: 52 },
   note: { ...typography.caption, lineHeight: 17, marginTop: spacing.md },
+  subNote: { ...typography.caption, fontSize: 11, lineHeight: 15, marginTop: 6 },
   // modal
   modalBg: { flex: 1, backgroundColor: 'rgba(0,0,0,0.4)', justifyContent: 'center', padding: spacing.lg },
   modalCard: { borderRadius: radius.lg, overflow: 'hidden', maxHeight: '80%' },
