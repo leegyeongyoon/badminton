@@ -992,6 +992,25 @@ export async function getAvailablePlayers(facilityId: string, clubSessionId?: st
   }
   const dedupedCheckins = Array.from(byUser.values());
 
+  // 각 선수의 '마지막으로 끝낸 게임' 완료 시각(lastPlayedAt) — 코트에서 나온 기준 시각.
+  // 이 정모의 완료된 CourtTurn(completedAt not null)을 최신순으로 훑어 userId 별 첫(=최신)
+  // 완료 시각을 기록. 운영판의 '게임 끝난 지 N분(15/30/60분 이상 편성 안 됨)' 표시에 쓴다.
+  // 서버 실데이터라 어느 기기/새로고침에서도 동일하게 계산된다(클라 로컬 기록 불필요).
+  const lastPlayedByUser = new Map<string, Date>();
+  if (clubSessionId) {
+    const completedTurns = await prisma.courtTurn.findMany({
+      where: { clubSessionId, completedAt: { not: null } },
+      select: { completedAt: true, players: { select: { userId: true } } },
+      orderBy: { completedAt: 'desc' },
+    });
+    for (const t of completedTurns) {
+      if (!t.completedAt) continue;
+      for (const tp of t.players) {
+        if (!lastPlayedByUser.has(tp.userId)) lastPlayedByUser.set(tp.userId, t.completedAt);
+      }
+    }
+  }
+
   // C: classify QUEUED (편성됨) players from the 정모 board so the operator pool
   // and member list agree with the board. A player in a court-less QUEUED entry
   // (and not already on a court) is QUEUED, not AVAILABLE.
@@ -1047,6 +1066,7 @@ export async function getAvailablePlayers(facilityId: string, clubSessionId?: st
       status,
       isGuest: c.user.isGuest,
       isInLesson: c.isInLesson,
+      lastPlayedAt: lastPlayedByUser.get(c.userId)?.toISOString() ?? null,
     };
   });
 }

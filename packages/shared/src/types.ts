@@ -395,6 +395,12 @@ export interface AvailablePlayerResponse {
   isGuest: boolean;
   /** 레슨 중 — 자동추천/풀에서 제외, 수동으로만 코트 배정. */
   isInLesson: boolean;
+  /**
+   * 이 정모에서 이 선수가 마지막으로 '끝낸' 게임(완료된 CourtTurn)의 완료 시각(ISO).
+   * 코트에서 나온 기준 시각 — 운영판의 '게임 끝난 지 N분(15/30/60분 이상 편성 안 됨)'
+   * 대기 표시에 쓴다. 한 판도 안 쳤으면 null. 서버 실데이터라 기기/새로고침 무관.
+   */
+  lastPlayedAt: string | null;
 }
 
 // --- Attendance leaderboard (출석왕) ---

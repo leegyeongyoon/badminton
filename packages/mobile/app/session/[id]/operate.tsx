@@ -40,6 +40,9 @@ interface Player {
   gamesPlayedToday?: number;
   isGuest?: boolean;
   isInLesson?: boolean;
+  // 이 정모에서 마지막으로 '끝낸' 게임의 완료 시각(ISO). 코트에서 나온 기준 시각.
+  // 대기 명단의 '게임 끝난 지 N분(15/30/60분 이상 편성 안 됨)' 버킷에 쓴다(서버 실데이터).
+  lastPlayedAt?: string | null;
 }
 
 interface Court {
@@ -4188,32 +4191,42 @@ export default function OperateScreen() {
       && (poolSkills.length === 0 || poolSkills.includes((m.skillLevel || '').toUpperCase())))
     .sort((a, b) => gamesOf(a.userId) - gamesOf(b.userId) || a.userName.localeCompare(b.userName));
   const poolIds = pool.map((m) => m.userId);
-  const poolSet = new Set(poolIds);
   const uniqueIdSet = new Set(uniquePlayers.map((m) => m.userId)); // 체크인된 전체(빈칸 유지 vs 제거 판단용)
   // 대기(게임 중 아님)는 '항상' 급수(S>A>B>C>D>E>F) → 이름순으로 정렬(일관). 게임판에서 대기로
   // 옮긴 사람도 곧장 제자리(급수순)에 들어간다. 안정 슬롯(빈칸 유지)은 정렬을 깨서 폐기.
   const skillRank = (lv?: string | null) => (({ S: 0, A: 1, B: 2, C: 3, D: 4, E: 5, F: 6 } as Record<string, number>)[(lv || '').toUpperCase()] ?? 9);
-  // 방금 끝난 게임 4명 묶음 — 정렬과 '별개로' 대기 명단 맨 아래에 그대로 한 줄로 쌓는다.
-  // (최근에 끝난 게 맨 아래로 계속 쌓임. recentlyOut 은 최신이 앞 → reverse 로 오래된 게 위/최근이 아래.)
-  // '원래 4자리'를 고정으로 둔다 — 게임에 빼낸 사람 자리는 빈칸(갭)으로 유지하고, 그 사람을 다시
-  // 빼면(대기로) recentlyOut 에 그대로 있어 '그 자리'로 돌아온다. (한판도 안 친 사람은 위 급수 정렬로.)
-  const finishedGroups: Array<{ slots: (string | null)[]; at: number }> = [];
-  const finishedIds = new Set<string>();
-  for (const r of [...recentlyOut].reverse()) {
-    const slots = r.playerIds.slice(0, 4).map((id) => (poolSet.has(id) && !finishedIds.has(id)) ? id : null);
-    if (slots.some((x) => x !== null)) {
-      slots.forEach((id) => { if (id) finishedIds.add(id); });
-      finishedGroups.push({ slots, at: r.at });
-    }
+  // ── 대기 명단 '대기 버킷' — 서버 lastPlayedAt(코트에서 나온 시각) 기준 ──
+  // 오래 기다린(=게임 끝난 지 오래됐는데 아직 편성 안 된) 선수를 위로 올리고 15/30/60분
+  // 이상은 경고 헤더로 묶는다. 서버 실데이터라 어느 기기·누가 종료했든·새로고침해도 동일
+  // (예전 recentlyOut 로컬 기록에 의존하던 방식은 대기시간 계산에서 폐기 — 그건 '방금 나온' 탭 전용).
+  const waitMinOf = (uid: string): number | null => {
+    const lp = getPlayer(uid)?.lastPlayedAt;
+    if (!lp) return null;
+    const t = Date.parse(lp);
+    if (Number.isNaN(t)) return null;
+    return Math.max(0, Math.floor((nowTs - t) / 60000));
+  };
+  const wb: Record<'h' | 'm30' | 'm15' | 'fresh' | 'recent', string[]> = { h: [], m30: [], m15: [], fresh: [], recent: [] };
+  for (const m of pool) {
+    const w = waitMinOf(m.userId);
+    if (w == null) wb.fresh.push(m.userId);       // 한 판도 안 침
+    else if (w >= 60) wb.h.push(m.userId);
+    else if (w >= 30) wb.m30.push(m.userId);
+    else if (w >= 15) wb.m15.push(m.userId);
+    else wb.recent.push(m.userId);                // 15분 이내에 막 끝남
   }
-  // 위쪽: 아직 게임 안 친(또는 묶음에서 빠진) 사람 — 급수(S>A>...>F) → 이름순 정렬.
-  const sortedPool = pool
-    .filter((m) => !finishedIds.has(m.userId))
-    .slice()
-    .sort((a, b) => skillRank(a.skillLevel) - skillRank(b.skillLevel) || a.userName.localeCompare(b.userName))
-    .map((m) => m.userId);
-  const poolGroups: string[][] = [];
-  for (let i = 0; i < sortedPool.length; i += 4) poolGroups.push(sortedPool.slice(i, i + 4));
+  const nameOf = (uid: string) => getPlayer(uid)?.userName || '';
+  const byWaitDesc = (a: string, b: string) => (waitMinOf(b) ?? 0) - (waitMinOf(a) ?? 0) || nameOf(a).localeCompare(nameOf(b));
+  const bySkill = (a: string, b: string) => skillRank(getPlayer(a)?.skillLevel) - skillRank(getPlayer(b)?.skillLevel) || nameOf(a).localeCompare(nameOf(b));
+  wb.h.sort(byWaitDesc); wb.m30.sort(byWaitDesc); wb.m15.sort(byWaitDesc); wb.recent.sort(byWaitDesc); wb.fresh.sort(bySkill);
+  const waitSections: Array<{ key: string; label: string; color: string; ids: string[] }> = ([
+    { key: 'h', label: '⏱ 1시간 이상 편성 안 됨', color: colors.danger, ids: wb.h },
+    { key: 'm30', label: '⏱ 30분 이상 편성 안 됨', color: colors.warning, ids: wb.m30 },
+    { key: 'm15', label: '⏱ 15분 이상 편성 안 됨', color: '#CA8A04', ids: wb.m15 },
+    { key: 'fresh', label: '아직 안 친 선수 · 급수순', color: colors.textSecondary, ids: wb.fresh },
+    { key: 'recent', label: '방금 끝난 게임 (15분 이내)', color: colors.textLight, ids: wb.recent },
+  ] as Array<{ key: string; label: string; color: string; ids: string[] }>).filter((s) => s.ids.length > 0);
+  const chunk4 = (arr: string[]): string[][] => { const out: string[][] = []; for (let i = 0; i < arr.length; i += 4) out.push(arr.slice(i, i + 4)); return out; };
   // 코트에 들어간(게임 중) 묶음 — 대기 맨 아래에 묶음으로 보여 '게임 치는 동안 다음 게임 미리 편성'.
   const playingCols = courts
     .map((c) => ({ name: c.name, entry: playingByCourtId.get(c.id) }))
@@ -4551,42 +4564,22 @@ export default function OperateScreen() {
                 ? <Text style={[styles.emptyPool, { color: colors.textLight }]}>대기 인원 없음</Text>
                 : (
                   <View style={{ width: '100%', gap: 5 }}>
-                    {poolGroups.map((grp, gi) => (
-                      <View key={gi} style={styles.gameFrameSlots}>
-                        {[0, 1, 2, 3].map((si) => {
-                          const id = grp[si]; // string=선수, undefined=마지막 줄 채우기 패딩(투명)
-                          if (!id) return <View key={si} style={styles.poolGapSlot} />;
-                          const p = getPlayer(id); return p ? <PlayerTag key={id} player={p} fill compact /> : <View key={si} style={styles.poolGapSlot} />;
-                        })}
+                    {/* 대기 버킷 — 서버 lastPlayedAt(코트에서 나온 시각) 기준. 오래 기다린 선수(15/30/60분
+                        이상 편성 안 됨)를 경고 헤더로 위에, 아직 안 친 선수·방금 끝난 선수는 아래로. */}
+                    {waitSections.map((sec) => (
+                      <View key={sec.key} style={{ gap: 3 }}>
+                        <Text style={[styles.m2SectionLabel, { color: sec.color, marginTop: 6 }]}>{sec.label} · {sec.ids.length}명</Text>
+                        {chunk4(sec.ids).map((row, ri) => (
+                          <View key={ri} style={styles.gameFrameSlots}>
+                            {[0, 1, 2, 3].map((si) => {
+                              const id = row[si];
+                              if (!id) return <View key={si} style={styles.poolGapSlot} />;
+                              const p = getPlayer(id); return p ? <PlayerTag key={id} player={p} fill compact /> : <View key={si} style={styles.poolGapSlot} />;
+                            })}
+                          </View>
+                        ))}
                       </View>
                     ))}
-                    {/* 방금 끝난 게임 — 묶음마다 'N분 전'이면 목록이 너무 길어 → 시간 구간(15/30/60분 이상
-                        편성 안 됨)으로 묶어 '헤더만' 표시. 오래 기다린(긴 구간) 묶음이 위, 최근이 아래로 쌓임. */}
-                    {(() => {
-                      const bucketOf = (min: number) =>
-                        min >= 60 ? { label: '⏱ 1시간 이상 편성 안 됨', color: colors.danger }
-                        : min >= 30 ? { label: '⏱ 30분 이상 편성 안 됨', color: colors.warning }
-                        : min >= 15 ? { label: '⏱ 15분 이상 편성 안 됨', color: '#CA8A04' }
-                        : { label: '방금 끝난 게임', color: colors.textSecondary };
-                      let lastLabel: string | null = null;
-                      return finishedGroups.map((g, gi) => {
-                        const waitMin = Math.max(0, Math.floor((nowTs - g.at) / 60000));
-                        const bk = bucketOf(waitMin);
-                        const showHeader = bk.label !== lastLabel; lastLabel = bk.label;
-                        return (
-                          <View key={`fin${gi}`} style={{ gap: 2 }}>
-                            {showHeader && <Text style={[styles.m2SectionLabel, { color: bk.color, marginTop: 6 }]}>{bk.label}</Text>}
-                            <View style={styles.gameFrameSlots}>
-                              {[0, 1, 2, 3].map((si) => {
-                                const id = g.slots[si];
-                                if (!id) return <View key={si} style={styles.poolGapSlot} />;
-                                const p = getPlayer(id); return p ? <PlayerTag key={id} player={p} fill compact /> : <View key={si} style={styles.poolGapSlot} />;
-                              })}
-                            </View>
-                          </View>
-                        );
-                      });
-                    })()}
                     {/* 코트에서 게임 중인 묶음 — 맨 밑에 4명 한 줄로. 끌어다 놓아 다음 게임 미리 편성. */}
                     {playingCols.length > 0 && <Text style={[styles.m2SectionLabel, { color: colors.warning, marginTop: 6 }]}>게임 중 · 끌어서 다음 게임 미리 편성</Text>}
                     {playingCols.map((pc, i) => (
