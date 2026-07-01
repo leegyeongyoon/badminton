@@ -2,7 +2,7 @@ import { Router, Request, Response, NextFunction } from 'express';
 import { authenticate } from '../../middleware/auth';
 import { ForbiddenError } from '../../utils/errors';
 import { isSuperAdmin } from '../clubSession/clubSession.service';
-import { getAdminMetrics, type Granularity } from './metrics.service';
+import { getAdminMetrics, getMetricsWho, type Granularity, type WhoScope } from './metrics.service';
 
 const router = Router();
 
@@ -27,6 +27,18 @@ router.get('/metrics', authenticate, superAdminOnly, async (req: Request, res: R
     const granularity: Granularity = g === 'week' || g === 'month' ? g : 'day';
     const count = req.query.count ? Number(req.query.count) : undefined;
     const result = await getAdminMetrics(granularity, count && count > 0 ? count : undefined);
+    res.json(result);
+  } catch (err) {
+    next(err);
+  }
+});
+
+// GET /api/v1/admin/metrics/who?scope=online|checkedin|today - 드릴다운 명단. 슈퍼관리자 전용.
+router.get('/metrics/who', authenticate, superAdminOnly, async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const s = String(req.query.scope || 'checkedin');
+    const scope: WhoScope = s === 'online' || s === 'today' ? s : 'checkedin';
+    const result = await getMetricsWho(scope);
     res.json(result);
   } catch (err) {
     next(err);

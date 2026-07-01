@@ -25,6 +25,9 @@ let currentConnections = 0; // 지금 연결된 소켓 수(실시간)
 let peakToday = 0; // 오늘 관측한 최대 동시접속
 let requestDelta = 0; // 마지막 flush 이후 쌓인 요청 수
 let bucketKey = dayKeyOf(new Date()); // 위 카운터가 속한 날
+// '누가 접속 중'인지 — 소켓이 user:join 하면 userId 와 연결해 둔다(대시보드 드릴다운).
+const socketUser = new Map<string, string>(); // socketId → userId
+const userSockets = new Map<string, number>(); // userId → 연결 소켓 수
 
 export function noteRequest(): void {
   requestDelta += 1;
@@ -33,11 +36,29 @@ export function noteConnect(): void {
   currentConnections += 1;
   if (currentConnections > peakToday) peakToday = currentConnections;
 }
-export function noteDisconnect(): void {
+export function noteDisconnect(socketId?: string): void {
   currentConnections = Math.max(0, currentConnections - 1);
+  if (socketId) {
+    const uid = socketUser.get(socketId);
+    if (uid) {
+      socketUser.delete(socketId);
+      const c = (userSockets.get(uid) ?? 1) - 1;
+      if (c <= 0) userSockets.delete(uid);
+      else userSockets.set(uid, c);
+    }
+  }
+}
+// 소켓이 자기 userId 를 알린 시점(인증 후 user:join)에 연결.
+export function noteSocketUser(socketId: string, userId: string): void {
+  if (!userId || socketUser.get(socketId) === userId) return;
+  socketUser.set(socketId, userId);
+  userSockets.set(userId, (userSockets.get(userId) ?? 0) + 1);
 }
 export function getCurrentConnections(): number {
   return currentConnections;
+}
+export function getOnlineUserIds(): string[] {
+  return Array.from(userSockets.keys());
 }
 
 // 오늘 행에 누적 반영(요청수는 증가분 increment, 피크는 max). 날이 바뀌었으면
@@ -119,12 +140,14 @@ export interface AdminMetricsResponse {
     checkedInNow: number; // 지금 체크인(미퇴장) 인원
   };
   totals: {
-    users: number;
+    members: number; // 실회원(게스트 제외)
+    guests: number; // 누적 게스트 레코드
     clubs: number;
     facilities: number;
   };
   granularity: Granularity;
   series: MetricPoint[]; // 오래된→최신 순
+  hourly: number[]; // 시간대별(0~23시) 체크인 수 — 조회 구간 기준(피크타임)
 }
 
 // 기간 버킷(일/주/월) 생성 — 모두 '날 경계(자정)'에 정렬돼, 각 날짜를 버킷 인덱스로
@@ -175,19 +198,24 @@ export async function getAdminMetrics(granularity: Granularity = 'day', count?: 
   }
   const idxOf = (ts: Date): number | undefined => dayToIdx.get(dayKeyOf(ts));
 
-  const [users, checkins, sessions, turns, metricRows, totalUsers, totalClubs, totalFacilities, activeSessions, checkedInNow] =
+  const [users, checkins, sessions, turns, metricRows, totalMembers, totalGuests, totalClubs, totalFacilities, activeSessions, checkedInNow] =
     await Promise.all([
       prisma.user.findMany({ where: { createdAt: { gte: windowStart } }, select: { createdAt: true } }),
       prisma.checkIn.findMany({ where: { checkedInAt: { gte: windowStart } }, select: { userId: true, checkedInAt: true } }),
       prisma.clubSession.findMany({ where: { startedAt: { gte: windowStart } }, select: { startedAt: true } }),
       prisma.courtTurn.findMany({ where: { completedAt: { gte: windowStart } }, select: { completedAt: true } }),
       prisma.dailyMetric.findMany({ where: { date: { gte: dayKeyOf(windowStart) } } }),
-      prisma.user.count(),
+      prisma.user.count({ where: { isGuest: false } }), // 실회원(게스트 제외)
+      prisma.user.count({ where: { isGuest: true } }),
       prisma.club.count(),
       prisma.facility.count(),
       prisma.clubSession.count({ where: { status: 'ACTIVE' } }),
       prisma.checkIn.count({ where: { checkedOutAt: null } }),
     ]);
+
+  // 시간대별(0~23시) 체크인 분포 — 조회 구간 기준 피크타임.
+  const hourly = new Array(24).fill(0) as number[];
+  for (const c of checkins) hourly[c.checkedInAt.getHours()] += 1;
 
   const series: MetricPoint[] = buckets.map((b) => ({ key: b.key, label: b.label, dau: 0, newUsers: 0, checkins: 0, sessions: 0, games: 0, peakConnections: 0, requestCount: 0 }));
   const dauSets = buckets.map(() => new Set<string>());
@@ -228,8 +256,62 @@ export async function getAdminMetrics(granularity: Granularity = 'day', count?: 
       activeSessions,
       checkedInNow,
     },
-    totals: { users: totalUsers, clubs: totalClubs, facilities: totalFacilities },
+    totals: { members: totalMembers, guests: totalGuests, clubs: totalClubs, facilities: totalFacilities },
     granularity,
     series,
+    hourly,
   };
+}
+
+// ─── 드릴다운: '누구'인지 명단 ───
+export type WhoScope = 'online' | 'checkedin' | 'today';
+export interface WhoUser {
+  userId: string;
+  name: string;
+  isGuest: boolean;
+  context?: string; // 모임/시설 등 맥락(체크인 명단용)
+  at?: string; // 체크인 시각(ISO)
+}
+export interface WhoResponse {
+  scope: WhoScope;
+  count: number;
+  users: WhoUser[];
+}
+
+export async function getMetricsWho(scope: WhoScope): Promise<WhoResponse> {
+  if (scope === 'online') {
+    const ids = getOnlineUserIds();
+    const users = ids.length
+      ? await prisma.user.findMany({ where: { id: { in: ids } }, select: { id: true, name: true, isGuest: true } })
+      : [];
+    return { scope, count: users.length, users: users.map((u) => ({ userId: u.id, name: u.name, isGuest: u.isGuest })) };
+  }
+
+  // checkedin = 지금 체크인(미퇴장), today = 오늘 체크인한 순 사용자
+  const where = scope === 'checkedin'
+    ? { checkedOutAt: null }
+    : { checkedInAt: { gte: startOfDayKey(dayKeyOf(new Date())) } };
+  const rows = await prisma.checkIn.findMany({
+    where,
+    orderBy: { checkedInAt: 'desc' },
+    select: {
+      userId: true,
+      checkedInAt: true,
+      user: { select: { name: true, isGuest: true } },
+      facility: { select: { name: true } },
+      clubSession: { select: { title: true, club: { select: { name: true } } } },
+    },
+  });
+  // today 는 순 사용자로 dedup(가장 최근 체크인 기준).
+  const seen = new Set<string>();
+  const users: WhoUser[] = [];
+  for (const r of rows) {
+    if (scope === 'today') {
+      if (seen.has(r.userId)) continue;
+      seen.add(r.userId);
+    }
+    const ctx = r.clubSession?.club?.name ?? r.facility?.name ?? undefined;
+    users.push({ userId: r.userId, name: r.user.name, isGuest: r.user.isGuest, context: ctx, at: r.checkedInAt.toISOString() });
+  }
+  return { scope, count: users.length, users };
 }
