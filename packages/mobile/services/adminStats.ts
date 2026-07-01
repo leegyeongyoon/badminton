@@ -3,8 +3,10 @@ import api from './api';
 const silent = { _silent: true } as any;
 
 // ─── 슈퍼관리자 운영 지표(대시보드) ───
-export interface AdminDailyMetric {
-  date: string; // "YYYY-MM-DD"
+export type MetricGranularity = 'day' | 'week' | 'month';
+export interface MetricPoint {
+  key: string;
+  label: string; // 화면 표시용 짧은 라벨
   dau: number;
   newUsers: number;
   checkins: number;
@@ -23,12 +25,13 @@ export interface AdminMetrics {
     checkedInNow: number;
   };
   totals: { users: number; clubs: number; facilities: number };
-  daily: AdminDailyMetric[]; // 오래된→최신
+  granularity: MetricGranularity;
+  series: MetricPoint[]; // 오래된→최신
 }
 
 export const adminStatsApi = {
-  getMetrics: async (days = 14): Promise<AdminMetrics> => {
-    const { data } = await api.get('/admin/metrics', { params: { days } });
+  getMetrics: async (granularity: MetricGranularity = 'day', count?: number): Promise<AdminMetrics> => {
+    const { data } = await api.get('/admin/metrics', { params: { granularity, ...(count ? { count } : {}) } });
     return data;
   },
 

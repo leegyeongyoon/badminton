@@ -2,7 +2,7 @@ import { Router, Request, Response, NextFunction } from 'express';
 import { authenticate } from '../../middleware/auth';
 import { ForbiddenError } from '../../utils/errors';
 import { isSuperAdmin } from '../clubSession/clubSession.service';
-import { getAdminMetrics } from './metrics.service';
+import { getAdminMetrics, type Granularity } from './metrics.service';
 
 const router = Router();
 
@@ -19,11 +19,14 @@ async function superAdminOnly(req: Request, _res: Response, next: NextFunction) 
   }
 }
 
-// GET /api/v1/admin/metrics?days=14 - 운영 지표(실시간 + 일별). 슈퍼관리자 전용.
+// GET /api/v1/admin/metrics?granularity=day|week|month&count=N
+// 운영 지표(실시간 + 기간별 추이). 슈퍼관리자 전용.
 router.get('/metrics', authenticate, superAdminOnly, async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const days = Number(req.query.days) || 14;
-    const result = await getAdminMetrics(days);
+    const g = String(req.query.granularity || 'day');
+    const granularity: Granularity = g === 'week' || g === 'month' ? g : 'day';
+    const count = req.query.count ? Number(req.query.count) : undefined;
+    const result = await getAdminMetrics(granularity, count && count > 0 ? count : undefined);
     res.json(result);
   } catch (err) {
     next(err);

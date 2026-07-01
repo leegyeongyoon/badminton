@@ -95,15 +95,18 @@ export function stopMetrics(): void {
 }
 
 // ─── 대시보드 조회 ───
-export interface DailyMetricRow {
-  date: string;
-  dau: number; // 그날 체크인한 순 사용자 수
-  newUsers: number; // 그날 신규 가입
-  checkins: number; // 그날 체크인 건수
-  sessions: number; // 그날 시작된 정모 수
-  games: number; // 그날 완료된 게임(턴) 수
-  peakConnections: number; // 그날 최대 동시접속(기록값)
-  requestCount: number; // 그날 API 요청수(기록값)
+export type Granularity = 'day' | 'week' | 'month';
+
+export interface MetricPoint {
+  key: string; // 버킷 키(day: YYYY-MM-DD, week: 시작일 YYYY-MM-DD, month: YYYY-MM)
+  label: string; // 화면 표시용 짧은 라벨
+  dau: number; // 그 기간에 체크인한 순 사용자 수
+  newUsers: number; // 그 기간 신규 가입
+  checkins: number; // 그 기간 체크인 건수
+  sessions: number; // 그 기간 시작된 정모 수
+  games: number; // 그 기간 완료된 게임(턴) 수
+  peakConnections: number; // 그 기간 최대 동시접속(일별 피크의 max)
+  requestCount: number; // 그 기간 API 요청수(일별 합)
 }
 
 export interface AdminMetricsResponse {
@@ -120,18 +123,57 @@ export interface AdminMetricsResponse {
     clubs: number;
     facilities: number;
   };
-  daily: DailyMetricRow[]; // 오래된→최신 순
+  granularity: Granularity;
+  series: MetricPoint[]; // 오래된→최신 순
 }
 
-export async function getAdminMetrics(days = 14): Promise<AdminMetricsResponse> {
-  const span = Math.min(Math.max(days, 1), 90);
-  const now = new Date();
-  // 최근 span 일의 dayKey(오래된→최신)
-  const keys: string[] = [];
-  for (let i = span - 1; i >= 0; i--) {
-    keys.push(dayKeyOf(new Date(now.getFullYear(), now.getMonth(), now.getDate() - i)));
+// 기간 버킷(일/주/월) 생성 — 모두 '날 경계(자정)'에 정렬돼, 각 날짜를 버킷 인덱스로
+// 매핑할 수 있다(주=월요일 시작 7일, 월=달력 월).
+interface Bucket { key: string; label: string; start: Date; end: Date }
+function buildBuckets(granularity: Granularity, count: number, now: Date): Bucket[] {
+  const out: Bucket[] = [];
+  if (granularity === 'month') {
+    for (let i = count - 1; i >= 0; i--) {
+      const start = new Date(now.getFullYear(), now.getMonth() - i, 1);
+      const end = new Date(start.getFullYear(), start.getMonth() + 1, 1);
+      out.push({ key: `${start.getFullYear()}-${pad2(start.getMonth() + 1)}`, label: `${String(start.getFullYear()).slice(2)}.${start.getMonth() + 1}`, start, end });
+    }
+  } else if (granularity === 'week') {
+    // 이번 주 월요일 기준으로 i주 전.
+    const dow = now.getDay(); // 0=일..6=토
+    const toMon = dow === 0 ? -6 : 1 - dow;
+    const thisMon = new Date(now.getFullYear(), now.getMonth(), now.getDate() + toMon);
+    for (let i = count - 1; i >= 0; i--) {
+      const start = new Date(thisMon.getFullYear(), thisMon.getMonth(), thisMon.getDate() - 7 * i);
+      const end = new Date(start.getFullYear(), start.getMonth(), start.getDate() + 7);
+      out.push({ key: dayKeyOf(start), label: `${start.getMonth() + 1}/${start.getDate()}`, start, end });
+    }
+  } else {
+    for (let i = count - 1; i >= 0; i--) {
+      const start = new Date(now.getFullYear(), now.getMonth(), now.getDate() - i);
+      const end = new Date(start.getFullYear(), start.getMonth(), start.getDate() + 1);
+      out.push({ key: dayKeyOf(start), label: `${start.getMonth() + 1}/${start.getDate()}`, start, end });
+    }
   }
-  const windowStart = startOfDayKey(keys[0]);
+  return out;
+}
+
+const DEFAULT_COUNT: Record<Granularity, number> = { day: 14, week: 12, month: 6 };
+
+export async function getAdminMetrics(granularity: Granularity = 'day', count?: number): Promise<AdminMetricsResponse> {
+  const now = new Date();
+  const n = Math.min(Math.max(count ?? DEFAULT_COUNT[granularity], 1), granularity === 'day' ? 60 : granularity === 'week' ? 26 : 24);
+  const buckets = buildBuckets(granularity, n, now);
+  const windowStart = buckets[0].start;
+
+  // 각 '날'(YYYY-MM-DD) → 버킷 인덱스 매핑(모든 경계가 날 정렬이라 가능).
+  const dayToIdx = new Map<string, number>();
+  for (let i = 0; i < buckets.length; i++) {
+    for (let d = new Date(buckets[i].start); d < buckets[i].end; d = new Date(d.getFullYear(), d.getMonth(), d.getDate() + 1)) {
+      dayToIdx.set(dayKeyOf(d), i);
+    }
+  }
+  const idxOf = (ts: Date): number | undefined => dayToIdx.get(dayKeyOf(ts));
 
   const [users, checkins, sessions, turns, metricRows, totalUsers, totalClubs, totalFacilities, activeSessions, checkedInNow] =
     await Promise.all([
@@ -139,7 +181,7 @@ export async function getAdminMetrics(days = 14): Promise<AdminMetricsResponse> 
       prisma.checkIn.findMany({ where: { checkedInAt: { gte: windowStart } }, select: { userId: true, checkedInAt: true } }),
       prisma.clubSession.findMany({ where: { startedAt: { gte: windowStart } }, select: { startedAt: true } }),
       prisma.courtTurn.findMany({ where: { completedAt: { gte: windowStart } }, select: { completedAt: true } }),
-      prisma.dailyMetric.findMany({ where: { date: { in: keys } } }),
+      prisma.dailyMetric.findMany({ where: { date: { gte: dayKeyOf(windowStart) } } }),
       prisma.user.count(),
       prisma.club.count(),
       prisma.facility.count(),
@@ -147,43 +189,47 @@ export async function getAdminMetrics(days = 14): Promise<AdminMetricsResponse> 
       prisma.checkIn.count({ where: { checkedOutAt: null } }),
     ]);
 
-  // 버킷 초기화
-  const bucket = new Map<string, DailyMetricRow>();
-  const dauSets = new Map<string, Set<string>>();
-  for (const k of keys) {
-    bucket.set(k, { date: k, dau: 0, newUsers: 0, checkins: 0, sessions: 0, games: 0, peakConnections: 0, requestCount: 0 });
-    dauSets.set(k, new Set<string>());
-  }
-  for (const u of users) { const b = bucket.get(dayKeyOf(u.createdAt)); if (b) b.newUsers += 1; }
-  for (const c of checkins) {
-    const k = dayKeyOf(c.checkedInAt);
-    const b = bucket.get(k);
-    if (b) { b.checkins += 1; dauSets.get(k)!.add(c.userId); }
-  }
-  for (const s of sessions) { const b = bucket.get(dayKeyOf(s.startedAt)); if (b) b.sessions += 1; }
-  for (const t of turns) { if (!t.completedAt) continue; const b = bucket.get(dayKeyOf(t.completedAt)); if (b) b.games += 1; }
-  for (const [k, set] of dauSets) { bucket.get(k)!.dau = set.size; }
+  const series: MetricPoint[] = buckets.map((b) => ({ key: b.key, label: b.label, dau: 0, newUsers: 0, checkins: 0, sessions: 0, games: 0, peakConnections: 0, requestCount: 0 }));
+  const dauSets = buckets.map(() => new Set<string>());
+
+  for (const u of users) { const i = idxOf(u.createdAt); if (i !== undefined) series[i].newUsers += 1; }
+  for (const c of checkins) { const i = idxOf(c.checkedInAt); if (i !== undefined) { series[i].checkins += 1; dauSets[i].add(c.userId); } }
+  for (const s of sessions) { const i = idxOf(s.startedAt); if (i !== undefined) series[i].sessions += 1; }
+  for (const t of turns) { if (!t.completedAt) continue; const i = idxOf(t.completedAt); if (i !== undefined) series[i].games += 1; }
+  for (let i = 0; i < series.length; i++) series[i].dau = dauSets[i].size;
+  // DailyMetric(일별 기록) → 기간 집계: 요청수 합, 피크 max.
   for (const m of metricRows) {
-    const b = bucket.get(m.date);
-    if (b) { b.peakConnections = m.peakConnections; b.requestCount = m.requestCount; }
+    const i = dayToIdx.get(m.date);
+    if (i !== undefined) {
+      series[i].requestCount += m.requestCount;
+      series[i].peakConnections = Math.max(series[i].peakConnections, m.peakConnections);
+    }
   }
 
-  const daily = keys.map((k) => bucket.get(k)!);
-  const todayKey = keys[keys.length - 1];
-  const today = bucket.get(todayKey)!;
+  // 현재 기간(마지막 버킷) 막대에 아직 flush 안 된 오늘 요청/피크를 반영.
+  const last = series[series.length - 1];
+  if (last) {
+    last.requestCount += requestDelta;
+    last.peakConnections = Math.max(last.peakConnections, peakToday, currentConnections);
+  }
+
+  // 실시간/오늘 카드는 granularity 와 무관하게 항상 '오늘' 기준으로 계산.
+  const todayKey = dayKeyOf(now);
+  const todayMetric = metricRows.find((m) => m.date === todayKey);
+  const todaySet = new Set<string>();
+  for (const c of checkins) if (dayKeyOf(c.checkedInAt) === todayKey) todaySet.add(c.userId);
 
   return {
     live: {
       currentConnections,
-      // 오늘 피크: 기록값과 메모리 관측값 중 큰 쪽.
-      todayPeakConnections: Math.max(today.peakConnections, peakToday, currentConnections),
-      // 오늘 요청수: 기록값 + 아직 flush 안 된 증가분.
-      todayRequests: today.requestCount + requestDelta,
-      todayDau: today.dau,
+      todayPeakConnections: Math.max(todayMetric?.peakConnections ?? 0, peakToday, currentConnections),
+      todayRequests: (todayMetric?.requestCount ?? 0) + requestDelta,
+      todayDau: todaySet.size,
       activeSessions,
       checkedInNow,
     },
     totals: { users: totalUsers, clubs: totalClubs, facilities: totalFacilities },
-    daily,
+    granularity,
+    series,
   };
 }
