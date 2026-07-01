@@ -62,7 +62,10 @@ async function verifyClubLeaderOrSuperAdmin(
   const club = await prisma.club.findUnique({ where: { id: clubId } });
   if (!club) throw new NotFoundError('모임');
 
-  if (requesterRole !== 'SUPER_ADMIN') {
+  // 슈퍼관리자 판정은 토큰 role 뿐 아니라 DB(isSuperAdmin)로도 확인한다.
+  // 최근 SUPER_ADMIN 으로 승격됐지만 아직 재로그인 전(토큰에 옛 role)이어도 전권이 통하도록.
+  const superAdmin = requesterRole === 'SUPER_ADMIN' || (await isSuperAdmin(requesterId));
+  if (!superAdmin) {
     const member = await prisma.clubMember.findUnique({
       where: { userId_clubId: { userId: requesterId, clubId } },
     });
@@ -163,7 +166,8 @@ export async function listMyClubs(userId: string, role?: string) {
   // 최고관리자(SUPER_ADMIN)는 앱의 모든 모임을 보고/운영/관리할 수 있다.
   // 멤버십과 무관하게 전체 모임을 같은 응답 형태로 반환하며, 모든 모임에 대해
   // 리더 권한(role: 'LEADER')으로 표시한다. 그 외 사용자는 동작 변화 없음(본인 멤버십만).
-  if (role === 'SUPER_ADMIN') {
+  // 토큰 role 이 옛것(승격 전 로그인)이어도 DB(isSuperAdmin)로 확인해 전체 모임을 준다.
+  if (role === 'SUPER_ADMIN' || (await isSuperAdmin(userId))) {
     const clubs = await prisma.club.findMany({
       include: { _count: { select: { members: true } } },
     });
@@ -241,8 +245,9 @@ export async function deleteClub(
   if (!club) throw new NotFoundError('모임');
 
   // SUPER_ADMIN bypasses the per-club staff check; everyone else must be
-  // LEADER/STAFF of this club.
-  if (requesterRole !== 'SUPER_ADMIN') {
+  // LEADER/STAFF of this club. (토큰 role 이 옛것이어도 DB 로 슈퍼관리자면 통과.)
+  const superAdmin = requesterRole === 'SUPER_ADMIN' || (await isSuperAdmin(requesterId));
+  if (!superAdmin) {
     await verifyClubStaff(clubId, requesterId);
   }
 
