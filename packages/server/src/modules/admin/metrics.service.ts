@@ -1,3 +1,4 @@
+import { Prisma } from '@prisma/client';
 import { prisma } from '../../utils/prisma';
 import { logger } from '../../utils/logger';
 
@@ -141,8 +142,8 @@ export interface AdminMetricsResponse {
     checkedInNow: number; // 지금 체크인(미퇴장) 인원
   };
   totals: {
-    members: number; // 실가입 회원 — 앱에 직접 가입(게스트X, 운영자 명단추가X)
-    managed: number; // 운영자가 명단으로 추가한 관리형 멤버(로그인 없음)
+    members: number; // 진짜 가입 회원 — 로그인 수단(비번/카카오/구글) 있는 계정
+    managed: number; // 명단·기타 — 로그인 수단 없는 비게스트(운영자 명단추가 + 시드 placeholder)
     guests: number; // 누적 게스트 레코드
     clubs: number;
     facilities: number;
@@ -200,20 +201,29 @@ export async function getAdminMetrics(granularity: Granularity = 'day', count?: 
   }
   const idxOf = (ts: Date): number | undefined => dayToIdx.get(dayKeyOf(ts));
 
+  // '진짜 가입 회원' = 로그인 수단(비밀번호/카카오/구글)이 있는 계정. 게스트·명단추가·시드
+  // 계정은 인증수단이 없어 자연히 제외된다(isManaged 플래그 유무와 무관하게 정확).
+  const SIGNED_UP: Prisma.UserWhereInput = {
+    isGuest: false,
+    OR: [{ password: { not: null } }, { kakaoId: { not: null } }, { googleId: { not: null } }],
+  };
+  // 로그인 수단 없는 비게스트(운영자 명단추가 + 시드/기타 placeholder).
+  const NO_LOGIN: Prisma.UserWhereInput = { isGuest: false, password: null, kakaoId: null, googleId: null };
+
   const [users, checkins, sessions, turns, metricRows, totalMembers, totalGuests, totalClubs, totalFacilities, activeSessions, checkedInNow, totalManaged] =
     await Promise.all([
-      prisma.user.findMany({ where: { createdAt: { gte: windowStart }, isGuest: false, isManaged: false }, select: { createdAt: true } }),
+      prisma.user.findMany({ where: { createdAt: { gte: windowStart }, ...SIGNED_UP }, select: { createdAt: true } }),
       prisma.checkIn.findMany({ where: { checkedInAt: { gte: windowStart } }, select: { userId: true, checkedInAt: true } }),
       prisma.clubSession.findMany({ where: { startedAt: { gte: windowStart } }, select: { startedAt: true } }),
       prisma.courtTurn.findMany({ where: { completedAt: { gte: windowStart } }, select: { completedAt: true } }),
       prisma.dailyMetric.findMany({ where: { date: { gte: dayKeyOf(windowStart) } } }),
-      prisma.user.count({ where: { isGuest: false, isManaged: false } }), // 실가입 회원
+      prisma.user.count({ where: SIGNED_UP }), // 진짜 가입 회원(로그인 수단 있음)
       prisma.user.count({ where: { isGuest: true } }),
       prisma.club.count(),
       prisma.facility.count(),
       prisma.clubSession.count({ where: { status: 'ACTIVE' } }),
       prisma.checkIn.count({ where: { checkedOutAt: null } }),
-      prisma.user.count({ where: { isManaged: true } }), // 관리형 명단(로그인 없음)
+      prisma.user.count({ where: NO_LOGIN }), // 명단·기타(로그인 없는 비게스트)
     ]);
 
   // 시간대별(0~23시) 체크인 분포 — 조회 구간 기준 피크타임.
