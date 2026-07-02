@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect, useMemo } from 'react';
+import { useState, useCallback, useEffect, useMemo, useRef } from 'react';
 import {
   View, Text, ScrollView, StyleSheet, SafeAreaView, ActivityIndicator,
   TouchableOpacity, Platform,
@@ -105,8 +105,15 @@ export default function ViewBoardScreen() {
   // to the facility room (which board.tsx joins via useFacilityRoom) by the
   // backend, so subscribing here makes the queue + court states reflect changes
   // within ~1s instead of waiting for the poll fallback below.
+  // 이벤트마다 즉시 재조회하면 접속한 참가자 폰 전원이 동시에 재조회해 서버가 폭주한다.
+  // 600ms 창으로 합쳐 1회만 재조회(참가자 화면은 실시간성이 덜 중요 + poll 폴백도 있음).
   useFacilityRoom(facilityId);
-  const refresh = useCallback(() => { loadPool(); loadBoard(); }, [loadPool, loadBoard]);
+  const refreshTimer = useRef<any>(null);
+  const refresh = useCallback(() => {
+    if (refreshTimer.current) return;
+    refreshTimer.current = setTimeout(() => { refreshTimer.current = null; loadPool(); loadBoard(); }, 600);
+  }, [loadPool, loadBoard]);
+  useEffect(() => () => { if (refreshTimer.current) clearTimeout(refreshTimer.current); }, []);
   useSocketEvent('players:updated', refresh);
   useSocketEvent('checkin:arrived', refresh);
   useSocketEvent('checkin:left', refresh);

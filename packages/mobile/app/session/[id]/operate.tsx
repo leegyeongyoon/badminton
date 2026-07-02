@@ -636,11 +636,20 @@ export default function OperateScreen() {
   useEffect(() => { loadPool(); }, [loadPool]);
 
   // ─── Real-time: join facility room, refresh pool/board on relevant events ───
+  // 소켓 이벤트마다 즉시 재조회하면, 한 번의 편성/투입이 여러 이벤트를 쏘고 그게 접속한
+  // 전원에게 브로드캐스트돼 '전원이 동시에 재조회'하는 폭주가 난다(라즈베리파이 포화 →
+  // 15초 타임아웃 → 코트 투입 실패). 그래서 이벤트를 600ms 창으로 '합쳐서' 1회만 재조회한다.
   useFacilityRoom(facilityId);
+  const realtimeTimer = useRef<any>(null);
   const handleRealtime = useCallback(() => {
-    loadPool();
-    loadBoard();
+    if (realtimeTimer.current) return; // 이미 예약됨 — 폭주를 1회로 합침
+    realtimeTimer.current = setTimeout(() => {
+      realtimeTimer.current = null;
+      loadPool();
+      loadBoard();
+    }, 600);
   }, [loadPool, loadBoard]);
+  useEffect(() => () => { if (realtimeTimer.current) clearTimeout(realtimeTimer.current); }, []);
   useSocketEvent('players:updated', handleRealtime);
   useSocketEvent('checkin:arrived', handleRealtime);
   useSocketEvent('checkin:left', handleRealtime);
