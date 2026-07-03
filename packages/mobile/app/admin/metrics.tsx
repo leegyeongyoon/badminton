@@ -112,9 +112,9 @@ export default function AdminMetricsScreen() {
     return () => clearInterval(t);
   }, [load, gran]);
 
-  const openWho = useCallback(async (scope: WhoScope) => {
+  const openWho = useCallback(async (scope: WhoScope, from?: string, to?: string) => {
     setWhoScope(scope); setWho(null); setWhoLoading(true);
-    try { setWho(await adminStatsApi.getWho(scope)); } catch { setWho(null); } finally { setWhoLoading(false); }
+    try { setWho(await adminStatsApi.getWho(scope, from, to)); } catch { setWho(null); } finally { setWhoLoading(false); }
   }, []);
 
   const live = data?.live;
@@ -157,7 +157,8 @@ export default function AdminMetricsScreen() {
       <Text style={[styles.topBarTitle, { color: colors.text }]}>운영 지표 (최고관리자)</Text>
     </View>
   );
-  const whoTitle = whoScope === 'online' ? '현재 접속 중' : whoScope === 'checkedin' ? '지금 체크인' : '오늘 활동(체크인)';
+  const whoTitle = whoScope === 'online' ? '현재 접속 중' : whoScope === 'checkedin' ? '지금 체크인'
+    : whoScope === 'signups' ? '가입자 명단' : '오늘 활동(체크인)';
 
   return (
     <View style={{ flex: 1, backgroundColor: colors.background }}>
@@ -251,6 +252,13 @@ export default function AdminMetricsScreen() {
               })}
             </ScrollView>
             <TrendChart values={series.map((p) => Number(p[metric.key]) || 0)} labels={labels} color={metric.color} unit={metric.unit} height={168} />
+            {/* 신규가입 지표 선택 시 → '누가 가입했는지' 명단 드릴다운 */}
+            {metricKey === 'newUsers' && (
+              <Pressable onPress={() => openWho('signups')} style={({ pressed }) => [styles.whoBtn, { borderColor: colors.border, backgroundColor: colors.surface2 ?? colors.surfaceSecondary }, pressed && { opacity: 0.6 }]}>
+                <Icon name="people" size={15} color={colors.primary} />
+                <Text style={[styles.whoBtnT, { color: colors.primary }]}>누가 가입했는지 명단 보기 ›</Text>
+              </Pressable>
+            )}
           </Card>
 
           {/* 시간대별 피크 */}
@@ -285,7 +293,11 @@ export default function AdminMetricsScreen() {
                     <Text style={[styles.whoName, { color: colors.text }]} numberOfLines={1}>
                       {u.name}{u.isGuest ? <Text style={{ color: colors.textLight }}> · 게스트</Text> : null}
                     </Text>
-                    {!!u.context && <Text style={[styles.whoCtx, { color: colors.textSecondary }]} numberOfLines={1}>{u.context}</Text>}
+                    {(!!u.context || !!u.at) && (
+                      <Text style={[styles.whoCtx, { color: colors.textSecondary }]} numberOfLines={1}>
+                        {u.context}{u.context && u.at ? ' · ' : ''}{u.at ? u.at.slice(0, 10) : ''}
+                      </Text>
+                    )}
                   </View>
                 ))}
               </ScrollView>
@@ -331,6 +343,8 @@ const styles = StyleSheet.create({
   // chips
   chip: { paddingHorizontal: 12, paddingVertical: 6, borderRadius: radius.pill, borderWidth: 1.5 },
   chipT: { ...typography.caption, fontWeight: '800' },
+  whoBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, marginTop: 12, paddingVertical: 10, borderRadius: radius.md, borderWidth: 1 },
+  whoBtnT: { ...typography.subtitle2, fontWeight: '800' },
   // table
   table: { borderWidth: 1, borderRadius: radius.md, overflow: 'hidden' },
   tr: { flexDirection: 'row', alignItems: 'center' },

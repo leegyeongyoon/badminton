@@ -186,6 +186,19 @@ function buildBuckets(granularity: Granularity, count: number, now: Date): Bucke
 
 const DEFAULT_COUNT: Record<Granularity, number> = { day: 14, week: 12, month: 6 };
 
+// '가입 회원' = 실제 앱 사용자. 카카오·구글 소셜 로그인은 모두 회원으로 센다.
+// 전화(비밀번호) 계정은 대부분 운영/테스트용이라, 관리자 역할(최고관리자·시설관리자·
+// 모임리더)만 회원으로 인정하고 일반(PLAYER) 전화 계정은 제외한다. 게스트·명단추가 제외.
+const SIGNED_UP: Prisma.UserWhereInput = {
+  isGuest: false,
+  isManaged: false,
+  OR: [
+    { kakaoId: { not: null } },
+    { googleId: { not: null } },
+    { AND: [{ password: { not: null } }, { role: { in: ['SUPER_ADMIN', 'FACILITY_ADMIN', 'CLUB_LEADER'] } }] },
+  ],
+};
+
 export async function getAdminMetrics(granularity: Granularity = 'day', count?: number): Promise<AdminMetricsResponse> {
   const now = new Date();
   const n = Math.min(Math.max(count ?? DEFAULT_COUNT[granularity], 1), granularity === 'day' ? 60 : granularity === 'week' ? 26 : 24);
@@ -201,18 +214,6 @@ export async function getAdminMetrics(granularity: Granularity = 'day', count?: 
   }
   const idxOf = (ts: Date): number | undefined => dayToIdx.get(dayKeyOf(ts));
 
-  // '가입 회원' = 실제 앱 사용자. 카카오·구글 소셜 로그인은 모두 회원으로 센다.
-  // 전화(비밀번호) 계정은 대부분 운영/테스트용이라, 관리자 역할(최고관리자·시설관리자·
-  // 모임리더)만 회원으로 인정하고 일반(PLAYER) 전화 계정은 제외한다. 게스트·명단추가 제외.
-  const SIGNED_UP: Prisma.UserWhereInput = {
-    isGuest: false,
-    isManaged: false,
-    OR: [
-      { kakaoId: { not: null } },
-      { googleId: { not: null } },
-      { AND: [{ password: { not: null } }, { role: { in: ['SUPER_ADMIN', 'FACILITY_ADMIN', 'CLUB_LEADER'] } }] },
-    ],
-  };
   // 로그인 수단 없는 비게스트(운영자 명단추가 + 시드/기타 placeholder).
   const NO_LOGIN: Prisma.UserWhereInput = { isGuest: false, password: null, kakaoId: null, googleId: null };
 
@@ -288,13 +289,13 @@ export async function getAdminMetrics(granularity: Granularity = 'day', count?: 
 }
 
 // ─── 드릴다운: '누구'인지 명단 ───
-export type WhoScope = 'online' | 'checkedin' | 'today';
+export type WhoScope = 'online' | 'checkedin' | 'today' | 'signups';
 export interface WhoUser {
   userId: string;
   name: string;
   isGuest: boolean;
-  context?: string; // 모임/시설 등 맥락(체크인 명단용)
-  at?: string; // 체크인 시각(ISO)
+  context?: string; // 체크인: 모임/시설 · 가입: 로그인수단(카카오/구글/전화)
+  at?: string; // 체크인/가입 시각(ISO)
 }
 export interface WhoResponse {
   scope: WhoScope;
@@ -302,7 +303,29 @@ export interface WhoResponse {
   users: WhoUser[];
 }
 
-export async function getMetricsWho(scope: WhoScope): Promise<WhoResponse> {
+export async function getMetricsWho(scope: WhoScope, fromISO?: string, toISO?: string): Promise<WhoResponse> {
+  if (scope === 'signups') {
+    // 가입 회원(SIGNED_UP) 명단 — 누가 언제 어떤 수단으로 가입했는지. from/to 있으면 그 구간만.
+    const from = fromISO ? new Date(fromISO) : undefined;
+    const to = toISO ? new Date(toISO) : undefined;
+    const rows = await prisma.user.findMany({
+      where: {
+        ...SIGNED_UP,
+        ...(from || to ? { createdAt: { ...(from ? { gte: from } : {}), ...(to ? { lt: to } : {}) } } : {}),
+      },
+      orderBy: { createdAt: 'desc' },
+      take: 500,
+      select: { id: true, name: true, createdAt: true, kakaoId: true, googleId: true, password: true, role: true },
+    });
+    const method = (u: { kakaoId: string | null; googleId: string | null }) =>
+      u.kakaoId ? '카카오' : u.googleId ? '구글' : '전화(관리자)';
+    return {
+      scope,
+      count: rows.length,
+      users: rows.map((u) => ({ userId: u.id, name: u.name, isGuest: false, context: method(u), at: u.createdAt.toISOString() })),
+    };
+  }
+
   if (scope === 'online') {
     const ids = getOnlineUserIds();
     const users = ids.length

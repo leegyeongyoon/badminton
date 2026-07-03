@@ -37,8 +37,10 @@ router.get('/metrics', authenticate, superAdminOnly, async (req: Request, res: R
 router.get('/metrics/who', authenticate, superAdminOnly, async (req: Request, res: Response, next: NextFunction) => {
   try {
     const s = String(req.query.scope || 'checkedin');
-    const scope: WhoScope = s === 'online' || s === 'today' ? s : 'checkedin';
-    const result = await getMetricsWho(scope);
+    const scope: WhoScope = s === 'online' || s === 'today' || s === 'signups' ? s : 'checkedin';
+    const from = req.query.from ? String(req.query.from) : undefined;
+    const to = req.query.to ? String(req.query.to) : undefined;
+    const result = await getMetricsWho(scope, from, to);
     res.json(result);
   } catch (err) {
     next(err);

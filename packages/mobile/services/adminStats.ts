@@ -31,7 +31,7 @@ export interface AdminMetrics {
   hourly: number[]; // 0~23시 체크인 분포(피크타임)
 }
 
-export type WhoScope = 'online' | 'checkedin' | 'today';
+export type WhoScope = 'online' | 'checkedin' | 'today' | 'signups';
 export interface WhoUser { userId: string; name: string; isGuest: boolean; context?: string; at?: string }
 export interface WhoResponse { scope: WhoScope; count: number; users: WhoUser[] }
 
@@ -40,8 +40,8 @@ export const adminStatsApi = {
     const { data } = await api.get('/admin/metrics', { params: { granularity, ...(count ? { count } : {}) } });
     return data;
   },
-  getWho: async (scope: WhoScope): Promise<WhoResponse> => {
-    const { data } = await api.get('/admin/metrics/who', { params: { scope } });
+  getWho: async (scope: WhoScope, from?: string, to?: string): Promise<WhoResponse> => {
+    const { data } = await api.get('/admin/metrics/who', { params: { scope, ...(from ? { from } : {}), ...(to ? { to } : {}) } });
     return data;
   },
 
