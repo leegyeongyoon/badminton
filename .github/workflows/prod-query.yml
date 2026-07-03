@@ -71,6 +71,17 @@ jobs:
           SELECT (SELECT count(*) FROM "Club") AS clubs,
                  (SELECT count(*) FROM "ClubSession") AS sessions_total,
                  (SELECT count(*) FROM "ClubSession" WHERE status='ACTIVE') AS sessions_active;
+
+          \echo '===== 7) 새 정의(가입 회원) = 카카오+구글+(전화는 관리자만) ====='
+          SELECT count(*) AS new_members FROM "User"
+          WHERE NOT "isGuest" AND "isManaged" IS NOT TRUE
+            AND ("kakaoId" IS NOT NULL OR "googleId" IS NOT NULL
+                 OR (password IS NOT NULL AND role IN ('SUPER_ADMIN','FACILITY_ADMIN','CLUB_LEADER')));
+
+          \echo '===== 8) 제외되는 일반(PLAYER) 전화 계정 수 ====='
+          SELECT count(*) AS player_phone FROM "User"
+          WHERE NOT "isGuest" AND "isManaged" IS NOT TRUE AND password IS NOT NULL
+            AND "kakaoId" IS NULL AND "googleId" IS NULL AND role='PLAYER';
           SQL
 
           B64=$(base64 -w0 q.sql)

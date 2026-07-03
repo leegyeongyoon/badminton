@@ -201,11 +201,17 @@ export async function getAdminMetrics(granularity: Granularity = 'day', count?: 
   }
   const idxOf = (ts: Date): number | undefined => dayToIdx.get(dayKeyOf(ts));
 
-  // '진짜 가입 회원' = 로그인 수단(비밀번호/카카오/구글)이 있는 계정. 게스트·명단추가·시드
-  // 계정은 인증수단이 없어 자연히 제외된다(isManaged 플래그 유무와 무관하게 정확).
+  // '가입 회원' = 실제 앱 사용자. 카카오·구글 소셜 로그인은 모두 회원으로 센다.
+  // 전화(비밀번호) 계정은 대부분 운영/테스트용이라, 관리자 역할(최고관리자·시설관리자·
+  // 모임리더)만 회원으로 인정하고 일반(PLAYER) 전화 계정은 제외한다. 게스트·명단추가 제외.
   const SIGNED_UP: Prisma.UserWhereInput = {
     isGuest: false,
-    OR: [{ password: { not: null } }, { kakaoId: { not: null } }, { googleId: { not: null } }],
+    isManaged: false,
+    OR: [
+      { kakaoId: { not: null } },
+      { googleId: { not: null } },
+      { AND: [{ password: { not: null } }, { role: { in: ['SUPER_ADMIN', 'FACILITY_ADMIN', 'CLUB_LEADER'] } }] },
+    ],
   };
   // 로그인 수단 없는 비게스트(운영자 명단추가 + 시드/기타 placeholder).
   const NO_LOGIN: Prisma.UserWhereInput = { isGuest: false, password: null, kakaoId: null, googleId: null };

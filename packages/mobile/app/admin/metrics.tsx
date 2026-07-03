@@ -191,12 +191,10 @@ export default function AdminMetricsScreen() {
           <Text style={[styles.section, { color: colors.text, marginTop: spacing.xl }]}>누적</Text>
           <View style={styles.grid}>
             <StatCard label="가입 회원" value={(totals?.members ?? 0).toLocaleString()} accent />
-            <StatCard label="명단·기타" value={(totals?.managed ?? 0).toLocaleString()} />
-            <StatCard label="게스트(누적)" value={(totals?.guests ?? 0).toLocaleString()} />
             <StatCard label="모임" value={totals?.clubs ?? 0} />
             <StatCard label="시설" value={totals?.facilities ?? 0} />
           </View>
-          <Text style={[styles.subNote, { color: colors.textLight }]}>가입 회원 = 실제 로그인 수단(비번·카카오·구글) 있는 계정 · 명단·기타 = 운영자 명단추가 등 로그인 없는 계정 · 게스트 = 임시 참여</Text>
+          <Text style={[styles.subNote, { color: colors.textLight }]}>가입 회원 = 카카오·구글 로그인 + 관리자(전화) 계정. 게스트·명단·일반 전화 테스트 계정 제외</Text>
 
           {/* 기간 전환 */}
           <View style={[styles.sectionRow, { marginTop: spacing.xl }]}>
