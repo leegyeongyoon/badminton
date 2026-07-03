@@ -1,0 +1,66 @@
+name: Prod Logs
+
+# 프로덕션(라즈베리파이) 서버 로그를 '읽기 전용'으로 조회해 Actions 로그에 출력한다.
+# 배포는 하지 않는다 — docker logs + winston 파일 로그를 tail/grep 만. 기존 배포 SSH
+# 시크릿(SSH_HOST/USER/PASSWORD)을 그대로 재사용하며, 시크릿 값은 로그에 찍지 않는다.
+# 수동 실행(workflow_dispatch) 전용.
+on:
+  workflow_dispatch:
+    inputs:
+      since:
+        description: "docker logs --since (예: 36h, 2026-07-02)"
+        default: "36h"
+        required: false
+      grep:
+        description: "필터 정규식(대소문자 무시). 비우면 에러/경고 위주"
+        default: ""
+        required: false
+
+concurrency:
+  group: prod-logs
+  cancel-in-progress: true
+
+jobs:
+  logs:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Install cloudflared + sshpass
+        run: |
+          curl -fsSL https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64.deb -o cloudflared.deb
+          sudo dpkg -i cloudflared.deb
+          sudo apt-get update && sudo apt-get install -y sshpass
+
+      - name: Configure SSH over Cloudflare Tunnel
+        run: |
+          mkdir -p ~/.ssh
+          cat >> ~/.ssh/config << SSHCONFIG
+          Host ${{ secrets.SSH_HOST }}
+            ProxyCommand cloudflared access ssh --hostname %h
+            StrictHostKeyChecking no
+            UserKnownHostsFile /dev/null
+          SSHCONFIG
+
+      - name: Fetch server logs (read-only)
+        env:
+          SSHPASS: ${{ secrets.SSH_PASSWORD }}
+          SINCE: ${{ github.event.inputs.since }}
+          GREP: ${{ github.event.inputs.grep }}
+        run: |
+          ssh_pi() { sshpass -e ssh -o ConnectTimeout=25 "${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}" "$1"; }
+          PAT="${GREP:-error|warn|timeout|ECONN|EAI_AGAIN|prisma|exception|unhandled|reject|500|cocourt|투입|배정}"
+
+          echo "==================== docker ps ===================="
+          ssh_pi "docker ps --format '{{.Names}}\t{{.Status}}' | head -20" || true
+
+          echo ""
+          echo "======= docker logs badminton-prod-server (since ${SINCE:-36h}, 필터) ======="
+          ssh_pi "docker logs badminton-prod-server --since ${SINCE:-36h} 2>&1 | grep -iE '$PAT' | tail -400" || echo "(docker logs 실패)"
+
+          echo ""
+          echo "======= winston error.log (마지막 300줄) ======="
+          ssh_pi "docker exec badminton-prod-server sh -lc 'tail -n 300 packages/server/logs/error.log 2>/dev/null || tail -n 300 logs/error.log 2>/dev/null || find / -name error.log -path \"*logs*\" 2>/dev/null | head -1 | xargs tail -n 300'" || echo "(error.log 없음/접근불가)"
+
+          echo ""
+          echo "======= 최근 500줄 중 에러코드/상태 요약 ======="
+          ssh_pi "docker logs badminton-prod-server --since ${SINCE:-36h} 2>&1 | grep -oiE 'status(Code)?[ =:]+[0-9]{3}|ECONN[A-Z]*|timeout|prisma[.:][a-zA-Z]+' | sort | uniq -c | sort -rn | head -30" || true
