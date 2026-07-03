@@ -74,6 +74,12 @@ COPY --from=builder /app/packages/server/dist ./packages/server/dist
 # the generated client itself lives in node_modules/.prisma & @prisma/client).
 COPY --from=builder /app/packages/server/prisma ./packages/server/prisma
 
+# 로그 디렉토리(LOG_DIR=/app/logs)를 미리 만들고 node 소유로 지정한다. compose 의
+# 명명 볼륨(serverlogs)이 이 경로에 '비어서' 처음 마운트될 때 Docker 가 이미지의
+# 소유권/내용을 볼륨으로 복사하므로, 비루트(node)도 로그를 쓸 수 있다. (이게 없으면
+# 볼륨이 root 소유로 생성돼 winston 파일 로깅이 조용히 비활성됨.)
+RUN mkdir -p /app/logs && chown -R node:node /app/logs
+
 # Run as the unprivileged user that the node images ship with.
 USER node
 
