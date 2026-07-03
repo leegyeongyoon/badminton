@@ -1370,19 +1370,22 @@ export default function OperateScreen() {
 
   // 빈 코트 탭 → 투입 가능한(4명·게임중 없음) 첫 큐 게임(또는 지정 entry)을 그 코트에 투입.
   const assignQueueToCourt = useCallback(async (courtId: string, candidateEntryId?: string) => {
-    const playing = new Set<string>();
-    playingByCourtId.forEach((e) => (e.playerIds || []).forEach((id) => playing.add(id)));
+    // 지정 엔트리가 없으면 '항상 큐 맨 위(대기 1번)'를 투입한다. queuedEntries 는 queueOrder
+    // 오름차순(맨 위=대기 1번)으로 정렬돼 있으므로 [0] 이 곧 대기 1번.
+    // (예전엔 '4명이고 아무도 게임 중이 아닌 첫 엔트리'를 골라서, 대기 1번 4명 중 한 명이
+    //  다른 코트에서 게임 중이면 대기 1번을 건너뛰고 2·3번이 투입되는 버그가 있었다.
+    //  4명 미만이어도 투입 가능 — 코트에서 인원을 더 넣을 수 있으니 맨 위부터 그대로.)
     const e = candidateEntryId
       ? queuedEntries.find((en) => en.id === candidateEntryId)
-      : queuedEntries.find((en) => en.playerIds.length === 4 && en.playerIds.every((u) => !playing.has(u)));
-    if (!e || e.playerIds.length !== 4) { showAlert('알림', '투입할 4명짜리 게임이 없어요'); return; }
+      : queuedEntries[0];
+    if (!e || (e.playerIds?.length ?? 0) === 0) { showAlert('알림', '투입할 다음 게임이 없어요'); return; }
     const court = courts.find((c) => c.id === courtId);
     try {
       await assignEntry(e.id, courtId);
       loadBoard(); loadCourts(); loadPool();
       showSuccess(`${court?.name || '코트'} 게임 시작!`);
     } catch (err: any) { showAlert('오류', err?.response?.data?.error || '코트 투입 실패'); loadBoard(); }
-  }, [queuedEntries, playingByCourtId, courts, assignEntry, loadBoard, loadCourts, loadPool]);
+  }, [queuedEntries, courts, assignEntry, loadBoard, loadCourts, loadPool]);
 
   // 텍스트 명령(runCommand)은 뒤에서 정의 — handleEndGame/handleDeleteQueued 등 핸들러를 쓰기 때문.
 
