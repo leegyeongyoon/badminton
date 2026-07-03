@@ -1,0 +1,78 @@
+name: Prod Query
+
+# 프로덕션 DB를 '읽기 전용(SELECT)'으로 진단 조회한다. 배포/변경 없음.
+# 사용자(가입 회원) 구성이 왜 그 숫자인지 등을 실데이터로 분해해 Actions 로그에 출력.
+# SQL 을 파일로 만들어 base64 로 전달(따옴표 이스케이프 회피) → docker exec psql stdin.
+# 수동 실행(workflow_dispatch) 전용.
+on:
+  workflow_dispatch:
+
+concurrency:
+  group: prod-query
+  cancel-in-progress: true
+
+jobs:
+  query:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Install cloudflared + sshpass
+        run: |
+          curl -fsSL https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64.deb -o cloudflared.deb
+          sudo dpkg -i cloudflared.deb
+          sudo apt-get update && sudo apt-get install -y sshpass
+
+      - name: Configure SSH over Cloudflare Tunnel
+        run: |
+          mkdir -p ~/.ssh
+          cat >> ~/.ssh/config << SSHCONFIG
+          Host ${{ secrets.SSH_HOST }}
+            ProxyCommand cloudflared access ssh --hostname %h
+            StrictHostKeyChecking no
+            UserKnownHostsFile /dev/null
+          SSHCONFIG
+
+      - name: Run read-only breakdown queries
+        env:
+          SSHPASS: ${{ secrets.SSH_PASSWORD }}
+        run: |
+          # 단일따옴표 heredoc = 변수/따옴표 확장 없음(안전). 읽기 전용 SELECT 만.
+          cat > q.sql <<'SQL'
+          \echo '===== 1) 사용자 대분류 ====='
+          SELECT count(*) FILTER (WHERE "isGuest") AS guest,
+                 count(*) FILTER (WHERE NOT "isGuest" AND "isManaged") AS managed,
+                 count(*) FILTER (WHERE NOT "isGuest" AND (password IS NOT NULL OR "kakaoId" IS NOT NULL OR "googleId" IS NOT NULL)) AS signed_up,
+                 count(*) FILTER (WHERE NOT "isGuest" AND "isManaged" IS NOT TRUE AND password IS NULL AND "kakaoId" IS NULL AND "googleId" IS NULL) AS nologin_other,
+                 count(*) AS total
+          FROM "User";
+
+          \echo '===== 2) 가입 회원 인증수단 분포(중복가능) ====='
+          SELECT count(*) FILTER (WHERE password IS NOT NULL) AS has_pw,
+                 count(*) FILTER (WHERE "kakaoId" IS NOT NULL) AS has_kakao,
+                 count(*) FILTER (WHERE "googleId" IS NOT NULL) AS has_google
+          FROM "User" WHERE NOT "isGuest" AND (password IS NOT NULL OR "kakaoId" IS NOT NULL OR "googleId" IS NOT NULL);
+
+          \echo '===== 3) 가입 회원 월별 생성 추이 ====='
+          SELECT to_char("createdAt",'YYYY-MM') AS month, count(*)
+          FROM "User" WHERE NOT "isGuest" AND (password IS NOT NULL OR "kakaoId" IS NOT NULL OR "googleId" IS NOT NULL)
+          GROUP BY 1 ORDER BY 1;
+
+          \echo '===== 4) 모임별 소속 회원 수(게스트 제외) ====='
+          SELECT c.name, count(DISTINCT cm."userId") AS members
+          FROM "ClubMember" cm JOIN "Club" c ON c.id=cm."clubId" JOIN "User" u ON u.id=cm."userId"
+          WHERE NOT u."isGuest" GROUP BY c.name ORDER BY members DESC;
+
+          \echo '===== 5) 가입했지만 어느 모임에도 소속 안 된 회원 수 ====='
+          SELECT count(*) FROM "User" u
+          WHERE NOT u."isGuest" AND (u.password IS NOT NULL OR u."kakaoId" IS NOT NULL OR u."googleId" IS NOT NULL)
+            AND NOT EXISTS (SELECT 1 FROM "ClubMember" cm WHERE cm."userId"=u.id);
+
+          \echo '===== 6) 전체 모임/정모 수 ====='
+          SELECT (SELECT count(*) FROM "Club") AS clubs,
+                 (SELECT count(*) FROM "ClubSession") AS sessions_total,
+                 (SELECT count(*) FROM "ClubSession" WHERE status='ACTIVE') AS sessions_active;
+          SQL
+
+          B64=$(base64 -w0 q.sql)
+          sshpass -e ssh -o ConnectTimeout=25 "${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}" \
+            "echo $B64 | base64 -d | docker exec -i badminton-prod-db psql -U badminton -d badminton -P pager=off -f -"
