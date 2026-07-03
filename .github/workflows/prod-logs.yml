@@ -58,8 +58,12 @@ jobs:
           ssh_pi "docker logs badminton-prod-server --since ${SINCE:-36h} 2>&1 | grep -iE '$PAT' | tail -400" || echo "(docker logs 실패)"
 
           echo ""
-          echo "======= winston error.log (마지막 300줄) ======="
-          ssh_pi "docker exec badminton-prod-server sh -lc 'tail -n 300 packages/server/logs/error.log 2>/dev/null || tail -n 300 logs/error.log 2>/dev/null || find / -name error.log -path \"*logs*\" 2>/dev/null | head -1 | xargs tail -n 300'" || echo "(error.log 없음/접근불가)"
+          echo "======= winston error.log (영속 볼륨 /app/logs, 마지막 300줄) ======="
+          ssh_pi "docker exec badminton-prod-server sh -lc 'tail -n 300 /app/logs/error.log 2>/dev/null || find / -name error.log -path \"*logs*\" 2>/dev/null | head -1 | xargs tail -n 300'" || echo "(error.log 없음/접근불가)"
+
+          echo ""
+          echo "======= winston combined.log 중 필터(마지막 400줄, client_error/느린요청 포함) ======="
+          ssh_pi "docker exec badminton-prod-server sh -lc 'grep -iE \"$PAT\" /app/logs/combined.log 2>/dev/null | tail -400'" || echo "(combined.log 없음/접근불가)"
 
           echo ""
           echo "======= 최근 500줄 중 에러코드/상태 요약 ======="

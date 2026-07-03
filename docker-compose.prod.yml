@@ -45,6 +45,13 @@ services:
       target: runner
     container_name: badminton-prod-server
     env_file: .env.prod
+    # 로그를 영속 볼륨(serverlogs)에 저장 → 배포로 컨테이너가 재생성돼도 winston 파일
+    # 로그(error.log/combined.log)가 남는다. (예전엔 컨테이너 내부에만 써서 배포 때마다
+    # 유실 → 장애 사후 진단 불가였음.) LOG_DIR 로 winston 출력 경로를 이 볼륨으로 고정.
+    environment:
+      - LOG_DIR=/app/logs
+    volumes:
+      - serverlogs:/app/logs
     depends_on:
       postgres:
         condition: service_healthy
@@ -65,3 +72,4 @@ services:
 
 volumes:
   pgdata:
+  serverlogs:
