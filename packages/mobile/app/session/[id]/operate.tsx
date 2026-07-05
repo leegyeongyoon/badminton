@@ -4218,8 +4218,16 @@ export default function OperateScreen() {
     if (Number.isNaN(t)) return null;
     return Math.max(0, Math.floor((nowTs - t) / 60000));
   };
+  // 대기 명단 '렌더용' 리스트 — pool 과 달리 inQueue(다음 게임에 편성된) 선수도 '포함'한다.
+  // 그래야 편성된 선수의 자리가 사라지지 않고 '빈칸'으로 남는다(게임 중 선수처럼). 밑의 사람이
+  // 위로 채워지며 재정렬되던 문제 수정. (pool/poolIds 는 자동편성용이라 inQueue 제외 유지.)
+  const poolForWait = uniquePlayers
+    .filter((m) => matchesPoolFilters(m) && !playingSet.has(m.userId)
+      && (poolQ === '' || (m.userName || '').toLowerCase().includes(poolQ))
+      && (poolGenders.length === 0 || poolGenders.includes(getGenderMeta(m.gender)?.gender ?? ''))
+      && (poolSkills.length === 0 || poolSkills.includes((m.skillLevel || '').toUpperCase())));
   const wb: Record<'h' | 'm30' | 'm15' | 'fresh' | 'recent', string[]> = { h: [], m30: [], m15: [], fresh: [], recent: [] };
-  for (const m of pool) {
+  for (const m of poolForWait) {
     const w = waitMinOf(m.userId);
     if (w == null) wb.fresh.push(m.userId);       // 한 판도 안 침
     else if (w >= 60) wb.h.push(m.userId);
@@ -4240,9 +4248,15 @@ export default function OperateScreen() {
   ] as Array<{ key: string; label: string; color: string; ids: string[] }>).filter((s) => s.ids.length > 0);
   const chunk4 = (arr: string[]): string[][] => { const out: string[][] = []; for (let i = 0; i < arr.length; i += 4) out.push(arr.slice(i, i + 4)); return out; };
   // 코트에 들어간(게임 중) 묶음 — 대기 맨 아래에 묶음으로 보여 '게임 치는 동안 다음 게임 미리 편성'.
+  // 정렬: 게임 시작(startedAt)이 이른 순 = 먼저 들어간 게임이 위, 나중이 아래로 쌓임.
   const playingCols = courts
-    .map((c) => ({ name: c.name, entry: playingByCourtId.get(c.id) }))
+    .map((c) => ({ name: c.name, startedAt: c.currentTurn?.startedAt ?? null, entry: playingByCourtId.get(c.id) }))
     .filter((x) => x.entry && (x.entry.playerIds?.length ?? 0) > 0)
+    .sort((a, b) => {
+      const ta = a.startedAt ? Date.parse(a.startedAt) : Number.POSITIVE_INFINITY; // 시작시각 없으면 뒤로
+      const tb = b.startedAt ? Date.parse(b.startedAt) : Number.POSITIVE_INFINITY;
+      return ta - tb;
+    })
     .map((x) => ({ name: x.name, ids: x.entry!.playerIds as string[] }));
   // 번호 게임 = 서버 큐 순서 + 끝에 '새 게임' 칸(entryId null).
   const queueFrames: Array<{ id: string | null; players: string[] }> = [
@@ -4572,7 +4586,7 @@ export default function OperateScreen() {
           {/* 대기 = 같이 나온 4명 묶음을 4명 한 줄로, 세로로 아래로 쌓는다(아래로 스크롤). 게임 중은 맨 밑. */}
           <ScrollView style={{ flex: 1 }} contentContainerStyle={{ paddingBottom: 56 }} keyboardShouldPersistTaps="handled">
             <PoolDropZone>
-              {pool.length === 0 && playingCols.length === 0
+              {poolForWait.length === 0 && playingCols.length === 0
                 ? <Text style={[styles.emptyPool, { color: colors.textLight }]}>대기 인원 없음</Text>
                 : (
                   <View style={{ width: '100%', gap: 5 }}>
@@ -4586,6 +4600,9 @@ export default function OperateScreen() {
                             {[0, 1, 2, 3].map((si) => {
                               const id = row[si];
                               if (!id) return <View key={si} style={styles.poolGapSlot} />;
+                              // 다음 게임에 편성된(inQueue) 선수는 '게임 중 선수'처럼 그 자리를 빈칸으로 —
+                              // 밑의 사람이 위로 채워지지 않게(자리 유지). 편성 빼면 다시 이름표로 복원.
+                              if (inQueue.has(id)) return <View key={id} style={styles.poolGapSlot} />;
                               const p = getPlayer(id); return p ? <PlayerTag key={id} player={p} fill compact /> : <View key={si} style={styles.poolGapSlot} />;
                             })}
                           </View>
