@@ -43,7 +43,7 @@ export default function MonitorScreen() {
 
   // 대기열 카드 열 수 — 히어로라 화면 폭에 맞춰 넉넉히.
   const queueCount = Math.max(queuedEntries.length, 1);
-  const qMaxCols = width >= 1800 ? 5 : width >= 1400 ? 4 : width >= 1000 ? 3 : width >= 640 ? 2 : 1;
+  const qMaxCols = width >= 1800 ? 6 : width >= 1400 ? 5 : width >= 1000 ? 4 : width >= 640 ? 2 : 1;
   const qCols = Math.min(queueCount, qMaxCols);
   const queueBasis = `${100 / qCols - 1.2}%`;
 
@@ -72,7 +72,7 @@ export default function MonitorScreen() {
                 <Text style={[styles.qSkillText, { color: hasSkill ? palette.white : colors.textLight }]}>{hasSkill ? skill.level : '·'}</Text>
               </View>
               <Text style={[styles.qName, { color: colors.text }]} numberOfLines={1}>{p?.userName || entry.playerNames?.[i] || '?'}</Text>
-              {g && <GenderMarker meta={g} size={18} />}
+              {g && <GenderMarker meta={g} size={14} />}
             </View>
           );
         })}
@@ -154,7 +154,7 @@ export default function MonitorScreen() {
                         <Text style={[styles.wSkillText, { color: hasSkill ? palette.white : colors.textLight }]}>{hasSkill ? skill.level : '·'}</Text>
                       </View>
                       <Text style={[styles.wName, { color: colors.text }]} numberOfLines={1}>{p.userName}</Text>
-                      {g && <GenderMarker meta={g} size={15} />}
+                      {g && <GenderMarker meta={g} size={13} />}
                     </View>
                   );
                 })}
@@ -182,52 +182,52 @@ export default function MonitorScreen() {
 const styles = StyleSheet.create({
   root: { flex: 1 },
   // 상단 바
-  topBar: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 24, paddingVertical: 12, borderBottomWidth: 1 },
-  topLeft: { flexDirection: 'row', alignItems: 'center', gap: 12, flex: 1, minWidth: 0 },
-  topRight: { flexDirection: 'row', alignItems: 'center', gap: 16 },
-  liveDot: { width: 12, height: 12, borderRadius: 6 },
-  title: { fontSize: 28, fontWeight: '900', flexShrink: 1 },
-  livePill: { paddingHorizontal: 10, paddingVertical: 3, borderRadius: 6 },
-  liveText: { fontSize: 13, fontWeight: '900', letterSpacing: 1 },
-  clock: { fontSize: 22, fontWeight: '800', fontVariant: ['tabular-nums'] },
+  topBar: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 18, paddingVertical: 9, borderBottomWidth: 1 },
+  topLeft: { flexDirection: 'row', alignItems: 'center', gap: 9, flex: 1, minWidth: 0 },
+  topRight: { flexDirection: 'row', alignItems: 'center', gap: 12 },
+  liveDot: { width: 9, height: 9, borderRadius: 5 },
+  title: { fontSize: 19, fontWeight: '900', flexShrink: 1 },
+  livePill: { paddingHorizontal: 8, paddingVertical: 2, borderRadius: 5 },
+  liveText: { fontSize: 11, fontWeight: '900', letterSpacing: 1 },
+  clock: { fontSize: 16, fontWeight: '800', fontVariant: ['tabular-nums'] },
   exitBtn: { padding: 4 },
 
   // 히어로(대기 순서)
-  heroWrap: { flex: 1, paddingHorizontal: 20, paddingTop: 14 },
-  heroHeader: { flexDirection: 'row', alignItems: 'baseline', justifyContent: 'space-between', marginBottom: 12 },
-  heroTitle: { fontSize: 30, fontWeight: '900' },
-  waitCount: { fontSize: 22, fontWeight: '800' },
-  heroScroll: { paddingBottom: 16 },
-  emptyBig: { fontSize: 26, fontWeight: '700', textAlign: 'center', marginTop: 60 },
-  queueGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 16, alignContent: 'flex-start' },
-  queueCard: { flexGrow: 1, minWidth: 220, borderWidth: 2, borderRadius: 18, padding: 16 },
-  queueTop: { flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 12 },
-  orderBadge: { minWidth: 44, height: 44, borderRadius: 22, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 8 },
-  orderText: { fontSize: 24, fontWeight: '900' },
-  orderLabel: { fontSize: 22, fontWeight: '900' },
-  queuePlayers: { gap: 8 },
-  qPlayerChip: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingHorizontal: 12, paddingVertical: 10, borderRadius: 12 },
-  qSkill: { minWidth: 30, height: 30, borderRadius: 8, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 4 },
-  qSkillText: { fontSize: 16, fontWeight: '900' },
-  qName: { fontSize: 24, fontWeight: '800', flex: 1 },
+  heroWrap: { flex: 1, paddingHorizontal: 16, paddingTop: 10 },
+  heroHeader: { flexDirection: 'row', alignItems: 'baseline', justifyContent: 'space-between', marginBottom: 9 },
+  heroTitle: { fontSize: 20, fontWeight: '900' },
+  waitCount: { fontSize: 15, fontWeight: '800' },
+  heroScroll: { paddingBottom: 12 },
+  emptyBig: { fontSize: 18, fontWeight: '700', textAlign: 'center', marginTop: 40 },
+  queueGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 10, alignContent: 'flex-start' },
+  queueCard: { flexGrow: 1, minWidth: 180, borderWidth: 1.5, borderRadius: 12, padding: 10 },
+  queueTop: { flexDirection: 'row', alignItems: 'center', gap: 7, marginBottom: 7 },
+  orderBadge: { minWidth: 28, height: 28, borderRadius: 14, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 6 },
+  orderText: { fontSize: 15, fontWeight: '900' },
+  orderLabel: { fontSize: 14, fontWeight: '900' },
+  queuePlayers: { gap: 5 },
+  qPlayerChip: { flexDirection: 'row', alignItems: 'center', gap: 7, paddingHorizontal: 8, paddingVertical: 6, borderRadius: 8 },
+  qSkill: { minWidth: 20, height: 20, borderRadius: 5, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 3 },
+  qSkillText: { fontSize: 12, fontWeight: '900' },
+  qName: { fontSize: 15, fontWeight: '800', flex: 1 },
 
   // 대기 중(편성 전) 칩
-  waitBox: { marginTop: 20 },
-  waitBoxTitle: { fontSize: 18, fontWeight: '800', marginBottom: 8 },
-  waitChips: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
-  waitChip: { flexDirection: 'row', alignItems: 'center', gap: 7, paddingHorizontal: 10, paddingVertical: 7, borderRadius: 10, borderWidth: 1 },
-  wSkill: { minWidth: 22, height: 22, borderRadius: 6, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 3 },
-  wSkillText: { fontSize: 12, fontWeight: '900' },
-  wName: { fontSize: 18, fontWeight: '700' },
+  waitBox: { marginTop: 14 },
+  waitBoxTitle: { fontSize: 13, fontWeight: '800', marginBottom: 6 },
+  waitChips: { flexDirection: 'row', flexWrap: 'wrap', gap: 6 },
+  waitChip: { flexDirection: 'row', alignItems: 'center', gap: 5, paddingHorizontal: 8, paddingVertical: 5, borderRadius: 8, borderWidth: 1 },
+  wSkill: { minWidth: 17, height: 17, borderRadius: 4, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 2 },
+  wSkillText: { fontSize: 10, fontWeight: '900' },
+  wName: { fontSize: 13, fontWeight: '700' },
 
   // 코트 현황(컴팩트 스트립)
-  courtStrip: { borderTopWidth: 1, paddingHorizontal: 20, paddingTop: 10, paddingBottom: 14 },
-  stripTitle: { fontSize: 16, fontWeight: '800', marginBottom: 8 },
-  courtRow: { flexDirection: 'row', gap: 10, paddingBottom: 2 },
-  courtChip: { width: 200, borderWidth: 1.5, borderRadius: 12, paddingHorizontal: 12, paddingVertical: 8 },
-  courtChipHead: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 3 },
-  courtChipName: { fontSize: 18, fontWeight: '900', flexShrink: 1 },
-  courtChipElapsed: { fontSize: 14, fontWeight: '800' },
-  courtChipEmpty: { fontSize: 14, fontWeight: '800' },
-  courtChipPlayers: { fontSize: 15, fontWeight: '600', lineHeight: 19 },
+  courtStrip: { borderTopWidth: 1, paddingHorizontal: 16, paddingTop: 8, paddingBottom: 10 },
+  stripTitle: { fontSize: 13, fontWeight: '800', marginBottom: 6 },
+  courtRow: { flexDirection: 'row', gap: 8, paddingBottom: 2 },
+  courtChip: { width: 165, borderWidth: 1, borderRadius: 10, paddingHorizontal: 10, paddingVertical: 6 },
+  courtChipHead: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 2 },
+  courtChipName: { fontSize: 15, fontWeight: '900', flexShrink: 1 },
+  courtChipElapsed: { fontSize: 12, fontWeight: '800' },
+  courtChipEmpty: { fontSize: 12, fontWeight: '800' },
+  courtChipPlayers: { fontSize: 12, fontWeight: '600', lineHeight: 16 },
 });
