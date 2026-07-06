@@ -1,8 +1,9 @@
-import { useEffect } from 'react';
-import { View, Text, StyleSheet, Platform, Pressable, ScrollView, useWindowDimensions } from 'react-native';
+import { useEffect, useState } from 'react';
+import { View, Text, StyleSheet, Platform, Pressable, ScrollView, useWindowDimensions, Image } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useTheme } from '../../../hooks/useTheme';
 import { useSessionLiveBoard } from '../../../hooks/useSessionLiveBoard';
+import { clubSessionApi } from '../../../services/clubSession';
 import { Icon } from '../../../components/ui/Icon';
 import { getSkillMeta } from '../../../constants/skill';
 import { GenderMarker } from '../../../components/ui/GenderMarker';
@@ -22,8 +23,19 @@ export default function MonitorScreen() {
   const { height } = useWindowDimensions();
 
   const {
-    clubName, displayCourts, playingByCourtId, queuedEntries, waiting, getPlayer, nowTs, loaded,
+    clubName, displayCourts, playingByCourtId, queuedEntries, waiting, players, getPlayer, nowTs, loaded,
   } = useSessionLiveBoard(clubSessionId);
+
+  // 체크인 QR — data URL 이미지 1회 로드(참가자가 스캔해 출석).
+  const [qr, setQr] = useState<string | null>(null);
+  useEffect(() => {
+    if (!clubSessionId) return;
+    let alive = true;
+    clubSessionApi.getSessionQr(clubSessionId).then((res) => { if (alive) setQr(res.data?.qr ?? null); }).catch(() => {});
+    return () => { alive = false; };
+  }, [clubSessionId]);
+
+  const checkedInCount = players.length; // 이 정모 체크인 전체 인원
 
   useEffect(() => {
     if (Platform.OS !== 'web') return;
@@ -130,6 +142,7 @@ export default function MonitorScreen() {
           </View>
         </View>
         <View style={styles.topRight}>
+          <Text style={[styles.checkinCount, { color: colors.text }]}>체크인 {checkedInCount}명</Text>
           <Text style={[styles.waitCount, { color: colors.primary }]}>대기 {waiting.length}명</Text>
           <Text style={[styles.clock, { color: colors.textSecondary }]}>{nowClock}</Text>
           <Pressable onPress={() => router.back()} hitSlop={12} style={styles.exitBtn} accessibilityLabel="모니터 닫기">
@@ -138,14 +151,35 @@ export default function MonitorScreen() {
         </View>
       </View>
 
-      {/* 다음 게임 대기 순서 — 화면을 채우는 큰 밴드들 */}
-      <View style={styles.hero}>
-        {queuedEntries.length === 0 ? (
-          <Text style={[styles.emptyBig, { color: colors.textLight }]}>{loaded ? '대기 중인 다음 게임이 없어요' : '불러오는 중…'}</Text>
-        ) : (
-          bands.map((e, i) => <GameBand key={e.id} entry={e} order={i + 1} />)
-        )}
-        {overflow > 0 && <Text style={[styles.overflow, { color: colors.textSecondary }]}>+ {overflow}게임 더 대기 중</Text>}
+      {/* 본문: [다음 게임 대기 순서 밴드] + [우측 QR/체크인 패널] */}
+      <View style={styles.mainRow}>
+        <View style={styles.hero}>
+          {queuedEntries.length === 0 ? (
+            <Text style={[styles.emptyBig, { color: colors.textLight }]}>{loaded ? '대기 중인 다음 게임이 없어요' : '불러오는 중…'}</Text>
+          ) : (
+            bands.map((e, i) => <GameBand key={e.id} entry={e} order={i + 1} />)
+          )}
+          {overflow > 0 && <Text style={[styles.overflow, { color: colors.textSecondary }]}>+ {overflow}게임 더 대기 중</Text>}
+        </View>
+
+        {/* 우측 패널: 체크인 QR + 체크인 인원 */}
+        <View style={[styles.sidePanel, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+          <View style={[styles.checkinBig, { backgroundColor: colors.primaryBg, borderColor: colors.primary }]}>
+            <Text style={[styles.checkinBigLabel, { color: colors.primary }]}>현재 체크인</Text>
+            <Text style={[styles.checkinBigNum, { color: colors.primary }]}>{checkedInCount}<Text style={styles.checkinBigUnit}>명</Text></Text>
+          </View>
+          <Text style={[styles.qrTitle, { color: colors.text }]}>출석 QR</Text>
+          {qr ? (
+            <View style={styles.qrBox}>
+              <Image source={{ uri: qr }} style={styles.qrImg} resizeMode="contain" accessibilityLabel="출석 QR 코드" />
+            </View>
+          ) : (
+            <View style={[styles.qrBox, styles.qrPlaceholder, { borderColor: colors.border }]}>
+              <Icon name="qr" size={40} color={colors.textLight} />
+            </View>
+          )}
+          <Text style={[styles.qrCaption, { color: colors.textSecondary }]}>스캔하면 바로 출석돼요</Text>
+        </View>
       </View>
 
       {/* 대기 중(편성 전) — 얇은 스트립 */}
@@ -193,12 +227,26 @@ const styles = StyleSheet.create({
   title: { fontSize: 24, fontWeight: '900', flexShrink: 1 },
   livePill: { paddingHorizontal: 9, paddingVertical: 2, borderRadius: 5 },
   liveText: { fontSize: 12, fontWeight: '900', letterSpacing: 1 },
+  checkinCount: { fontSize: 22, fontWeight: '900' },
   waitCount: { fontSize: 22, fontWeight: '900' },
   clock: { fontSize: 20, fontWeight: '800', fontVariant: ['tabular-nums'] },
   exitBtn: { padding: 4 },
 
-  // 히어로: 게임 밴드들(높이는 bandH 로 화면에 맞춰 계산됨). 위에서부터 채움.
+  // 본문 행: 밴드 + 우측 패널
+  mainRow: { flex: 1, flexDirection: 'row' },
+  // 히어로: 게임 밴드들(높이는 bandH 로 화면에 맞춰 계산됨).
   hero: { flex: 1, paddingHorizontal: 16, paddingVertical: 10, gap: 10, justifyContent: 'center' },
+  // 우측 패널: QR + 체크인
+  sidePanel: { width: 300, borderLeftWidth: 1, alignItems: 'center', justifyContent: 'center', gap: 16, paddingHorizontal: 18, paddingVertical: 16 },
+  checkinBig: { width: '100%', borderWidth: 2, borderRadius: 16, alignItems: 'center', paddingVertical: 14 },
+  checkinBigLabel: { fontSize: 18, fontWeight: '900' },
+  checkinBigNum: { fontSize: 60, fontWeight: '900', lineHeight: 66 },
+  checkinBigUnit: { fontSize: 26, fontWeight: '900' },
+  qrTitle: { fontSize: 22, fontWeight: '900' },
+  qrBox: { backgroundColor: '#fff', borderRadius: 16, padding: 12 },
+  qrImg: { width: 200, height: 200 },
+  qrPlaceholder: { width: 224, height: 224, alignItems: 'center', justifyContent: 'center', borderWidth: 1.5, borderStyle: 'dashed' },
+  qrCaption: { fontSize: 17, fontWeight: '800' },
   band: { flexDirection: 'row', alignItems: 'center', borderRadius: 14, overflow: 'hidden' },
   orderCol: { width: 116, alignItems: 'center', justifyContent: 'center', borderRightWidth: 1, alignSelf: 'stretch', paddingVertical: 6 },
   orderNum: { fontWeight: '900' },
