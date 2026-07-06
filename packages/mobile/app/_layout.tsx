@@ -90,9 +90,10 @@ function RootLayoutInner() {
     const inJoin = seg[0] === 'join';
     // /attend captures the pending 정모 출석 session id itself; never bounce away.
     const inAttend = seg[0] === 'attend';
-    // The read-only viewing board (현황 보드) is open to participants, including
-    // guests — don't bounce a guest away from /session/[id]/board.
-    const inViewBoard = seg[0] === 'session' && seg[2] === 'board';
+    // The read-only viewing board (현황 보드) and the monitoring display
+    // (모니터 뷰) are open to participants, including guests — don't bounce a
+    // guest away from /session/[id]/board or /session/[id]/monitor.
+    const inViewBoard = seg[0] === 'session' && (seg[2] === 'board' || seg[2] === 'monitor');
 
     // Onboarding gate: first-time users see the onboarding flow
     if (hasCompletedOnboarding === false && !inOnboarding) {
@@ -254,6 +255,7 @@ function RootLayoutInner() {
           <Stack.Screen name="session/[id]/operate" options={transitions.slideFromRight} />
           <Stack.Screen name="session/[id]/qr" options={transitions.slideFromRight} />
           <Stack.Screen name="session/[id]/board" options={transitions.slideFromRight} />
+          <Stack.Screen name="session/[id]/monitor" options={transitions.slideFromRight} />
           <Stack.Screen name="session/[id]/summary" options={transitions.slideFromRight} />
           <Stack.Screen name="change-password" options={transitions.slideFromRight} />
         </Stack>

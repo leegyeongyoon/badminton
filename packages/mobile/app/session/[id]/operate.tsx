@@ -3665,6 +3665,14 @@ export default function OperateScreen() {
       </TouchableOpacity>
       <TouchableOpacity
         style={[styles.headerLink, headerLinkTouch, { borderColor: colors.border }]}
+        onPress={() => router.push(`/session/${clubSessionId}/monitor`)}
+        activeOpacity={0.8}
+      >
+        <Icon name="tv" size={16} color={colors.primary} />
+        <Text style={[styles.headerLinkText, { color: colors.primary }]}>모니터 뷰</Text>
+      </TouchableOpacity>
+      <TouchableOpacity
+        style={[styles.headerLink, headerLinkTouch, { borderColor: colors.border }]}
         onPress={() => router.push(`/session/${clubSessionId}/qr`)}
         activeOpacity={0.8}
         accessibilityLabel="출석 QR"
