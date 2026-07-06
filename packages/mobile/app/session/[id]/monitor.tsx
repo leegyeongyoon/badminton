@@ -1,5 +1,5 @@
 import { useEffect } from 'react';
-import { View, Text, StyleSheet, Platform, Pressable, ScrollView } from 'react-native';
+import { View, Text, StyleSheet, Platform, Pressable, ScrollView, useWindowDimensions } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useTheme } from '../../../hooks/useTheme';
 import { useSessionLiveBoard } from '../../../hooks/useSessionLiveBoard';
@@ -15,12 +15,11 @@ import { getGenderMeta } from '../../../constants/gender';
  * 다음 게임 대기 순서 = 히어로(밴드), 코트 현황 = 하단 얇은 스트립.
  * 소켓+7초 폴링 자가 새로고침 · 웹 화면 꺼짐 방지. 진입: 운영판 "모니터 뷰".
  */
-const MAX_BANDS = 6; // 화면을 채우며 크게 보일 최대 밴드 수(그 이상은 +N)
-
 export default function MonitorScreen() {
   const router = useRouter();
   const { id: clubSessionId } = useLocalSearchParams<{ id: string }>();
   const { colors } = useTheme();
+  const { height } = useWindowDimensions();
 
   const {
     clubName, displayCourts, playingByCourtId, queuedEntries, waiting, getPlayer, nowTs, loaded,
@@ -40,16 +39,30 @@ export default function MonitorScreen() {
   }, []);
 
   const nowClock = new Date(nowTs).toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' });
-  const bands = queuedEntries.slice(0, MAX_BANDS);
+  // 스크롤 없이 화면에 다 들어가도록 밴드 크기/개수를 화면 높이에 맞춰 자동 조절.
+  // 밴드는 flex:1 로 남는 높이를 균등 분할해 채우되, 한 밴드가 너무 커지지 않게 maxHeight 로 상한.
+  // 게임이 많으면 최소 높이(minBand)까지 줄여 최대한 담고, 그래도 넘치면 나머지는 '+N'.
+  const reserved = 52 /*top*/ + (waiting.length > 0 ? 58 : 0) /*대기중*/ + 150 /*코트*/ + 28 /*여백*/;
+  const heroH = Math.max(220, height - reserved);
+  const minBand = 60;
+  const maxFit = Math.max(3, Math.floor(heroH / minBand));
+  const bands = queuedEntries.slice(0, maxFit);
   const overflow = queuedEntries.length - bands.length;
+  // 밴드 실제 높이(=heroH/개수)를 상한(150)으로 캡 → 게임 적을 때 과대 방지.
+  const bandH = Math.min(150, Math.floor((heroH - (bands.length - 1) * 10) / Math.max(bands.length, 1)));
 
-  // ── 한 게임 = 한 줄(가로 밴드). flex:1 로 화면 높이를 균등하게 채운다. ──
+  // 밴드 높이에 따라 글자 크기 스케일(많은 게임 = 낮은 밴드 = 작은 글자).
+  const nameSize = Math.max(16, Math.min(28, Math.round(bandH * 0.24)));
+  const skillSize = Math.max(24, Math.min(34, Math.round(bandH * 0.28)));
+  const orderNumSize = Math.max(22, Math.min(38, Math.round(bandH * 0.32)));
+
+  // ── 한 게임 = 한 줄(가로 밴드). 높이(bandH)를 화면에 맞춰 자동 조절. ──
   const GameBand = ({ entry, order }: { entry: any; order: number }) => {
     const first = order === 1;
     return (
-      <View style={[styles.band, { backgroundColor: first ? colors.primaryBg : colors.surface, borderColor: first ? colors.primary : colors.border, borderWidth: first ? 3 : 1.5 }]}>
+      <View style={[styles.band, { height: bandH, backgroundColor: first ? colors.primaryBg : colors.surface, borderColor: first ? colors.primary : colors.border, borderWidth: first ? 3 : 1.5 }]}>
         <View style={[styles.orderCol, { borderRightColor: colors.border }]}>
-          <Text style={[styles.orderNum, { color: first ? colors.primary : colors.text }]}>{order}</Text>
+          <Text style={[styles.orderNum, { fontSize: orderNumSize, lineHeight: orderNumSize + 3, color: first ? colors.primary : colors.text }]}>{order}</Text>
           <Text style={[styles.orderLabel, { color: first ? colors.primary : colors.textSecondary }]}>{first ? '다음 게임' : '번째'}</Text>
         </View>
         <View style={styles.bandPlayers}>
@@ -60,11 +73,11 @@ export default function MonitorScreen() {
             const hasSkill = !!p?.skillLevel;
             return (
               <View key={pId || i} style={styles.bandPlayer}>
-                <View style={[styles.bSkill, { backgroundColor: hasSkill ? skill.color : colors.surfaceSecondary }]}>
-                  <Text style={[styles.bSkillT, { color: hasSkill ? '#fff' : colors.textLight }]}>{hasSkill ? skill.level : '·'}</Text>
+                <View style={[styles.bSkill, { width: skillSize, height: skillSize, backgroundColor: hasSkill ? skill.color : colors.surfaceSecondary }]}>
+                  <Text style={[styles.bSkillT, { fontSize: Math.round(skillSize * 0.5), color: hasSkill ? '#fff' : colors.textLight }]}>{hasSkill ? skill.level : '·'}</Text>
                 </View>
-                <Text style={[styles.bName, { color: colors.text }]} numberOfLines={1}>{p?.userName || entry.playerNames?.[i] || '?'}</Text>
-                {g && <GenderMarker meta={g} size={22} />}
+                <Text style={[styles.bName, { fontSize: nameSize, color: colors.text }]} numberOfLines={1}>{p?.userName || entry.playerNames?.[i] || '?'}</Text>
+                {g && <GenderMarker meta={g} size={Math.round(nameSize * 0.72)} />}
               </View>
             );
           })}
@@ -170,19 +183,19 @@ const styles = StyleSheet.create({
   clock: { fontSize: 20, fontWeight: '800', fontVariant: ['tabular-nums'] },
   exitBtn: { padding: 4 },
 
-  // 히어로: 게임 밴드들이 화면 높이를 채우되 너무 커지지 않게 maxHeight 로 상한
+  // 히어로: 게임 밴드들(높이는 bandH 로 화면에 맞춰 계산됨). 위에서부터 채움.
   hero: { flex: 1, paddingHorizontal: 16, paddingVertical: 10, gap: 10, justifyContent: 'center' },
-  band: { flex: 1, maxHeight: 150, flexDirection: 'row', alignItems: 'center', borderRadius: 14, overflow: 'hidden', minHeight: 84 },
-  orderCol: { width: 116, alignItems: 'center', justifyContent: 'center', borderRightWidth: 1, alignSelf: 'stretch', paddingVertical: 8 },
-  orderNum: { fontSize: 36, fontWeight: '900', lineHeight: 40 },
-  orderLabel: { fontSize: 15, fontWeight: '900' },
+  band: { flexDirection: 'row', alignItems: 'center', borderRadius: 14, overflow: 'hidden' },
+  orderCol: { width: 116, alignItems: 'center', justifyContent: 'center', borderRightWidth: 1, alignSelf: 'stretch', paddingVertical: 6 },
+  orderNum: { fontWeight: '900' },
+  orderLabel: { fontSize: 14, fontWeight: '900' },
   bandPlayers: { flex: 1, flexDirection: 'row', alignItems: 'center', paddingHorizontal: 10 },
   bandPlayer: { flex: 1, flexDirection: 'row', alignItems: 'center', gap: 9, paddingHorizontal: 6, minWidth: 0 },
-  bSkill: { minWidth: 32, height: 32, borderRadius: 8, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 4 },
-  bSkillT: { fontSize: 17, fontWeight: '900' },
-  bName: { fontSize: 27, fontWeight: '800', flexShrink: 1 },
+  bSkill: { borderRadius: 8, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 4 },
+  bSkillT: { fontWeight: '900' },
+  bName: { fontWeight: '800', flexShrink: 1 },
   emptyBig: { fontSize: 24, fontWeight: '800', textAlign: 'center' },
-  overflow: { fontSize: 17, fontWeight: '800', textAlign: 'center' },
+  overflow: { fontSize: 16, fontWeight: '800', textAlign: 'center', marginTop: 4 },
 
   // 대기 중(편성 전) 얇은 스트립
   waitStrip: { flexDirection: 'row', alignItems: 'center', gap: 12, borderTopWidth: 1, paddingHorizontal: 16, paddingVertical: 8 },
