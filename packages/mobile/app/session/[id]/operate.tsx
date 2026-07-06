@@ -4687,69 +4687,7 @@ export default function OperateScreen() {
       {/* ── 하단 채팅형 명령 패널 (absolute · 아코디언) — 선택 중이 아닐 때만 ── */}
       {!selectedPlayer && (
         <View pointerEvents="box-none" style={styles.m2ChatAnchor}>
-          {/* ── 운영 노트 (실시간) — 편성 맥락을 한 줄씩 #태그로 공유 ── */}
-          {memoOpen ? (
-            <View style={[styles.m2MemoPanel, { backgroundColor: colors.surface, borderColor: colors.border }]}>
-              <View style={[styles.m2ChatHead, { borderBottomColor: colors.border }]}>
-                <Text style={[styles.m2ChatTitle, { color: colors.text }]} numberOfLines={1}>🗒 운영 노트 · 실시간</Text>
-                <Text style={[styles.m2MemoStatus, { color: colors.textLight }]}>{memoSaving ? '저장 중…' : '자동 저장'}</Text>
-                <TouchableOpacity onPress={() => setMemoOpen(false)} hitSlop={8} accessibilityLabel="운영 노트 닫기"><Text style={[styles.m2ChatChevron, { color: colors.textSecondary }]}>▾</Text></TouchableOpacity>
-              </View>
-              <ScrollView style={styles.m2MemoList} contentContainerStyle={{ padding: 8, gap: 5 }} keyboardShouldPersistTaps="handled">
-                {memoLines.length === 0 ? (
-                  <Text style={[styles.m2MemoEmpty, { color: colors.textLight }]}>아직 노트가 없어요. 아래 #태그를 누르고 한 줄씩 남겨보세요.{'\n'}예) #파트너 김철수·이영희 · #주의 3코트 라인 · #결석 오지우</Text>
-                ) : memoLines.map((l, i) => {
-                  const { tag, rest } = parseMemoLine(l);
-                  return (
-                    <View key={i} style={[styles.m2MemoRow, { backgroundColor: colors.surfaceSecondary }]}>
-                      <TouchableOpacity style={styles.m2MemoRowMain} onPress={() => editMemoLine(i)} accessibilityLabel={`노트 수정: ${rest}`}>
-                        {!!tag && <View style={[styles.m2MemoTagBadge, { backgroundColor: memoTagColor(tag) }]}><Text style={styles.m2MemoTagBadgeT}>{tag}</Text></View>}
-                        <Text style={[styles.m2MemoRowT, { color: colors.text }]}>{rest || (tag ? '' : l)}</Text>
-                      </TouchableOpacity>
-                      <TouchableOpacity onPress={() => removeMemoLine(i)} hitSlop={8} style={styles.m2MemoDel} accessibilityLabel="노트 줄 삭제">
-                        <Text style={[styles.m2MemoDelT, { color: colors.textLight }]}>✕</Text>
-                      </TouchableOpacity>
-                    </View>
-                  );
-                })}
-              </ScrollView>
-              <View style={styles.m2MemoTagsRow}>
-                {MEMO_TAGS.map((t) => {
-                  const on = lineTag === t.key;
-                  return (
-                    <TouchableOpacity key={t.key} onPress={() => { setLineTag(on ? null : t.key); memoInputRef.current?.focus?.(); }}
-                      style={[styles.m2MemoTagChip, { borderColor: t.color, backgroundColor: on ? t.color : 'transparent' }]}>
-                      <Text style={[styles.m2MemoTagChipT, { color: on ? '#fff' : t.color }]}>#{t.key}</Text>
-                    </TouchableOpacity>
-                  );
-                })}
-              </View>
-              <View style={[styles.m2ChatInputRow, { borderTopColor: colors.border }]}>
-                <TextInput
-                  ref={memoInputRef}
-                  testID="memoLineInput"
-                  value={lineInput}
-                  onChangeText={setLineInput}
-                  onSubmitEditing={addMemoLine}
-                  returnKeyType="done"
-                  blurOnSubmit={false}
-                  placeholder={lineTag ? `#${lineTag} 내용 입력…` : '한 줄 메모 입력…'}
-                  placeholderTextColor={colors.textLight}
-                  style={[styles.m2ChatInput, { color: colors.text, backgroundColor: colors.surfaceSecondary }]}
-                />
-                <TouchableOpacity onPress={addMemoLine} disabled={!lineInput.trim()} style={[styles.m2ChatSend, { backgroundColor: lineInput.trim() ? colors.primary : colors.surfaceSecondary }]} accessibilityLabel="노트 줄 추가">
-                  <Text style={[styles.m2ChatSendT, { color: lineInput.trim() ? '#fff' : colors.textLight }]}>추가</Text>
-                </TouchableOpacity>
-              </View>
-              <Text style={[styles.m2MemoHint, { color: colors.textLight }]}>운영진 모두에게 실시간 공유 · 줄 눌러 수정, ✕ 삭제</Text>
-            </View>
-          ) : (
-            <TouchableOpacity onPress={() => setMemoOpen(true)} style={[styles.m2MemoFab, { backgroundColor: colors.surface, borderColor: colors.border }]} accessibilityLabel="운영 노트 열기">
-              <Text style={styles.m2MemoFabIcon}>🗒</Text>
-              <Text style={[styles.m2MemoFabT, { color: colors.text }]}>노트{memoLines.length > 0 ? ` ${memoLines.length}` : ''}</Text>
-              {memoLines.length > 0 && <View style={[styles.m2MemoDot, { backgroundColor: colors.primary }]} />}
-            </TouchableOpacity>
-          )}
+          {/* 운영 노트는 상단 항상 보이는 메모 바로 이동됨 — 여기선 명령 채팅만. */}
           {cmdOpen ? (
             <View style={[styles.m2ChatPanel, { backgroundColor: colors.surface, borderColor: colors.border }]}>
               <View style={[styles.m2ChatHead, { borderBottomColor: colors.border }]}>
@@ -4799,8 +4737,42 @@ export default function OperateScreen() {
       <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]}>
         {Header}
         {ModeTabs}
-        <View style={styles.mode2Toolbar}>
-          <View style={{ flex: 1 }}>{PoolSearch}</View>
+        {/* 상단 항상 보이는 '운영 노트' 바 — 편성 맥락(#주의/#파트너/#결석/#일반)을 한 줄씩 실시간 공유 */}
+        <View style={[styles.m2MemoBar, { backgroundColor: colors.surface, borderBottomColor: colors.border }]}>
+          <Text style={styles.m2MemoBarIcon}>🗒</Text>
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ flex: 1 }} contentContainerStyle={styles.m2MemoBarList} keyboardShouldPersistTaps="handled">
+            {memoLines.length === 0 ? (
+              <Text style={[styles.m2MemoBarEmpty, { color: colors.textLight }]}>운영 노트 — 오른쪽에서 #태그 골라 한 줄씩 남기면 운영진 전원에게 실시간 공유돼요</Text>
+            ) : memoLines.map((l, i) => {
+              const { tag, rest } = parseMemoLine(l);
+              return (
+                <View key={i} style={[styles.m2MemoBarChip, { backgroundColor: colors.surfaceSecondary }]}>
+                  <TouchableOpacity style={styles.m2MemoBarChipMain} onPress={() => editMemoLine(i)} accessibilityLabel={`노트 수정: ${rest}`}>
+                    {!!tag && <View style={[styles.m2MemoBarBadge, { backgroundColor: memoTagColor(tag) }]}><Text style={styles.m2MemoBarBadgeT}>{tag}</Text></View>}
+                    <Text style={[styles.m2MemoBarChipT, { color: colors.text }]} numberOfLines={1}>{rest || (tag ? '' : l)}</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity onPress={() => removeMemoLine(i)} hitSlop={6} style={styles.m2MemoBarDel} accessibilityLabel="노트 줄 삭제"><Text style={[styles.m2MemoBarDelT, { color: colors.textLight }]}>✕</Text></TouchableOpacity>
+                </View>
+              );
+            })}
+          </ScrollView>
+          <View style={styles.m2MemoBarInputWrap}>
+            {MEMO_TAGS.map((t) => {
+              const on = lineTag === t.key;
+              return (
+                <TouchableOpacity key={t.key} onPress={() => { setLineTag(on ? null : t.key); memoInputRef.current?.focus?.(); }}
+                  style={[styles.m2MemoBarTag, { borderColor: t.color, backgroundColor: on ? t.color : 'transparent' }]}>
+                  <Text style={[styles.m2MemoBarTagT, { color: on ? '#fff' : t.color }]}>#{t.key}</Text>
+                </TouchableOpacity>
+              );
+            })}
+            <TextInput ref={memoInputRef} testID="memoLineInput" value={lineInput} onChangeText={setLineInput} onSubmitEditing={addMemoLine} returnKeyType="done" blurOnSubmit={false}
+              placeholder={lineTag ? `#${lineTag} 내용…` : '메모 추가…'} placeholderTextColor={colors.textLight}
+              style={[styles.m2MemoBarInput, { color: colors.text, backgroundColor: colors.surfaceSecondary, borderColor: colors.border }]} />
+            <TouchableOpacity onPress={addMemoLine} disabled={!lineInput.trim()} style={[styles.m2MemoBarAdd, { backgroundColor: lineInput.trim() ? colors.primary : colors.surfaceSecondary }]} accessibilityLabel="노트 줄 추가">
+              <Text style={[styles.m2MemoBarAddT, { color: lineInput.trim() ? '#fff' : colors.textLight }]}>추가</Text>
+            </TouchableOpacity>
+          </View>
         </View>
         {BoardMode2}
         {DragOverlay}
@@ -5922,6 +5894,24 @@ const styles = StyleSheet.create({
   magnetGamesText: { ...typography.caption, fontWeight: '700' },
   // 모드 2 상단 툴바: 검색/필터 + 정렬
   mode2Toolbar: { flexDirection: 'row', alignItems: 'flex-start', gap: spacing.sm, paddingHorizontal: spacing.smd, paddingTop: spacing.sm },
+  // 상단 항상 보이는 운영 노트 바
+  m2MemoBar: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: spacing.smd, paddingVertical: 7, borderBottomWidth: 1 },
+  m2MemoBarIcon: { fontSize: 16 },
+  m2MemoBarList: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingRight: 8 },
+  m2MemoBarEmpty: { ...typography.caption, fontStyle: 'italic' },
+  m2MemoBarChip: { flexDirection: 'row', alignItems: 'center', borderRadius: 8, paddingLeft: 8, paddingRight: 2, maxWidth: 260 },
+  m2MemoBarChipMain: { flexDirection: 'row', alignItems: 'center', gap: 5, paddingVertical: 5, flexShrink: 1 },
+  m2MemoBarBadge: { paddingHorizontal: 5, paddingVertical: 1, borderRadius: 5 },
+  m2MemoBarBadgeT: { color: '#fff', fontSize: 10, fontWeight: '800' },
+  m2MemoBarChipT: { ...typography.caption, fontWeight: '700', flexShrink: 1 },
+  m2MemoBarDel: { paddingHorizontal: 6, paddingVertical: 4 },
+  m2MemoBarDelT: { fontSize: 12, fontWeight: '700' },
+  m2MemoBarInputWrap: { flexDirection: 'row', alignItems: 'center', gap: 5 },
+  m2MemoBarTag: { paddingHorizontal: 8, paddingVertical: 4, borderRadius: 12, borderWidth: 1.5 },
+  m2MemoBarTagT: { ...typography.caption, fontWeight: '800' },
+  m2MemoBarInput: { width: 150, height: 32, borderWidth: 1, borderRadius: 8, paddingHorizontal: 10, ...typography.caption },
+  m2MemoBarAdd: { height: 32, paddingHorizontal: 14, borderRadius: 8, alignItems: 'center', justifyContent: 'center' },
+  m2MemoBarAddT: { ...typography.caption, fontWeight: '800' },
   mode2TidyBtn: { flexDirection: 'row', alignItems: 'center', gap: 5, paddingHorizontal: spacing.md, paddingVertical: 9, borderWidth: 1, borderRadius: radius.lg },
   mode2TidyText: { ...typography.buttonSm, fontWeight: '700' },
   // 코트 4칸 슬롯 틀
