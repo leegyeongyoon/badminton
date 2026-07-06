@@ -5984,7 +5984,9 @@ const styles = StyleSheet.create({
   m2CmdHelpK: { ...typography.caption, fontWeight: '800' },
   m2CmdHelpEx: { fontSize: 11 },
   // 하단 채팅형 명령 패널
-  m2ChatAnchor: { position: 'absolute', right: 14, bottom: 14, alignItems: 'flex-end', gap: 10 },
+  // 왼쪽 아래로 배치 — 오른쪽 '대기 명단'(이름 선택)을 가리지 않도록. 이름 선택 후엔
+  // 앵커 자체가 숨겨져(!selectedPlayer) 왼쪽 게임 슬롯 배치도 안 겹친다.
+  m2ChatAnchor: { position: 'absolute', left: 14, bottom: 14, alignItems: 'flex-start', gap: 10 },
   m2ChatFab: { flexDirection: 'row', alignItems: 'center', gap: 6, height: 44, paddingHorizontal: 16, borderRadius: 22, shadowColor: '#000', shadowOpacity: 0.22, shadowRadius: 8, shadowOffset: { width: 0, height: 2 }, elevation: 8 },
   m2ChatFabT: { color: '#fff', ...typography.body2, fontWeight: '800' },
   // ── 운영 공유 메모 (실시간) ──
