@@ -42,7 +42,7 @@ export default function MonitorScreen() {
   // 스크롤 없이 화면에 다 들어가도록 밴드 크기/개수를 화면 높이에 맞춰 자동 조절.
   // 밴드는 flex:1 로 남는 높이를 균등 분할해 채우되, 한 밴드가 너무 커지지 않게 maxHeight 로 상한.
   // 게임이 많으면 최소 높이(minBand)까지 줄여 최대한 담고, 그래도 넘치면 나머지는 '+N'.
-  const reserved = 52 /*top*/ + (waiting.length > 0 ? 58 : 0) /*대기중*/ + 150 /*코트*/ + 28 /*여백*/;
+  const reserved = 52 /*top*/ + (waiting.length > 0 ? 58 : 0) /*대기중*/ + 196 /*코트 카드*/ + 28 /*여백*/;
   const heroH = Math.max(220, height - reserved);
   const minBand = 60;
   const maxFit = Math.max(3, Math.floor(heroH / minBand));
@@ -86,20 +86,34 @@ export default function MonitorScreen() {
     );
   };
 
-  const CourtChip = ({ court }: { court: { id: string; name: string } }) => {
+  const CourtCard = ({ court }: { court: { id: string; name: string } }) => {
     const playing = playingByCourtId.get(court.id);
     const elapsedMin = playing?.startedAt ? Math.max(0, Math.floor((nowTs - new Date(playing.startedAt).getTime()) / 60000)) : null;
     return (
-      <View style={[styles.courtChip, { backgroundColor: colors.surface, borderColor: playing ? colors.warningLight : colors.border }]}>
+      <View style={[styles.courtCard, { backgroundColor: playing ? colors.surface : colors.surfaceSecondary, borderColor: playing ? colors.warning : colors.border, borderWidth: playing ? 2 : 1.5 }]}>
         <View style={styles.courtHead}>
           <Text style={[styles.courtName, { color: colors.text }]} numberOfLines={1}>{court.name}</Text>
           {playing
-            ? <Text style={[styles.courtTag, { color: colors.warning }]}>{elapsedMin != null ? (elapsedMin < 1 ? '방금' : `${elapsedMin}분`) : '게임중'}</Text>
-            : <Text style={[styles.courtTag, { color: colors.textLight }]}>비어있음</Text>}
+            ? <View style={[styles.courtBadge, { backgroundColor: colors.warningLight }]}><Text style={[styles.courtBadgeT, { color: colors.warning }]}>{elapsedMin != null ? (elapsedMin < 1 ? '방금' : `${elapsedMin}분`) : '게임중'}</Text></View>
+            : <Text style={[styles.courtEmpty, { color: colors.textLight }]}>비어있음</Text>}
         </View>
-        <Text style={[styles.courtPlayers, { color: playing ? colors.textSecondary : colors.textLight }]} numberOfLines={2}>
-          {playing ? playing.playerIds.map((pId, i) => getPlayer(pId)?.userName || playing.playerNames?.[i] || '?').join(' · ') : '—'}
-        </Text>
+        {playing && (
+          <View style={styles.courtPlayers}>
+            {playing.playerIds.map((pId, i) => {
+              const p = getPlayer(pId);
+              const skill = getSkillMeta(p?.skillLevel);
+              const hasSkill = !!p?.skillLevel;
+              return (
+                <View key={pId || i} style={[styles.cPlayer, { backgroundColor: colors.surfaceSecondary }]}>
+                  <View style={[styles.cSkill, { backgroundColor: hasSkill ? skill.color : colors.surface }]}>
+                    <Text style={[styles.cSkillT, { color: hasSkill ? '#fff' : colors.textLight }]}>{hasSkill ? skill.level : '·'}</Text>
+                  </View>
+                  <Text style={[styles.cName, { color: colors.text }]} numberOfLines={1}>{p?.userName || playing.playerNames?.[i] || '?'}</Text>
+                </View>
+              );
+            })}
+          </View>
+        )}
       </View>
     );
   };
@@ -155,15 +169,15 @@ export default function MonitorScreen() {
         </View>
       )}
 
-      {/* 코트 현황 — 하단 얇은 스트립 */}
-      <View style={[styles.courtStrip, { borderTopColor: colors.border, backgroundColor: colors.surface }]}>
-        <Text style={[styles.stripLabel, { color: colors.textSecondary }]}>코트</Text>
+      {/* 코트 현황 — 하단, 코트별 카드(선수 칩) */}
+      <View style={[styles.courtSection, { borderTopColor: colors.border, backgroundColor: colors.surface }]}>
+        <Text style={[styles.stripLabel, { color: colors.textSecondary }]}>코트 현황</Text>
         {displayCourts.length === 0 ? (
-          <Text style={[styles.courtTag, { color: colors.textLight }]}>{loaded ? '없음' : '…'}</Text>
+          <Text style={[styles.courtEmpty, { color: colors.textLight }]}>{loaded ? '없음' : '…'}</Text>
         ) : (
-          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.courtRow}>
-            {displayCourts.map((c) => <CourtChip key={c.id} court={c} />)}
-          </ScrollView>
+          <View style={styles.courtRow}>
+            {displayCourts.map((c) => <CourtCard key={c.id} court={c} />)}
+          </View>
         )}
       </View>
     </View>
@@ -206,12 +220,18 @@ const styles = StyleSheet.create({
   wSkillT: { fontSize: 12, fontWeight: '900' },
   wName: { fontSize: 18, fontWeight: '800' },
 
-  // 코트 현황 하단 스트립(살짝 키움)
-  courtStrip: { flexDirection: 'row', alignItems: 'center', gap: 12, borderTopWidth: 1, paddingHorizontal: 16, paddingVertical: 11 },
+  // 코트 현황 — 코트별 카드(선수 칩 2x2)
+  courtSection: { borderTopWidth: 1, paddingHorizontal: 16, paddingTop: 8, paddingBottom: 12 },
   courtRow: { flexDirection: 'row', gap: 10, alignItems: 'stretch' },
-  courtChip: { minWidth: 215, borderWidth: 1.5, borderRadius: 12, paddingHorizontal: 14, paddingVertical: 9 },
-  courtHead: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 8, marginBottom: 3 },
-  courtName: { fontSize: 21, fontWeight: '900', flexShrink: 1 },
-  courtTag: { fontSize: 15, fontWeight: '800' },
-  courtPlayers: { fontSize: 17, fontWeight: '700', lineHeight: 22 },
+  courtCard: { flex: 1, minWidth: 0, borderRadius: 12, paddingHorizontal: 12, paddingVertical: 9 },
+  courtHead: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 8, marginBottom: 7 },
+  courtName: { fontSize: 22, fontWeight: '900', flexShrink: 1 },
+  courtBadge: { paddingHorizontal: 9, paddingVertical: 3, borderRadius: 8 },
+  courtBadgeT: { fontSize: 15, fontWeight: '900' },
+  courtEmpty: { fontSize: 16, fontWeight: '800' },
+  courtPlayers: { flexDirection: 'row', flexWrap: 'wrap', gap: 6 },
+  cPlayer: { flexBasis: '47%', flexGrow: 1, flexDirection: 'row', alignItems: 'center', gap: 7, paddingHorizontal: 8, paddingVertical: 6, borderRadius: 9 },
+  cSkill: { minWidth: 24, height: 24, borderRadius: 6, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 3 },
+  cSkillT: { fontSize: 14, fontWeight: '900' },
+  cName: { fontSize: 19, fontWeight: '800', flexShrink: 1 },
 });
