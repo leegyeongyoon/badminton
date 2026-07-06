@@ -82,6 +82,20 @@ jobs:
           SELECT count(*) AS player_phone FROM "User"
           WHERE NOT "isGuest" AND "isManaged" IS NOT TRUE AND password IS NOT NULL
             AND "kakaoId" IS NULL AND "googleId" IS NULL AND role='PLAYER';
+
+          \echo '===== 9) 미퇴장 체크인(지금 체크인) — 세션 상태별 분해 ====='
+          SELECT COALESCE(cs.status::text, '(clubSession 없음)') AS session_status, count(*) AS open_checkins
+          FROM "CheckIn" ci LEFT JOIN "ClubSession" cs ON cs.id = ci."clubSessionId"
+          WHERE ci."checkedOutAt" IS NULL GROUP BY 1 ORDER BY 2 DESC;
+
+          \echo '===== 10) 미퇴장 체크인 총계 vs ACTIVE 세션 소속만 ====='
+          SELECT
+            (SELECT count(*) FROM "CheckIn" WHERE "checkedOutAt" IS NULL) AS all_open,
+            (SELECT count(*) FROM "CheckIn" ci JOIN "ClubSession" cs ON cs.id=ci."clubSessionId"
+               WHERE ci."checkedOutAt" IS NULL AND cs.status='ACTIVE') AS active_open;
+
+          \echo '===== 11) ACTIVE 정모 목록 ====='
+          SELECT id, title, status, "startedAt" FROM "ClubSession" WHERE status='ACTIVE' ORDER BY "startedAt" DESC;
           SQL
 
           B64=$(base64 -w0 q.sql)

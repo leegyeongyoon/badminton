@@ -2,7 +2,7 @@ import { Server as HttpServer } from 'http';
 import { Server } from 'socket.io';
 import type { ServerToClientEvents, ClientToServerEvents } from '@badminton/shared';
 import { logger } from '../utils/logger';
-import { noteConnect, noteDisconnect, noteSocketUser } from '../modules/admin/metrics.service';
+import { noteConnect, noteDisconnect, noteSocketUser, registerIO } from '../modules/admin/metrics.service';
 
 let io: Server<ClientToServerEvents, ServerToClientEvents>;
 
@@ -16,6 +16,7 @@ export function initSocketIO(httpServer: HttpServer) {
       skipMiddlewares: true,
     },
   });
+  registerIO(io); // 대시보드 '현재 접속'을 io.engine.clientsCount(권위값)로 계산하도록 등록
 
   io.on('connection', (socket) => {
     noteConnect(); // 동시접속 집계(슈퍼관리자 대시보드)

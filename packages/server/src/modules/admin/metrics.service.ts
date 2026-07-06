@@ -22,44 +22,49 @@ function startOfDayKey(key: string): Date {
 }
 
 // ─── 프로세스 메모리 카운터 ───
-let currentConnections = 0; // 지금 연결된 소켓 수(실시간)
 let peakToday = 0; // 오늘 관측한 최대 동시접속
 let requestDelta = 0; // 마지막 flush 이후 쌓인 요청 수
 let bucketKey = dayKeyOf(new Date()); // 위 카운터가 속한 날
 // '누가 접속 중'인지 — 소켓이 user:join 하면 userId 와 연결해 둔다(대시보드 드릴다운).
 const socketUser = new Map<string, string>(); // socketId → userId
-const userSockets = new Map<string, number>(); // userId → 연결 소켓 수
+
+// 실시간 접속 수는 '수동 카운터' 대신 Socket.IO 의 실제 연결 수(engine.clientsCount)를
+// 권위값으로 쓴다. 수동 카운터는 유령 연결(disconnect 누락)로 시간이 지나며 드리프트했다.
+// socket 모듈이 초기화 때 registerIO(io) 로 인스턴스를 넘겨준다(순환 import 회피).
+let ioRef: { engine?: { clientsCount?: number } } | null = null;
+export function registerIO(io: { engine?: { clientsCount?: number } }): void {
+  ioRef = io;
+}
+function liveConnections(): number {
+  const n = ioRef?.engine?.clientsCount;
+  return typeof n === 'number' && n >= 0 ? n : 0;
+}
 
 export function noteRequest(): void {
   requestDelta += 1;
 }
 export function noteConnect(): void {
-  currentConnections += 1;
-  if (currentConnections > peakToday) peakToday = currentConnections;
+  const n = liveConnections();
+  if (n > peakToday) peakToday = n;
 }
 export function noteDisconnect(socketId?: string): void {
-  currentConnections = Math.max(0, currentConnections - 1);
-  if (socketId) {
-    const uid = socketUser.get(socketId);
-    if (uid) {
-      socketUser.delete(socketId);
-      const c = (userSockets.get(uid) ?? 1) - 1;
-      if (c <= 0) userSockets.delete(uid);
-      else userSockets.set(uid, c);
-    }
-  }
+  if (socketId) socketUser.delete(socketId);
 }
 // 소켓이 자기 userId 를 알린 시점(인증 후 user:join)에 연결.
 export function noteSocketUser(socketId: string, userId: string): void {
-  if (!userId || socketUser.get(socketId) === userId) return;
+  if (!userId) return;
   socketUser.set(socketId, userId);
-  userSockets.set(userId, (userSockets.get(userId) ?? 0) + 1);
 }
 export function getCurrentConnections(): number {
-  return currentConnections;
+  return liveConnections();
+}
+// 지금 접속 중인 순 userId — user:join 한 소켓들 중, 실제로 아직 연결된 소켓만 반영하도록
+// (드리프트 방지) socketUser 를 그대로 쓰되 disconnect 에서 정리한다.
+function onlineUserIdsInternal(): string[] {
+  return Array.from(new Set(socketUser.values()));
 }
 export function getOnlineUserIds(): string[] {
-  return Array.from(userSockets.keys());
+  return onlineUserIdsInternal();
 }
 
 // 오늘 행에 누적 반영(요청수는 증가분 increment, 피크는 max). 날이 바뀌었으면
@@ -89,11 +94,13 @@ export async function flushMetrics(): Promise<void> {
     const nowKey = dayKeyOf(new Date());
     const addRequests = requestDelta;
     requestDelta = 0;
+    // flush 때마다 현재 실제 연결 수로 오늘 피크를 갱신(관측 샘플).
+    if (liveConnections() > peakToday) peakToday = liveConnections();
     await upsertDay(bucketKey, addRequests, peakToday);
     if (nowKey !== bucketKey) {
       // 날 넘어감 → 새 날 시작. 현재 연결 수를 새 날의 시작 피크로.
       bucketKey = nowKey;
-      peakToday = currentConnections;
+      peakToday = liveConnections();
       // 새 날 행을 즉시 만들어 오늘 피크가 곧바로 반영되게.
       await upsertDay(bucketKey, 0, peakToday);
     }
@@ -229,7 +236,9 @@ export async function getAdminMetrics(granularity: Granularity = 'day', count?: 
       prisma.club.count(),
       prisma.facility.count(),
       prisma.clubSession.count({ where: { status: 'ACTIVE' } }),
-      prisma.checkIn.count({ where: { checkedOutAt: null } }),
+      // '지금 체크인' = 진행 중(ACTIVE)인 정모에 체크인한(미퇴장) 인원만. 종료된/버려진
+      // 세션의 잔여 체크인이나 정모 미연결 체크인은 제외(예전엔 전체를 세어 부풀려졌음).
+      prisma.checkIn.count({ where: { checkedOutAt: null, clubSession: { status: 'ACTIVE' } } }),
       prisma.user.count({ where: NO_LOGIN }), // 명단·기타(로그인 없는 비게스트)
     ]);
 
@@ -260,10 +269,11 @@ export async function getAdminMetrics(granularity: Granularity = 'day', count?: 
   for (const s of series) { running += s.newUsers; s.cumulativeMembers = running; }
 
   // 현재 기간(마지막 버킷) 막대에 아직 flush 안 된 오늘 요청/피크를 반영.
+  const liveConn = liveConnections();
   const last = series[series.length - 1];
   if (last) {
     last.requestCount += requestDelta;
-    last.peakConnections = Math.max(last.peakConnections, peakToday, currentConnections);
+    last.peakConnections = Math.max(last.peakConnections, peakToday, liveConn);
   }
 
   // 실시간/오늘 카드는 granularity 와 무관하게 항상 '오늘' 기준으로 계산.
@@ -274,8 +284,8 @@ export async function getAdminMetrics(granularity: Granularity = 'day', count?: 
 
   return {
     live: {
-      currentConnections,
-      todayPeakConnections: Math.max(todayMetric?.peakConnections ?? 0, peakToday, currentConnections),
+      currentConnections: liveConn,
+      todayPeakConnections: Math.max(todayMetric?.peakConnections ?? 0, peakToday, liveConn),
       todayRequests: (todayMetric?.requestCount ?? 0) + requestDelta,
       todayDau: todaySet.size,
       activeSessions,
