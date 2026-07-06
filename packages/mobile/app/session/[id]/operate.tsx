@@ -408,6 +408,8 @@ export default function OperateScreen() {
   const [swapTarget, setSwapTarget] = useState<{ entryId: string; slotIndex: number } | null>(null);
   // 게임 중(PLAYING) 코트에서 선수 1명 교체: 그 코트의 turnId + 빠질 선수 + 현재 4명(제외용).
   const [runningSwap, setRunningSwap] = useState<{ turnId: string; outUserId: string; courtName: string; currentIds: string[] } | null>(null);
+  // 코트 이동: 진행 중인 게임을 다른 빈 코트로 옮기기 — 소스 코트 지정 시 빈 코트 선택 모달.
+  const [moveSource, setMoveSource] = useState<{ courtId: string; courtName: string } | null>(null);
   // Assign: entryId awaiting a court pick
   const [assignTarget, setAssignTarget] = useState<string | null>(null);
 
@@ -1499,6 +1501,20 @@ export default function OperateScreen() {
     },
     [courts, loadBoard, loadCourts, loadPool, pushRecentOut],
   );
+
+  // 코트 이동 — 진행 중인 게임을 다른 빈 코트로. (코트 잘못 넣었을 때 코트명 변경 대신)
+  const handleMoveGame = useCallback(async (sourceCourtId: string, targetCourtId: string) => {
+    setMoveSource(null);
+    try {
+      await courtApi.moveGame(sourceCourtId, targetCourtId);
+      loadBoard(); loadCourts(); loadPool();
+      const t = courts.find((c) => c.id === targetCourtId);
+      showSuccess(`${t?.name || '코트'}로 옮겼어요`);
+    } catch (err: any) {
+      showAlert('오류', err?.response?.data?.error || '코트 이동 실패');
+      loadCourts();
+    }
+  }, [courts, loadBoard, loadCourts, loadPool]);
 
   const handleDeleteQueued = useCallback(
     (entryId: string) =>
@@ -3833,6 +3849,28 @@ export default function OperateScreen() {
           allowAddToEmpty={false}
         />
       )}
+      {/* 코트 이동 — 진행 중 게임을 다른 빈 코트로 옮기기(빈 코트 선택) */}
+      {moveSource && (
+        <Modal visible transparent animationType="fade" onRequestClose={() => setMoveSource(null)}>
+          <TouchableOpacity activeOpacity={1} style={styles.moveBg} onPress={() => setMoveSource(null)}>
+            <TouchableOpacity activeOpacity={1} style={[styles.moveCard, { backgroundColor: colors.surface }]} onPress={() => {}}>
+              <Text style={[styles.moveTitle, { color: colors.text }]}>{moveSource.courtName} → 어느 코트로 옮길까요?</Text>
+              {emptyCourts.filter((c) => c.id !== moveSource.courtId).length === 0 ? (
+                <Text style={[styles.moveEmpty, { color: colors.textLight }]}>옮길 수 있는 빈 코트가 없어요</Text>
+              ) : (
+                <View style={styles.moveGrid}>
+                  {emptyCourts.filter((c) => c.id !== moveSource.courtId).map((c) => (
+                    <TouchableOpacity key={c.id} onPress={() => handleMoveGame(moveSource.courtId, c.id)} style={[styles.moveCourtBtn, { borderColor: colors.primary, backgroundColor: colors.surfaceSecondary }]} accessibilityLabel={`${c.name}로 이동`}>
+                      <Text style={[styles.moveCourtBtnT, { color: colors.primary }]}>{c.name}</Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+              )}
+              <TouchableOpacity onPress={() => setMoveSource(null)} style={styles.moveCancel}><Text style={[styles.moveCancelT, { color: colors.textSecondary }]}>취소</Text></TouchableOpacity>
+            </TouchableOpacity>
+          </TouchableOpacity>
+        </Modal>
+      )}
       {matchupTarget && clubSessionId && (
         <MatchupModal
           colors={colors}
@@ -4369,7 +4407,10 @@ export default function OperateScreen() {
             <Text style={[styles.m2CourtName, { color: colors.text }]} numberOfLines={1}>{court.name}</Text>
             <CourtElapsedBadge startedAt={court.currentTurn?.startedAt} />
           </View>
-          <TouchableOpacity onPress={() => handleEndGame(court.id)} accessibilityLabel={`${court.name} 게임 종료`}><Text style={[styles.m2CourtState, { color: colors.danger }]}>종료</Text></TouchableOpacity>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+            <TouchableOpacity onPress={() => setMoveSource({ courtId: court.id, courtName: court.name })} accessibilityLabel={`${court.name} 게임 코트 이동`}><Text style={[styles.m2CourtState, { color: colors.primary }]}>이동</Text></TouchableOpacity>
+            <TouchableOpacity onPress={() => handleEndGame(court.id)} accessibilityLabel={`${court.name} 게임 종료`}><Text style={[styles.m2CourtState, { color: colors.danger }]}>종료</Text></TouchableOpacity>
+          </View>
         </View>
         <View style={styles.m2CourtSlots}>
           {[0, 1, 2, 3].map((s) => { const pid = pids[s]; const p = pid ? getPlayer(pid) : null; const sk = getSkillMeta(p?.skillLevel); const gm = getGenderMeta(p?.gender); return (
@@ -5986,6 +6027,16 @@ const styles = StyleSheet.create({
   // 하단 채팅형 명령 패널
   // 왼쪽 아래로 배치 — 오른쪽 '대기 명단'(이름 선택)을 가리지 않도록. 이름 선택 후엔
   // 앵커 자체가 숨겨져(!selectedPlayer) 왼쪽 게임 슬롯 배치도 안 겹친다.
+  // 코트 이동 선택 모달
+  moveBg: { flex: 1, backgroundColor: 'rgba(0,0,0,0.4)', alignItems: 'center', justifyContent: 'center', padding: 24 },
+  moveCard: { width: 420, maxWidth: '92%', borderRadius: radius.lg, padding: 20, gap: 14 },
+  moveTitle: { ...typography.subtitle1, fontWeight: '800', textAlign: 'center' },
+  moveEmpty: { ...typography.body2, textAlign: 'center', paddingVertical: 12 },
+  moveGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 10, justifyContent: 'center' },
+  moveCourtBtn: { minWidth: 110, paddingHorizontal: 18, paddingVertical: 14, borderRadius: radius.md, borderWidth: 2, alignItems: 'center' },
+  moveCourtBtnT: { ...typography.subtitle1, fontWeight: '900' },
+  moveCancel: { alignSelf: 'center', paddingVertical: 6, paddingHorizontal: 20 },
+  moveCancelT: { ...typography.subtitle2, fontWeight: '700' },
   m2ChatAnchor: { position: 'absolute', left: 14, bottom: 14, alignItems: 'flex-start', gap: 10 },
   m2ChatFab: { flexDirection: 'row', alignItems: 'center', gap: 6, height: 44, paddingHorizontal: 16, borderRadius: 22, shadowColor: '#000', shadowOpacity: 0.22, shadowRadius: 8, shadowOffset: { width: 0, height: 2 }, elevation: 8 },
   m2ChatFabT: { color: '#fff', ...typography.body2, fontWeight: '800' },

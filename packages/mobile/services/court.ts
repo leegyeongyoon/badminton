@@ -31,6 +31,9 @@ export const courtApi = {
   // turns), so it can't get stuck on a stale client turnId. Frees the players.
   completeActiveByCourt: (courtId: string) =>
     api.post(`/courts/${courtId}/complete-active`),
+  // 진행 중인 게임을 다른 빈 코트로 이동(코트 잘못 넣었을 때).
+  moveGame: (courtId: string, targetCourtId: string) =>
+    api.post(`/courts/${courtId}/move-game`, { targetCourtId }),
   cancelTurn: (turnId: string) =>
     api.post(`/turns/${turnId}/cancel`),
   requeueTurn: (turnId: string, options?: { newPlayerIds?: string[]; targetCourtId?: string }) =>

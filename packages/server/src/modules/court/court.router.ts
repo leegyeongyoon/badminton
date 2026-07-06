@@ -32,6 +32,17 @@ router.patch('/:id', authenticate, validate(updateCourtSchema), async (req: Requ
   } catch (err) { next(err); }
 });
 
+// POST /api/v1/courts/:id/move-game — 진행 중인 게임을 다른 빈 코트로 이동.
+// body: { targetCourtId }. 코트 관리 권한(LEADER/STAFF/시설관리자) 필요.
+router.post('/:id/move-game', authenticate, async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const targetCourtId = String(req.body?.targetCourtId || '');
+    if (!targetCourtId) throw new NotFoundError('대상 코트');
+    const result = await courtService.moveCourtGame(req.params.id as string, targetCourtId, req.user!.userId);
+    res.json(result);
+  } catch (err) { next(err); }
+});
+
 // DELETE /api/v1/courts/:id — remove a court (only if not in use and has no history).
 // Allowed for FACILITY_ADMIN of the court's facility OR any club LEADER/STAFF.
 router.delete('/:id', authenticate, async (req: Request, res: Response, next: NextFunction) => {

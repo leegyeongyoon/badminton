@@ -2,6 +2,7 @@ import { prisma } from '../../utils/prisma';
 import { NotFoundError, BadRequestError, ForbiddenError } from '../../utils/errors';
 import { CourtStatus, CourtGameType } from '@badminton/shared';
 import type { UpdateCourtInput } from '@badminton/shared';
+import { getIO } from '../../socket';
 
 /**
  * Court-management permission for a club operator.
@@ -121,4 +122,56 @@ export async function transitionCourtStatus(courtId: string, newStatus: CourtSta
     where: { id: courtId },
     data: { status: newStatus },
   });
+}
+
+// ─────────────────────────────────────────────────────────────
+// 진행 중인 게임을 다른 '빈' 코트로 이동(코트 잘못 넣었을 때 코트명 변경 대신).
+// 소스 코트의 활성 턴(PLAYING/WAITING)을 대상 코트로 옮긴다: CourtTurn·Game·
+// GameBoardEntry 의 courtId 를 갱신하고 코트 상태(소스→EMPTY, 대상→IN_USE)를 맞춘 뒤
+// 소켓으로 브로드캐스트. 게임 자체(선수·시작시각·경과)는 그대로 유지된다.
+export async function moveCourtGame(sourceCourtId: string, targetCourtId: string, userId: string) {
+  if (sourceCourtId === targetCourtId) throw new BadRequestError('같은 코트로는 옮길 수 없어요');
+
+  const source = await prisma.court.findUnique({ where: { id: sourceCourtId } });
+  if (!source) throw new NotFoundError('코트');
+  const target = await prisma.court.findUnique({ where: { id: targetCourtId } });
+  if (!target) throw new NotFoundError('대상 코트');
+  if (source.facilityId !== target.facilityId) throw new BadRequestError('같은 시설의 코트끼리만 옮길 수 있어요');
+  if (target.status === CourtStatus.MAINTENANCE) throw new BadRequestError('점검 중인 코트로는 옮길 수 없어요');
+
+  // 권한: 코트 관리 권한(클럽 LEADER/STAFF 또는 시설 관리자).
+  await verifyCourtManager(userId, source.facilityId);
+
+  // 소스의 활성 턴(진행 중 우선). 없으면 옮길 게임이 없음.
+  const turn = await prisma.courtTurn.findFirst({
+    where: { courtId: sourceCourtId, status: { in: ['PLAYING', 'WAITING'] } },
+    orderBy: [{ status: 'asc' }, { position: 'asc' }], // PLAYING < WAITING(알파벳), position 낮은 것
+  });
+  if (!turn) throw new BadRequestError('이 코트에 옮길 게임이 없어요');
+
+  // 대상 코트에 이미 활성 게임이 있으면 불가(빈 코트에만).
+  const occupied = await prisma.courtTurn.findFirst({
+    where: { courtId: targetCourtId, status: { in: ['PLAYING', 'WAITING'] } },
+  });
+  if (occupied) throw new BadRequestError('대상 코트가 이미 사용 중이에요. 빈 코트로 옮겨주세요');
+
+  await prisma.$transaction(async (tx) => {
+    await tx.courtTurn.update({ where: { id: turn.id }, data: { courtId: targetCourtId } });
+    await tx.game.updateMany({ where: { turnId: turn.id }, data: { courtId: targetCourtId } });
+    await tx.gameBoardEntry.updateMany({ where: { turnId: turn.id }, data: { courtId: targetCourtId } });
+    // 소스에 다른 활성 턴이 없으면 EMPTY 로, 대상은 소스와 같은 상태(IN_USE)로.
+    const remain = await tx.courtTurn.count({ where: { courtId: sourceCourtId, status: { in: ['PLAYING', 'WAITING'] } } });
+    await tx.court.update({ where: { id: sourceCourtId }, data: { status: remain > 0 ? CourtStatus.IN_USE : CourtStatus.EMPTY } });
+    await tx.court.update({ where: { id: targetCourtId }, data: { status: CourtStatus.IN_USE } });
+  });
+
+  // 실시간 반영 — 운영판/현황판/모니터가 코트 상태·게임보드 갱신.
+  try {
+    const io = getIO();
+    io.to(`facility:${source.facilityId}`).emit('court:statusChanged', { courtId: sourceCourtId });
+    io.to(`facility:${source.facilityId}`).emit('court:statusChanged', { courtId: targetCourtId });
+    io.to(`facility:${source.facilityId}`).emit('clubSession:courtsUpdated', { facilityId: source.facilityId });
+  } catch { /* 소켓 미연결 시 무시 */ }
+
+  return { success: true, turnId: turn.id, from: sourceCourtId, to: targetCourtId };
 }
