@@ -84,7 +84,7 @@ export default function MonitorScreen() {
             ? <Text style={[styles.courtTag, { color: colors.warning }]}>{elapsedMin != null ? (elapsedMin < 1 ? '방금' : `${elapsedMin}분`) : '게임중'}</Text>
             : <Text style={[styles.courtTag, { color: colors.textLight }]}>비어있음</Text>}
         </View>
-        <Text style={[styles.courtPlayers, { color: playing ? colors.textSecondary : colors.textLight }]} numberOfLines={1}>
+        <Text style={[styles.courtPlayers, { color: playing ? colors.textSecondary : colors.textLight }]} numberOfLines={2}>
           {playing ? playing.playerIds.map((pId, i) => getPlayer(pId)?.userName || playing.playerNames?.[i] || '?').join(' · ') : '—'}
         </Text>
       </View>
@@ -170,19 +170,19 @@ const styles = StyleSheet.create({
   clock: { fontSize: 20, fontWeight: '800', fontVariant: ['tabular-nums'] },
   exitBtn: { padding: 4 },
 
-  // 히어로: 게임 밴드들이 화면 높이를 균등 분할해 채움
-  hero: { flex: 1, paddingHorizontal: 16, paddingVertical: 12, gap: 12, justifyContent: 'center' },
-  band: { flex: 1, flexDirection: 'row', alignItems: 'center', borderRadius: 16, overflow: 'hidden', minHeight: 96 },
-  orderCol: { width: 130, alignItems: 'center', justifyContent: 'center', borderRightWidth: 1, alignSelf: 'stretch', paddingVertical: 8 },
-  orderNum: { fontSize: 48, fontWeight: '900', lineHeight: 52 },
-  orderLabel: { fontSize: 18, fontWeight: '900' },
-  bandPlayers: { flex: 1, flexDirection: 'row', alignItems: 'center', paddingHorizontal: 12 },
-  bandPlayer: { flex: 1, flexDirection: 'row', alignItems: 'center', gap: 10, paddingHorizontal: 8, minWidth: 0 },
-  bSkill: { minWidth: 38, height: 38, borderRadius: 9, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 5 },
-  bSkillT: { fontSize: 20, fontWeight: '900' },
-  bName: { fontSize: 34, fontWeight: '800', flexShrink: 1 },
-  emptyBig: { fontSize: 26, fontWeight: '800', textAlign: 'center' },
-  overflow: { fontSize: 18, fontWeight: '800', textAlign: 'center' },
+  // 히어로: 게임 밴드들이 화면 높이를 채우되 너무 커지지 않게 maxHeight 로 상한
+  hero: { flex: 1, paddingHorizontal: 16, paddingVertical: 10, gap: 10, justifyContent: 'center' },
+  band: { flex: 1, maxHeight: 150, flexDirection: 'row', alignItems: 'center', borderRadius: 14, overflow: 'hidden', minHeight: 84 },
+  orderCol: { width: 116, alignItems: 'center', justifyContent: 'center', borderRightWidth: 1, alignSelf: 'stretch', paddingVertical: 8 },
+  orderNum: { fontSize: 36, fontWeight: '900', lineHeight: 40 },
+  orderLabel: { fontSize: 15, fontWeight: '900' },
+  bandPlayers: { flex: 1, flexDirection: 'row', alignItems: 'center', paddingHorizontal: 10 },
+  bandPlayer: { flex: 1, flexDirection: 'row', alignItems: 'center', gap: 9, paddingHorizontal: 6, minWidth: 0 },
+  bSkill: { minWidth: 32, height: 32, borderRadius: 8, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 4 },
+  bSkillT: { fontSize: 17, fontWeight: '900' },
+  bName: { fontSize: 27, fontWeight: '800', flexShrink: 1 },
+  emptyBig: { fontSize: 24, fontWeight: '800', textAlign: 'center' },
+  overflow: { fontSize: 17, fontWeight: '800', textAlign: 'center' },
 
   // 대기 중(편성 전) 얇은 스트립
   waitStrip: { flexDirection: 'row', alignItems: 'center', gap: 12, borderTopWidth: 1, paddingHorizontal: 16, paddingVertical: 8 },
@@ -193,12 +193,12 @@ const styles = StyleSheet.create({
   wSkillT: { fontSize: 12, fontWeight: '900' },
   wName: { fontSize: 18, fontWeight: '800' },
 
-  // 코트 현황 하단 얇은 스트립
-  courtStrip: { flexDirection: 'row', alignItems: 'center', gap: 12, borderTopWidth: 1, paddingHorizontal: 16, paddingVertical: 8 },
-  courtRow: { flexDirection: 'row', gap: 8, alignItems: 'center' },
-  courtChip: { minWidth: 170, borderWidth: 1.5, borderRadius: 10, paddingHorizontal: 11, paddingVertical: 6 },
-  courtHead: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 8, marginBottom: 1 },
-  courtName: { fontSize: 17, fontWeight: '900', flexShrink: 1 },
-  courtTag: { fontSize: 13, fontWeight: '800' },
-  courtPlayers: { fontSize: 14, fontWeight: '700' },
+  // 코트 현황 하단 스트립(살짝 키움)
+  courtStrip: { flexDirection: 'row', alignItems: 'center', gap: 12, borderTopWidth: 1, paddingHorizontal: 16, paddingVertical: 11 },
+  courtRow: { flexDirection: 'row', gap: 10, alignItems: 'stretch' },
+  courtChip: { minWidth: 215, borderWidth: 1.5, borderRadius: 12, paddingHorizontal: 14, paddingVertical: 9 },
+  courtHead: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 8, marginBottom: 3 },
+  courtName: { fontSize: 21, fontWeight: '900', flexShrink: 1 },
+  courtTag: { fontSize: 15, fontWeight: '800' },
+  courtPlayers: { fontSize: 17, fontWeight: '700', lineHeight: 22 },
 });
