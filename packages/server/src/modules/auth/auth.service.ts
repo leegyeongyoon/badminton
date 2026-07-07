@@ -3,6 +3,7 @@ import jwt from 'jsonwebtoken';
 import { prisma } from '../../utils/prisma';
 import { AppError, ConflictError, UnauthorizedError, BadRequestError } from '../../utils/errors';
 import { AuthPayload } from '../../middleware/auth';
+import { notifySlack } from '../../utils/notify';
 import type { RegisterInput, RegisterOperatorInput, LoginInput, KakaoLoginInput, GoogleLoginInput, CompleteProfileInput, LinkProviderInput } from '@badminton/shared';
 
 const JWT_SECRET = process.env.JWT_SECRET || 'dev-secret';
@@ -194,6 +195,17 @@ export async function registerOperator(input: RegisterOperatorInput) {
     where: { id: dbUser.id },
     include: { profile: true },
   });
+
+  // 관리자에게 새 운영자 가입 신청 알림(Slack) — 부가 기능이라 응답을 막지 않도록
+  // fire-and-forget. 신규/재신청 모두 여기 도달하므로 한 번만 보낸다.
+  void notifySlack(
+    `🏸 새 운영자 가입 신청${existing ? ' (재신청)' : ''}\n` +
+      `• 이름: ${input.name}\n` +
+      `• 연락처: ${input.phone}\n` +
+      `• 운영할 모임: ${input.clubName}\n` +
+      `• 활동 지역: ${input.region || '-'}\n` +
+      `➡️ 앱 › 운영자 신청 관리에서 승인/거절`,
+  );
 
   return {
     isNew: !existing,

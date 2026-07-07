@@ -87,6 +87,17 @@ jobs:
           ssh_pi "cd /opt/badminton && touch .env.prod && sed -i '/^OPENAI_API_KEY=/d' .env.prod && echo 'OPENAI_API_KEY=$OPENAI_KEY' >> .env.prod && echo 'OPENAI key injected'" \
             || echo "주입 실패(무시) — AI 명령은 키 설정 전까지 비활성"
 
+      - name: Inject SLACK_WEBHOOK_URL into .env.prod (Pi)
+        env:
+          SSHPASS: ${{ secrets.SSH_PASSWORD }}
+          SLACK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+        run: |
+          if [ -z "$SLACK_URL" ]; then echo "SLACK 시크릿 미설정 — 건너뜀(가입 신청 알림 비활성)"; exit 0; fi
+          ssh_pi() { sshpass -e ssh -o ConnectTimeout=25 "${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}" "$1"; }
+          # .env.prod 에 SLACK_WEBHOOK_URL 만 idempotent 하게 갱신 (운영자 가입 신청 알림용).
+          ssh_pi "cd /opt/badminton && touch .env.prod && sed -i '/^SLACK_WEBHOOK_URL=/d' .env.prod && echo 'SLACK_WEBHOOK_URL=$SLACK_URL' >> .env.prod && echo 'SLACK webhook injected'" \
+            || echo "주입 실패(무시) — 가입 신청 알림은 웹훅 설정 전까지 비활성"
+
       - name: Build & deploy on Pi (detached) + poll
         env:
           SSHPASS: ${{ secrets.SSH_PASSWORD }}
