@@ -224,6 +224,13 @@ export default function SettingsScreen() {
       <View style={styles.appInfo}>
         <Text style={[styles.appInfoText, { color: colors.textLight }]}>{Strings.app.name}</Text>
         <Text style={[styles.versionText, { color: colors.textLight }]}>v1.0.0</Text>
+        <Text
+          style={[styles.versionText, { color: colors.primary, marginTop: 6, fontWeight: '600' }]}
+          onPress={() => router.push('/privacy')}
+          accessibilityRole="link"
+        >
+          개인정보처리방침
+        </Text>
       </View>
 
       <ClubModal

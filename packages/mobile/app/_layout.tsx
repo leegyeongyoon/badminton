@@ -96,9 +96,12 @@ function RootLayoutInner() {
     // (모니터 뷰) are open to participants, including guests — don't bounce a
     // guest away from /session/[id]/board or /session/[id]/monitor.
     const inViewBoard = seg[0] === 'session' && (seg[2] === 'board' || seg[2] === 'monitor');
+    // 개인정보처리방침은 공개 페이지(App Store 심사자가 로그인 없이 열어야 함) —
+    // 온보딩/로그인/게스트 게이트 모두에서 예외로 둔다.
+    const inPrivacy = seg[0] === 'privacy';
 
     // Onboarding gate: first-time users see the onboarding flow
-    if (hasCompletedOnboarding === false && !inOnboarding) {
+    if (hasCompletedOnboarding === false && !inOnboarding && !inPrivacy) {
       isNavigatingRef.current = true;
       router.replace('/onboarding');
       setTimeout(() => { isNavigatingRef.current = false; }, 100);
@@ -106,8 +109,8 @@ function RootLayoutInner() {
     }
 
     if (!isAuthenticated) {
-      // Not logged in -> auth screens
-      if (!inAuthGroup) {
+      // Not logged in -> auth screens (개인정보처리방침은 공개라 예외)
+      if (!inAuthGroup && !inPrivacy) {
         isNavigatingRef.current = true;
         router.replace('/(auth)/login');
         setTimeout(() => { isNavigatingRef.current = false; }, 100);
@@ -117,7 +120,7 @@ function RootLayoutInner() {
       // Allow them to remain on guest-status (and on the (auth)/guest screen
       // momentarily during the check-in handoff before state propagates), and
       // to open the read-only viewing board for the live game status.
-      if (!inGuestStatus && !inViewBoard) {
+      if (!inGuestStatus && !inViewBoard && !inPrivacy) {
         isNavigatingRef.current = true;
         router.replace('/guest-status');
         setTimeout(() => { isNavigatingRef.current = false; }, 100);
@@ -127,7 +130,7 @@ function RootLayoutInner() {
       //    가둔다. 프로필 온보딩·홈보다 먼저(급수/성별 강제 흐름을 우회). 최고관리자
       //    승인 시 accountStatus=ACTIVE 로 바뀌어 이 게이트를 통과하고 아래 홈 흐름으로.
       if (user?.accountStatus === 'PENDING' || user?.accountStatus === 'REJECTED') {
-        if (!inOperatorPending) {
+        if (!inOperatorPending && !inPrivacy) {
           isNavigatingRef.current = true;
           router.replace('/operator-pending');
           setTimeout(() => { isNavigatingRef.current = false; }, 100);
@@ -257,6 +260,7 @@ function RootLayoutInner() {
           <Stack.Screen name="attend" options={transitions.fadeScale} />
           <Stack.Screen name="guest-status" options={transitions.fadeScale} />
           <Stack.Screen name="operator-pending" options={transitions.fadeScale} />
+          <Stack.Screen name="privacy" options={transitions.slideFromRight} />
           <Stack.Screen name="facility-select" />
           <Stack.Screen name="notifications" options={transitions.modalSlideUp} />
           <Stack.Screen name="admin/index" options={transitions.slideFromRight} />
