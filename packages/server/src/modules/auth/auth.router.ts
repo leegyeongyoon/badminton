@@ -1,5 +1,5 @@
 import { Router, Request, Response, NextFunction } from 'express';
-import { registerSchema, loginSchema, kakaoLoginSchema, googleLoginSchema, pushTokenSchema, changePasswordSchema, completeProfileSchema, linkProviderSchema } from '@badminton/shared';
+import { registerSchema, registerOperatorSchema, loginSchema, kakaoLoginSchema, googleLoginSchema, pushTokenSchema, changePasswordSchema, completeProfileSchema, linkProviderSchema } from '@badminton/shared';
 import { validate } from '../../middleware/validate';
 import { authenticate } from '../../middleware/auth';
 import { rateLimit } from '../../middleware/rateLimit';
@@ -16,6 +16,15 @@ const googleLimiter = rateLimit({ windowMs: 15 * 60 * 1000, max: 20, keyPrefix: 
 router.post('/register', registerLimiter, validate(registerSchema), async (req: Request, res: Response, next: NextFunction) => {
   try {
     const result = await authService.register(req.body);
+    res.status(201).json(result);
+  } catch (err) { next(err); }
+});
+
+// 운영자(모임 관리자) 회원가입 신청 — 계정 생성 + 최고관리자 승인 대기(OperatorRequest).
+// register 와 동일한 남용 방지 리미터를 재사용한다.
+router.post('/register-operator', registerLimiter, validate(registerOperatorSchema), async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const result = await authService.registerOperator(req.body);
     res.status(201).json(result);
   } catch (err) { next(err); }
 });

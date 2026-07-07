@@ -205,6 +205,13 @@ export async function listMyClubs(userId: string, role?: string) {
 }
 
 export async function joinClub(userId: string, inviteCode: string) {
+  // 운영자 회원가입 승인 대기(PENDING)/거절(REJECTED) 계정은 아직 앱을 쓸 수 없으므로
+  // 초대코드 가입도 막는다(승인 대기 벽 우회 방지).
+  const joiner = await prisma.user.findUnique({ where: { id: userId }, select: { accountStatus: true } });
+  if (joiner && joiner.accountStatus !== 'ACTIVE') {
+    throw new ForbiddenError('승인 대기 중인 계정입니다. 최고관리자 승인 후 이용해 주세요');
+  }
+
   const club = await prisma.club.findUnique({ where: { inviteCode } });
   if (!club) throw new NotFoundError('모임');
 

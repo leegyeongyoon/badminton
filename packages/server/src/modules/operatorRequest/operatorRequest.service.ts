@@ -10,6 +10,8 @@ type OperatorRequestRow = {
   userId: string;
   status: string;
   message: string | null;
+  clubName: string | null;
+  region: string | null;
   reviewedById: string | null;
   reviewedAt: Date | null;
   createdAt: Date;
@@ -21,6 +23,8 @@ function toResponse(r: OperatorRequestRow) {
     userId: r.userId,
     status: r.status as 'PENDING' | 'APPROVED' | 'REJECTED',
     message: r.message,
+    clubName: r.clubName,
+    region: r.region,
     reviewedById: r.reviewedById,
     reviewedAt: r.reviewedAt ? r.reviewedAt.toISOString() : null,
     createdAt: r.createdAt.toISOString(),
@@ -128,13 +132,26 @@ export async function reviewRequest(
       },
     });
 
+    const requester = await tx.user.findUnique({ where: { id: existing.userId } });
+
     if (input.decision === 'approve') {
-      // 신청자가 이미 더 높은 권한이 아니라면 운영자(CLUB_LEADER)로 승격.
-      const requester = await tx.user.findUnique({ where: { id: existing.userId } });
-      if (requester && requester.role === 'PLAYER') {
+      // 신청자가 이미 더 높은 권한이 아니라면 운영자(CLUB_LEADER)로 승격하고,
+      // 운영자 회원가입으로 PENDING 이던 계정은 ACTIVE 로 풀어 승인 대기 벽을 해제한다.
+      // (인앱 신청한 기존 활성 유저는 accountStatus 가 이미 ACTIVE 라 no-op.)
+      await tx.user.update({
+        where: { id: existing.userId },
+        data: {
+          ...(requester && requester.role === 'PLAYER' ? { role: 'CLUB_LEADER' as const } : {}),
+          accountStatus: 'ACTIVE',
+        },
+      });
+    } else {
+      // 거절 — 운영자 회원가입으로 승인 대기(PENDING) 중이던 계정만 REJECTED 로 표시한다.
+      // 이미 앱을 쓰던(ACTIVE) 유저가 인앱 운영자 신청을 거절당한 경우는 계정을 막지 않는다.
+      if (requester && requester.accountStatus === 'PENDING') {
         await tx.user.update({
           where: { id: existing.userId },
-          data: { role: 'CLUB_LEADER' },
+          data: { accountStatus: 'REJECTED' },
         });
       }
     }

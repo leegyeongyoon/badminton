@@ -11,6 +11,17 @@ export const registerSchema = z.object({
   gender: z.enum(['M', 'F']).optional().nullable(),
 });
 
+// 운영자(모임 관리자) 회원가입 신청 — 전화+비번 계정 생성과 동시에 최고관리자
+// 승인을 받기 위한 OperatorRequest 를 만든다. 신청서에 운영하려는 모임 이름(필수)과
+// 활동 지역/장소(선택)를 함께 받는다. 승인 전까지 계정은 PENDING(앱 사용 차단).
+export const registerOperatorSchema = z.object({
+  phone: z.string().regex(/^01[0-9]{8,9}$/, '올바른 전화번호를 입력하세요'),
+  password: z.string().min(6, '비밀번호는 6자 이상이어야 합니다'),
+  name: z.string().min(1, '이름을 입력하세요').max(20),
+  clubName: z.string().min(1, '운영할 모임 이름을 입력하세요').max(40),
+  region: z.string().max(40).optional(),
+});
+
 export const loginSchema = z.object({
   phone: z.string(),
   password: z.string(),
@@ -332,6 +343,7 @@ export type OperatorRequestCreateInput = z.infer<typeof operatorRequestCreateSch
 export type OperatorRequestReviewInput = z.infer<typeof operatorRequestReviewSchema>;
 
 export type RegisterInput = z.infer<typeof registerSchema>;
+export type RegisterOperatorInput = z.infer<typeof registerOperatorSchema>;
 export type LoginInput = z.infer<typeof loginSchema>;
 export type KakaoLoginInput = z.infer<typeof kakaoLoginSchema>;
 export type GoogleLoginInput = z.infer<typeof googleLoginSchema>;

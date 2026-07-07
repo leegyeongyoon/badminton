@@ -46,6 +46,11 @@ interface User {
   linkedProviders?: { kakao: boolean; google: boolean };
   /** True for a phone account (has a password) — counts as a login method. */
   hasPassword?: boolean;
+  /**
+   * 계정 상태. 운영자 회원가입한 계정은 승인 전까지 'PENDING'(앱 사용 차단),
+   * 거절 시 'REJECTED', 그 외 'ACTIVE'. 루트 게이트가 이 값을 보고 승인 대기 화면으로 보낸다.
+   */
+  accountStatus?: 'ACTIVE' | 'PENDING' | 'REJECTED';
 }
 
 interface AuthState {
@@ -93,6 +98,11 @@ interface AuthState {
   unlinkKakao: () => Promise<void>;
   unlinkGoogle: () => Promise<void>;
   register: (phone: string, password: string, name: string) => Promise<void>;
+  /**
+   * 운영자(모임 관리자) 회원가입 신청. 계정을 만들고(accountStatus=PENDING) 최고관리자
+   * 승인 대기 상태로 로그인시킨다 — 루트 게이트가 곧바로 승인 대기 화면으로 보낸다.
+   */
+  registerOperator: (data: { phone: string; password: string; name: string; clubName: string; region?: string }) => Promise<void>;
   /**
    * New-user profile completion (신규 카카오 가입자). Sets name + 급수/성별 on the
    * server, then refreshes the local user so the gate stops treating them as new.
@@ -194,6 +204,14 @@ export const useAuthStore = create<AuthState>((set) => ({
     const { data } = await authApi.register({ phone, password, name });
     await setItem('accessToken', data.tokens.accessToken);
     await setItem('refreshToken', data.tokens.refreshToken);
+    set({ user: data.user, isAuthenticated: true, isGuest: !!data.user?.isGuest });
+  },
+
+  registerOperator: async (payload) => {
+    const { data } = await authApi.registerOperator(payload);
+    await setItem('accessToken', data.tokens.accessToken);
+    await setItem('refreshToken', data.tokens.refreshToken);
+    // accountStatus=PENDING 로 로그인 — 루트 게이트가 /operator-pending 로 보낸다.
     set({ user: data.user, isAuthenticated: true, isGuest: !!data.user?.isGuest });
   },
 

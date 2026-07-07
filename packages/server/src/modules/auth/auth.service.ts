@@ -3,7 +3,7 @@ import jwt from 'jsonwebtoken';
 import { prisma } from '../../utils/prisma';
 import { AppError, ConflictError, UnauthorizedError, BadRequestError } from '../../utils/errors';
 import { AuthPayload } from '../../middleware/auth';
-import type { RegisterInput, LoginInput, KakaoLoginInput, GoogleLoginInput, CompleteProfileInput, LinkProviderInput } from '@badminton/shared';
+import type { RegisterInput, RegisterOperatorInput, LoginInput, KakaoLoginInput, GoogleLoginInput, CompleteProfileInput, LinkProviderInput } from '@badminton/shared';
 
 const JWT_SECRET = process.env.JWT_SECRET || 'dev-secret';
 const JWT_REFRESH_SECRET = process.env.JWT_REFRESH_SECRET || 'dev-refresh-secret';
@@ -26,6 +26,7 @@ type UserWithProfile = {
   name: string;
   role: string;
   isGuest: boolean;
+  accountStatus: string;
   createdAt: Date;
   // Linked-provider ids + password presence drive linkedProviders/hasPassword in
   // the response so the client can show 연동 status + enforce "keep ≥1 method".
@@ -48,6 +49,9 @@ function toUserResponse(user: UserWithProfile) {
     name: user.name,
     role: user.role,
     isGuest: user.isGuest,
+    // 계정 상태(운영자 회원가입 승인 대기 여부). 클라 루트 게이트가 PENDING/REJECTED
+    // 를 보고 승인 대기 화면으로 보낸다.
+    accountStatus: user.accountStatus,
     createdAt: user.createdAt.toISOString(),
     skillLevel: user.profile?.skillLevel ?? null,
     gender: user.profile?.gender ?? null,
@@ -111,6 +115,67 @@ export async function register(input: RegisterInput) {
 
   return {
     // A phone-register always creates a brand-new account.
+    isNew: true,
+    user: toUserResponse(withProfile),
+    tokens,
+  };
+}
+
+/**
+ * 운영자(모임 관리자) 회원가입 신청.
+ *
+ * 전화+비번 계정을 만들되 accountStatus=PENDING 으로 시작(승인 전까지 앱 사용 차단)하고,
+ * 동시에 최고관리자(SUPER_ADMIN)가 검토할 OperatorRequest(PENDING) 를 생성한다. 신청서에
+ * 담긴 운영하려는 모임 이름(clubName)·활동 지역(region)은 승인 판단용으로 요청에 저장된다.
+ * 승인되면 OperatorRequest.reviewRequest 가 role=CLUB_LEADER + accountStatus=ACTIVE 로 푼다.
+ *
+ * 계정은 만들어지고 토큰도 발급되므로 신청 직후 곧바로 로그인 상태가 되지만, 클라 루트
+ * 게이트가 accountStatus=PENDING 을 보고 승인 대기 화면으로 보낸다.
+ */
+export async function registerOperator(input: RegisterOperatorInput) {
+  const existing = await prisma.user.findUnique({ where: { phone: input.phone } });
+  if (existing) {
+    throw new ConflictError('이미 등록된 전화번호입니다');
+  }
+
+  const hashedPassword = await bcrypt.hash(input.password, 10);
+
+  // 계정 + 승인 신청을 한 트랜잭션으로(하나만 만들어지고 다른 하나가 실패하는 상태 방지).
+  const user = await prisma.$transaction(async (tx) => {
+    const created = await tx.user.create({
+      data: {
+        phone: input.phone,
+        password: hashedPassword,
+        name: input.name,
+        role: 'PLAYER',
+        accountStatus: 'PENDING',
+      },
+    });
+    await tx.operatorRequest.create({
+      data: {
+        userId: created.id,
+        status: 'PENDING',
+        clubName: input.clubName,
+        region: input.region ?? null,
+      },
+    });
+    return created;
+  });
+
+  const payload: AuthPayload = { userId: user.id, role: user.role };
+  const tokens = generateTokens(payload);
+
+  await prisma.user.update({
+    where: { id: user.id },
+    data: { refreshToken: tokens.refreshToken },
+  });
+
+  const withProfile = await prisma.user.findUniqueOrThrow({
+    where: { id: user.id },
+    include: { profile: true },
+  });
+
+  return {
     isNew: true,
     user: toUserResponse(withProfile),
     tokens,

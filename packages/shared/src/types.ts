@@ -5,6 +5,9 @@ import {
   ClubMemberRole, ClubSessionStatus, GameBoardEntryStatus,
 } from './enums';
 
+/** 계정 사용 가능 상태. PENDING = 운영자 회원가입 승인 대기(앱 사용 차단). */
+export type AccountStatusValue = 'ACTIVE' | 'PENDING' | 'REJECTED';
+
 export interface UserResponse {
   id: string;
   phone: string | null;
@@ -12,6 +15,11 @@ export interface UserResponse {
   role: UserRole;
   isGuest: boolean;
   createdAt: string;
+  /**
+   * 계정 상태. 운영자 회원가입한 계정은 승인 전까지 'PENDING'(앱 사용 차단),
+   * 거절 시 'REJECTED'. 그 외 모든 계정은 'ACTIVE'. 구버전 클라 호환을 위해 optional.
+   */
+  accountStatus?: AccountStatusValue;
   /** 급수 from the user's PlayerProfile; null when not yet set. */
   skillLevel?: string | null;
   /** 성별 ('M' | 'F') from the PlayerProfile; null when not set. */
@@ -48,6 +56,10 @@ export interface OperatorRequestResponse {
   userId: string;
   status: OperatorRequestStatusValue;
   message: string | null;
+  /** 운영자 회원가입 신청 시 입력한 운영할 모임 이름. 인앱 신청에는 null. */
+  clubName: string | null;
+  /** 운영자 회원가입 신청 시 입력한 활동 지역/장소(선택). 인앱 신청에는 null. */
+  region: string | null;
   reviewedById: string | null;
   reviewedAt: string | null;
   createdAt: string;

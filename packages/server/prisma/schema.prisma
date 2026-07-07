@@ -20,6 +20,15 @@ enum OperatorRequestStatus {
   REJECTED
 }
 
+// 계정 사용 가능 상태. ACTIVE = 정상 사용. PENDING = 운영자 회원가입 후 최고관리자
+// 승인 대기(앱 사용 차단). REJECTED = 신청 거절됨. 기존/일반(카톡·QR) 유저는 기본
+// ACTIVE 라 승인 흐름의 영향을 받지 않는다.
+enum AccountStatus {
+  ACTIVE
+  PENDING
+  REJECTED
+}
+
 enum CourtStatus {
   EMPTY
   IN_USE
@@ -89,6 +98,10 @@ model User {
   googleId      String?  @unique
   name          String
   role          UserRole @default(PLAYER)
+  // 계정 상태. 운영자 회원가입(관리자 신청)으로 만들어진 계정은 PENDING 으로 시작해
+  // 최고관리자 승인 전까지 앱 사용이 차단된다. 그 외 모든 경로(카톡/구글/전화 로그인,
+  // QR·초대코드 가입)는 기본 ACTIVE.
+  accountStatus AccountStatus @default(ACTIVE)
   isGuest       Boolean  @default(false)
   // Operator-managed club member: a real, PERSISTENT club member with no app
   // login (운영자가 등록한 멤버). Unlike a session guest (isGuest=true, vanishes
@@ -124,6 +137,10 @@ model OperatorRequest {
   userId       String
   status       OperatorRequestStatus @default(PENDING)
   message      String?
+  // 운영자 회원가입(관리자 신청) 경로에서 채워지는 신청 정보. 신청자가 운영하려는
+  // 모임 이름과 활동 지역/장소. 기존 인앱 "운영자 신청"(PLAYER→CLUB_LEADER)에는 null.
+  clubName     String?
+  region       String?
   reviewedById String?
   reviewedAt   DateTime?
   createdAt    DateTime              @default(now())

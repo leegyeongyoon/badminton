@@ -2,6 +2,7 @@ import { useState, useMemo } from 'react';
 import {
   View,
   Text,
+  ScrollView,
   StyleSheet,
   KeyboardAvoidingView,
   Platform,
@@ -17,25 +18,35 @@ import {
   password as passwordRule,
   minLength,
 } from '../../utils/validation';
-import { typography, spacing } from '../../constants/theme';
+import { typography, spacing, radius } from '../../constants/theme';
 import { Strings } from '../../constants/strings';
 import { showError } from '../../utils/feedback';
 import { Input } from '../../components/ui/Input';
 import { Button } from '../../components/ui/Button';
 
+/**
+ * 운영자(모임 관리자) 가입 신청 화면.
+ *
+ * 일반 회원은 카카오 로그인 + 현장 QR 출석으로 들어오므로, 이 화면은 "모임을
+ * 운영하려는 사람"이 계정을 만들고 최고관리자 승인을 받기 위한 신청서다. 이름·연락처·
+ * 비밀번호에 더해 운영할 모임 이름(필수)과 활동 지역/장소(선택)를 받는다. 제출하면
+ * 계정이 PENDING 으로 생성되고, 루트 게이트가 곧바로 승인 대기 화면(/operator-pending)
+ * 으로 보낸다. 승인 전까지는 앱을 사용할 수 없다.
+ */
 export default function RegisterScreen() {
   const [loading, setLoading] = useState(false);
-  const { register } = useAuthStore();
+  const { registerOperator } = useAuthStore();
   const { colors } = useTheme();
 
   const rules = useMemo(() => ({
     name: compose(required, minLength(2)),
     phone: compose(required, phoneRule),
     password: compose(required, passwordRule),
+    clubName: compose(required, minLength(1)),
   }), []);
 
   const form = useFormValidation(
-    { name: '', phone: '', password: '' },
+    { name: '', phone: '', password: '', clubName: '', region: '' },
     rules,
   );
 
@@ -44,10 +55,16 @@ export default function RegisterScreen() {
 
     setLoading(true);
     try {
-      await register(form.values.phone, form.values.password, form.values.name);
-      // Navigation handled by root layout gating
+      await registerOperator({
+        phone: form.values.phone,
+        password: form.values.password,
+        name: form.values.name,
+        clubName: form.values.clubName.trim(),
+        region: form.values.region.trim() || undefined,
+      });
+      // 이후 이동은 루트 레이아웃 게이트가 처리(→ /operator-pending).
     } catch (err: any) {
-      showError(err.response?.data?.error || '회원가입에 실패했습니다');
+      showError(err.response?.data?.error || '가입 신청에 실패했습니다');
     } finally {
       setLoading(false);
     }
@@ -58,9 +75,14 @@ export default function RegisterScreen() {
       style={[styles.container, { backgroundColor: colors.background }]}
       behavior={Platform.OS === 'ios' ? 'padding' : undefined}
     >
-      <View style={styles.content}>
-        <Text style={[styles.title, { color: colors.primary }]}>{Strings.app.name}</Text>
-        <Text style={[styles.subtitle, { color: colors.textSecondary }]}>{Strings.auth.register}</Text>
+      <ScrollView
+        contentContainerStyle={styles.content}
+        keyboardShouldPersistTaps="handled"
+      >
+        <Text style={[styles.title, { color: colors.primary }]}>운영자 가입 신청</Text>
+        <Text style={[styles.subtitle, { color: colors.textSecondary }]}>
+          모임을 운영하시려면 신청 후 승인을 받아야 해요
+        </Text>
 
         <View style={styles.form}>
           <Input
@@ -94,10 +116,28 @@ export default function RegisterScreen() {
             icon="link"
             secureTextEntry
           />
+          <Input
+            label="운영할 모임 이름"
+            placeholder="예: 터닝포인트 배드민턴"
+            value={form.values.clubName}
+            onChangeText={(v) => form.setValue('clubName', v)}
+            onBlur={() => form.setTouched('clubName')}
+            error={form.touched.clubName ? form.errors.clubName : undefined}
+            icon="board"
+            maxLength={40}
+          />
+          <Input
+            label="활동 지역/장소 (선택)"
+            placeholder="예: 서울 강남 · ○○체육관"
+            value={form.values.region}
+            onChangeText={(v) => form.setValue('region', v)}
+            icon="map"
+            maxLength={40}
+          />
         </View>
 
         <Button
-          title={loading ? Strings.common.loading : Strings.auth.registerButton}
+          title={loading ? Strings.common.loading : '가입 신청'}
           onPress={handleRegister}
           loading={loading}
           disabled={loading}
@@ -105,12 +145,18 @@ export default function RegisterScreen() {
           style={styles.registerButton}
         />
 
+        <View style={[styles.noticeBox, { backgroundColor: colors.surface, borderColor: colors.divider }]}>
+          <Text style={[styles.noticeText, { color: colors.textSecondary }]}>
+            신청하면 최고관리자 승인 후 이용할 수 있어요. 승인 전까지는 대기 화면이 표시됩니다.
+          </Text>
+        </View>
+
         <Link href="/(auth)/login" asChild>
           <Text style={[styles.linkText, { color: colors.primary }]}>
             {Strings.auth.goToLogin}
           </Text>
         </Link>
-      </View>
+      </ScrollView>
     </KeyboardAvoidingView>
   );
 }
@@ -120,9 +166,10 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   content: {
-    flex: 1,
+    flexGrow: 1,
     justifyContent: 'center',
     paddingHorizontal: spacing.xxl,
+    paddingVertical: spacing.xxxl,
   },
   title: {
     ...typography.h1,
@@ -140,6 +187,17 @@ const styles = StyleSheet.create({
   },
   registerButton: {
     marginTop: spacing.sm,
+  },
+  noticeBox: {
+    marginTop: spacing.lg,
+    padding: spacing.md,
+    borderRadius: radius.md,
+    borderWidth: StyleSheet.hairlineWidth,
+  },
+  noticeText: {
+    ...typography.caption,
+    textAlign: 'center',
+    lineHeight: 18,
   },
   linkText: {
     ...typography.body2,

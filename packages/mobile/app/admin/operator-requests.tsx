@@ -84,6 +84,21 @@ export default function OperatorRequestsScreen() {
         <Text style={[styles.name, { color: colors.text }]}>{item.requester.name}</Text>
         <Text style={[styles.phone, { color: colors.textSecondary }]}>{item.requester.phone || '-'}</Text>
       </View>
+      {/* 운영자 회원가입 신청서 정보: 운영할 모임 이름(강조) + 활동 지역. */}
+      {item.clubName ? (
+        <View style={[styles.applyBox, { backgroundColor: colors.background, borderColor: colors.divider }]}>
+          <View style={styles.applyRow}>
+            <Text style={[styles.applyLabel, { color: colors.textLight }]}>운영할 모임</Text>
+            <Text style={[styles.applyValue, { color: colors.text }]}>{item.clubName}</Text>
+          </View>
+          {item.region ? (
+            <View style={styles.applyRow}>
+              <Text style={[styles.applyLabel, { color: colors.textLight }]}>활동 지역</Text>
+              <Text style={[styles.applyValueSub, { color: colors.textSecondary }]}>{item.region}</Text>
+            </View>
+          ) : null}
+        </View>
+      ) : null}
       <Text style={[styles.meta, { color: colors.textLight }]}>신청일 {formatDate(item.createdAt)}</Text>
       {item.message ? (
         <Text style={[styles.message, { color: colors.textSecondary }]}>{item.message}</Text>
@@ -185,6 +200,22 @@ const styles = StyleSheet.create({
   },
   name: { ...typography.subtitle1 },
   phone: { ...typography.caption },
+  applyBox: {
+    marginTop: spacing.xs,
+    padding: spacing.md,
+    borderRadius: radius.md,
+    borderWidth: StyleSheet.hairlineWidth,
+    gap: 4,
+  },
+  applyRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: spacing.md,
+  },
+  applyLabel: { ...typography.caption },
+  applyValue: { ...typography.subtitle2, flexShrink: 1, textAlign: 'right' },
+  applyValueSub: { ...typography.body2, flexShrink: 1, textAlign: 'right' },
   meta: { ...typography.caption },
   message: {
     ...typography.body2,

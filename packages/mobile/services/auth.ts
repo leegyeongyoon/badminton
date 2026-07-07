@@ -4,6 +4,10 @@ export const authApi = {
   register: (data: { phone: string; password: string; name: string }) =>
     api.post('/auth/register', data),
 
+  // 운영자(모임 관리자) 회원가입 신청 — 계정 생성 + 최고관리자 승인 대기.
+  registerOperator: (data: { phone: string; password: string; name: string; clubName: string; region?: string }) =>
+    api.post('/auth/register-operator', data),
+
   login: (data: { phone: string; password: string }) =>
     api.post('/auth/login', data),
 

@@ -86,6 +86,8 @@ function RootLayoutInner() {
     const inOnboarding = seg[0] === 'onboarding';
     const inGuestStatus = seg[0] === 'guest-status';
     const inProfileSetup = seg[0] === 'profile-setup';
+    // 운영자 회원가입 승인 대기 화면 — PENDING/REJECTED 계정을 여기 가둔다.
+    const inOperatorPending = seg[0] === 'operator-pending';
     // /join captures the pending invite code itself; never bounce away from it.
     const inJoin = seg[0] === 'join';
     // /attend captures the pending 정모 출석 session id itself; never bounce away.
@@ -121,6 +123,18 @@ function RootLayoutInner() {
         setTimeout(() => { isNavigatingRef.current = false; }, 100);
       }
     } else {
+      // 0) 운영자 회원가입 승인 대기(PENDING)/거절(REJECTED) 계정 → 승인 대기 화면에
+      //    가둔다. 프로필 온보딩·홈보다 먼저(급수/성별 강제 흐름을 우회). 최고관리자
+      //    승인 시 accountStatus=ACTIVE 로 바뀌어 이 게이트를 통과하고 아래 홈 흐름으로.
+      if (user?.accountStatus === 'PENDING' || user?.accountStatus === 'REJECTED') {
+        if (!inOperatorPending) {
+          isNavigatingRef.current = true;
+          router.replace('/operator-pending');
+          setTimeout(() => { isNavigatingRef.current = false; }, 100);
+        }
+        return;
+      }
+
       // Logged-in member. ORDER: profile-setup (if new/placeholder/no 급수/no 성별) →
       // consume pendingJoin → home/club.
       // A returning user whose profile has NO 급수 (skillLevel) OR NO 성별 (gender)
@@ -242,6 +256,7 @@ function RootLayoutInner() {
           <Stack.Screen name="join" options={transitions.fadeScale} />
           <Stack.Screen name="attend" options={transitions.fadeScale} />
           <Stack.Screen name="guest-status" options={transitions.fadeScale} />
+          <Stack.Screen name="operator-pending" options={transitions.fadeScale} />
           <Stack.Screen name="facility-select" />
           <Stack.Screen name="notifications" options={transitions.modalSlideUp} />
           <Stack.Screen name="admin/index" options={transitions.slideFromRight} />

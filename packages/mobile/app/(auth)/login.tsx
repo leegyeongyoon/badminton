@@ -242,8 +242,16 @@ export default function LoginScreen() {
           style={styles.loginButton}
         />
 
-        {/* 회원가입·게스트 참여 제거 — 회원은 카카오 로그인으로만 진입(현장 QR 스캔 출석),
-            운영자/관리자는 위 전화번호 로그인. 게스트는 운영자가 운영판에서 직접 추가. */}
+        {/* 일반 회원가입·게스트 참여는 제거(회원은 카카오 로그인 + 현장 QR 출석). 단,
+            모임을 운영하려는 사람은 아래에서 '운영자 가입 신청' → 최고관리자 승인 후 이용. */}
+        <View style={styles.operatorSignupRow}>
+          <Text style={[styles.operatorSignupHint, { color: colors.textSecondary }]}>모임을 운영하시나요?</Text>
+          <Link href="/(auth)/register" asChild>
+            <Pressable hitSlop={8}>
+              <Text style={[styles.operatorSignupLink, { color: colors.primary }]}>운영자 가입 신청</Text>
+            </Pressable>
+          </Link>
+        </View>
       </View>
       </ScreenContainer>
     </KeyboardAvoidingView>
@@ -337,6 +345,20 @@ const styles = StyleSheet.create({
   },
   loginButton: {
     marginTop: spacing.sm,
+  },
+  operatorSignupRow: {
+    flexDirection: 'row',
+    justifyContent: 'center',
+    alignItems: 'center',
+    gap: spacing.xs,
+    marginTop: spacing.xl,
+  },
+  operatorSignupHint: {
+    ...typography.body2,
+  },
+  operatorSignupLink: {
+    ...typography.body2,
+    fontWeight: '700',
   },
   guestButton: {
     marginTop: spacing.xl,
