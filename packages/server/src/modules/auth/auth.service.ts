@@ -134,49 +134,69 @@ export async function register(input: RegisterInput) {
  */
 export async function registerOperator(input: RegisterOperatorInput) {
   const existing = await prisma.user.findUnique({ where: { phone: input.phone } });
-  if (existing) {
-    throw new ConflictError('이미 등록된 전화번호입니다');
-  }
-
   const hashedPassword = await bcrypt.hash(input.password, 10);
 
-  // 계정 + 승인 신청을 한 트랜잭션으로(하나만 만들어지고 다른 하나가 실패하는 상태 방지).
-  const user = await prisma.$transaction(async (tx) => {
-    const created = await tx.user.create({
-      data: {
-        phone: input.phone,
-        password: hashedPassword,
-        name: input.name,
-        role: 'PLAYER',
-        accountStatus: 'PENDING',
-      },
-    });
-    await tx.operatorRequest.create({
-      data: {
-        userId: created.id,
-        status: 'PENDING',
-        clubName: input.clubName,
-        region: input.region ?? null,
-      },
-    });
-    return created;
-  });
+  let userId: string;
 
-  const payload: AuthPayload = { userId: user.id, role: user.role };
+  if (existing) {
+    // 같은 번호로 다시 신청한 경우 — 계정 상태에 따라 다르게 처리한다.
+    if (existing.accountStatus === 'REJECTED') {
+      // 거절된 운영자 회원가입 계정은 재신청 허용: 정보를 갱신하고 새 승인 신청을
+      // 만들어 다시 승인 대기(PENDING)로. REJECTED 는 운영자 회원가입 거절 경로에서만
+      // 생기므로(활성 회원은 항상 ACTIVE) 활성 계정을 가로챌 위험이 없다.
+      await prisma.$transaction(async (tx) => {
+        await tx.user.update({
+          where: { id: existing.id },
+          data: { name: input.name, password: hashedPassword, accountStatus: 'PENDING' },
+        });
+        await tx.operatorRequest.create({
+          data: { userId: existing.id, status: 'PENDING', clubName: input.clubName, region: input.region ?? null },
+        });
+      });
+      userId = existing.id;
+    } else if (existing.accountStatus === 'PENDING') {
+      // 이미 신청 접수 + 승인 대기 중 — 로그인해서 상태를 확인하도록 안내.
+      throw new ConflictError('이미 가입 신청이 접수되어 승인 대기 중이에요. 로그인 후 확인해 주세요');
+    } else {
+      // 활성 계정(이미 가입된 회원/운영자) — 신규 가입 대신 로그인 안내.
+      throw new ConflictError('이미 가입된 번호예요. 로그인해 주세요');
+    }
+  } else {
+    // 신규 — 계정 + 승인 신청을 한 트랜잭션으로(부분 생성 방지).
+    const created = await prisma.$transaction(async (tx) => {
+      const u = await tx.user.create({
+        data: {
+          phone: input.phone,
+          password: hashedPassword,
+          name: input.name,
+          role: 'PLAYER',
+          accountStatus: 'PENDING',
+        },
+      });
+      await tx.operatorRequest.create({
+        data: { userId: u.id, status: 'PENDING', clubName: input.clubName, region: input.region ?? null },
+      });
+      return u;
+    });
+    userId = created.id;
+  }
+
+  const dbUser = await prisma.user.findUniqueOrThrow({ where: { id: userId } });
+  const payload: AuthPayload = { userId: dbUser.id, role: dbUser.role };
   const tokens = generateTokens(payload);
 
   await prisma.user.update({
-    where: { id: user.id },
+    where: { id: dbUser.id },
     data: { refreshToken: tokens.refreshToken },
   });
 
   const withProfile = await prisma.user.findUniqueOrThrow({
-    where: { id: user.id },
+    where: { id: dbUser.id },
     include: { profile: true },
   });
 
   return {
-    isNew: true,
+    isNew: !existing,
     user: toUserResponse(withProfile),
     tokens,
   };

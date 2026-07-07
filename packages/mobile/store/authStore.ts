@@ -256,6 +256,21 @@ export const useAuthStore = create<AuthState>((set) => ({
         set({ isLoading: false });
         return;
       }
+      // 액세스 토큰의 role/상태를 최신 서버 값으로 맞추기 위해 선제적으로 토큰을
+      // 회전한다. 예: 운영자 승인으로 PLAYER→CLUB_LEADER 로 승격되면 기존 토큰엔
+      // 여전히 PLAYER 가 박혀 있어 roleGuard(403)에 막힌다. 인터셉터는 401 에서만
+      // 갱신하므로 403 은 못 잡는다 → 여기서 refresh(서버가 DB role 을 다시 읽어 재발급)
+      // 로 새 토큰을 받아 저장. 게스트는 리프레시 토큰이 없으므로 건너뛴다.
+      const refreshToken = await getItem('refreshToken');
+      if (refreshToken) {
+        try {
+          const { data: r } = await authApi.refresh(refreshToken);
+          if (r?.tokens?.accessToken) {
+            await setItem('accessToken', r.tokens.accessToken);
+            await setItem('refreshToken', r.tokens.refreshToken);
+          }
+        } catch { /* 리프레시 실패 시 기존 토큰으로 getMe 시도 */ }
+      }
       const { data } = await authApi.getMe();
       set({
         user: data,
