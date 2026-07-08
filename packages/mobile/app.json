@@ -7,7 +7,10 @@
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "light",
     "newArchEnabled": true,
-    "scheme": "badminton",
+    "scheme": [
+      "badminton",
+      "kakaoafed6b497e507e1cd83e5642df44c031"
+    ],
     "splash": {
       "image": "./assets/splash-icon.png",
       "resizeMode": "contain",
@@ -43,6 +46,7 @@
     "extra": {
       "apiUrl": "https://api.badmintoncourt.store",
       "kakaoRestKey": "5a202bd90ab8dff01348f24cb1c37f3f",
+      "kakaoNativeKey": "afed6b497e507e1cd83e5642df44c031",
       "googleClientId": "REPLACE_WITH_GOOGLE_CLIENT_ID",
       "eas": {
         "projectId": "ad8ee9b9-c892-4ebe-bfec-b8df01ea405b"

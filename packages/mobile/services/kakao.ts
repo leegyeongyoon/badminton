@@ -45,6 +45,13 @@ function getKakaoKey(): string | null {
   return key;
 }
 
+/** The Kakao NATIVE app key, or null when not configured. */
+function getKakaoNativeKey(): string | null {
+  const key = Constants.expoConfig?.extra?.kakaoNativeKey as string | undefined;
+  if (!key || key === 'REPLACE_WITH_KAKAO_NATIVE_KEY') return null;
+  return key;
+}
+
 /** True when a real (non-placeholder) Kakao key is configured. */
 export function isKakaoConfigured(): boolean {
   return getKakaoKey() !== null;
@@ -70,11 +77,18 @@ export async function getKakaoAuthCode(): Promise<{ code: string; redirectUri: s
   // "카카오 로그인 설정이 준비 중이에요 (키 필요)" message.
   if (!clientId) return null;
 
-  // Compute the redirect URI ONCE. On web this is the served origin (e.g.
-  // http://localhost:8081); on native it's the `badminton://` scheme. The SAME
-  // value is returned to the caller so the backend exchange uses an identical
-  // redirect_uri.
-  const redirectUri = makeRedirectUri({ scheme: 'badminton' });
+  // Compute the redirect URI ONCE. Kakao validates the native redirect against
+  // the REGISTERED iOS/Android platform (bundle id / package) — NOT a Redirect URI
+  // list — and the accepted scheme is `kakao{NATIVE_APP_KEY}://oauth`. Using our
+  // app scheme (`badminton://`) fails with KOE006 because it matches no platform.
+  // So on native we use the Kakao scheme (registered in app.json). Fall back to
+  // the app scheme only if the native key is somehow missing. The SAME value is
+  // returned to the caller so the backend token exchange uses an identical
+  // redirect_uri (Kakao validates the match).
+  const nativeKey = getKakaoNativeKey();
+  const redirectUri = nativeKey
+    ? `kakao${nativeKey}://oauth`
+    : makeRedirectUri({ scheme: 'badminton' });
 
   const request = new AuthRequest({
     clientId,
