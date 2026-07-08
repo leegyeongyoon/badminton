@@ -4730,8 +4730,9 @@ export default function OperateScreen() {
           </ScrollView>
         </View>
       </View>
-      {/* ── 하단 채팅형 명령 패널 (absolute · 아코디언) — 선택 중이 아닐 때만 ── */}
-      {!selectedPlayer && (
+      {/* ── 하단 채팅형 명령 패널 (absolute · 아코디언) — 선택 중이 아닐 때만.
+          태블릿/폰(narrowSlots)에서는 화면이 좁아 방해되므로 숨김(데스크톱 전용). ── */}
+      {!selectedPlayer && !narrowSlots && (
         <View pointerEvents="box-none" style={styles.m2ChatAnchor}>
           {/* 운영 노트는 상단 항상 보이는 메모 바로 이동됨 — 여기선 명령 채팅만. */}
           {cmdOpen ? (
