@@ -146,6 +146,9 @@ export default function OperateScreen() {
   // (768/834), narrow laptops and phones all use a single-column STACKED layout
   // so each cell stays wide enough that Korean names never clip.
   const twoPane = layout.twoPane;
+  // 태블릿/폰(좁은 폭)에서는 선수 슬롯을 한 줄 4칸 대신 2×2로 감싸 칩을 넓힌다 →
+  // 한글 이름이 잘리지 않게. 데스크톱(>=1180)은 기존 4칸 그대로 유지(안전).
+  const narrowSlots = layout.width < 1180;
 
   // Actual laid-out width of the courts area (measured, NOT the window) → drives
   // the court-grid column count so each court cell is ≥ ~150px wide.
@@ -4402,7 +4405,7 @@ export default function OperateScreen() {
         }}
         onLongPress={() => setMatchupTarget({ userId: player.userId, name: player.userName, skillLevel: player.skillLevel, isGuest: (player as any).isGuest })}
         delayLongPress={300}
-        style={[styles.poolTag, compact && (big ? styles.poolTagBig : styles.poolTagCompact), fill ? { flex: 1, minWidth: 0 } : block ? { width: '100%' } : { width: MAG_W }, { borderColor: selected ? colors.primary : gCol, borderWidth: selected ? 3 : 2, backgroundColor: selected ? 'rgba(16,185,129,0.14)' : gBg, zIndex: selected ? 9 : 1 }]}
+        style={[styles.poolTag, compact && (big ? styles.poolTagBig : styles.poolTagCompact), fill ? (narrowSlots ? styles.slotHalf : { flex: 1, minWidth: 0 }) : block ? { width: '100%' } : { width: MAG_W }, { borderColor: selected ? colors.primary : gCol, borderWidth: selected ? 3 : 2, backgroundColor: selected ? 'rgba(16,185,129,0.14)' : gBg, zIndex: selected ? 9 : 1 }]}
         accessibilityLabel={`${player.userName} ${g ? g.label : ''} ${selected ? '선택 해제' : '선택'} · 길게=정보·수정`}
       >
         {typeof order === 'number' && <View style={[styles.poolOrder, { backgroundColor: colors.surfaceSecondary }]}><Text style={[styles.poolOrderT, { color: colors.textSecondary }]}>{order}</Text></View>}
@@ -4555,7 +4558,7 @@ export default function OperateScreen() {
             return p ? (
               <PlayerTag key={s} player={p} fill compact big />
             ) : (
-              <TouchableOpacity key={s} disabled={!selectedPlayer} activeOpacity={0.6} onPress={() => { if (selectedPlayer) moveSelectedToGame(frame.id); }} style={[styles.gameSlotEmpty, { borderColor: target ? colors.primary : colors.border, backgroundColor: target ? 'rgba(16,185,129,0.10)' : 'transparent' }]}>
+              <TouchableOpacity key={s} disabled={!selectedPlayer} activeOpacity={0.6} onPress={() => { if (selectedPlayer) moveSelectedToGame(frame.id); }} style={[styles.gameSlotEmpty, narrowSlots && styles.slotHalf, { borderColor: target ? colors.primary : colors.border, backgroundColor: target ? 'rgba(16,185,129,0.10)' : 'transparent' }]}>
                 <Text style={[styles.slotEmpty, { color: target ? colors.primary : colors.textLight }]}>＋</Text>
               </TouchableOpacity>
             );
@@ -4673,11 +4676,11 @@ export default function OperateScreen() {
                           <View key={ri} style={styles.gameFrameSlots}>
                             {[0, 1, 2, 3].map((si) => {
                               const id = row[si];
-                              if (!id) return <View key={si} style={styles.poolGapSlot} />;
+                              if (!id) return <View key={si} style={[styles.poolGapSlot, narrowSlots && styles.slotHalf]} />;
                               // 다음 게임에 편성된(inQueue) 선수는 '게임 중 선수'처럼 그 자리를 빈칸으로 —
                               // 밑의 사람이 위로 채워지지 않게(자리 유지). 편성 빼면 다시 이름표로 복원.
-                              if (inQueue.has(id)) return <View key={id} style={styles.poolGapSlot} />;
-                              const p = getPlayer(id); return p ? <PlayerTag key={id} player={p} fill compact /> : <View key={si} style={styles.poolGapSlot} />;
+                              if (inQueue.has(id)) return <View key={id} style={[styles.poolGapSlot, narrowSlots && styles.slotHalf]} />;
+                              const p = getPlayer(id); return p ? <PlayerTag key={id} player={p} fill compact /> : <View key={si} style={[styles.poolGapSlot, narrowSlots && styles.slotHalf]} />;
                             })}
                           </View>
                         ))}
@@ -4695,8 +4698,8 @@ export default function OperateScreen() {
                           {visiblePlaying.map((pc, i) => (
                             <View key={`play${i}`} style={[styles.gameFrameSlots, { borderTopWidth: 1, borderTopColor: colors.warningLight, paddingTop: 4 }]}>
                               {pc.ids.map((id) => {
-                                if (inQueue.has(id)) return <View key={id} style={styles.poolGapSlot} />; // 편성됨 → 자리 비움
-                                const p = getPlayer(id); return p ? <PlayerTag key={id} player={p} fill compact /> : <View key={id} style={styles.poolGapSlot} />;
+                                if (inQueue.has(id)) return <View key={id} style={[styles.poolGapSlot, narrowSlots && styles.slotHalf]} />; // 편성됨 → 자리 비움
+                                const p = getPlayer(id); return p ? <PlayerTag key={id} player={p} fill compact /> : <View key={id} style={[styles.poolGapSlot, narrowSlots && styles.slotHalf]} />;
                               })}
                             </View>
                           ))}
@@ -6096,7 +6099,9 @@ const styles = StyleSheet.create({
   gameFrameStart: { flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: spacing.md, paddingVertical: 5, borderRadius: radius.md },
   gameFrameStartT: { ...typography.buttonSm, color: '#fff', fontWeight: '800' },
   gameFrameWait: { ...typography.caption, fontWeight: '700' },
-  gameFrameSlots: { flexDirection: 'row', gap: 4 },
+  gameFrameSlots: { flexDirection: 'row', flexWrap: 'wrap', gap: 4 },
+  // 좁은 폭에서 슬롯을 2×2로: 한 칸이 행의 ~48%를 차지 → 한 줄에 2개, 4개면 2줄.
+  slotHalf: { flexBasis: '48%', flexGrow: 1, flexShrink: 1, minWidth: 0 },
   // 코트 카드(위 가로줄, 좁음)는 4명을 2x2로 — 한 줄 4명이면 이름이 1글자로 잘림.
   m2CourtSlots: { flexDirection: 'row', flexWrap: 'wrap', gap: 4 },
   m2CourtSlotItem: { flexBasis: '47%', flexGrow: 1 },
