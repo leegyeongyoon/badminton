@@ -4648,14 +4648,7 @@ export default function OperateScreen() {
           <Text style={[styles.m2PanelTitle, { color: colors.text }]}>대기 명단 ({pool.length}) · 급수순</Text>
           {/* 대기 명단 검색 + 성별 필터 — 가운데 게임은 그대로, 대기만 추림 */}
           <View style={styles.m2PoolSearchRow}>
-            {/* 태블릿은 대기 인원이 적어 검색 불필요 → 검색창 숨김(성별/급수 필터는 유지). */}
-            {!narrowSlots && (
-              <>
-                <TextInput value={poolQuery} onChangeText={setPoolQuery} placeholder="대기 검색" placeholderTextColor={colors.textLight}
-                  style={[styles.m2PoolSearch, { borderColor: colors.border, color: colors.text, backgroundColor: colors.surface }]} />
-                {poolQuery !== '' && <TouchableOpacity onPress={() => setPoolQuery('')} style={styles.m2PoolSearchClear}><Icon name="close" size={13} color={colors.textLight} /></TouchableOpacity>}
-              </>
-            )}
+            {/* 대기 검색창 제거 — 굳이 검색 안 해도 되어 성별/급수 필터만 둔다(PC·태블릿 공통). */}
             {(['all', 'M', 'F'] as const).map((gf) => {
               const on = gf === 'all' ? poolGenders.length === 0 : poolGenders.includes(gf);
               return (
