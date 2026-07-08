@@ -11,7 +11,9 @@ export const authApi = {
   login: (data: { phone: string; password: string }) =>
     api.post('/auth/login', data),
 
-  kakaoLogin: (data: { code: string; redirectUri: string }) =>
+  // WEB sends { code, redirectUri } (server exchanges w/ secret); NATIVE sends
+  // { accessToken } (Kakao SDK returned it) — server accepts both.
+  kakaoLogin: (data: { code: string; redirectUri: string } | { accessToken: string }) =>
     api.post('/auth/kakao', data),
 
   // WEB sends { code, redirectUri } (server exchanges w/ secret); NATIVE sends

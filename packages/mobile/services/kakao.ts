@@ -1,12 +1,10 @@
 import { Platform } from 'react-native';
 import Constants from 'expo-constants';
 import * as WebBrowser from 'expo-web-browser';
-import {
-  AuthRequest,
-  ResponseType,
-  makeRedirectUri,
-  type AuthSessionResult,
-} from 'expo-auth-session';
+// Kakao NATIVE SDK. Both packages ship web stubs (index.web.js), so importing
+// them is safe on web; the SDK calls below are gated to native only.
+import { initializeKakaoSDK } from '@react-native-kakao/core';
+import { login as kakaoSdkLogin } from '@react-native-kakao/user';
 
 /**
  * Kakao OAuth — authorization-code step ONLY (secure, server-side exchange).
@@ -33,11 +31,6 @@ import {
 
 const KAKAO_KEY_PLACEHOLDER = 'REPLACE_WITH_KAKAO_KEY';
 
-const KAKAO_DISCOVERY = {
-  authorizationEndpoint: 'https://kauth.kakao.com/oauth/authorize',
-  tokenEndpoint: 'https://kauth.kakao.com/oauth/token',
-};
-
 /** The configured Kakao REST key, or null when not (yet) configured. */
 function getKakaoKey(): string | null {
   const key = Constants.expoConfig?.extra?.kakaoRestKey as string | undefined;
@@ -60,65 +53,41 @@ export function isKakaoConfigured(): boolean {
 // Required on web so the popup window can deliver the auth result back.
 WebBrowser.maybeCompleteAuthSession();
 
+let kakaoSdkInitialized = false;
+
 /**
- * Runs Kakao's authorize step and resolves to the authorization `code` plus the
- * EXACT `redirectUri` used to obtain it (the backend must reuse the same
- * redirectUri for the token exchange — Kakao validates the match). Resolves to
- * null when:
- *  - no real Kakao key is configured (placeholder) — caller shows "키 필요", or
- *  - the user cancelled / dismissed the auth prompt, or
- *  - the flow otherwise failed.
+ * NATIVE Kakao login via the Kakao SDK.
  *
- * Web-safe: uses expo-web-browser under the hood via expo-auth-session.
+ * Why the SDK (not the REST/authorize flow): Kakao's REST authorize requires the
+ * redirect_uri to EXACTLY match a Redirect URI registered in the console. This
+ * Kakao app is SHARED (eattable) and its console exposes no place to register a
+ * native custom-scheme redirect — so both `badminton://` and `kakao{key}://oauth`
+ * fail with KOE006 (앱 관리자 설정 오류). The SDK instead authenticates through the
+ * KakaoTalk app / Kakao account and is validated by the REGISTERED iOS/Android
+ * platform (bundle id / package) — NO redirect URI needed. It returns a Kakao
+ * access token directly, which the backend accepts on its { accessToken } path
+ * (server validates it against Kakao's user API — no client_secret involved here).
+ *
+ * Returns null when: on web (web uses the full-page redirect flow), no native key
+ * configured (→ caller shows "키 필요"), or the user cancelled / the flow failed.
  */
-export async function getKakaoAuthCode(): Promise<{ code: string; redirectUri: string } | null> {
-  const clientId = getKakaoKey();
-  // Not configured → never attempt OAuth; let the caller show the friendly
-  // "카카오 로그인 설정이 준비 중이에요 (키 필요)" message.
-  if (!clientId) return null;
-
-  // Compute the redirect URI ONCE. Kakao validates the native redirect against
-  // the REGISTERED iOS/Android platform (bundle id / package) — NOT a Redirect URI
-  // list — and the accepted scheme is `kakao{NATIVE_APP_KEY}://oauth`. Using our
-  // app scheme (`badminton://`) fails with KOE006 because it matches no platform.
-  // So on native we use the Kakao scheme (registered in app.json). Fall back to
-  // the app scheme only if the native key is somehow missing. The SAME value is
-  // returned to the caller so the backend token exchange uses an identical
-  // redirect_uri (Kakao validates the match).
+export async function getKakaoAuthCode(): Promise<{ accessToken: string } | null> {
+  if (Platform.OS === 'web') return null;
   const nativeKey = getKakaoNativeKey();
-  const redirectUri = nativeKey
-    ? `kakao${nativeKey}://oauth`
-    : makeRedirectUri({ scheme: 'badminton' });
+  // Not configured → never attempt login; caller shows the friendly "키 필요".
+  if (!nativeKey) return null;
 
-  const request = new AuthRequest({
-    clientId,
-    redirectUri,
-    responseType: ResponseType.Code,
-    // No forced scope: requesting an unconfigured consent item (e.g.
-    // profile_nickname) on the shared Kakao app triggers KOE205 at the consent
-    // step. We only need the kakao id to identify/create the user; the backend
-    // falls back to '카카오회원' when no nickname is returned. To request the
-    // nickname later, enable the 닉네임(profile_nickname) consent item in the
-    // Kakao console (선택 동의) and set scopes: ['profile_nickname'] here.
-    scopes: [],
-    usePKCE: false,
-  });
-
-  let result: AuthSessionResult;
   try {
-    result = await request.promptAsync(KAKAO_DISCOVERY);
+    if (!kakaoSdkInitialized) {
+      initializeKakaoSDK(nativeKey);
+      kakaoSdkInitialized = true;
+    }
+    const token = await kakaoSdkLogin();
+    return token?.accessToken ? { accessToken: token.accessToken } : null;
   } catch {
+    // user cancelled, KakaoTalk/account login dismissed, or SDK error.
     return null;
   }
-
-  if (result.type !== 'success' || !result.params.code) {
-    // 'cancel' / 'dismiss' / 'error' — treat all as "no code".
-    return null;
-  }
-
-  // No client-side token exchange (no client_secret here). Hand the raw code +
-  // the redirectUri to the backend.
-  return { code: result.params.code, redirectUri };
 }
 
 // ───────────────────────────────────────────────────────────────────────────
