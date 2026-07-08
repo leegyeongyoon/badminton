@@ -149,6 +149,9 @@ export default function OperateScreen() {
   // 태블릿/폰(좁은 폭)에서는 선수 슬롯을 한 줄 4칸 대신 2×2로 감싸 칩을 넓힌다 →
   // 한글 이름이 잘리지 않게. 데스크톱(>=1180)은 기존 4칸 그대로 유지(안전).
   const narrowSlots = layout.width < 1180;
+  // 아주 좁은 폭(폰). 태블릿은 게임판 1열이라 슬롯을 1×4로 둬도 넓어서 이름이 보이지만,
+  // 폰은 카드가 좁아 슬롯을 2×2로 감싼다.
+  const veryNarrow = layout.width < 768;
 
   // Actual laid-out width of the courts area (measured, NOT the window) → drives
   // the court-grid column count so each court cell is ≥ ~150px wide.
@@ -4342,7 +4345,11 @@ export default function OperateScreen() {
   ];
   // 게임판은 '항상 2분할(2열)' 유지 — 게임이 적어도 2열로 균형 있게(가독성). 컬럼당 = ceil(개수/2).
   // 4→2/2, 6→3/3, 10→5/5, 12→6/6, 14→7/7… (게임이 1개뿐이면 1열)
-  const GAME_COL = Math.max(1, Math.ceil(queueFrames.length / 2));
+  // 데스크톱은 게임판 2열(넓어서 균형), 태블릿/폰(narrowSlots)은 1열로 → 게임 카드가
+  // 넓어져 슬롯(선수 4명)이 커지고 이름이 다 보여 짜기 쉬움(레이아웃 자체를 바꿈).
+  const GAME_COL = narrowSlots
+    ? Math.max(1, queueFrames.length)
+    : Math.max(1, Math.ceil(queueFrames.length / 2));
   const gameColumns: Array<typeof queueFrames> = [];
   for (let i = 0; i < queueFrames.length; i += GAME_COL) gameColumns.push(queueFrames.slice(i, i + GAME_COL));
   const firstEmptyCourt = courts.find((c) => c.status === 'EMPTY' && !playingByCourtId.get(c.id));
@@ -4409,7 +4416,7 @@ export default function OperateScreen() {
         }}
         onLongPress={() => setMatchupTarget({ userId: player.userId, name: player.userName, skillLevel: player.skillLevel, isGuest: (player as any).isGuest })}
         delayLongPress={300}
-        style={[styles.poolTag, compact && (big ? styles.poolTagBig : styles.poolTagCompact), fill ? (narrowSlots && big ? styles.slotHalf : { flex: 1, minWidth: 0 }) : block ? { width: '100%' } : { width: MAG_W }, { borderColor: selected ? colors.primary : gCol, borderWidth: selected ? 3 : 2, backgroundColor: selected ? 'rgba(16,185,129,0.14)' : gBg, zIndex: selected ? 9 : 1 }]}
+        style={[styles.poolTag, compact && (big ? styles.poolTagBig : styles.poolTagCompact), fill ? (veryNarrow && big ? styles.slotHalf : { flex: 1, minWidth: 0 }) : block ? { width: '100%' } : { width: MAG_W }, { borderColor: selected ? colors.primary : gCol, borderWidth: selected ? 3 : 2, backgroundColor: selected ? 'rgba(16,185,129,0.14)' : gBg, zIndex: selected ? 9 : 1 }]}
         accessibilityLabel={`${player.userName} ${g ? g.label : ''} ${selected ? '선택 해제' : '선택'} · 길게=정보·수정`}
       >
         {typeof order === 'number' && <View style={[styles.poolOrder, { backgroundColor: colors.surfaceSecondary }]}><Text style={[styles.poolOrderT, { color: colors.textSecondary }]}>{order}</Text></View>}
@@ -4562,7 +4569,7 @@ export default function OperateScreen() {
             return p ? (
               <PlayerTag key={s} player={p} fill compact big />
             ) : (
-              <TouchableOpacity key={s} disabled={!selectedPlayer} activeOpacity={0.6} onPress={() => { if (selectedPlayer) moveSelectedToGame(frame.id); }} style={[styles.gameSlotEmpty, narrowSlots && styles.slotHalf, { borderColor: target ? colors.primary : colors.border, backgroundColor: target ? 'rgba(16,185,129,0.10)' : 'transparent' }]}>
+              <TouchableOpacity key={s} disabled={!selectedPlayer} activeOpacity={0.6} onPress={() => { if (selectedPlayer) moveSelectedToGame(frame.id); }} style={[styles.gameSlotEmpty, veryNarrow && styles.slotHalf, { borderColor: target ? colors.primary : colors.border, backgroundColor: target ? 'rgba(16,185,129,0.10)' : 'transparent' }]}>
                 <Text style={[styles.slotEmpty, { color: target ? colors.primary : colors.textLight }]}>＋</Text>
               </TouchableOpacity>
             );
