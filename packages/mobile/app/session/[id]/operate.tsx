@@ -5959,9 +5959,9 @@ const styles = StyleSheet.create({
   m2Wrap: { flex: 1 },
   // 일번 배치: 코트 위(가로) / 게임판 가운데(세로) / 대기 오른쪽
   m2CourtTopRow: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm, paddingHorizontal: spacing.smd, paddingTop: spacing.sm },
-  // 좁은 폭에서 코트 카드가 최소 175px를 확보하며 줄바꿈 → 태블릿 5~6개/줄(컴팩트),
-  // 폰 2개/줄. (너무 크지 않게 — 한눈에 여러 코트가 보이도록.)
-  m2CourtCardNarrow: { flexBasis: 185, flexGrow: 1, flexShrink: 1, minWidth: 175 },
+  // 좁은 폭에서 코트 카드가 최소 152px를 확보하며 줄바꿈 → 태블릿(1024)은 6개/줄=1줄
+  // 로 컴팩트(세로 공간 최소화, 게임판이 주). 폰은 2개/줄. 코트는 참고용이라 작아도 OK.
+  m2CourtCardNarrow: { flexBasis: 160, flexGrow: 1, flexShrink: 1, minWidth: 152 },
   m2CourtTop: { flex: 1, minWidth: 0, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 6, paddingHorizontal: spacing.md, paddingVertical: 10, borderWidth: 2, borderRadius: radius.md },
   m2CourtCard: { flex: 1, minWidth: 0, borderWidth: 2, borderRadius: radius.md, padding: spacing.sm },
   m2Body: { flex: 1, flexDirection: 'row', paddingTop: spacing.xs },
