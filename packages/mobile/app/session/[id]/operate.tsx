@@ -4453,7 +4453,7 @@ export default function OperateScreen() {
         </View>
         <View style={styles.m2CourtSlots}>
           {[0, 1, 2, 3].map((s) => { const pid = pids[s]; const p = pid ? getPlayer(pid) : null; const sk = getSkillMeta(p?.skillLevel); const gm = getGenderMeta(p?.gender); return (
-            <TouchableOpacity key={s} disabled={!pid || !turnId} activeOpacity={0.7} onPress={() => { if (turnId && pid) setRunningSwap({ turnId, outUserId: pid, courtName: court.name, currentIds: pids }); }} style={[styles.gameSlot, styles.m2CourtSlotItem, { borderColor: pid ? (gm ? (gm.gender === 'M' ? '#2563EB' : '#CA8A04') : sk.color) : colors.border, backgroundColor: gm ? (gm.gender === 'M' ? '#EFF6FF' : '#FEFCE8') : colors.surface }]} accessibilityLabel={pid ? `${p?.userName ?? pnames[s] ?? ''} ${gm?.label ?? ''} 교체` : '빈 칸'}>
+            <TouchableOpacity key={s} disabled={!pid || !turnId} activeOpacity={0.7} onPress={() => { if (turnId && pid) setRunningSwap({ turnId, outUserId: pid, courtName: court.name, currentIds: pids }); }} style={[styles.gameSlot, styles.m2CourtSlotItem, narrowSlots && styles.m2CourtSlotCompact, { borderColor: pid ? (gm ? (gm.gender === 'M' ? '#2563EB' : '#CA8A04') : sk.color) : colors.border, backgroundColor: gm ? (gm.gender === 'M' ? '#EFF6FF' : '#FEFCE8') : colors.surface }]} accessibilityLabel={pid ? `${p?.userName ?? pnames[s] ?? ''} ${gm?.label ?? ''} 교체` : '빈 칸'}>
               {pid ? (<><View style={[styles.slotSkill, { backgroundColor: sk.color }]}><Text style={styles.slotSkillText}>{(p?.skillLevel || '·').toUpperCase()}</Text></View><Text style={[styles.slotName, { color: colors.text }]} numberOfLines={1}>{p?.userName ?? pnames[s] ?? '선수'}</Text>{gm && <GenderMarker meta={gm} size={12} />}</>) : <Text style={[styles.slotEmpty, { color: colors.textLight }]}>·</Text>}
             </TouchableOpacity>
           ); })}
@@ -5978,9 +5978,11 @@ const styles = StyleSheet.create({
   m2Wrap: { flex: 1 },
   // 일번 배치: 코트 위(가로) / 게임판 가운데(세로) / 대기 오른쪽
   m2CourtTopRow: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm, paddingHorizontal: spacing.smd, paddingTop: spacing.sm },
-  // 좁은 폭에서 코트 카드가 최소 185px를 확보하며 줄바꿈 → 태블릿(1024)은 5개/줄,
-  // 코트 안 선수 2×2 이름이 보이도록(152=너무작음·220=너무큼 사이). 폰은 2개/줄.
-  m2CourtCardNarrow: { flexBasis: 195, flexGrow: 1, flexShrink: 1, minWidth: 185 },
+  // 태블릿에서 코트는 '게임 넣고 확인'용(참고)이라 작게 → 6개/줄=1줄로 컴팩트,
+  // 세로 공간을 게임판(짜는 곳)에 몰아줌. 폰은 3개/줄.
+  m2CourtCardNarrow: { flexBasis: 156, flexGrow: 1, flexShrink: 1, minWidth: 150, paddingVertical: 5, paddingHorizontal: 7 },
+  // 코트 선수 슬롯 높이도 줄여(28) 코트 카드가 짧아지게 — 참고용이라 컴팩트.
+  m2CourtSlotCompact: { minHeight: 27, paddingVertical: 2 },
   m2CourtTop: { flex: 1, minWidth: 0, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 6, paddingHorizontal: spacing.md, paddingVertical: 10, borderWidth: 2, borderRadius: radius.md },
   m2CourtCard: { flex: 1, minWidth: 0, borderWidth: 2, borderRadius: radius.md, padding: spacing.sm },
   m2Body: { flex: 1, flexDirection: 'row', paddingTop: spacing.xs },
