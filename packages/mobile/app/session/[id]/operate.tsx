@@ -4608,7 +4608,7 @@ export default function OperateScreen() {
       {/* 코트: 위 가로줄 — 빈 코트 탭=다음 게임 투입 */}
       {narrowSlots ? (
         // 태블릿/폰: 코트를 좌우 스크롤 1줄로(감싸서 2줄 되는 것보다 깔끔 · 폰은 각 코트 넓게)
-        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.m2CourtScrollContent}>
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.m2CourtScroll} contentContainerStyle={styles.m2CourtScrollContent}>
           {courts.length === 0
             ? <Text style={[styles.emptyPool, { color: colors.textLight }]}>코트가 없어요. "코트 관리"에서 추가</Text>
             : courts.map((court) => <Mode2CourtCard key={court.id} court={court} />)}
@@ -5995,7 +5995,9 @@ const styles = StyleSheet.create({
   m2CourtCardNarrow: { flexBasis: 168, flexGrow: 0, flexShrink: 1, minWidth: 160, paddingVertical: 5, paddingHorizontal: 7 },
   // 폰: 좌우 스크롤용 고정폭 코트(넓게 → 가독성). 1.3개쯤 보여 스크롤 가능함이 드러남.
   m2CourtCardPhone: { width: 290, paddingVertical: 5, paddingHorizontal: 8 },
-  m2CourtScrollContent: { flexDirection: 'row', gap: 8, paddingHorizontal: 12, paddingTop: 8 },
+  // alignItems flex-start → 코트가 세로로 stretch되지 않고 내용 높이만 차지(안 늘어남).
+  m2CourtScrollContent: { flexDirection: 'row', alignItems: 'flex-start', gap: 8, paddingHorizontal: 12, paddingTop: 8 },
+  m2CourtScroll: { flexGrow: 0, flexShrink: 0 },
   // 코트 선수 슬롯 높이도 줄여(28) 코트 카드가 짧아지게 — 참고용이라 컴팩트.
   m2CourtSlotCompact: { minHeight: 27, paddingVertical: 2 },
   m2CourtTop: { flex: 1, minWidth: 0, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 6, paddingHorizontal: spacing.md, paddingVertical: 10, borderWidth: 2, borderRadius: radius.md },
