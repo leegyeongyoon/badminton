@@ -4438,7 +4438,8 @@ export default function OperateScreen() {
         <View style={styles.m2CourtHead}>
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, flex: 1, minWidth: 0 }}>
             <Text style={[styles.m2CourtName, { color: colors.text }]} numberOfLines={1}>{court.name}</Text>
-            <CourtElapsedBadge startedAt={court.currentTurn?.startedAt} />
+            {/* 태블릿은 헤더가 좁아 타이머를 숨겨 코트 이름이 잘리지 않게 함. */}
+            {!narrowSlots && <CourtElapsedBadge startedAt={court.currentTurn?.startedAt} />}
           </View>
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
             <TouchableOpacity onPress={() => handleUnassign(court.id)} accessibilityLabel={`${court.name} 배정 취소(대기로)`}><Text style={[styles.m2CourtState, { color: colors.textSecondary }]}>대기로</Text></TouchableOpacity>
