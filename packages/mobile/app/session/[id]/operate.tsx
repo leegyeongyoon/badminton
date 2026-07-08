@@ -4606,8 +4606,8 @@ export default function OperateScreen() {
   const BoardMode2 = (
     <View style={styles.m2Wrap}>
       {/* 코트: 위 가로줄 — 빈 코트 탭=다음 게임 투입 */}
-      {isPhone ? (
-        // 폰: 코트를 좌우 스크롤 1줄로(각 코트 넓게 → 가독성↑)
+      {narrowSlots ? (
+        // 태블릿/폰: 코트를 좌우 스크롤 1줄로(감싸서 2줄 되는 것보다 깔끔 · 폰은 각 코트 넓게)
         <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.m2CourtScrollContent}>
           {courts.length === 0
             ? <Text style={[styles.emptyPool, { color: colors.textLight }]}>코트가 없어요. "코트 관리"에서 추가</Text>
