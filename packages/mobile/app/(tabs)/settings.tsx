@@ -226,6 +226,13 @@ export default function SettingsScreen() {
         <Text style={[styles.versionText, { color: colors.textLight }]}>v1.0.0</Text>
         <Text
           style={[styles.versionText, { color: colors.primary, marginTop: 6, fontWeight: '600' }]}
+          onPress={() => router.push('/guide')}
+          accessibilityRole="link"
+        >
+          앱 사용법
+        </Text>
+        <Text
+          style={[styles.versionText, { color: colors.primary, marginTop: 6, fontWeight: '600' }]}
           onPress={() => router.push('/privacy')}
           accessibilityRole="link"
         >

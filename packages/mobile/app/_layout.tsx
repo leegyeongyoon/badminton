@@ -261,6 +261,7 @@ function RootLayoutInner() {
           <Stack.Screen name="guest-status" options={transitions.fadeScale} />
           <Stack.Screen name="operator-pending" options={transitions.fadeScale} />
           <Stack.Screen name="privacy" options={transitions.slideFromRight} />
+          <Stack.Screen name="guide" options={transitions.slideFromRight} />
           <Stack.Screen name="facility-select" />
           <Stack.Screen name="notifications" options={transitions.modalSlideUp} />
           <Stack.Screen name="admin/index" options={transitions.slideFromRight} />

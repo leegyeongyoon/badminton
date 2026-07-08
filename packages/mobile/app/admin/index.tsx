@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
-import { View, Text, StyleSheet, ScrollView, ActivityIndicator, Platform } from 'react-native';
+import { View, Text, StyleSheet, ScrollView, ActivityIndicator, Platform, TouchableOpacity } from 'react-native';
 import Animated from 'react-native-reanimated';
+import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import { useCheckinStore } from '../../store/checkinStore';
 import { useFacilityStore } from '../../store/facilityStore';
@@ -234,6 +235,20 @@ export default function AdminDashboard() {
           isSessionActive={!!session}
           onToggleSession={session ? handleCloseSession : handleOpenSession}
         />
+        {/* 운영 사용법 가이드 진입 — 처음 운영하는 관리자를 위한 안내 */}
+        <TouchableOpacity
+          style={[styles.guideCard, { backgroundColor: colors.surface, borderColor: colors.divider }]}
+          onPress={() => router.push('/guide?role=operator')}
+          activeOpacity={0.7}
+          accessibilityRole="button"
+        >
+          <MaterialCommunityIcons name="book-open-variant" size={22} color={colors.primary} />
+          <View style={{ flex: 1 }}>
+            <Text style={[styles.guideCardTitle, { color: colors.text }]}>운영이 처음이신가요?</Text>
+            <Text style={[styles.guideCardSub, { color: colors.textSecondary }]}>운영 시작·게임 편성·코트 관리 사용법 보기</Text>
+          </View>
+          <MaterialCommunityIcons name="chevron-right" size={22} color={colors.textLight} />
+        </TouchableOpacity>
       </Animated.View>
 
       {/* Session Controls */}
@@ -304,6 +319,17 @@ export default function AdminDashboard() {
 }
 
 const styles = StyleSheet.create({
+  guideCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    padding: 14,
+    marginTop: 12,
+    borderRadius: 14,
+    borderWidth: StyleSheet.hairlineWidth,
+  },
+  guideCardTitle: { fontSize: 14, fontWeight: '700', marginBottom: 2 },
+  guideCardSub: { fontSize: 12 },
   container: { flex: 1 },
   topBar: {
     flexDirection: 'row',
