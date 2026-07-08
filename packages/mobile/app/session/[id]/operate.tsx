@@ -4632,7 +4632,13 @@ export default function OperateScreen() {
         </ScrollView>
         {/* 분할 디바이더 — 끌어서 가운데 게임판 ↔ 오른쪽 대기판 크기 조절(모드1 분할처럼) */}
         <View style={[styles.m2Divider, Platform.OS === 'web' ? ({ cursor: 'col-resize' } as any) : null]} {...m2DividerPan.panHandlers}>
-          <View style={[styles.m2DividerBar, { backgroundColor: colors.textLight }]} />
+          <View style={[styles.m2DividerBar, { backgroundColor: colors.border }]} />
+          {/* 잡아서 좌우로 끌면 게임판↔대기명단 넓이 조절 — 조절 가능함을 알리는 그립 핸들 */}
+          <View style={[styles.m2DividerHandle, { backgroundColor: colors.surface, borderColor: colors.primary }]}>
+            <View style={[styles.m2DividerDot, { backgroundColor: colors.primary }]} />
+            <View style={[styles.m2DividerDot, { backgroundColor: colors.primary }]} />
+            <View style={[styles.m2DividerDot, { backgroundColor: colors.primary }]} />
+          </View>
         </View>
         {/* 오른쪽 대기판 = 대기 명단을 '같이 나온 4명'끼리 한 줄로 정렬. 그 4명을 탭→다음 게임으로 재편성. */}
         <View style={[styles.m2PoolRight, { borderLeftColor: colors.border, width: m2RightWidth }]}>
@@ -4673,10 +4679,15 @@ export default function OperateScreen() {
                   <View style={{ width: '100%', gap: 5 }}>
                     {/* 대기 버킷 — 서버 lastPlayedAt(코트에서 나온 시각) 기준. 오래 기다린 선수(15/30/60분
                         이상 편성 안 됨)를 경고 헤더로 위에, 아직 안 친 선수·방금 끝난 선수는 아래로. */}
-                    {waitSections.map((sec) => (
+                    {waitSections.map((sec) => {
+                      // 태블릿/폰: 이미 편성된(inQueue) 선수는 빈칸으로 남기지 않고 빼서 대기자만
+                      // 4명씩 깔끔히 묶는다(흩어짐 방지). 데스크톱은 기존대로 자리 유지.
+                      const secIds = narrowSlots ? sec.ids.filter((id) => !inQueue.has(id)) : sec.ids;
+                      if (secIds.length === 0) return null;
+                      return (
                       <View key={sec.key} style={{ gap: 3 }}>
-                        <Text style={[styles.m2SectionLabel, { color: sec.color, marginTop: 6 }]}>{sec.label} · {sec.ids.length}명</Text>
-                        {chunk4(sec.ids).map((row, ri) => (
+                        <Text style={[styles.m2SectionLabel, { color: sec.color, marginTop: 6 }]}>{sec.label} · {secIds.length}명</Text>
+                        {chunk4(secIds).map((row, ri) => (
                           <View key={ri} style={styles.gameFrameSlots}>
                             {[0, 1, 2, 3].map((si) => {
                               const id = row[si];
@@ -4689,7 +4700,8 @@ export default function OperateScreen() {
                           </View>
                         ))}
                       </View>
-                    ))}
+                      );
+                    })}
                     {/* 코트에서 게임 중인 묶음 — 맨 밑에 4명 한 줄로. 끌어다 놓아 다음 게임 미리 편성.
                         이미 다음 게임으로 편성된(inQueue) 선수는 '방금 끝난 게임'처럼 그 자리만 빈칸으로
                         비운다(이름표가 남지 않도록). 자리는 유지돼 빼면 다시 채워짐. 4명 다 편성된 코트 줄은 숨김. */}
@@ -5977,8 +5989,11 @@ const styles = StyleSheet.create({
   m2GChip: { paddingHorizontal: 8, height: 30, borderRadius: radius.md, borderWidth: 1.5, alignItems: 'center', justifyContent: 'center' },
   m2GChipT: { ...typography.caption, fontWeight: '800' },
   m2SkChip: { minWidth: 28, height: 26, paddingHorizontal: 5, borderRadius: radius.sm, borderWidth: 1.5, alignItems: 'center', justifyContent: 'center' },
-  m2Divider: { width: 16, alignSelf: 'stretch', alignItems: 'center', justifyContent: 'center' },
-  m2DividerBar: { width: 4, alignSelf: 'stretch', borderRadius: 2, marginVertical: 6, opacity: 0.7 },
+  m2Divider: { width: 18, alignSelf: 'stretch', alignItems: 'center', justifyContent: 'center', position: 'relative' },
+  m2DividerBar: { position: 'absolute', width: 3, top: 8, bottom: 8, borderRadius: 2 },
+  // 잡을 수 있는 그립 핸들(점 3개) — 조절 가능함을 시각적으로 알림.
+  m2DividerHandle: { width: 14, height: 46, borderRadius: 7, borderWidth: 1.5, alignItems: 'center', justifyContent: 'center', gap: 3 },
+  m2DividerDot: { width: 3.5, height: 3.5, borderRadius: 2 },
   // (이전 2단 스타일 — 일부 미사용)
   m2Board: { flex: 1, flexDirection: 'row' },
   m2Left: { flex: 1, paddingLeft: spacing.smd, paddingTop: spacing.sm },
