@@ -5991,8 +5991,9 @@ const styles = StyleSheet.create({
   m2CourtTopRow: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm, paddingHorizontal: spacing.smd, paddingTop: spacing.sm },
   // 태블릿에서 코트는 '게임 넣고 확인'용(참고)이라 작게 → 6개/줄=1줄로 컴팩트,
   // 세로 공간을 게임판(짜는 곳)에 몰아줌. 폰은 3개/줄.
-  // flexGrow 0 → 마지막 줄에 코트가 혼자 남아도 늘어나지 않고 원래 크기(168) 유지.
-  m2CourtCardNarrow: { flexBasis: 168, flexGrow: 0, flexShrink: 1, minWidth: 160, paddingVertical: 5, paddingHorizontal: 7 },
+  // 가로 스크롤이라 코트가 좁을 필요 없음 → 230px로 넓혀 코트 안 선수 이름이 다 보이게
+  // (세로 높이는 그대로 컴팩트, 넘치면 좌우 스크롤).
+  m2CourtCardNarrow: { width: 230, paddingVertical: 5, paddingHorizontal: 8 },
   // 폰: 좌우 스크롤용 고정폭 코트(넓게 → 가독성). 1.3개쯤 보여 스크롤 가능함이 드러남.
   m2CourtCardPhone: { width: 290, paddingVertical: 5, paddingHorizontal: 8 },
   // alignItems flex-start → 코트가 세로로 stretch되지 않고 내용 높이만 차지(안 늘어남).
