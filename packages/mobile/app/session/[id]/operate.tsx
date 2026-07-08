@@ -325,7 +325,7 @@ export default function OperateScreen() {
   // 대기 명단 기본 폭 — 컴퓨터(>=1180)는 500px, 태블릿/좁은 폭은 화면의 36%(최소 300)
   // 로 시작해 게임판이 눌리지 않게. 이후 가운데 디바이더를 끌어 자유 조절(280~820).
   const [m2RightWidth, setM2RightWidth] = useState(() =>
-    layout.width >= 1180 ? 500 : Math.max(300, Math.min(460, Math.round(layout.width * 0.36))),
+    layout.width >= 1180 ? 500 : Math.max(360, Math.min(520, Math.round(layout.width * 0.44))),
   );
   const m2RightWidthRef = useRef(m2RightWidth); m2RightWidthRef.current = m2RightWidth;
   const m2DragStartRef = useRef(500);
@@ -4409,7 +4409,7 @@ export default function OperateScreen() {
         }}
         onLongPress={() => setMatchupTarget({ userId: player.userId, name: player.userName, skillLevel: player.skillLevel, isGuest: (player as any).isGuest })}
         delayLongPress={300}
-        style={[styles.poolTag, compact && (big ? styles.poolTagBig : styles.poolTagCompact), fill ? (narrowSlots ? styles.slotHalf : { flex: 1, minWidth: 0 }) : block ? { width: '100%' } : { width: MAG_W }, { borderColor: selected ? colors.primary : gCol, borderWidth: selected ? 3 : 2, backgroundColor: selected ? 'rgba(16,185,129,0.14)' : gBg, zIndex: selected ? 9 : 1 }]}
+        style={[styles.poolTag, compact && (big ? styles.poolTagBig : styles.poolTagCompact), fill ? (narrowSlots && big ? styles.slotHalf : { flex: 1, minWidth: 0 }) : block ? { width: '100%' } : { width: MAG_W }, { borderColor: selected ? colors.primary : gCol, borderWidth: selected ? 3 : 2, backgroundColor: selected ? 'rgba(16,185,129,0.14)' : gBg, zIndex: selected ? 9 : 1 }]}
         accessibilityLabel={`${player.userName} ${g ? g.label : ''} ${selected ? '선택 해제' : '선택'} · 길게=정보·수정`}
       >
         {typeof order === 'number' && <View style={[styles.poolOrder, { backgroundColor: colors.surfaceSecondary }]}><Text style={[styles.poolOrderT, { color: colors.textSecondary }]}>{order}</Text></View>}
@@ -4691,11 +4691,11 @@ export default function OperateScreen() {
                           <View key={ri} style={styles.gameFrameSlots}>
                             {[0, 1, 2, 3].map((si) => {
                               const id = row[si];
-                              if (!id) return <View key={si} style={[styles.poolGapSlot, narrowSlots && styles.slotHalf]} />;
+                              if (!id) return <View key={si} style={styles.poolGapSlot} />;
                               // 다음 게임에 편성된(inQueue) 선수는 '게임 중 선수'처럼 그 자리를 빈칸으로 —
                               // 밑의 사람이 위로 채워지지 않게(자리 유지). 편성 빼면 다시 이름표로 복원.
-                              if (inQueue.has(id)) return <View key={id} style={[styles.poolGapSlot, narrowSlots && styles.slotHalf]} />;
-                              const p = getPlayer(id); return p ? <PlayerTag key={id} player={p} fill compact /> : <View key={si} style={[styles.poolGapSlot, narrowSlots && styles.slotHalf]} />;
+                              if (inQueue.has(id)) return <View key={id} style={styles.poolGapSlot} />;
+                              const p = getPlayer(id); return p ? <PlayerTag key={id} player={p} fill compact /> : <View key={si} style={styles.poolGapSlot} />;
                             })}
                           </View>
                         ))}
@@ -4714,8 +4714,8 @@ export default function OperateScreen() {
                           {visiblePlaying.map((pc, i) => (
                             <View key={`play${i}`} style={[styles.gameFrameSlots, { borderTopWidth: 1, borderTopColor: colors.warningLight, paddingTop: 4 }]}>
                               {pc.ids.map((id) => {
-                                if (inQueue.has(id)) return <View key={id} style={[styles.poolGapSlot, narrowSlots && styles.slotHalf]} />; // 편성됨 → 자리 비움
-                                const p = getPlayer(id); return p ? <PlayerTag key={id} player={p} fill compact /> : <View key={id} style={[styles.poolGapSlot, narrowSlots && styles.slotHalf]} />;
+                                if (inQueue.has(id)) return <View key={id} style={styles.poolGapSlot} />; // 편성됨 → 자리 비움
+                                const p = getPlayer(id); return p ? <PlayerTag key={id} player={p} fill compact /> : <View key={id} style={styles.poolGapSlot} />;
                               })}
                             </View>
                           ))}
@@ -5971,9 +5971,9 @@ const styles = StyleSheet.create({
   m2Wrap: { flex: 1 },
   // 일번 배치: 코트 위(가로) / 게임판 가운데(세로) / 대기 오른쪽
   m2CourtTopRow: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm, paddingHorizontal: spacing.smd, paddingTop: spacing.sm },
-  // 좁은 폭에서 코트 카드가 최소 152px를 확보하며 줄바꿈 → 태블릿(1024)은 6개/줄=1줄
-  // 로 컴팩트(세로 공간 최소화, 게임판이 주). 폰은 2개/줄. 코트는 참고용이라 작아도 OK.
-  m2CourtCardNarrow: { flexBasis: 160, flexGrow: 1, flexShrink: 1, minWidth: 152 },
+  // 좁은 폭에서 코트 카드가 최소 185px를 확보하며 줄바꿈 → 태블릿(1024)은 5개/줄,
+  // 코트 안 선수 2×2 이름이 보이도록(152=너무작음·220=너무큼 사이). 폰은 2개/줄.
+  m2CourtCardNarrow: { flexBasis: 195, flexGrow: 1, flexShrink: 1, minWidth: 185 },
   m2CourtTop: { flex: 1, minWidth: 0, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 6, paddingHorizontal: spacing.md, paddingVertical: 10, borderWidth: 2, borderRadius: radius.md },
   m2CourtCard: { flex: 1, minWidth: 0, borderWidth: 2, borderRadius: radius.md, padding: spacing.sm },
   m2Body: { flex: 1, flexDirection: 'row', paddingTop: spacing.xs },
