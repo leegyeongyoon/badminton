@@ -16,7 +16,7 @@
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "com.gylee.badminton",
-      "buildNumber": "5",
+      "buildNumber": "6",
       "infoPlist": {
         "NSCameraUsageDescription": "QR코드 체크인을 위해 카메라 접근이 필요합니다",
         "NSLocationWhenInUseUsageDescription": "주변 체육관을 찾기 위해 위치 정보가 필요합니다",
@@ -25,7 +25,7 @@
     },
     "android": {
       "package": "com.gylee.badminton",
-      "versionCode": 2,
+      "versionCode": 3,
       "adaptiveIcon": {
         "foregroundImage": "./assets/adaptive-icon.png",
         "backgroundColor": "#14B8A6"
