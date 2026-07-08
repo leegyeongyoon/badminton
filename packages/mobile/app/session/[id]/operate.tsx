@@ -322,8 +322,12 @@ export default function OperateScreen() {
     }),
   ).current;
   // 모드2 오른쪽 '대기 명단' 폭 — 디바이더 드래그로 조절(모드1 분할처럼). 왼쪽으로 끌면 넓어짐.
-  const [m2RightWidth, setM2RightWidth] = useState(500);
-  const m2RightWidthRef = useRef(500); m2RightWidthRef.current = m2RightWidth;
+  // 대기 명단 기본 폭 — 컴퓨터(>=1180)는 500px, 태블릿/좁은 폭은 화면의 36%(최소 300)
+  // 로 시작해 게임판이 눌리지 않게. 이후 가운데 디바이더를 끌어 자유 조절(280~820).
+  const [m2RightWidth, setM2RightWidth] = useState(() =>
+    layout.width >= 1180 ? 500 : Math.max(300, Math.min(460, Math.round(layout.width * 0.36))),
+  );
+  const m2RightWidthRef = useRef(m2RightWidth); m2RightWidthRef.current = m2RightWidth;
   const m2DragStartRef = useRef(500);
   const m2DividerPan = useRef(
     PanResponder.create({
@@ -4428,7 +4432,7 @@ export default function OperateScreen() {
     const pnames = playingEntry?.playerNames ?? court.currentTurn?.playerNames ?? [];
     const turnId = court.currentTurn?.id ?? playingEntry?.turnId ?? null;
     return occupied ? (
-      <View style={[styles.m2CourtCard, { borderColor: colors.warning, backgroundColor: colors.warningLight }]}>
+      <View style={[styles.m2CourtCard, narrowSlots && styles.m2CourtCardNarrow, { borderColor: colors.warning, backgroundColor: colors.warningLight }]}>
         <View style={styles.m2CourtHead}>
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, flex: 1, minWidth: 0 }}>
             <Text style={[styles.m2CourtName, { color: colors.text }]} numberOfLines={1}>{court.name}</Text>
@@ -4449,7 +4453,7 @@ export default function OperateScreen() {
         </View>
       </View>
     ) : (
-      <TouchableOpacity style={[styles.m2CourtCard, { borderColor: colors.primary, borderStyle: 'dashed', backgroundColor: colors.surfaceSecondary, alignItems: 'center', justifyContent: 'center', minHeight: 70 }]} activeOpacity={0.7} onPress={() => assignQueueToCourt(court.id)} accessibilityLabel={`${court.name} 다음 게임 투입`}>
+      <TouchableOpacity style={[styles.m2CourtCard, narrowSlots && styles.m2CourtCardNarrow, { borderColor: colors.primary, borderStyle: 'dashed', backgroundColor: colors.surfaceSecondary, alignItems: 'center', justifyContent: 'center', minHeight: 70 }]} activeOpacity={0.7} onPress={() => assignQueueToCourt(court.id)} accessibilityLabel={`${court.name} 다음 게임 투입`}>
         <Text style={[styles.m2CourtName, { color: colors.text }]} numberOfLines={1}>{court.name}</Text>
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 3 }}><Icon name="play" size={13} color={colors.primary} /><Text style={[styles.m2CourtState, { color: colors.primary }]}>탭=다음 게임 투입</Text></View>
       </TouchableOpacity>
@@ -5954,7 +5958,9 @@ const styles = StyleSheet.create({
   // ── 모드 2: 코트 줄 / 대기 게임 줄 / 명단 3단 ──
   m2Wrap: { flex: 1 },
   // 일번 배치: 코트 위(가로) / 게임판 가운데(세로) / 대기 오른쪽
-  m2CourtTopRow: { flexDirection: 'row', gap: spacing.sm, paddingHorizontal: spacing.smd, paddingTop: spacing.sm },
+  m2CourtTopRow: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm, paddingHorizontal: spacing.smd, paddingTop: spacing.sm },
+  // 좁은 폭에서 코트 카드가 최소 220px를 확보하며 줄바꿈 → 태블릿 3~4개/줄, 폰 1개/줄.
+  m2CourtCardNarrow: { flexBasis: 250, flexGrow: 1, flexShrink: 1, minWidth: 220 },
   m2CourtTop: { flex: 1, minWidth: 0, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 6, paddingHorizontal: spacing.md, paddingVertical: 10, borderWidth: 2, borderRadius: radius.md },
   m2CourtCard: { flex: 1, minWidth: 0, borderWidth: 2, borderRadius: radius.md, padding: spacing.sm },
   m2Body: { flex: 1, flexDirection: 'row', paddingTop: spacing.xs },
