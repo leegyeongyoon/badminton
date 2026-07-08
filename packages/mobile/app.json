@@ -1,6 +1,6 @@
 {
   "expo": {
-    "name": "배드민턴 코트",
+    "name": "콕고",
     "slug": "badminton-court",
     "version": "1.0.0",
     "orientation": "default",
@@ -11,12 +11,12 @@
     "splash": {
       "image": "./assets/splash-icon.png",
       "resizeMode": "contain",
-      "backgroundColor": "#ffffff"
+      "backgroundColor": "#14B8A6"
     },
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "com.gylee.badminton",
-      "buildNumber": "1",
+      "buildNumber": "5",
       "infoPlist": {
         "NSCameraUsageDescription": "QR코드 체크인을 위해 카메라 접근이 필요합니다",
         "NSLocationWhenInUseUsageDescription": "주변 체육관을 찾기 위해 위치 정보가 필요합니다",
@@ -28,7 +28,7 @@
       "versionCode": 2,
       "adaptiveIcon": {
         "foregroundImage": "./assets/adaptive-icon.png",
-        "backgroundColor": "#ffffff"
+        "backgroundColor": "#14B8A6"
       },
       "edgeToEdgeEnabled": true,
       "permissions": [

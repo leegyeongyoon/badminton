@@ -1,6 +1,6 @@
 export const Strings = {
   app: {
-    name: '배드민턴 코트',
+    name: '콕고',
   },
   auth: {
     login: '로그인',

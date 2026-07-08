@@ -116,10 +116,10 @@ export default function PrivacyScreen() {
       </View>
 
       <ScrollView contentContainerStyle={styles.content}>
-        <Text style={[styles.appName, { color: colors.text }]}>배드민턴 코트</Text>
+        <Text style={[styles.appName, { color: colors.text }]}>콕고</Text>
         <Text style={[styles.meta, { color: colors.textSecondary }]}>시행일: {EFFECTIVE_DATE}</Text>
         <Text style={[styles.intro, { color: colors.textSecondary }]}>
-          &lsquo;배드민턴 코트&rsquo;(이하 &ldquo;서비스&rdquo;)는 이용자의 개인정보를 중요하게 생각하며,
+          &lsquo;콕고&rsquo;(이하 &ldquo;서비스&rdquo;)는 이용자의 개인정보를 중요하게 생각하며,
           「개인정보 보호법」 등 관련 법령을 준수합니다. 본 방침은 서비스가 어떤 개인정보를 수집하고
           어떻게 이용·보호하는지 안내합니다.
         </Text>
