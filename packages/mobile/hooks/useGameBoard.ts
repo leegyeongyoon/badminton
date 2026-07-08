@@ -135,6 +135,13 @@ export function useGameBoard(clubSessionId: string | undefined) {
     return data;
   }, [board]);
 
+  // 코트에 잘못 배정한 게임을 다시 대기 큐로 되돌림(배정 취소).
+  const unassignByCourt = useCallback(async (courtId: string) => {
+    if (!board) return;
+    const { data } = await gameBoardApi.unassignByCourt(board.id, courtId);
+    return data;
+  }, [board]);
+
   /**
    * 자동 추천: 다음 복식 4인 조합을 서버에서 받아 첫 추천의 playerIds 반환.
    * opts.mode 로 매칭 전략 선택(기본 fair). 서버가 실제 적용한 mode 도 함께 반환.
@@ -199,5 +206,6 @@ export function useGameBoard(clubSessionId: string | undefined) {
     createQueueGame,
     reorderQueue,
     assignEntry,
+    unassignByCourt,
   };
 }

@@ -196,7 +196,7 @@ export default function OperateScreen() {
     board, loading, error,
     createBoard, loadBoard,
     deleteEntry, suggestNext, suggesting,
-    createQueueGame, reorderQueue, assignEntry, updateEntry,
+    createQueueGame, reorderQueue, assignEntry, unassignByCourt, updateEntry,
   } = useGameBoard(clubSessionId);
 
   const [courts, setCourts] = useState<Court[]>([]);
@@ -1515,6 +1515,30 @@ export default function OperateScreen() {
       loadCourts();
     }
   }, [courts, loadBoard, loadCourts, loadPool]);
+
+  // 배정 취소 — 코트에 잘못 넣은 게임을 다시 대기 큐로 되돌린다(순서 아닌데 잘못 눌렀을 때).
+  // 진행 기록은 남지 않으므로, 실제로 하던 게임을 끝내는 '종료'와는 다르다.
+  const handleUnassign = useCallback(
+    (courtId: string) => {
+      const court = courts.find((c) => c.id === courtId);
+      showConfirm(
+        '배정 취소',
+        `${court?.name || '코트'} 배정을 취소하고 팀을 대기로 되돌릴까요? (진행 기록은 남지 않아요)`,
+        async () => {
+          try {
+            await unassignByCourt(courtId);
+            loadBoard(); loadCourts(); loadPool();
+            showSuccess('대기로 되돌렸어요');
+          } catch (err: any) {
+            showAlert('오류', err?.response?.data?.error || '배정 취소 실패');
+            loadBoard(); loadCourts();
+          }
+        },
+        '대기로', '취소',
+      );
+    },
+    [courts, unassignByCourt, loadBoard, loadCourts, loadPool],
+  );
 
   const handleDeleteQueued = useCallback(
     (entryId: string) =>
@@ -4408,6 +4432,7 @@ export default function OperateScreen() {
             <CourtElapsedBadge startedAt={court.currentTurn?.startedAt} />
           </View>
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+            <TouchableOpacity onPress={() => handleUnassign(court.id)} accessibilityLabel={`${court.name} 배정 취소(대기로)`}><Text style={[styles.m2CourtState, { color: colors.textSecondary }]}>대기로</Text></TouchableOpacity>
             <TouchableOpacity onPress={() => setMoveSource({ courtId: court.id, courtName: court.name })} accessibilityLabel={`${court.name} 게임 코트 이동`}><Text style={[styles.m2CourtState, { color: colors.primary }]}>이동</Text></TouchableOpacity>
             <TouchableOpacity onPress={() => handleEndGame(court.id)} accessibilityLabel={`${court.name} 게임 종료`}><Text style={[styles.m2CourtState, { color: colors.danger }]}>종료</Text></TouchableOpacity>
           </View>

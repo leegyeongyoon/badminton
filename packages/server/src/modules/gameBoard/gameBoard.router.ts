@@ -19,6 +19,7 @@ import {
   createQueueGame,
   reorderQueue,
   assignEntry,
+  unassignEntryByCourt,
   updateTagLayout,
 } from './gameBoard.service';
 
@@ -208,6 +209,24 @@ router.post(
         req.params.id as string,
         req.params.entryId as string,
         courtId,
+        req.user!.userId,
+      );
+      res.json(entry);
+    } catch (err) {
+      next(err);
+    }
+  },
+);
+
+// POST /game-boards/:id/courts/:courtId/unassign — 코트에 잘못 배정한 게임을 다시 대기 큐로 되돌림
+router.post(
+  '/:id/courts/:courtId/unassign',
+  authenticate,
+  async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const entry = await unassignEntryByCourt(
+        req.params.id as string,
+        req.params.courtId as string,
         req.user!.userId,
       );
       res.json(entry);

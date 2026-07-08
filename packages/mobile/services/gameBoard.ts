@@ -54,6 +54,10 @@ export const gameBoardApi = {
   assignEntry: (boardId: string, entryId: string, courtId: string) =>
     api.post(`/game-boards/${boardId}/entries/${entryId}/assign`, { courtId }),
 
+  // 코트에 잘못 배정한 게임을 다시 대기 큐로 되돌림(배정 취소, 기록 안 남김)
+  unassignByCourt: (boardId: string, courtId: string) =>
+    api.post(`/game-boards/${boardId}/courts/${courtId}/unassign`),
+
   // 모드2 자석판: 이름표 1개 위치(분수) 갱신 → 운영진 공유(소켓 전파). 드래그 릴리즈마다.
   updateLayout: (boardId: string, userId: string, x: number, y: number) =>
     api.patch(`/game-boards/${boardId}/layout`, { userId, x, y }),

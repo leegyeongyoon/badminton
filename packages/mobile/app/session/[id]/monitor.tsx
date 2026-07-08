@@ -20,7 +20,7 @@ export default function MonitorScreen() {
   const router = useRouter();
   const { id: clubSessionId } = useLocalSearchParams<{ id: string }>();
   const { colors } = useTheme();
-  const { height } = useWindowDimensions();
+  const { width, height } = useWindowDimensions();
 
   const {
     clubName, displayCourts, playingByCourtId, queuedEntries, waiting, players, getPlayer, nowTs, loaded,
@@ -98,16 +98,27 @@ export default function MonitorScreen() {
     );
   };
 
+  // 코트 카드는 한 줄에 나열되며 코트 수만큼 폭을 나눠 갖는다. 코트가 많아도(최대 6개
+  // 상시, 그 이상도 축소해 수용) 안 깨지도록 카드 실제 폭(cardW)에 맞춰 코트명/급수칩/
+  // 이름 폰트를 자동 스케일한다. 3코트=크게, 5~6코트=작게.
+  const courtCount = Math.max(displayCourts.length, 1);
+  const courtGap = 8;
+  const courtCardW = Math.max(110, (width - 32 - courtGap * (courtCount - 1)) / courtCount);
+  const cCourtNameSize = Math.max(15, Math.min(24, Math.round(courtCardW / 15)));
+  const cSkillBox = Math.max(18, Math.min(26, Math.round(courtCardW / 15)));
+  const cPlayerNameSize = Math.max(12, Math.min(19, Math.round(courtCardW / 20)));
+  const cBadgeSize = Math.max(12, Math.min(15, Math.round(courtCardW / 24)));
+
   const CourtCard = ({ court }: { court: { id: string; name: string } }) => {
     const playing = playingByCourtId.get(court.id);
     const elapsedMin = playing?.startedAt ? Math.max(0, Math.floor((nowTs - new Date(playing.startedAt).getTime()) / 60000)) : null;
     return (
       <View style={[styles.courtCard, { backgroundColor: playing ? colors.surface : colors.surfaceSecondary, borderColor: playing ? colors.warning : colors.border, borderWidth: playing ? 2 : 1.5 }]}>
         <View style={styles.courtHead}>
-          <Text style={[styles.courtName, { color: colors.text }]} numberOfLines={1}>{court.name}</Text>
+          <Text style={[styles.courtName, { color: colors.text, fontSize: cCourtNameSize }]} numberOfLines={1}>{court.name}</Text>
           {playing
-            ? <View style={[styles.courtBadge, { backgroundColor: colors.warningLight }]}><Text style={[styles.courtBadgeT, { color: colors.warning }]}>{elapsedMin != null ? (elapsedMin < 1 ? '방금' : `${elapsedMin}분`) : '게임중'}</Text></View>
-            : <Text style={[styles.courtEmpty, { color: colors.textLight }]}>비어있음</Text>}
+            ? <View style={[styles.courtBadge, { backgroundColor: colors.warningLight }]}><Text style={[styles.courtBadgeT, { color: colors.warning, fontSize: cBadgeSize }]}>{elapsedMin != null ? (elapsedMin < 1 ? '방금' : `${elapsedMin}분`) : '게임중'}</Text></View>
+            : <Text style={[styles.courtEmpty, { color: colors.textLight, fontSize: cBadgeSize + 1 }]}>비어있음</Text>}
         </View>
         {playing && (
           <View style={styles.courtPlayers}>
@@ -117,10 +128,10 @@ export default function MonitorScreen() {
               const hasSkill = !!p?.skillLevel;
               return (
                 <View key={pId || i} style={[styles.cPlayer, { backgroundColor: colors.surfaceSecondary }]}>
-                  <View style={[styles.cSkill, { backgroundColor: hasSkill ? skill.color : colors.surface }]}>
-                    <Text style={[styles.cSkillT, { color: hasSkill ? '#fff' : colors.textLight }]}>{hasSkill ? skill.level : '·'}</Text>
+                  <View style={[styles.cSkill, { backgroundColor: hasSkill ? skill.color : colors.surface, width: cSkillBox, height: cSkillBox }]}>
+                    <Text style={[styles.cSkillT, { color: hasSkill ? '#fff' : colors.textLight, fontSize: Math.round(cSkillBox * 0.56) }]}>{hasSkill ? skill.level : '·'}</Text>
                   </View>
-                  <Text style={[styles.cName, { color: colors.text }]} numberOfLines={1}>{p?.userName || playing.playerNames?.[i] || '?'}</Text>
+                  <Text style={[styles.cName, { color: colors.text, fontSize: cPlayerNameSize }]} numberOfLines={1}>{p?.userName || playing.playerNames?.[i] || '?'}</Text>
                 </View>
               );
             })}

@@ -359,6 +359,59 @@ export async function pushEntry(boardId: string, entryId: string, courtId: strin
   return formatted;
 }
 
+// 코트에 잘못 배정한 게임을 다시 대기 큐로 되돌린다(배정 취소).
+// 빈 코트 배정은 registerTurn 이 즉시 PLAYING + Game(IN_PROGRESS) + 코트 IN_USE 로
+// 만들므로, 되돌리기는 ①그 CourtTurn/Game 을 취소(기록에 안 남김) ②코트를 비우고
+// ③GameBoardEntry 를 원래 자리(position 유지)로 QUEUED 복원한다. 이미 '완료'된 게임엔
+// 쓸 수 없다(그건 종료로 처리). 코트 기준으로 활성 편성 엔트리를 서버가 직접 찾는다.
+export async function unassignEntryByCourt(boardId: string, courtId: string, userId: string) {
+  const board = await verifyBoardStaff(boardId, userId);
+
+  const entry = await prisma.gameBoardEntry.findFirst({
+    where: { boardId, courtId, status: { in: ['MATERIALIZED', 'PLAYING'] } },
+  });
+  if (!entry) throw new BadRequestError('이 코트에 되돌릴 배정 게임이 없어요');
+
+  const turn = entry.turnId
+    ? await prisma.courtTurn.findUnique({ where: { id: entry.turnId } })
+    : null;
+  if (turn && turn.status === 'COMPLETED') {
+    throw new BadRequestError('이미 끝난 게임은 되돌릴 수 없어요 (종료로 처리하세요)');
+  }
+
+  await prisma.$transaction(async (tx) => {
+    if (turn) {
+      // 자동 시작됐던 게임/순번을 취소 — 실제로 안 한 게임이므로 기록/통계에 남기지 않는다.
+      await tx.game.updateMany({ where: { turnId: turn.id, status: 'IN_PROGRESS' }, data: { status: 'CANCELLED' } });
+      await tx.courtTurn.update({ where: { id: turn.id }, data: { status: 'CANCELLED' } });
+    }
+    // 편성 엔트리를 원래 대기 자리(position 유지)로 QUEUED 복원.
+    await tx.gameBoardEntry.update({
+      where: { id: entry.id },
+      data: { status: 'QUEUED', courtId: null, turnId: null },
+    });
+    // 코트에 남은 활성 순번이 없으면 EMPTY 로(점검 중이면 유지).
+    const remaining = await tx.courtTurn.count({ where: { courtId, status: { in: ['WAITING', 'PLAYING'] } } });
+    if (remaining === 0) {
+      const court = await tx.court.findUnique({ where: { id: courtId } });
+      if (court && court.status !== 'MAINTENANCE') {
+        await tx.court.update({ where: { id: courtId }, data: { status: 'EMPTY' } });
+      }
+    }
+  });
+
+  // 실시간 반영 — 운영판/현황판/모니터가 보드·코트 상태를 새로고침.
+  const restored = await prisma.gameBoardEntry.findUniqueOrThrow({ where: { id: entry.id } });
+  const formatted = await formatEntry(restored);
+  const io = getIO();
+  io.to(`facility:${board.facilityId}`).emit('gameBoard:entryUpdated', formatted);
+  io.to(`facility:${board.facilityId}`).emit('court:statusChanged', { courtId });
+  if (turn) io.to(`court:${courtId}`).emit('turn:cancelled', { courtId, turnId: turn.id });
+  io.to(`facility:${board.facilityId}`).emit('clubSession:courtsUpdated', { facilityId: board.facilityId });
+
+  return formatted;
+}
+
 export async function pushAllEntries(boardId: string, userId: string) {
   const board = await prisma.gameBoard.findUnique({
     where: { id: boardId },
