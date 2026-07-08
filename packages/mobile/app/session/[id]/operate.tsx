@@ -148,7 +148,11 @@ export default function OperateScreen() {
   const twoPane = layout.twoPane;
   // 태블릿/폰(좁은 폭)에서는 선수 슬롯을 한 줄 4칸 대신 2×2로 감싸 칩을 넓힌다 →
   // 한글 이름이 잘리지 않게. 데스크톱(>=1180)은 기존 4칸 그대로 유지(안전).
-  const narrowSlots = layout.width < 1180;
+  // < 1200: iPad Air(1180)·iPad Pro 11"(1194) 등 가로 태블릿을 모두 태블릿 레이아웃으로.
+  // (앱의 twoPane 기준 1200과 일치 — 1200 미만은 좁은 화면 취급.)
+  const narrowSlots = layout.width < 1200;
+  // 폰(아주 좁음): 코트를 여러 줄로 눌러 넣는 대신 좌우 스크롤 1줄로 → 각 코트가 넓어 가독성↑.
+  const isPhone = layout.width < 768;
 
   // Actual laid-out width of the courts area (measured, NOT the window) → drives
   // the court-grid column count so each court cell is ≥ ~150px wide.
@@ -4434,7 +4438,7 @@ export default function OperateScreen() {
     const pnames = playingEntry?.playerNames ?? court.currentTurn?.playerNames ?? [];
     const turnId = court.currentTurn?.id ?? playingEntry?.turnId ?? null;
     return occupied ? (
-      <View style={[styles.m2CourtCard, narrowSlots && styles.m2CourtCardNarrow, { borderColor: colors.warning, backgroundColor: colors.warningLight }]}>
+      <View style={[styles.m2CourtCard, narrowSlots && (isPhone ? styles.m2CourtCardPhone : styles.m2CourtCardNarrow), { borderColor: colors.warning, backgroundColor: colors.warningLight }]}>
         <View style={styles.m2CourtHead}>
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, flex: 1, minWidth: 0 }}>
             <Text style={[styles.m2CourtName, { color: colors.text }]} numberOfLines={1}>{court.name}</Text>
@@ -4456,7 +4460,7 @@ export default function OperateScreen() {
         </View>
       </View>
     ) : (
-      <TouchableOpacity style={[styles.m2CourtCard, narrowSlots && styles.m2CourtCardNarrow, { borderColor: colors.primary, borderStyle: 'dashed', backgroundColor: colors.surfaceSecondary, alignItems: 'center', justifyContent: 'center', minHeight: 70 }]} activeOpacity={0.7} onPress={() => assignQueueToCourt(court.id)} accessibilityLabel={`${court.name} 다음 게임 투입`}>
+      <TouchableOpacity style={[styles.m2CourtCard, narrowSlots && (isPhone ? styles.m2CourtCardPhone : styles.m2CourtCardNarrow), { borderColor: colors.primary, borderStyle: 'dashed', backgroundColor: colors.surfaceSecondary, alignItems: 'center', justifyContent: 'center', minHeight: 70 }]} activeOpacity={0.7} onPress={() => assignQueueToCourt(court.id)} accessibilityLabel={`${court.name} 다음 게임 투입`}>
         <Text style={[styles.m2CourtName, { color: colors.text }]} numberOfLines={1}>{court.name}</Text>
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 3 }}><Icon name="play" size={13} color={colors.primary} /><Text style={[styles.m2CourtState, { color: colors.primary }]}>탭=다음 게임 투입</Text></View>
       </TouchableOpacity>
@@ -4602,11 +4606,20 @@ export default function OperateScreen() {
   const BoardMode2 = (
     <View style={styles.m2Wrap}>
       {/* 코트: 위 가로줄 — 빈 코트 탭=다음 게임 투입 */}
-      <View style={styles.m2CourtTopRow}>
-        {courts.length === 0
-          ? <Text style={[styles.emptyPool, { color: colors.textLight }]}>코트가 없어요. "코트 관리"에서 추가</Text>
-          : courts.map((court) => <Mode2CourtCard key={court.id} court={court} />)}
-      </View>
+      {isPhone ? (
+        // 폰: 코트를 좌우 스크롤 1줄로(각 코트 넓게 → 가독성↑)
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.m2CourtScrollContent}>
+          {courts.length === 0
+            ? <Text style={[styles.emptyPool, { color: colors.textLight }]}>코트가 없어요. "코트 관리"에서 추가</Text>
+            : courts.map((court) => <Mode2CourtCard key={court.id} court={court} />)}
+        </ScrollView>
+      ) : (
+        <View style={styles.m2CourtTopRow}>
+          {courts.length === 0
+            ? <Text style={[styles.emptyPool, { color: colors.textLight }]}>코트가 없어요. "코트 관리"에서 추가</Text>
+            : courts.map((court) => <Mode2CourtCard key={court.id} court={court} />)}
+        </View>
+      )}
       {/* 선택 배너 / 안내 + 자동 편성 */}
       {selectedPlayer ? (
         <View style={[styles.m2SelectBar, { backgroundColor: colors.primary }]}>
@@ -4615,7 +4628,10 @@ export default function OperateScreen() {
         </View>
       ) : (
         <View style={styles.m2LeftHead}>
-          <Text style={[styles.m2PanelTitle, { color: colors.text, marginBottom: 0 }]} numberOfLines={1}>게임판 · 선수 탭/드래그로 편성</Text>
+          {/* 태블릿/폰은 아래 부제와 중복이라 위 제목 숨김(공간 절약). 자동 편성 버튼은 유지. */}
+          {!narrowSlots
+            ? <Text style={[styles.m2PanelTitle, { color: colors.text, marginBottom: 0 }]} numberOfLines={1}>게임판 · 선수 탭/드래그로 편성</Text>
+            : <View />}
           <TouchableOpacity style={[styles.m2AutoBtn, { borderColor: colors.primary }]} onPress={() => autoFillQueue(poolIds)} accessibilityLabel="대기 인원 자동 편성">
             <Icon name="rotation" size={13} color={colors.primary} /><Text style={[styles.m2AutoBtnT, { color: colors.primary }]}>자동 편성</Text>
           </TouchableOpacity>
@@ -5977,6 +5993,9 @@ const styles = StyleSheet.create({
   // 세로 공간을 게임판(짜는 곳)에 몰아줌. 폰은 3개/줄.
   // flexGrow 0 → 마지막 줄에 코트가 혼자 남아도 늘어나지 않고 원래 크기(168) 유지.
   m2CourtCardNarrow: { flexBasis: 168, flexGrow: 0, flexShrink: 1, minWidth: 160, paddingVertical: 5, paddingHorizontal: 7 },
+  // 폰: 좌우 스크롤용 고정폭 코트(넓게 → 가독성). 1.3개쯤 보여 스크롤 가능함이 드러남.
+  m2CourtCardPhone: { width: 290, paddingVertical: 5, paddingHorizontal: 8 },
+  m2CourtScrollContent: { flexDirection: 'row', gap: 8, paddingHorizontal: 12, paddingTop: 8 },
   // 코트 선수 슬롯 높이도 줄여(28) 코트 카드가 짧아지게 — 참고용이라 컴팩트.
   m2CourtSlotCompact: { minHeight: 27, paddingVertical: 2 },
   m2CourtTop: { flex: 1, minWidth: 0, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 6, paddingHorizontal: spacing.md, paddingVertical: 10, borderWidth: 2, borderRadius: radius.md },
