@@ -8,7 +8,7 @@ import {
   Pressable,
 } from 'react-native';
 import { Link, useRouter } from 'expo-router';
-import { useAuthStore, KakaoNotConfiguredError } from '../../store/authStore';
+import { useAuthStore, KakaoNotConfiguredError, GoogleNotConfiguredError } from '../../store/authStore';
 import { startKakaoWebLogin } from '../../services/kakao';
 import { startGoogleWebLogin } from '../../services/google';
 import { useTheme } from '../../hooks/useTheme';
@@ -38,7 +38,7 @@ export default function LoginScreen() {
   const [kakaoNotice, setKakaoNotice] = useState<string | null>(null);
   const [googleLoading, setGoogleLoading] = useState(false);
   const [googleNotice, setGoogleNotice] = useState<string | null>(null);
-  const { login, kakaoLogin } = useAuthStore();
+  const { login, kakaoLogin, googleLogin } = useAuthStore();
   const { colors } = useTheme();
   const router = useRouter();
 
@@ -126,11 +126,24 @@ export default function LoginScreen() {
       return;
     }
 
-    // Native: Google login is web-only here — show the friendly "키 필요" notice.
-    const msg = '구글 로그인 설정이 준비 중이에요 (키 필요)';
-    setGoogleNotice(msg);
-    showInfo(msg);
-    setGoogleLoading(false);
+    // Native: run Google's authorize+PKCE exchange (getGoogleAccessToken inside
+    // authStore.googleLogin), mirroring the Kakao native path.
+    try {
+      await googleLogin();
+      // Navigation handled by root layout gating
+    } catch (err: any) {
+      if (err instanceof GoogleNotConfiguredError) {
+        // No real Google client id yet — friendly inline message, no crash.
+        const msg = '구글 로그인 설정이 준비 중이에요 (키 필요)';
+        setGoogleNotice(msg);
+        showInfo(msg);
+      } else {
+        const msg = err.response?.data?.error || err?.message || '구글 로그인에 실패했습니다';
+        showError(msg);
+      }
+    } finally {
+      setGoogleLoading(false);
+    }
   };
 
   return (

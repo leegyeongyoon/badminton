@@ -4,6 +4,7 @@ import { authApi } from '../services/auth';
 import { onAuthExpired } from '../services/api';
 import { disconnectSocket } from '../hooks/useSocket';
 import { getKakaoAuthCode } from '../services/kakao';
+import { getGoogleAccessToken } from '../services/google';
 import { usePendingJoinStore } from './pendingJoinStore';
 
 /**
@@ -155,15 +156,16 @@ export const useAuthStore = create<AuthState>((set) => ({
 
   googleLogin: async (preauth) => {
     // WEB full-page redirect already obtained { code, redirectUri } from Google's
-    // return URL → use them directly. (Google has no native popup path here.)
-    const auth = preauth;
-    // null → no { code, redirectUri } available (e.g. no real client id / the
-    // user cancelled). Surface the "키 필요" path like Kakao does.
+    // return URL → use them directly. NATIVE passes nothing → run the native PKCE
+    // authorize+exchange (getGoogleAccessToken) to obtain a Google access token.
+    const auth = preauth ?? (await getGoogleAccessToken());
+    // null → nothing available (no native client id / user cancelled). Surface the
+    // "키 필요" path like Kakao does.
     if (!auth) {
       throw new GoogleNotConfiguredError();
     }
-    // Hand the code + redirectUri to our backend, which does the secure
-    // server-side token exchange (client_secret never leaves the server).
+    // WEB → { code, redirectUri } (server exchanges w/ secret). NATIVE →
+    // { accessToken } (client already exchanged via PKCE). Server accepts both.
     const { data } = await authApi.googleLogin(auth);
     // Reuse the exact same token-storage path as phone/password + kakao login.
     await setItem('accessToken', data.tokens.accessToken);

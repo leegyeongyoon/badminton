@@ -14,7 +14,9 @@ export const authApi = {
   kakaoLogin: (data: { code: string; redirectUri: string }) =>
     api.post('/auth/kakao', data),
 
-  googleLogin: (data: { code: string; redirectUri: string }) =>
+  // WEB sends { code, redirectUri } (server exchanges w/ secret); NATIVE sends
+  // { accessToken } (client did the PKCE exchange, no secret) — server accepts both.
+  googleLogin: (data: { code: string; redirectUri: string } | { accessToken: string }) =>
     api.post('/auth/google', data),
 
   refresh: (refreshToken: string) =>

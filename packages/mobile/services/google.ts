@@ -1,5 +1,7 @@
 import { Platform } from 'react-native';
 import Constants from 'expo-constants';
+import * as WebBrowser from 'expo-web-browser';
+import { AuthRequest, ResponseType, exchangeCodeAsync } from 'expo-auth-session';
 
 /**
  * Google OAuth — authorization-code step ONLY (secure, server-side exchange).
@@ -25,16 +27,114 @@ import Constants from 'expo-constants';
 
 const GOOGLE_CLIENT_ID_PLACEHOLDER = 'REPLACE_WITH_GOOGLE_CLIENT_ID';
 
-/** The configured Google client id, or null when not (yet) configured. */
+/** The configured WEB Google client id, or null when not (yet) configured. */
 function getGoogleClientId(): string | null {
   const id = Constants.expoConfig?.extra?.googleClientId as string | undefined;
   if (!id || id === GOOGLE_CLIENT_ID_PLACEHOLDER) return null;
   return id;
 }
 
-/** True when a real (non-placeholder) Google client id is configured. */
+/** The iOS Google client id (native), or null when not configured. */
+function getGoogleIosClientId(): string | null {
+  const id = Constants.expoConfig?.extra?.googleIosClientId as string | undefined;
+  if (!id || id === 'REPLACE_WITH_GOOGLE_IOS_CLIENT_ID') return null;
+  return id;
+}
+
+/** The Android Google client id (native), or null when not configured. */
+function getGoogleAndroidClientId(): string | null {
+  const id = Constants.expoConfig?.extra?.googleAndroidClientId as string | undefined;
+  if (!id || id === 'REPLACE_WITH_GOOGLE_ANDROID_CLIENT_ID') return null;
+  return id;
+}
+
+/**
+ * The native (iOS/Android) Google client id + redirect URI for THIS platform,
+ * or null when not configured. Native Google clients have NO secret — they use
+ * PKCE, and the redirect is a platform-specific custom scheme (registered in
+ * app.json):
+ *   - iOS: the "reversed client id" scheme, `com.googleusercontent.apps.<id>://`,
+ *     which is what Google REQUIRES for iOS clients.
+ *   - Android: a package-based scheme; Google validates the Android client by
+ *     package name + SHA-1 (not a redirect list), so any registered scheme works.
+ */
+function getNativeGoogleConfig(): { clientId: string; redirectUri: string } | null {
+  if (Platform.OS === 'ios') {
+    const id = getGoogleIosClientId();
+    if (!id) return null;
+    const reversed = 'com.googleusercontent.apps.' + id.replace(/\.apps\.googleusercontent\.com$/, '');
+    return { clientId: id, redirectUri: `${reversed}:/oauthredirect` };
+  }
+  if (Platform.OS === 'android') {
+    const id = getGoogleAndroidClientId();
+    if (!id) return null;
+    return { clientId: id, redirectUri: 'com.gylee.badminton:/oauth2redirect' };
+  }
+  return null;
+}
+
+/** True when a real (non-placeholder) Google client id is configured for the
+ *  current platform (web → web client id; native → the platform native id). */
 export function isGoogleConfigured(): boolean {
-  return getGoogleClientId() !== null;
+  return Platform.OS === 'web' ? getGoogleClientId() !== null : getNativeGoogleConfig() !== null;
+}
+
+// Required so a native auth session can deliver its result back to the app.
+WebBrowser.maybeCompleteAuthSession();
+
+const GOOGLE_DISCOVERY = {
+  authorizationEndpoint: 'https://accounts.google.com/o/oauth2/v2/auth',
+  tokenEndpoint: 'https://oauth2.googleapis.com/token',
+};
+
+/**
+ * NATIVE Google login. Runs Google's authorize step (PKCE) with the platform
+ * native client id, then exchanges the code for an access token ON THE CLIENT
+ * (native Google clients have no secret — PKCE only). The access token is handed
+ * to the caller, which sends it to our backend as { accessToken }; the backend
+ * fetches Google userinfo and logs the user in (no server secret on this path).
+ *
+ * Resolves to null when not configured (no native client id for this platform),
+ * cancelled/dismissed, or the flow otherwise failed — the caller then shows the
+ * friendly "키 필요" / error message, exactly like Kakao.
+ */
+export async function getGoogleAccessToken(): Promise<{ accessToken: string } | null> {
+  const cfg = getNativeGoogleConfig();
+  if (!cfg) return null;
+
+  const request = new AuthRequest({
+    clientId: cfg.clientId,
+    redirectUri: cfg.redirectUri,
+    responseType: ResponseType.Code,
+    scopes: ['openid', 'profile', 'email'],
+    usePKCE: true,
+  });
+
+  let result;
+  try {
+    result = await request.promptAsync(GOOGLE_DISCOVERY);
+  } catch {
+    return null;
+  }
+  if (result.type !== 'success' || !result.params.code) return null;
+
+  let tokenResponse;
+  try {
+    tokenResponse = await exchangeCodeAsync(
+      {
+        clientId: cfg.clientId,
+        code: result.params.code,
+        redirectUri: cfg.redirectUri,
+        extraParams: request.codeVerifier ? { code_verifier: request.codeVerifier } : {},
+      },
+      GOOGLE_DISCOVERY,
+    );
+  } catch {
+    return null;
+  }
+
+  if (!tokenResponse.accessToken) return null;
+  return { accessToken: tokenResponse.accessToken };
 }
 
 // ───────────────────────────────────────────────────────────────────────────

@@ -9,7 +9,9 @@
     "newArchEnabled": true,
     "scheme": [
       "badminton",
-      "kakaoafed6b497e507e1cd83e5642df44c031"
+      "kakaoafed6b497e507e1cd83e5642df44c031",
+      "com.googleusercontent.apps.1020314759155-bsuf7iag4269kp5317obhrbrbs0ihl5f",
+      "com.gylee.badminton"
     ],
     "splash": {
       "image": "./assets/splash-icon.png",
@@ -19,7 +21,7 @@
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "com.gylee.badminton",
-      "buildNumber": "6",
+      "buildNumber": "7",
       "infoPlist": {
         "NSCameraUsageDescription": "QR코드 체크인을 위해 카메라 접근이 필요합니다",
         "NSLocationWhenInUseUsageDescription": "주변 체육관을 찾기 위해 위치 정보가 필요합니다",
@@ -47,7 +49,9 @@
       "apiUrl": "https://api.badmintoncourt.store",
       "kakaoRestKey": "5a202bd90ab8dff01348f24cb1c37f3f",
       "kakaoNativeKey": "afed6b497e507e1cd83e5642df44c031",
-      "googleClientId": "REPLACE_WITH_GOOGLE_CLIENT_ID",
+      "googleClientId": "1020314759155-5itpocn654tbvt8ah0a44kif04pj8hjh.apps.googleusercontent.com",
+      "googleIosClientId": "1020314759155-bsuf7iag4269kp5317obhrbrbs0ihl5f.apps.googleusercontent.com",
+      "googleAndroidClientId": "REPLACE_WITH_GOOGLE_ANDROID_CLIENT_ID",
       "eas": {
         "projectId": "ad8ee9b9-c892-4ebe-bfec-b8df01ea405b"
       },
