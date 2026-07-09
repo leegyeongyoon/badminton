@@ -18,7 +18,9 @@ interface NetworkStatusBarProps {
 
 export function NetworkStatusBar({ isConnected, isReconnecting = false }: NetworkStatusBarProps) {
   const insets = useSafeAreaInsets();
-  const translateY = useSharedValue(-80);
+  // -200: 노치/다이내믹아일랜드 아이폰은 바 높이(insets.top+내용)가 80보다 커서 -80이면
+  // 약 20px가 상단에 계속 삐져나온다(빨간 띠). 넉넉히 -200으로 완전히 숨긴다.
+  const translateY = useSharedValue(-200);
 
   const shouldShow = !isConnected || isReconnecting;
 
@@ -32,7 +34,7 @@ export function NetworkStatusBar({ isConnected, isReconnecting = false }: Networ
       // Delay hide slightly so user sees the bar before it disappears
       translateY.value = withDelay(
         400,
-        withTiming(-80, {
+        withTiming(-200, {
           duration: 300,
           easing: Easing.in(Easing.cubic),
         }),
