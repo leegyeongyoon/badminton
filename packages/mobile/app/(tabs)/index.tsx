@@ -371,23 +371,36 @@ export default function HomeScreen() {
                   {/* ONE primary action by context (운영판 = 운영진만). */}
                   {session ? (
                     isStaff ? (
-                      <View style={styles.clubActions}>
-                        <Button
-                          title="운영판"
-                          icon="board"
-                          variant="primary"
-                          size="md"
-                          onPress={() => router.push(`/session/${session.id}/operate`)}
-                          style={{ flex: 1 }}
-                        />
-                        <Button
-                          title="현황 보기"
-                          icon="tv"
-                          variant="outline"
-                          size="md"
-                          onPress={() => router.push(`/session/${session.id}/board`)}
-                          style={{ flex: 1 }}
-                        />
+                      <View style={{ gap: spacing.sm + 2 }}>
+                        <View style={styles.clubActions}>
+                          <Button
+                            title="운영판"
+                            icon="board"
+                            variant="primary"
+                            size="md"
+                            onPress={() => router.push(`/session/${session.id}/operate`)}
+                            style={{ flex: 1 }}
+                          />
+                          <Button
+                            title="현황 보기"
+                            icon="tv"
+                            variant="outline"
+                            size="md"
+                            onPress={() => router.push(`/session/${session.id}/board`)}
+                            style={{ flex: 1 }}
+                          />
+                        </View>
+                        {!checkedIn && (
+                          // 운영진도 게임에 참석 가능 — 미체크인이면 앱 내 QR 스캔으로 출석.
+                          <Button
+                            title="QR 체크인"
+                            icon="checkin"
+                            variant="outline"
+                            size="md"
+                            fullWidth
+                            onPress={() => router.push('/checkin-modal')}
+                          />
+                        )}
                       </View>
                     ) : !checkedIn ? (
                       // 회원 · 미체크인: 앱 내 카메라로 정모 QR을 스캔해 출석 + 현황 보기.
