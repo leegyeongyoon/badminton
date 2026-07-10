@@ -14,6 +14,7 @@ import { TurnBanner } from '../components/shared/TurnBanner';
 import { ConfirmDialogContainer } from '../components/ui/ConfirmDialog';
 import { ErrorBoundary } from '../components/shared/ErrorBoundary';
 import { NetworkStatusBar } from '../components/shared/NetworkStatusBar';
+import { AppInstallBanner } from '../components/shared/AppInstallBanner';
 import { ThemeProvider, useThemeContext } from '../contexts/ThemeContext';
 import { useNetworkStatus } from '../hooks/useNetworkStatus';
 import { useDeepLinking } from '../hooks/useDeepLinking';
@@ -282,6 +283,7 @@ function RootLayoutInner() {
         <ToastContainer />
         <TurnBanner />
         <ConfirmDialogContainer />
+        <AppInstallBanner />
       </ErrorBoundary>
     </GestureHandlerRootView>
   );
