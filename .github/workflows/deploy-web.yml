@@ -63,6 +63,13 @@ jobs:
           test "$(find dist -type d -name node_modules | wc -l)" = "0"   # fail the build if any remain
           # SPA fallback: client-routed paths (/join, /attend, refresh) -> index.html
           printf '/*    /index.html   200\n' > dist/_redirects
+          # Universal Links (iOS) / App Links (Android): serve the association
+          # files from /.well-known. Static assets take priority over the SPA
+          # _redirects, so these resolve to the real JSON (not index.html).
+          mkdir -p dist/.well-known
+          cp public/.well-known/apple-app-site-association public/.well-known/assetlinks.json dist/.well-known/
+          # AASA has no file extension → force application/json for iOS.
+          printf '/.well-known/apple-app-site-association\n  Content-Type: application/json\n' > dist/_headers
 
       - name: Deploy to Cloudflare Pages
         uses: cloudflare/wrangler-action@v3
