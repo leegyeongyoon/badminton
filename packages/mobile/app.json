@@ -32,7 +32,7 @@
     },
     "android": {
       "package": "com.gylee.badminton",
-      "versionCode": 6,
+      "versionCode": 7,
       "intentFilters": [
         {
           "action": "VIEW",
