@@ -99,7 +99,9 @@ function RootLayoutInner() {
     const inViewBoard = seg[0] === 'session' && (seg[2] === 'board' || seg[2] === 'monitor');
     // 개인정보처리방침은 공개 페이지(App Store 심사자가 로그인 없이 열어야 함) —
     // 온보딩/로그인/게스트 게이트 모두에서 예외로 둔다.
-    const inPrivacy = seg[0] === 'privacy';
+    // 로그인 없이 볼 수 있는 공개 페이지(개인정보처리방침·계정삭제 안내). 아래 게이트
+    // 조건들이 모두 !inPrivacy 로 예외 처리하므로 여기에 추가하면 한 번에 허용된다.
+    const inPrivacy = seg[0] === 'privacy' || seg[0] === 'delete-account';
 
     // Onboarding gate: first-time users see the onboarding flow
     if (hasCompletedOnboarding === false && !inOnboarding && !inPrivacy) {
@@ -262,6 +264,7 @@ function RootLayoutInner() {
           <Stack.Screen name="guest-status" options={transitions.fadeScale} />
           <Stack.Screen name="operator-pending" options={transitions.fadeScale} />
           <Stack.Screen name="privacy" options={transitions.slideFromRight} />
+          <Stack.Screen name="delete-account" options={transitions.slideFromRight} />
           <Stack.Screen name="guide" options={transitions.slideFromRight} />
           <Stack.Screen name="facility-select" />
           <Stack.Screen name="notifications" options={transitions.modalSlideUp} />
