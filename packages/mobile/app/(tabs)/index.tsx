@@ -389,8 +389,28 @@ export default function HomeScreen() {
                           style={{ flex: 1 }}
                         />
                       </View>
+                    ) : !checkedIn ? (
+                      // 회원 · 미체크인: 앱 내 카메라로 정모 QR을 스캔해 출석 + 현황 보기.
+                      <View style={styles.clubActions}>
+                        <Button
+                          title="QR 체크인"
+                          icon="checkin"
+                          variant="primary"
+                          size="md"
+                          onPress={() => router.push('/checkin-modal')}
+                          style={{ flex: 1 }}
+                        />
+                        <Button
+                          title="현황 보기"
+                          icon="tv"
+                          variant="outline"
+                          size="md"
+                          onPress={() => router.push(`/session/${session.id}/board`)}
+                          style={{ flex: 1 }}
+                        />
+                      </View>
                     ) : (
-                      // 출석은 정모 QR 스캔으로만 — 자가 체크인 버튼 없음. 회원은 현황 보기만.
+                      // 회원 · 체크인 완료: 현황 보기.
                       <Button
                         title="현황 보기"
                         icon="tv"

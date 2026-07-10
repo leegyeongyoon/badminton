@@ -2,7 +2,7 @@
   "expo": {
     "name": "콕고",
     "slug": "badminton-court",
-    "version": "1.0.0",
+    "version": "1.0.1",
     "orientation": "default",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "light",
@@ -20,8 +20,10 @@
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "com.gylee.badminton",
-      "buildNumber": "11",
-      "associatedDomains": ["applinks:badmintoncourt.store"],
+      "buildNumber": "12",
+      "associatedDomains": [
+        "applinks:badmintoncourt.store"
+      ],
       "infoPlist": {
         "NSCameraUsageDescription": "QR코드 체크인을 위해 카메라 접근이 필요합니다",
         "NSLocationWhenInUseUsageDescription": "주변 체육관을 찾기 위해 위치 정보가 필요합니다",
@@ -36,10 +38,21 @@
           "action": "VIEW",
           "autoVerify": true,
           "data": [
-            { "scheme": "https", "host": "badmintoncourt.store", "pathPrefix": "/attend" },
-            { "scheme": "https", "host": "badmintoncourt.store", "pathPrefix": "/join" }
+            {
+              "scheme": "https",
+              "host": "badmintoncourt.store",
+              "pathPrefix": "/attend"
+            },
+            {
+              "scheme": "https",
+              "host": "badmintoncourt.store",
+              "pathPrefix": "/join"
+            }
           ],
-          "category": ["BROWSABLE", "DEFAULT"]
+          "category": [
+            "BROWSABLE",
+            "DEFAULT"
+          ]
         }
       ],
       "adaptiveIcon": {
