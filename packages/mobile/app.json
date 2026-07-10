@@ -64,6 +64,9 @@
         "android.permission.CAMERA",
         "android.permission.ACCESS_FINE_LOCATION",
         "android.permission.ACCESS_COARSE_LOCATION"
+      ],
+      "blockedPermissions": [
+        "com.google.android.gms.permission.AD_ID"
       ]
     },
     "web": {
@@ -75,7 +78,7 @@
       "kakaoNativeKey": "afed6b497e507e1cd83e5642df44c031",
       "googleClientId": "1020314759155-5itpocn654tbvt8ah0a44kif04pj8hjh.apps.googleusercontent.com",
       "googleIosClientId": "1020314759155-bsuf7iag4269kp5317obhrbrbs0ihl5f.apps.googleusercontent.com",
-      "googleAndroidClientId": "REPLACE_WITH_GOOGLE_ANDROID_CLIENT_ID",
+      "googleAndroidClientId": "1020314759155-51uevle9fklv33mep7v8mgtf0534f0jh.apps.googleusercontent.com",
       "eas": {
         "projectId": "ad8ee9b9-c892-4ebe-bfec-b8df01ea405b"
       },
