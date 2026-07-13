@@ -199,7 +199,7 @@ export default function HomeScreen() {
     return (
       <View style={[styles.container, { backgroundColor: pageBg }]}>
         <ScreenContainer>
-          <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
+          <ScrollView style={styles.container} contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
             <View style={styles.greetingRow}>
               <SkeletonGroup>
                 <Skeleton width={160} height={28} borderRadius={radius.sm} />
@@ -220,6 +220,7 @@ export default function HomeScreen() {
     <View style={[styles.container, { backgroundColor: pageBg }]}>
       <ScreenContainer>
       <ScrollView
+        style={styles.container}
         contentContainerStyle={styles.content}
         showsVerticalScrollIndicator={false}
         refreshControl={Platform.OS === 'web' ? undefined : <AnimatedRefreshControl refreshing={refreshing} onRefresh={onRefresh} />}

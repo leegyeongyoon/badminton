@@ -219,9 +219,13 @@ export default function TabsLayout() {
         tabBarStyle: {
           backgroundColor: colors.surface,
           borderTopColor: colors.border,
+          elevation: 0, // Android: elevation + Fabric 텍스트 이중 그리기(라벨 겹침) 방지
         },
+        // Android Fabric에서 고정 lineHeight + 명시 fontFamily(Roboto)가 탭 라벨을
+        // 잘림/겹침으로 만들어, 크기/굵기만 지정(줄높이·폰트패밀리 제거).
         tabBarLabelStyle: {
-          ...typography.caption,
+          fontSize: 12,
+          fontWeight: '500',
         },
         tabBarItemStyle: {
           paddingVertical: spacing.xs,
