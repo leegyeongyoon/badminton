@@ -1,7 +1,7 @@
 import { Platform } from 'react-native';
 import Constants from 'expo-constants';
 import * as WebBrowser from 'expo-web-browser';
-import { AuthRequest, ResponseType, exchangeCodeAsync } from 'expo-auth-session';
+import { AuthRequest, ResponseType, exchangeCodeAsync, makeRedirectUri } from 'expo-auth-session';
 
 /**
  * Google OAuth — authorization-code step ONLY (secure, server-side exchange).
@@ -68,7 +68,13 @@ function getNativeGoogleConfig(): { clientId: string; redirectUri: string } | nu
   if (Platform.OS === 'android') {
     const id = getGoogleAndroidClientId();
     if (!id) return null;
-    return { clientId: id, redirectUri: 'com.gylee.badminton:/oauth2redirect' };
+    // Use expo-auth-session's canonical redirect (app's default scheme), NOT a
+    // hardcoded string. Hardcoding 'com.gylee.badminton:/oauth2redirect' made the
+    // redirect actually come back as 'badminton://oauth2redirect' (app scheme),
+    // which did NOT match the returnUrl the auth session was watching for → the
+    // redirect leaked to expo-router as an "Unmatched Route" instead of completing
+    // login. makeRedirectUri keeps authorize + exchange + session-catch on ONE URI.
+    return { clientId: id, redirectUri: makeRedirectUri({ scheme: 'badminton', path: 'oauth2redirect' }) };
   }
   return null;
 }
