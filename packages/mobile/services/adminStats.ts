@@ -22,6 +22,7 @@ export interface AdminMetrics {
     todayPeakConnections: number;
     todayRequests: number;
     todayDau: number;
+    todayActive: number; // 오늘 앱 접근(로그인/요청)한 순 회원 — 체크인 무관
     activeSessions: number;
     checkedInNow: number;
   };
@@ -31,7 +32,7 @@ export interface AdminMetrics {
   hourly: number[]; // 0~23시 체크인 분포(피크타임)
 }
 
-export type WhoScope = 'online' | 'checkedin' | 'today' | 'signups';
+export type WhoScope = 'online' | 'checkedin' | 'today' | 'signups' | 'accessed';
 export interface WhoUser { userId: string; name: string; isGuest: boolean; context?: string; at?: string }
 export interface WhoResponse { scope: WhoScope; count: number; users: WhoUser[] }
 

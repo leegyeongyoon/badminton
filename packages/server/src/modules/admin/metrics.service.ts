@@ -55,6 +55,27 @@ export function noteSocketUser(socketId: string, userId: string): void {
   if (!userId) return;
   socketUser.set(socketId, userId);
 }
+
+// 오늘 앱에 접근(로그인/인증 API 요청)한 순 userId → 마지막 접근 ms. 체크인 안 해도 잡힌다.
+// 프로세스 메모리(서버 재시작 시 그날치 리셋) — DB 컬럼 추가 없이 '오늘 접속 회원' 파악용.
+let seenToday = new Map<string, number>();
+let seenTodayKey = dayKeyOf(new Date());
+function rolloverSeen(): void {
+  const k = dayKeyOf(new Date());
+  if (k !== seenTodayKey) {
+    seenTodayKey = k;
+    seenToday = new Map();
+  }
+}
+export function noteSeen(userId: string): void {
+  if (!userId) return;
+  rolloverSeen();
+  seenToday.set(userId, Date.now());
+}
+export function getSeenToday(): { userId: string; at: number }[] {
+  rolloverSeen();
+  return Array.from(seenToday, ([userId, at]) => ({ userId, at }));
+}
 export function getCurrentConnections(): number {
   return liveConnections();
 }
@@ -145,6 +166,7 @@ export interface AdminMetricsResponse {
     todayPeakConnections: number;
     todayRequests: number;
     todayDau: number;
+    todayActive: number; // 오늘 앱에 접근(로그인/요청)한 순 회원 — 체크인 무관
     activeSessions: number; // 지금 진행 중(ACTIVE)인 정모 수
     checkedInNow: number; // 지금 체크인(미퇴장) 인원
   };
@@ -288,6 +310,7 @@ export async function getAdminMetrics(granularity: Granularity = 'day', count?: 
       todayPeakConnections: Math.max(todayMetric?.peakConnections ?? 0, peakToday, liveConn),
       todayRequests: (todayMetric?.requestCount ?? 0) + requestDelta,
       todayDau: todaySet.size,
+      todayActive: getSeenToday().length,
       activeSessions,
       checkedInNow,
     },
@@ -299,7 +322,7 @@ export async function getAdminMetrics(granularity: Granularity = 'day', count?: 
 }
 
 // ─── 드릴다운: '누구'인지 명단 ───
-export type WhoScope = 'online' | 'checkedin' | 'today' | 'signups';
+export type WhoScope = 'online' | 'checkedin' | 'today' | 'signups' | 'accessed';
 export interface WhoUser {
   userId: string;
   name: string;
@@ -342,6 +365,22 @@ export async function getMetricsWho(scope: WhoScope, fromISO?: string, toISO?: s
       ? await prisma.user.findMany({ where: { id: { in: ids } }, select: { id: true, name: true, isGuest: true } })
       : [];
     return { scope, count: users.length, users: users.map((u) => ({ userId: u.id, name: u.name, isGuest: u.isGuest })) };
+  }
+
+  if (scope === 'accessed') {
+    // 오늘 앱에 접근(로그인/요청)한 회원 명단 — 체크인 안 해도 잡힘. 인메모리 기준(재시작 후분).
+    const seen = getSeenToday();
+    const atById = new Map(seen.map((s) => [s.userId, s.at]));
+    const users = seen.length
+      ? await prisma.user.findMany({ where: { id: { in: seen.map((s) => s.userId) } }, select: { id: true, name: true, isGuest: true } })
+      : [];
+    return {
+      scope,
+      count: users.length,
+      users: users
+        .map((u) => ({ userId: u.id, name: u.name, isGuest: u.isGuest, at: new Date(atById.get(u.id) ?? Date.now()).toISOString() }))
+        .sort((a, b) => (a.at < b.at ? 1 : -1)),
+    };
   }
 
   // checkedin = 지금 체크인(미퇴장), today = 오늘 체크인한 순 사용자

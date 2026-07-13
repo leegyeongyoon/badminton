@@ -158,7 +158,7 @@ export default function AdminMetricsScreen() {
     </View>
   );
   const whoTitle = whoScope === 'online' ? '현재 접속 중' : whoScope === 'checkedin' ? '지금 체크인'
-    : whoScope === 'signups' ? '가입자 명단' : '오늘 활동(체크인)';
+    : whoScope === 'signups' ? '가입자 명단' : whoScope === 'accessed' ? '오늘 접속한 회원' : '오늘 활동(체크인)';
 
   return (
     <View style={{ flex: 1, backgroundColor: colors.background }}>
@@ -183,6 +183,7 @@ export default function AdminMetricsScreen() {
             <StatCard label="현재 접속" value={live?.currentConnections ?? 0} accent onPress={() => openWho('online')} />
             <StatCard label="지금 체크인" value={live?.checkedInNow ?? 0} onPress={() => openWho('checkedin')} />
             <StatCard label="오늘 DAU" value={live?.todayDau ?? 0} onPress={() => openWho('today')} />
+            <StatCard label="오늘 접속" value={live?.todayActive ?? 0} onPress={() => openWho('accessed')} />
             <StatCard label="진행 중 정모" value={live?.activeSessions ?? 0} />
             <StatCard label="오늘 피크" value={live?.todayPeakConnections ?? 0} />
             <StatCard label="오늘 요청수" value={(live?.todayRequests ?? 0).toLocaleString()} />
