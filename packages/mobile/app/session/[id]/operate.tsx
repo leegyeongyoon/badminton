@@ -849,6 +849,8 @@ export default function OperateScreen() {
       (a.userName || '').localeCompare(b.userName || '', 'ko-KR');
     return uniquePlayers
       .slice()
+      // 레슨 중(비-게임)은 '따로 빠짐' — 전체 탭에서도 제외해 레슨자 박스에서만 관리.
+      .filter((p) => !(p.isInLesson && p.status !== 'IN_TURN'))
       .sort(byName)
       .map((p) => {
         const poolStatus: 'free' | 'queued' | 'playing' =
@@ -2851,6 +2853,12 @@ export default function OperateScreen() {
             label="게임 중" count={playingPool.length} list={playingPool}
             tint={colors.playerInTurn} stageable emptyText="진행 중인 게임이 없어요"
           />
+          {/* 레슨 중 — 자동추천·미편성 풀에서 빠진 레슨자를 따로 표시(모드2 레슨자
+              박스와 동일 개념). stageable이라 필요하면 수동 편성은 가능. */}
+          <PoolBox
+            label="레슨 중" count={lessonPool.length} list={lessonPool}
+            tint={colors.warning} stageable emptyText="레슨 중인 회원이 없어요"
+          />
         </>
       ) : poolTab === 'all' ? (
         <AllPoolBox />
@@ -4006,7 +4014,8 @@ export default function OperateScreen() {
     <View style={[styles.modeTabsRow, { borderBottomColor: colors.border }]}>
       <Text style={[styles.modeTabsLabel, { color: colors.textSecondary }]}>운영 모드</Text>
       <View style={[styles.modeTabs, { backgroundColor: colors.surfaceSecondary, borderColor: colors.border }]}>
-        {([[1, '기본'], [2, '게임판']] as const).map(([key, label]) => {
+        {/* 모드 2(게임판)를 메인으로 앞(왼쪽)에 둔다 — 운영진 주 사용 모드. */}
+        {([[2, '게임판'], [1, '기본']] as const).map(([key, label]) => {
           const active = boardMode === key;
           return (
             <TouchableOpacity
