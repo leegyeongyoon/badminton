@@ -127,6 +127,12 @@
             ]
           }
         }
+      ],
+      [
+        "@react-native-google-signin/google-signin",
+        {
+          "iosUrlScheme": "com.googleusercontent.apps.1020314759155-bsuf7iag4269kp5317obhrbrbs0ihl5f"
+        }
       ]
     ],
     "owner": "leegyoungyoon"

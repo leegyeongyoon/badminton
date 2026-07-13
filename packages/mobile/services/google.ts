@@ -94,6 +94,44 @@ const GOOGLE_DISCOVERY = {
 };
 
 /**
+ * NATIVE Android Google login via the official Google Sign-In SDK
+ * (@react-native-google-signin/google-signin). Google BLOCKS browser-based
+ * custom-scheme OAuth for Android clients ("doesn't comply with Google's OAuth
+ * 2.0 policy for keeping apps secure" → 400 invalid_request), so Android MUST
+ * use the native account picker. The SDK identifies the app by package name +
+ * SHA-1 (registered on the Android OAuth client), shows the native chooser, and
+ * returns tokens directly — no browser, no redirect URI. We hand the resulting
+ * ACCESS token to the backend exactly like the iOS/web flows. Dynamically
+ * imported so the web bundle (which uses startGoogleWebLogin) never touches the
+ * native module. Returns null on cancel / any failure (caller shows the friendly
+ * message), mirroring the other paths.
+ */
+async function getNativeAndroidGoogleToken(): Promise<{ accessToken: string } | null> {
+  const webClientId = getGoogleClientId(); // WEB client id = idToken audience
+  try {
+    const { GoogleSignin } = await import('@react-native-google-signin/google-signin');
+    GoogleSignin.configure({
+      webClientId: webClientId ?? undefined,
+      scopes: ['profile', 'email'],
+    });
+    await GoogleSignin.hasPlayServices({ showPlayServicesUpdateDialog: true });
+    // Clear any stale session so the account picker always appears.
+    try {
+      await GoogleSignin.signOut();
+    } catch {
+      // no active session — fine
+    }
+    const response = await GoogleSignin.signIn();
+    // v13+ returns { type: 'success' | 'cancelled', data }. Bail on cancel.
+    if (response && (response as { type?: string }).type === 'cancelled') return null;
+    const tokens = await GoogleSignin.getTokens();
+    return tokens?.accessToken ? { accessToken: tokens.accessToken } : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
  * NATIVE Google login. Runs Google's authorize step (PKCE) with the platform
  * native client id, then exchanges the code for an access token ON THE CLIENT
  * (native Google clients have no secret — PKCE only). The access token is handed
@@ -105,6 +143,9 @@ const GOOGLE_DISCOVERY = {
  * friendly "키 필요" / error message, exactly like Kakao.
  */
 export async function getGoogleAccessToken(): Promise<{ accessToken: string } | null> {
+  // Android: Google blocks the browser custom-scheme flow → native SDK only.
+  if (Platform.OS === 'android') return getNativeAndroidGoogleToken();
+
   const cfg = getNativeGoogleConfig();
   if (!cfg) return null;
 
