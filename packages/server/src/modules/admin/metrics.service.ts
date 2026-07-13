@@ -304,13 +304,19 @@ export async function getAdminMetrics(granularity: Granularity = 'day', count?: 
   const todaySet = new Set<string>();
   for (const c of checkins) if (dayKeyOf(c.checkedInAt) === todayKey) todaySet.add(c.userId);
 
+  // '오늘 접속' = 인메모리 seenToday 중 실제 가입 회원(SIGNED_UP)만 — 게스트·명단전용 제외.
+  const seenIds = getSeenToday().map((s) => s.userId);
+  const todayActive = seenIds.length
+    ? await prisma.user.count({ where: { id: { in: seenIds }, ...SIGNED_UP } })
+    : 0;
+
   return {
     live: {
       currentConnections: liveConn,
       todayPeakConnections: Math.max(todayMetric?.peakConnections ?? 0, peakToday, liveConn),
       todayRequests: (todayMetric?.requestCount ?? 0) + requestDelta,
       todayDau: todaySet.size,
-      todayActive: getSeenToday().length,
+      todayActive,
       activeSessions,
       checkedInNow,
     },
@@ -368,17 +374,18 @@ export async function getMetricsWho(scope: WhoScope, fromISO?: string, toISO?: s
   }
 
   if (scope === 'accessed') {
-    // 오늘 앱에 접근(로그인/요청)한 회원 명단 — 체크인 안 해도 잡힘. 인메모리 기준(재시작 후분).
+    // 오늘 앱에 접근(로그인/요청)한 '가입 회원' 명단 — 체크인 안 해도 잡힘.
+    // SIGNED_UP 으로 게스트·명단전용(로그인 없는) 계정은 제외. 인메모리 기준(재시작 후분).
     const seen = getSeenToday();
     const atById = new Map(seen.map((s) => [s.userId, s.at]));
     const users = seen.length
-      ? await prisma.user.findMany({ where: { id: { in: seen.map((s) => s.userId) } }, select: { id: true, name: true, isGuest: true } })
+      ? await prisma.user.findMany({ where: { id: { in: seen.map((s) => s.userId) }, ...SIGNED_UP }, select: { id: true, name: true } })
       : [];
     return {
       scope,
       count: users.length,
       users: users
-        .map((u) => ({ userId: u.id, name: u.name, isGuest: u.isGuest, at: new Date(atById.get(u.id) ?? Date.now()).toISOString() }))
+        .map((u) => ({ userId: u.id, name: u.name, isGuest: false, at: new Date(atById.get(u.id) ?? Date.now()).toISOString() }))
         .sort((a, b) => (a.at < b.at ? 1 : -1)),
     };
   }
