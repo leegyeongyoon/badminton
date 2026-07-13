@@ -28,17 +28,20 @@ export default function OperatorRequestsScreen() {
   const [refreshing, setRefreshing] = useState(false);
   // id of the request currently being reviewed (disables its buttons).
   const [reviewingId, setReviewingId] = useState<string | null>(null);
+  // 대기 중 / 승인됨 필터. 승인하면 pending 목록에서 빠지므로, 승인된 운영자
+  // (이름·연락처·모임)를 다시 확인할 수 있도록 상태 탭을 둔다.
+  const [filter, setFilter] = useState<'pending' | 'approved'>('pending');
 
   const load = useCallback(async () => {
     try {
-      const { data } = await operatorRequestApi.list('pending');
+      const { data } = await operatorRequestApi.list(filter);
       setRequests(data || []);
     } catch (err: any) {
       showAlert(Strings.common.error, err?.response?.data?.error || '신청 목록을 불러오지 못했습니다');
     } finally {
       setIsLoading(false);
     }
-  }, []);
+  }, [filter]);
 
   useEffect(() => {
     load();
@@ -103,22 +106,28 @@ export default function OperatorRequestsScreen() {
       {item.message ? (
         <Text style={[styles.message, { color: colors.textSecondary }]}>{item.message}</Text>
       ) : null}
-      <View style={styles.actions}>
-        <Button
-          title="거절"
-          onPress={() => confirmReview(item, 'reject')}
-          variant="outline"
-          size="md"
-          disabled={reviewingId === item.id}
-        />
-        <Button
-          title="승인"
-          onPress={() => confirmReview(item, 'approve')}
-          variant="primary"
-          size="md"
-          loading={reviewingId === item.id}
-        />
-      </View>
+      {item.status === 'PENDING' ? (
+        <View style={styles.actions}>
+          <Button
+            title="거절"
+            onPress={() => confirmReview(item, 'reject')}
+            variant="outline"
+            size="md"
+            disabled={reviewingId === item.id}
+          />
+          <Button
+            title="승인"
+            onPress={() => confirmReview(item, 'approve')}
+            variant="primary"
+            size="md"
+            loading={reviewingId === item.id}
+          />
+        </View>
+      ) : (
+        <View style={[styles.statusBadge, { backgroundColor: colors.secondaryLight }]}>
+          <Text style={[styles.statusBadgeText, { color: colors.secondary }]}>✓ 승인된 운영자</Text>
+        </View>
+      )}
     </View>
   );
 
@@ -146,6 +155,16 @@ export default function OperatorRequestsScreen() {
   return (
     <View style={[styles.container, { backgroundColor: colors.background }]}>
       {Header}
+      <View style={[styles.filterBar, { backgroundColor: colors.surface, borderBottomColor: colors.divider }]}>
+        {(['pending', 'approved'] as const).map((f) => (
+          <TouchableOpacity key={f} onPress={() => { if (filter !== f) setFilter(f); }} style={styles.filterTab}>
+            <Text style={[styles.filterTabText, { color: filter === f ? colors.primary : colors.textLight }]}>
+              {f === 'pending' ? '대기 중' : '승인됨'}
+            </Text>
+            {filter === f ? <View style={[styles.filterUnderline, { backgroundColor: colors.primary }]} /> : null}
+          </TouchableOpacity>
+        ))}
+      </View>
       <ScreenContainer maxWidth={720}>
       <FlatList
         data={requests}
@@ -159,9 +178,13 @@ export default function OperatorRequestsScreen() {
         }
         ListEmptyComponent={
           <View style={styles.emptyContainer}>
-            <Text style={[styles.emptyTitle, { color: colors.text }]}>대기 중인 신청이 없어요</Text>
+            <Text style={[styles.emptyTitle, { color: colors.text }]}>
+              {filter === 'pending' ? '대기 중인 신청이 없어요' : '승인된 운영자가 없어요'}
+            </Text>
             <Text style={[styles.emptyDesc, { color: colors.textSecondary }]}>
-              새로운 운영자 신청이 들어오면 여기에 표시됩니다.
+              {filter === 'pending'
+                ? '새로운 운영자 신청이 들어오면 여기에 표시됩니다.'
+                : '운영자를 승인하면 여기에서 이름·연락처를 다시 확인할 수 있어요.'}
             </Text>
           </View>
         }
@@ -186,6 +209,32 @@ const styles = StyleSheet.create({
   backButton: { width: 60 },
   backText: { ...typography.body1, fontWeight: '600' },
   headerTitle: { ...typography.subtitle1 },
+  filterBar: {
+    flexDirection: 'row',
+    borderBottomWidth: StyleSheet.hairlineWidth,
+  },
+  filterTab: {
+    flex: 1,
+    alignItems: 'center',
+    paddingVertical: spacing.md,
+  },
+  filterTabText: { ...typography.subtitle2 },
+  filterUnderline: {
+    position: 'absolute',
+    bottom: 0,
+    height: 2,
+    left: '30%',
+    right: '30%',
+    borderRadius: 1,
+  },
+  statusBadge: {
+    alignSelf: 'flex-end',
+    marginTop: spacing.md,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.xs + 2,
+    borderRadius: radius.pill,
+  },
+  statusBadgeText: { ...typography.caption, fontWeight: '700' },
   list: { padding: spacing.lg, gap: spacing.md },
   listEmpty: { flexGrow: 1 },
   card: {
