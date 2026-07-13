@@ -93,8 +93,8 @@ interface AuthState {
    * (loadUser) so linkedProviders updates. Throw on 409/400 so the caller can
    * surface the server message. The user's token persists across the redirect.
    */
-  linkKakao: (auth: { code: string; redirectUri: string }) => Promise<void>;
-  linkGoogle: (auth: { code: string; redirectUri: string }) => Promise<void>;
+  linkKakao: (auth: { code: string; redirectUri: string } | { accessToken: string }) => Promise<void>;
+  linkGoogle: (auth: { code: string; redirectUri: string } | { accessToken: string }) => Promise<void>;
   /** Unlink a provider; refreshes the local user. Server guards ≥1 method. */
   unlinkKakao: () => Promise<void>;
   unlinkGoogle: () => Promise<void>;

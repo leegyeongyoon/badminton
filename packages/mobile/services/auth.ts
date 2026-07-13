@@ -34,11 +34,12 @@ export const authApi = {
     api.post('/auth/complete-profile', data),
 
   // Manual account linking (계정 연동) — authenticated. Attach a SECOND social
-  // provider to the current account; body { code, redirectUri } mirrors login.
-  linkKakao: (data: { code: string; redirectUri: string }) =>
+  // provider to the current account. Web sends { code, redirectUri }; native
+  // sends { accessToken } from the provider's native SDK. Mirrors login.
+  linkKakao: (data: { code: string; redirectUri: string } | { accessToken: string }) =>
     api.post('/auth/link/kakao', data),
 
-  linkGoogle: (data: { code: string; redirectUri: string }) =>
+  linkGoogle: (data: { code: string; redirectUri: string } | { accessToken: string }) =>
     api.post('/auth/link/google', data),
 
   // Unlink a provider (authenticated). Server guards "keep ≥1 login method".

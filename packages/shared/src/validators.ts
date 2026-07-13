@@ -87,10 +87,19 @@ export const googleLoginSchema = z
 // instead of creating/logging in a new user. Both fields are required (the link
 // flow always runs the web full-page redirect, which yields a fresh code +
 // the exact redirectUri used at authorize).
-export const linkProviderSchema = z.object({
-  code: z.string().min(1, 'code가 필요합니다'),
-  redirectUri: z.string().min(1, 'redirectUri가 필요합니다'),
-});
+export const linkProviderSchema = z
+  .object({
+    code: z.string().min(1).optional(),
+    redirectUri: z.string().min(1).optional(),
+    accessToken: z.string().min(1).optional(),
+  })
+  .refine(
+    (d) => (!!d.code && !!d.redirectUri) || !!d.accessToken,
+    {
+      message: 'code+redirectUri 또는 accessToken이 필요합니다',
+      path: ['code'],
+    },
+  );
 
 // New-user profile completion (신규 카카오 가입자 프로필 설정).
 // Sets the User.name and upserts the caller's PlayerProfile (급수/성별).

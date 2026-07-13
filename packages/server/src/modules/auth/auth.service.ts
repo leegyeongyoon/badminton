@@ -564,9 +564,7 @@ export async function googleLogin(input: GoogleLoginInput) {
  * by the link flow to discover which Kakao identity to attach to the current
  * account. Throws the same diagnosable auth errors as the login path.
  */
-async function resolveKakaoIdFromCode(code: string, redirectUri: string): Promise<string> {
-  const accessToken = await exchangeKakaoCode(code, redirectUri);
-
+async function resolveKakaoIdFromAccessToken(accessToken: string): Promise<string> {
   let kakaoRes: globalThis.Response;
   try {
     kakaoRes = await fetch('https://kapi.kakao.com/v2/user/me', {
@@ -590,14 +588,17 @@ async function resolveKakaoIdFromCode(code: string, redirectUri: string): Promis
   return String(data.id);
 }
 
+async function resolveKakaoIdFromCode(code: string, redirectUri: string): Promise<string> {
+  const accessToken = await exchangeKakaoCode(code, redirectUri);
+  return resolveKakaoIdFromAccessToken(accessToken);
+}
+
 /**
  * Resolve a Google account id (sub) from a { code, redirectUri } using the SAME
  * exchange + userinfo call as googleLogin — but WITHOUT creating/logging in any
  * user. Used by the link flow. Throws the same diagnosable auth errors.
  */
-async function resolveGoogleIdFromCode(code: string, redirectUri: string): Promise<string> {
-  const accessToken = await exchangeGoogleCode(code, redirectUri);
-
+async function resolveGoogleIdFromAccessToken(accessToken: string): Promise<string> {
   let googleRes: globalThis.Response;
   try {
     googleRes = await fetch('https://www.googleapis.com/oauth2/v3/userinfo', {
@@ -619,6 +620,11 @@ async function resolveGoogleIdFromCode(code: string, redirectUri: string): Promi
     throw new UnauthorizedError('구글 인증에 실패했습니다');
   }
   return data.sub;
+}
+
+async function resolveGoogleIdFromCode(code: string, redirectUri: string): Promise<string> {
+  const accessToken = await exchangeGoogleCode(code, redirectUri);
+  return resolveGoogleIdFromAccessToken(accessToken);
 }
 
 /** Re-fetch the current user WITH profile and return the canonical user response. */
@@ -651,7 +657,9 @@ async function otherAccountHasActivity(otherUserId: string): Promise<boolean> {
  *   - on ANOTHER user WITH activity → 409: 그 계정으로 로그인하라고 안내(자동 병합 안 함).
  */
 export async function linkKakao(userId: string, input: LinkProviderInput) {
-  const kakaoId = await resolveKakaoIdFromCode(input.code, input.redirectUri);
+  const kakaoId = input.accessToken
+    ? await resolveKakaoIdFromAccessToken(input.accessToken)
+    : await resolveKakaoIdFromCode(input.code!, input.redirectUri!);
 
   const existing = await prisma.user.findUnique({ where: { kakaoId } });
   if (existing && existing.id !== userId) {
@@ -676,7 +684,9 @@ export async function linkKakao(userId: string, input: LinkProviderInput) {
  * (빈 중복 계정은 흡수, 활동 있는 계정은 409 안내).
  */
 export async function linkGoogle(userId: string, input: LinkProviderInput) {
-  const googleId = await resolveGoogleIdFromCode(input.code, input.redirectUri);
+  const googleId = input.accessToken
+    ? await resolveGoogleIdFromAccessToken(input.accessToken)
+    : await resolveGoogleIdFromCode(input.code!, input.redirectUri!);
 
   const existing = await prisma.user.findUnique({ where: { googleId } });
   if (existing && existing.id !== userId) {

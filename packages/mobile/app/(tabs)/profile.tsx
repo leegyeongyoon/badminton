@@ -14,17 +14,17 @@ import { profileApi } from '../../services/profile';
 import { Colors } from '../../constants/colors';
 import { createShadow } from '../../constants/theme';
 import { showAlert, showConfirm } from '../../utils/alert';
-import { showError } from '../../utils/feedback';
-import { startKakaoWebLogin } from '../../services/kakao';
-import { startGoogleWebLogin } from '../../services/google';
+import { showError, showSuccess } from '../../utils/feedback';
+import { startKakaoWebLogin, getKakaoAuthCode } from '../../services/kakao';
+import { startGoogleWebLogin, getGoogleAccessToken } from '../../services/google';
 import { SKILL_LEVELS as SKILL_LETTERS, getSkillMeta } from '../../constants/skill';
 import { GENDER_META, type Gender } from '../../constants/gender';
 import { GenderMarker } from '../../components/ui/GenderMarker';
 
 // 계정 연동(account linking) providers rendered in the 내 정보 section.
 const LINK_PROVIDERS = [
-  { key: 'kakao' as const, label: '카카오', start: startKakaoWebLogin },
-  { key: 'google' as const, label: '구글', start: startGoogleWebLogin },
+  { key: 'kakao' as const, label: '카카오', start: startKakaoWebLogin, getNativeToken: getKakaoAuthCode },
+  { key: 'google' as const, label: '구글', start: startGoogleWebLogin, getNativeToken: getGoogleAccessToken },
 ];
 
 const roleLabels: Record<string, string> = {
@@ -41,7 +41,7 @@ const GAME_TYPES = [
 
 export default function ProfileScreen() {
   const router = useRouter();
-  const { user, loadUser, unlinkKakao, unlinkGoogle } = useAuthStore();
+  const { user, loadUser, unlinkKakao, unlinkGoogle, linkKakao, linkGoogle } = useAuthStore();
 
   const [skillLevel, setSkillLevel] = useState<string>('');
   const [gender, setGender] = useState<string>('');
@@ -137,12 +137,27 @@ export default function ProfileScreen() {
   // returns to our origin and the callback (useKakao/GoogleWebCallback) finishes
   // the link under the persisted token. `start('link')` returns false when the
   // provider key isn't configured (placeholder) → friendly notice.
-  const handleLink = (start: (mode?: 'login' | 'link') => boolean, label: string) => {
-    const started = start('link');
-    if (!started) {
-      showError(`${label} 연동 설정이 준비 중이에요 (키 필요)`);
+  const handleLink = async (provider: (typeof LINK_PROVIDERS)[number]) => {
+    const { key, label, start, getNativeToken } = provider;
+    // WEB: full-page redirect to the provider (returns to our origin; the
+    // useKakao/GoogleWebCallback finishes the link). start() reads window.* so it
+    // MUST NOT run on native — that's exactly what was crashing the app.
+    if (Platform.OS === 'web') {
+      const started = start('link');
+      if (!started) showError(`${label} 연동 설정이 준비 중이에요 (키 필요)`);
+      return;
     }
-    // started === true → the page is navigating to the provider; nothing else to do.
+    // NATIVE: get a provider token via its native SDK (account picker), then link
+    // via { accessToken }. No browser, no window.* — this is the crash fix.
+    try {
+      const auth = await getNativeToken();
+      if (!auth) return; // cancelled / not configured (SDK showed its own UI)
+      if (key === 'kakao') await linkKakao(auth);
+      else await linkGoogle(auth);
+      showSuccess(`${label} 연동 완료`);
+    } catch (err: any) {
+      showError(err?.response?.data?.error || err?.message || `${label} 연동에 실패했어요`);
+    }
   };
 
   const handleUnlink = (key: 'kakao' | 'google', label: string) => {
@@ -440,7 +455,7 @@ export default function ProfileScreen() {
                 ) : (
                   <TouchableOpacity
                     style={styles.linkButton}
-                    onPress={() => handleLink(p.start, p.label)}
+                    onPress={() => handleLink(p)}
                     activeOpacity={0.7}
                     accessibilityRole="button"
                     accessibilityLabel={`${p.label} 연동`}
