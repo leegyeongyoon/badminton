@@ -19,6 +19,7 @@ import { Input } from '../components/ui/Input';
 import { Button } from '../components/ui/Button';
 import { ScreenContainer } from '../components/ui/ScreenContainer';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useRouter } from 'expo-router';
 
 // ─────────────────────────────────────────────────────────
 // 신규 카카오 가입자 프로필 설정 — 이름(필수) + 급수(필수) + 성별(필수).
@@ -33,6 +34,7 @@ export default function ProfileSetupScreen() {
   const { user, completeProfile } = useAuthStore();
   const { colors } = useTheme();
   const insets = useSafeAreaInsets();
+  const router = useRouter();
 
   // Prefill with the current name unless it's the Kakao placeholder.
   const initialName = user?.name && user.name !== '카카오회원' ? user.name : '';
@@ -41,6 +43,8 @@ export default function ProfileSetupScreen() {
   const [gender, setGender] = useState<Gender | null>(null);
   const [loading, setLoading] = useState(false);
   const [touched, setTouched] = useState(false);
+  // 개인정보 수집·이용 동의(필수) — PIPA. 체크해야 가입 진행 가능.
+  const [agreed, setAgreed] = useState(false);
 
   const trimmedName = name.trim();
   const nameError = touched && trimmedName.length === 0 ? '이름을 입력하세요' : undefined;
@@ -49,7 +53,8 @@ export default function ProfileSetupScreen() {
   const skillError = touched && !skill ? '급수를 선택하세요' : undefined;
   // 성별 is REQUIRED — the gate enforces it (카카오는 성별을 주지 않음).
   const genderError = touched && !gender ? '성별을 선택하세요' : undefined;
-  const canSubmit = trimmedName.length > 0 && !!skill && !!gender;
+  const consentError = touched && !agreed ? '개인정보처리방침 동의가 필요해요' : undefined;
+  const canSubmit = trimmedName.length > 0 && !!skill && !!gender && agreed;
 
   const handleSubmit = async () => {
     setTouched(true);
@@ -199,6 +204,42 @@ export default function ProfileSetupScreen() {
           )}
         </View>
 
+        {/* 개인정보 수집·이용 동의 (필수) — PIPA. 체크해야 시작하기 활성화 */}
+        <View style={styles.field}>
+          <Pressable
+            onPress={() => setAgreed((v) => !v)}
+            accessibilityRole="checkbox"
+            accessibilityState={{ checked: agreed }}
+            accessibilityLabel="개인정보처리방침 동의 (필수)"
+            style={styles.consentRow}
+          >
+            <View
+              style={[
+                styles.checkbox,
+                { borderColor: agreed ? colors.primary : colors.border },
+                agreed && { backgroundColor: colors.primary },
+              ]}
+            >
+              {agreed && <Text style={styles.checkboxMark}>✓</Text>}
+            </View>
+            <Text style={[styles.consentText, { color: colors.textSecondary }]}>
+              <Text
+                style={{ color: colors.primary, fontWeight: '700', textDecorationLine: 'underline' }}
+                onPress={() => router.push('/privacy')}
+                suppressHighlighting
+              >
+                개인정보처리방침
+              </Text>
+              {' 및 개인정보 수집·이용에 동의합니다 (필수)'}
+            </Text>
+          </Pressable>
+          {consentError && (
+            <Text style={[styles.errorText, { color: colors.danger }]} accessibilityLiveRegion="polite">
+              {consentError}
+            </Text>
+          )}
+        </View>
+
         <Button
           title={loading ? '저장 중…' : '시작하기'}
           onPress={handleSubmit}
@@ -237,6 +278,29 @@ const styles = StyleSheet.create({
   errorText: {
     ...typography.caption,
     marginTop: spacing.xs,
+  },
+  consentRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+  },
+  checkbox: {
+    width: 22,
+    height: 22,
+    borderRadius: radius.sm,
+    borderWidth: 2,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  checkboxMark: {
+    color: '#fff',
+    fontSize: 14,
+    fontWeight: '900',
+    lineHeight: 16,
+  },
+  consentText: {
+    ...typography.body2,
+    flex: 1,
   },
   chipRow: {
     flexDirection: 'row',
