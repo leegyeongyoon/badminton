@@ -35,6 +35,10 @@ export async function sendPushToUser(userId: string, payload: PushPayload) {
     title: payload.title,
     body: payload.body,
     data: payload.data,
+    // Android: 'default' 채널(클라에서 HIGH importance로 생성)로 보내고 high priority로
+    // 즉시 헤드업(팝업) 표시. iOS에는 무해(무시됨).
+    channelId: 'default',
+    priority: 'high',
   };
 
   try {

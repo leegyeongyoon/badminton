@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "775576393375",
+    "project_id": "cockgo",
+    "storage_bucket": "cockgo.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:775576393375:android:b63104a81e1a3e9354f4aa",
+        "android_client_info": {
+          "package_name": "com.gylee.badminton"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyDObCpSEf9zuaBDuc_xgvQX_m-wom7o6WI"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
