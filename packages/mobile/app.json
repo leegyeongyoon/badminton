@@ -33,7 +33,7 @@
     "android": {
       "package": "com.gylee.badminton",
       "googleServicesFile": "./google-services.json",
-      "versionCode": 13,
+      "versionCode": 14,
       "intentFilters": [
         {
           "action": "VIEW",
