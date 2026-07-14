@@ -189,10 +189,11 @@ export default function MyStatusScreen() {
     <ScrollView
       style={styles.container}
       contentContainerStyle={styles.content}
+      // Android(Fabric)는 RefreshControl이 스크롤 높이를 0으로 붕괴 → 백지. iOS만 붙임.
       refreshControl={
-        Platform.OS === 'web' ? undefined : (
+        Platform.OS === 'ios' ? (
           <AnimatedRefreshControl refreshing={isLoading} onRefresh={refresh} />
-        )
+        ) : undefined
       }
     >
       {/* Headline: my current state — big label + distinct 순번/코트 chips */}

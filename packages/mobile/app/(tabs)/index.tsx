@@ -223,7 +223,8 @@ export default function HomeScreen() {
         style={styles.container}
         contentContainerStyle={styles.content}
         showsVerticalScrollIndicator={false}
-        refreshControl={Platform.OS === 'web' ? undefined : <AnimatedRefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
+        // Android(Fabric)는 RefreshControl이 스크롤 높이를 0으로 붕괴 → 백지. iOS만 붙임.
+        refreshControl={Platform.OS === 'ios' ? <AnimatedRefreshControl refreshing={refreshing} onRefresh={onRefresh} /> : undefined}
       >
         {/* ─── 1. Greeting ─── */}
         <View style={styles.greetingRow}>
