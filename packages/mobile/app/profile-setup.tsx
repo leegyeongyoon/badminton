@@ -18,6 +18,7 @@ import { showError } from '../utils/feedback';
 import { Input } from '../components/ui/Input';
 import { Button } from '../components/ui/Button';
 import { ScreenContainer } from '../components/ui/ScreenContainer';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 // ─────────────────────────────────────────────────────────
 // 신규 카카오 가입자 프로필 설정 — 이름(필수) + 급수(필수) + 성별(필수).
@@ -31,6 +32,7 @@ import { ScreenContainer } from '../components/ui/ScreenContainer';
 export default function ProfileSetupScreen() {
   const { user, completeProfile } = useAuthStore();
   const { colors } = useTheme();
+  const insets = useSafeAreaInsets();
 
   // Prefill with the current name unless it's the Kakao placeholder.
   const initialName = user?.name && user.name !== '카카오회원' ? user.name : '';
@@ -76,7 +78,7 @@ export default function ProfileSetupScreen() {
     >
       <ScreenContainer maxWidth={480}>
       <ScrollView
-        contentContainerStyle={styles.content}
+        contentContainerStyle={[styles.content, { paddingTop: insets.top + spacing.xl }]}
         keyboardShouldPersistTaps="handled"
       >
         <Text style={[styles.title, { color: colors.text }]}>프로필 설정</Text>
