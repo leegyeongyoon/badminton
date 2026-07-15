@@ -13,20 +13,48 @@ import { getSocket } from './useSocket';
  * forever even though real-time sync actually worked. Polling reflects reality
  * within 1.5s regardless of timing or socket re-creation (logout/login).
  *
- * The banner is also suppressed during the INITIAL connecting phase: we only flip
- * to "disconnected" once the socket has actually been connected at least once and
- * then dropped — so a fresh load never flashes a false "재연결 중".
+ * GRACE PERIODS — the banner is intentionally SLOW to appear so it never flashes
+ * on the brief, normal blips that browsers/phones (and every server redeploy!)
+ * cause. It only surfaces for a SUSTAINED problem:
+ *   - socket: must fail ~3 consecutive polls (~4.5s) before "재연결 중"
+ *   - network: must stay offline ~3s before "인터넷 연결 없음"
+ * Recovery clears instantly. The banner is also suppressed during the INITIAL
+ * connecting phase (everConnectedRef) so a fresh load never flashes a false
+ * "재연결 중".
  */
+const SOCKET_FAIL_GRACE = 3; // consecutive 1.5s polls (~4.5s) before showing
+const NET_OFFLINE_GRACE_MS = 3000; // sustained offline before showing
+
 export function useNetworkStatus() {
   const [isConnected, setIsConnected] = useState(true);
   const [isSocketConnected, setIsSocketConnected] = useState(true);
   const everConnectedRef = useRef(false);
+  const failCountRef = useRef(0);
+  const offlineTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
     const unsubscribe = NetInfo.addEventListener((state) => {
-      setIsConnected(state.isConnected ?? true);
+      const online = state.isConnected ?? true;
+      if (online) {
+        // Back online → clear any pending "offline" timer and recover instantly.
+        if (offlineTimerRef.current) {
+          clearTimeout(offlineTimerRef.current);
+          offlineTimerRef.current = null;
+        }
+        setIsConnected(true);
+      } else if (!offlineTimerRef.current) {
+        // Only flip to offline after it STAYS offline past the grace window, so a
+        // wifi handoff / momentary drop never flashes the red bar.
+        offlineTimerRef.current = setTimeout(() => {
+          setIsConnected(false);
+          offlineTimerRef.current = null;
+        }, NET_OFFLINE_GRACE_MS);
+      }
     });
-    return () => unsubscribe();
+    return () => {
+      unsubscribe();
+      if (offlineTimerRef.current) clearTimeout(offlineTimerRef.current);
+    };
   }, []);
 
   useEffect(() => {
@@ -37,11 +65,14 @@ export function useNetworkStatus() {
       if (!mounted) return;
       if (socket.connected) {
         everConnectedRef.current = true;
+        failCountRef.current = 0;
         setIsSocketConnected(true);
       } else if (everConnectedRef.current) {
-        // Only treat as "disconnected" after a REAL drop following a prior
-        // connection — never during the first-connect handshake.
-        setIsSocketConnected(false);
+        // Only treat as "disconnected" after a REAL drop (post-first-connect)
+        // that persists past the grace window — brief reconnects (server
+        // redeploy, tab backgrounding, network hiccup) recover silently.
+        failCountRef.current += 1;
+        if (failCountRef.current >= SOCKET_FAIL_GRACE) setIsSocketConnected(false);
       }
     };
     tick();
