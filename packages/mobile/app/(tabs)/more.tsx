@@ -3,6 +3,7 @@ import { View, Text, TouchableOpacity, StyleSheet, ScrollView, Share } from 'rea
 import { useRouter } from 'expo-router';
 import { useAuthStore } from '../../store/authStore';
 import { useClubStore } from '../../store/clubStore';
+import { useNotificationStore } from '../../store/notificationStore';
 import { useTheme } from '../../hooks/useTheme';
 import { Strings } from '../../constants/strings';
 import { showAlert, showConfirm } from '../../utils/alert';
@@ -35,7 +36,7 @@ export default function MoreScreen() {
   const { colors, shadows } = useTheme();
   const { user, logout, loadUser } = useAuthStore();
   const { clubs, fetchClubs, createClub, joinClub } = useClubStore();
-  const [unreadCount, setUnreadCount] = useState(0);
+  const unreadCount = useNotificationStore((s) => s.unreadCount);
   const [profileData, setProfileData] = useState<any>(null);
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [showJoinModal, setShowJoinModal] = useState(false);
@@ -110,14 +111,8 @@ export default function MoreScreen() {
     }
   };
 
-  const loadUnreadCount = async () => {
-    try {
-      const { data } = await api.get('/notifications', { params: { unreadOnly: true } });
-      setUnreadCount(Array.isArray(data) ? data.filter((n: any) => !n.read).length : 0);
-    } catch {
-      /* silent */
-    }
-  };
+  // 공용 알림 스토어 갱신(탭 뱃지와 동일 소스). 화면 진입 시 최신 미읽음 수 반영.
+  const loadUnreadCount = () => useNotificationStore.getState().refresh();
 
   const handleLogout = () => {
     showConfirm(Strings.auth.logout, '로그아웃하시겠습니까?', async () => {

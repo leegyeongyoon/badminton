@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback, useRef } from 'react';
+import { useEffect, useRef } from 'react';
 import { Tabs } from 'expo-router';
 import { Text, View, StyleSheet, Platform, Pressable } from 'react-native';
 import { BottomTabBar, type BottomTabBarProps } from '@react-navigation/bottom-tabs';
@@ -13,7 +13,7 @@ import { useTheme } from '../../hooks/useTheme';
 import { useResponsiveLayout } from '../../hooks/useResponsiveLayout';
 import { Strings } from '../../constants/strings';
 import { Icon, IconName } from '../../components/ui/Icon';
-import api from '../../services/api';
+import { useNotificationStore } from '../../store/notificationStore';
 import { breakpoints, palette, radius, spacing, typography } from '../../constants/theme';
 import { springPresets } from '../../utils/animations';
 import { A11y } from '../../constants/accessibility';
@@ -188,24 +188,14 @@ export default function TabsLayout() {
   const { colors } = useTheme();
   const { width } = useResponsiveLayout();
   const useSideRail = width >= breakpoints.tablet;
-  const [unreadCount, setUnreadCount] = useState(0);
-
-  const loadUnreadCount = useCallback(async () => {
-    try {
-      const { data } = await api.get('/notifications', { params: { limit: 50 } });
-      setUnreadCount(
-        Array.isArray(data) ? data.filter((n: any) => !n.read).length : 0,
-      );
-    } catch (e) {
-      console.warn('loadUnreadCount failed:', e);
-    }
-  }, []);
+  const unreadCount = useNotificationStore((s) => s.unreadCount);
+  const refreshUnread = useNotificationStore((s) => s.refresh);
 
   useEffect(() => {
-    loadUnreadCount();
-    const interval = setInterval(loadUnreadCount, 30000);
+    refreshUnread();
+    const interval = setInterval(refreshUnread, 30000);
     return () => clearInterval(interval);
-  }, [loadUnreadCount]);
+  }, [refreshUnread]);
 
   const tabs = (
     <Tabs

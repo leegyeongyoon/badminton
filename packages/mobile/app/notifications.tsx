@@ -16,6 +16,7 @@ import { Strings } from '../constants/strings';
 import { BackButton } from '../components/ui/BackButton';
 import { ScreenContainer } from '../components/ui/ScreenContainer';
 import api from '../services/api';
+import { useNotificationStore } from '../store/notificationStore';
 
 interface Notification {
   id: string;
@@ -72,6 +73,8 @@ export default function NotificationsScreen() {
       setNotifications((prev) =>
         prev.map((n) => (n.id === id ? { ...n, read: true } : n)),
       );
+      // 탭 뱃지 즉시 갱신 (30초 폴링 기다리지 않고 바로 숫자 감소)
+      useNotificationStore.getState().refresh();
     } catch {
       /* silent */
     }
@@ -81,6 +84,7 @@ export default function NotificationsScreen() {
     try {
       await api.patch('/notifications/read-all');
       setNotifications((prev) => prev.map((n) => ({ ...n, read: true })));
+      useNotificationStore.getState().refresh();
     } catch {
       /* silent */
     }

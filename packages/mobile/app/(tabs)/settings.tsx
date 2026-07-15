@@ -6,6 +6,7 @@ import { useCheckinStore } from '../../store/checkinStore';
 import { useAuthStore } from '../../store/authStore';
 import { useFacilityStore } from '../../store/facilityStore';
 import { useClubStore } from '../../store/clubStore';
+import { useNotificationStore } from '../../store/notificationStore';
 import { useTheme } from '../../hooks/useTheme';
 import { useScrollAnimation } from '../../hooks/useScrollAnimation';
 import { Strings } from '../../constants/strings';
@@ -40,7 +41,7 @@ export default function SettingsScreen() {
   const { user, logout } = useAuthStore();
   const { selectedFacility, clearSelectedFacility } = useFacilityStore();
   const { clubs, fetchClubs, createClub, joinClub } = useClubStore();
-  const [unreadCount, setUnreadCount] = useState(0);
+  const unreadCount = useNotificationStore((s) => s.unreadCount);
   const [isAdmin, setIsAdmin] = useState(false);
   const [profileData, setProfileData] = useState<any>(null);
   const [playerStats, setPlayerStats] = useState<any>(null);
@@ -80,12 +81,8 @@ export default function SettingsScreen() {
     } catch { /* silent */ }
   };
 
-  const loadUnreadCount = async () => {
-    try {
-      const { data } = await api.get('/notifications', { params: { unreadOnly: true } });
-      setUnreadCount(Array.isArray(data) ? data.filter((n: any) => !n.read).length : 0);
-    } catch { /* silent */ }
-  };
+  // 공용 알림 스토어 갱신(탭 뱃지와 동일 소스). 화면 진입 시 최신 미읽음 수 반영.
+  const loadUnreadCount = () => useNotificationStore.getState().refresh();
 
   const checkAdminStatus = async () => {
     if (!user) return;
