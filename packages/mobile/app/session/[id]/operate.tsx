@@ -864,6 +864,9 @@ export default function OperateScreen() {
   // 미설정은 'none' 키로 취급해 '미설정' 칩으로 거를 수 있게 한다. PoolBox/AllPoolBox
   // 가 공유한다.
   const matchesPoolFilters = useCallback((p: Player): boolean => {
+    // 레슨 중(비-게임)은 대기/편성 명단에서 제외 — 레슨자 박스에서만 관리.
+    // (레슨자 박스는 lessonPool을 직접 렌더하므로 이 필터의 영향을 안 받음)
+    if (p.isInLesson && p.status !== 'IN_TURN') return false;
     if (poolSearch && !(p.userName || '').toLowerCase().includes(poolSearch)) return false;
     if (filterSkills.size > 0) {
       const lv = p.skillLevel && (SKILL_LEVELS as string[]).includes(p.skillLevel) ? p.skillLevel : 'none';
@@ -1411,7 +1414,7 @@ export default function OperateScreen() {
     const playing = new Set<string>();
     playingByCourtId.forEach((e) => (e.playerIds || []).forEach((id) => playing.add(id)));
     const waitingIds = uniquePlayers
-      .filter((m) => !playing.has(m.userId))
+      .filter((m) => !playing.has(m.userId) && !(m.isInLesson && m.status !== 'IN_TURN'))
       .sort((a, b) => (getPlayer(a.userId)?.gamesPlayedToday ?? 0) - (getPlayer(b.userId)?.gamesPlayedToday ?? 0))
       .map((m) => m.userId);
     if (waitingIds.length >= 4) { autoFilledRef.current = true; autoFillQueue(waitingIds); }

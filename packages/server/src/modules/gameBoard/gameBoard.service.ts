@@ -121,6 +121,21 @@ export async function addEntry(
   });
   if (!board) throw new NotFoundError('모임판');
 
+  // 레슨 중인 회원은 대기열(QUEUED)에도 넣지 못하게 하드 차단(코트 배정 전 단계).
+  const lessonCheckins = await prisma.checkIn.findMany({
+    where: {
+      facilityId: board.facilityId,
+      clubSessionId: board.clubSessionId,
+      checkedOutAt: null,
+      userId: { in: playerIds },
+      isInLesson: true,
+    },
+    select: { userId: true },
+  });
+  if (lessonCheckins.length > 0) {
+    throw new BadRequestError('레슨 중인 회원은 대기열에 넣을 수 없어요');
+  }
+
   // A1 (SOFT double-booking): the operator may PRE-DRAFT a future QUEUED game
   // with a player already composed/playing elsewhere this 정모. The former HARD
   // block (assertNotAlreadyBooked) is removed — creating/editing a QUEUED entry

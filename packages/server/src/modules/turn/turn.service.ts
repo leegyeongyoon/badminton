@@ -51,6 +51,7 @@ export async function replacePlayerInRunningTurn(
     where: { userId: inUserId, facilityId: court.facilityId, checkedOutAt: null },
   });
   if (!checkin) throw new BadRequestError(`${inUser?.name ?? ''}님이 체크인되어 있지 않습니다`);
+  if (checkin.isInLesson) throw new BadRequestError(`${inUser?.name ?? ''}님은 레슨 중이라 교체 투입할 수 없어요`);
   const penalty = await prisma.noShowRecord.findFirst({ where: { userId: inUserId, penaltyEndsAt: { gt: new Date() } } });
   if (penalty) throw new BadRequestError(`${inUser?.name ?? ''}님은 페널티 중입니다`);
   if (turn.clubSessionId) {
@@ -158,6 +159,12 @@ export async function registerTurn(
     if (!checkin) {
       const user = await prisma.user.findUnique({ where: { id: pid } });
       throw new BadRequestError(`${user?.name ?? pid}님이 체크인되어 있지 않습니다`);
+    }
+    // 레슨 중인 회원은 코트에 배정 불가(하드 제외). 이 가드가 직접/대량/큐→코트/
+    // requeue 등 모든 registerTurn 경로를 막는다.
+    if (checkin.isInLesson) {
+      const user = await prisma.user.findUnique({ where: { id: pid } });
+      throw new BadRequestError(`${user?.name ?? pid}님은 레슨 중이라 코트에 배정할 수 없어요`);
     }
   }
 
