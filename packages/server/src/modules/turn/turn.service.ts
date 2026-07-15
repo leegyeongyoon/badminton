@@ -248,8 +248,10 @@ export async function registerTurn(
     await startTurn(turn.id, courtId, playerIds, court.facilityId);
   }
 
-  // Notify players
-  if (policy?.turnNotifyEnabled !== false) {
+  // Notify players — 자동시작(1순번+빈코트)이면 방금 startTurn이 '게임 시작(입장)'
+  // 푸시를 이미 보냈으니 '순번 등록'은 생략(중복 방지). 진짜 대기(2순번+)일 때만
+  // 순번 안내. (게임판 흐름은 '다음 게임 준비' + '입장' 2개로 충분)
+  if (policy?.turnNotifyEnabled !== false && nextPosition > 1) {
     for (const pid of playerIds) {
       await sendPushToUser(pid, {
         title: '순번 등록',
@@ -335,7 +337,7 @@ async function startTurn(turnId: string, courtId: string, playerIds: string[], f
     if (policy?.turnNotifyEnabled !== false) {
       for (const pid of playerIds) {
         await sendPushToUser(pid, {
-          title: `코트 ${court.name} 게임 시작`,
+          title: `${court.name} 게임 시작`,
           body: `${court.name}으로 입장하세요. 게임이 시작됩니다.`,
           data: { type: 'your_turn', courtId, turnId },
         });
