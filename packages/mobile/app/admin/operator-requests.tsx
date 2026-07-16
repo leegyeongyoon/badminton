@@ -172,9 +172,9 @@ export default function OperatorRequestsScreen() {
         keyExtractor={(item) => item.id}
         contentContainerStyle={[styles.list, requests.length === 0 && styles.listEmpty]}
         refreshControl={
-          Platform.OS === 'web' ? undefined : (
+          Platform.OS === 'ios' ? (
             <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
-          )
+          ) : undefined
         }
         ListEmptyComponent={
           <View style={styles.emptyContainer}>

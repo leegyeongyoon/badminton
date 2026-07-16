@@ -383,7 +383,7 @@ export default function ClubDetailScreen() {
         <ScreenContainer maxWidth={820}>
         <ScrollView
           contentContainerStyle={styles.scrollContent}
-          refreshControl={Platform.OS === 'web' ? undefined : <RefreshControl refreshing={loadingSession} onRefresh={onRefresh} />}
+          refreshControl={Platform.OS === 'ios' ? <RefreshControl refreshing={loadingSession} onRefresh={onRefresh} /> : undefined}
         >
           {/* ─── 모임 정체성 (quiet, compact) ───
               avatar + 이름 + 멤버수 + 초대코드. 채팅/건의·QR은 작은 아이콘 액션으로

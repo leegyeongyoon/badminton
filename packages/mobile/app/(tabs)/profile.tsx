@@ -199,9 +199,9 @@ export default function ProfileScreen() {
       style={styles.container}
       contentContainerStyle={styles.content}
       refreshControl={
-        Platform.OS === 'web' ? undefined : (
+        Platform.OS === 'ios' ? (
           <RefreshControl refreshing={isLoading} onRefresh={loadProfileData} />
-        )
+        ) : undefined
       }
     >
       {/* Profile card with skill badge */}

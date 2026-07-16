@@ -216,9 +216,9 @@ export default function NotificationsScreen() {
           notifications.length === 0 && styles.listEmpty,
         ]}
         refreshControl={
-          Platform.OS === 'web' ? undefined : (
+          Platform.OS === 'ios' ? (
             <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
-          )
+          ) : undefined
         }
         ListEmptyComponent={
           <View style={styles.emptyContainer}>

@@ -172,7 +172,7 @@ export default function AdminMetricsScreen() {
         </View>
       ) : (
         <ScrollView contentContainerStyle={{ padding: spacing.lg, paddingBottom: 48 }}
-          refreshControl={Platform.OS === 'web' ? undefined : <RefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); load(gran); }} />}>
+          refreshControl={Platform.OS === 'ios' ? <RefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); load(gran); }} /> : undefined}>
           {/* 실시간 */}
           <View style={styles.sectionRow}>
             <Text style={[styles.section, { color: colors.text }]}>실시간</Text>

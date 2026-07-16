@@ -214,7 +214,7 @@ export default function ClubSessionScreen() {
       <ScrollView
         style={styles.container}
         contentContainerStyle={styles.content}
-        refreshControl={Platform.OS === 'web' ? undefined : <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
+        refreshControl={Platform.OS === 'ios' ? <RefreshControl refreshing={refreshing} onRefresh={onRefresh} /> : undefined}
       >
         {/* Session info header */}
         <View style={styles.sessionHeader}>

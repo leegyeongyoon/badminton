@@ -223,7 +223,7 @@ export default function AdminDashboard() {
         contentContainerStyle={{ padding: spacing.lg, paddingBottom: spacing.xxxxl }}
         onScroll={scrollHandler}
         scrollEventThrottle={16}
-        refreshControl={Platform.OS === 'web' ? undefined : <AnimatedRefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
+        refreshControl={Platform.OS === 'ios' ? <AnimatedRefreshControl refreshing={refreshing} onRefresh={onRefresh} /> : undefined}
       >
       {/* Header + Quick Actions */}
       <Animated.View style={[fadeHeader, headerStyle]}>
