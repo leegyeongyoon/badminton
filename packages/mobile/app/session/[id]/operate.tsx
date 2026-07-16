@@ -2393,6 +2393,7 @@ export default function OperateScreen() {
             stagedIndex={isStaged ? staged.indexOf(m.userId) + 1 : null}
             highlighted={isStaged}
             dimmed={!stageable && !isStaged}
+            compact
             busy={busy}
           />
           {infoButton}
@@ -2408,6 +2409,7 @@ export default function OperateScreen() {
           onPress={tap}
           stagedIndex={isStaged ? staged.indexOf(m.userId) + 1 : null}
           highlighted={isStaged}
+          compact
           busy={busy}
         />
         {infoButton}

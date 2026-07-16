@@ -38,6 +38,9 @@ interface PlayerCardProps {
    * dot in the top-right corner — informational only, never disables the card.
    */
   busy?: boolean;
+  /** Compact single-line variant for dense Mode 1 pools: smaller avatar/name,
+   *  no 2-line footer — game count shown as a tiny inline number. */
+  compact?: boolean;
   style?: ViewStyle;
 }
 
@@ -62,6 +65,7 @@ export function PlayerCard({
   variant = 'grid',
   nameSuffix = '',
   busy = false,
+  compact = false,
   style,
 }: PlayerCardProps) {
   const { colors } = useTheme();
@@ -83,7 +87,7 @@ export function PlayerCard({
   // the name's flex width never jumps when a player is staged/selected ("이름표가
   // 작아진다" bug). The chip is a touch wider on the grid variant now (filled +
   // bigger letter), so keep the staged badge identical in both variants.
-  const chipDim = isCourt ? 20 : 22;
+  const chipDim = compact ? 18 : isCourt ? 20 : 22;
 
   // 카드 색 = 성별(남=파랑/여=연노랑) — 운영판 모드1/2와 동일. 급수는 좌측 배지로.
   const borderColor = highlighted
@@ -139,7 +143,7 @@ export function PlayerCard({
         <View style={styles.nameRow}>
           <Text
             style={[
-              isCourt ? styles.nameCourt : styles.name,
+              isCourt ? styles.nameCourt : compact ? styles.nameCompact : styles.name,
               { color: highlighted ? colors.primary : colors.text },
             ]}
             numberOfLines={1}
@@ -147,11 +151,18 @@ export function PlayerCard({
             {name}{nameSuffix}
           </Text>
           {genderMeta && (
-            <GenderMarker meta={genderMeta} size={isCourt ? 16 : 17} />
+            <GenderMarker meta={genderMeta} size={compact ? 13 : isCourt ? 16 : 17} />
+          )}
+          {/* compact: 2줄 대신 이름 줄에 작은 숫자로 게임수(+게스트) 표시 */}
+          {compact && player.isGuest && (
+            <Text style={[styles.gamesTiny, { color: colors.warning }]}>게</Text>
+          )}
+          {compact && showGames && stagedIndex == null && (
+            <Text style={[styles.gamesTiny, { color: gameTint.fg }]}>{games}</Text>
           )}
         </View>
 
-        {(player.isGuest || (showGames && !isCourt)) && (
+        {!compact && (player.isGuest || (showGames && !isCourt)) && (
           <View style={styles.metaRow}>
             {player.isGuest && (
               <View style={[styles.guestTag, { backgroundColor: colors.warningLight }]}>
@@ -184,7 +195,7 @@ export function PlayerCard({
   );
 
   const containerStyle = [
-    isCourt ? styles.containerCourt : styles.container,
+    isCourt ? styles.containerCourt : compact ? styles.containerCompact : styles.container,
     { backgroundColor: bg, borderColor },
     // NOTE: do NOT bump borderWidth on highlight. The base border is already
     // 1.5px; growing it to 2px on select pulls the inner content box inward,
@@ -228,6 +239,20 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     minHeight: 38,
   },
+  // 컴팩트(모드1 밀집): 한 줄, 작은 아바타/이름. paddingRight로 ⓘ 버튼 자리 확보.
+  containerCompact: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingVertical: 4,
+    paddingHorizontal: 6,
+    paddingLeft: 8,
+    paddingRight: 26,
+    borderRadius: radius.md,
+    borderWidth: 1.5,
+    minHeight: 30,
+    overflow: 'hidden',
+  },
   dimmed: { opacity: 0.45 },
 
   statusRail: {
@@ -260,6 +285,9 @@ const styles = StyleSheet.create({
   nameRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.xs },
   name: { ...typography.subtitle1, flexShrink: 1 },
   nameCourt: { ...typography.subtitle2, fontSize: 15, flexShrink: 1 },
+  nameCompact: { fontSize: 14, lineHeight: 17, fontWeight: '600', flexShrink: 1 },
+  // compact 전용: 게임수를 이름 줄에 붙이는 작은 숫자(모드2 magnetGamesTiny와 동급).
+  gamesTiny: { fontSize: 10, fontWeight: '800' },
 
   // Gender marker now renders via the shared <GenderMarker> vector icon
   // (blue male / rose female) — robust on every device, no raw-glyph tofu /

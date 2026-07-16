@@ -20,20 +20,21 @@ export interface ResponsiveLayout {
 }
 
 /**
- * Maps an ACTUAL container width (px) to a player-pool grid column count. Pool
- * cards hold a 급수 avatar + a 2–4 char Korean name + 게임수, so each cell wants
- * to stay ≥ ~150px wide:
- *   <380  → 1 column   (narrow phone)
- *   380–479 → 2 columns (phone landscape / iPad two-pane left column ~410)
- *   480–899 → 3 columns (desktop two-pane left column ~510)
- *   ≥900 → 4 columns   (full-width pool on a very wide stacked layout)
+ * Maps an ACTUAL container width (px) to a player-pool grid column count. Mode 1
+ * now uses the COMPACT single-line PlayerCard (급수 avatar + 이름 + 작은 게임수),
+ * so each cell only needs ~100–115px — denser than the old 2-line card. We aim
+ * for 4명 한 줄 on the common operator widths:
+ *   <220  → 1 column   (아주 좁은 폰)
+ *   220–319 → 2 columns
+ *   320–459 → 3 columns (iPad 2분할 좌측 ~410)
+ *   ≥460 → 4 columns    (데스크톱 2분할 좌측 ~510 · 태블릿 세로 · 넓은 폰)
  * Always compute from the real laid-out width of the pool area, NOT the window.
- * At 3 cols / 480px each cell is ~155px → still clears the ~150px name target.
+ * At 4 cols / 460px each cell is ~112px → comfortable for the compact one-liner.
  */
 export function poolColumnsFor(containerWidth: number): 1 | 2 | 3 | 4 {
-  if (containerWidth >= 900) return 4;
-  if (containerWidth >= 480) return 3;
-  if (containerWidth >= 380) return 2;
+  if (containerWidth >= 460) return 4;
+  if (containerWidth >= 320) return 3;
+  if (containerWidth >= 220) return 2;
   return 1;
 }
 
