@@ -4754,6 +4754,23 @@ export default function OperateScreen() {
                   </View>
                 )}
             </PoolDropZone>
+            {/* 레슨 중 — 배정/대기에서 빠진 레슨자를 여기서 보여준다(사라지지 않게).
+                배정은 서버가 막으므로 표시용. 레슨 해제하면 다시 대기 명단으로 복귀. */}
+            {lessonPool.length > 0 && (
+              <View style={{ width: '100%', gap: 3, marginTop: spacing.sm }}>
+                <Text style={[styles.m2SectionLabel, { color: colors.warning, marginTop: 6 }]}>레슨 중 · {lessonPool.length}명 (배정 제외)</Text>
+                {chunk4(lessonPool.map((m) => m.userId)).map((row, ri) => (
+                  <View key={`lesson${ri}`} style={styles.gameFrameSlots}>
+                    {[0, 1, 2, 3].map((si) => {
+                      const id = row[si];
+                      if (!id) return <View key={si} style={styles.poolGapSlot} />;
+                      const p = getPlayer(id);
+                      return p ? <PlayerTag key={id} player={p} fill compact /> : <View key={si} style={styles.poolGapSlot} />;
+                    })}
+                  </View>
+                ))}
+              </View>
+            )}
           </ScrollView>
         </View>
       </View>
