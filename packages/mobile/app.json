@@ -2,7 +2,7 @@
   "expo": {
     "name": "콕고",
     "slug": "badminton-court",
-    "version": "1.0.1",
+    "version": "1.0.2",
     "orientation": "default",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "light",
@@ -20,7 +20,7 @@
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "com.gylee.badminton",
-      "buildNumber": "16",
+      "buildNumber": "18",
       "associatedDomains": [
         "applinks:badmintoncourt.store"
       ],
