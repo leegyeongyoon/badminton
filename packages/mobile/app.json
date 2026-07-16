@@ -20,7 +20,7 @@
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "com.gylee.badminton",
-      "buildNumber": "15",
+      "buildNumber": "16",
       "associatedDomains": [
         "applinks:badmintoncourt.store"
       ],
@@ -136,12 +136,6 @@
         }
       ]
     ],
-    "owner": "leegyoungyoon",
-    "autolinking": {
-      "ios": {
-        "//": "iOS는 브라우저 방식 구글 로그인이라 native SDK 팟 불필요. 이 pod들이 iOS pod install을 실패시켜 제외. Android는 그대로 링크. (google.ts의 GoogleSignin 사용은 Platform.OS==='android' 분기 + lazy import라 iOS에서 미실행)",
-        "exclude": ["@react-native-google-signin/google-signin"]
-      }
-    }
+    "owner": "leegyoungyoon"
   }
 }
