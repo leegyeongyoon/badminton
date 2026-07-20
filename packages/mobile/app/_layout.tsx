@@ -29,12 +29,15 @@ import { transitions } from '../utils/transitions';
 import { lightColors } from '../constants/theme';
 import * as Sentry from '@sentry/react-native';
 
-// 크래시/에러 모니터링. DSN은 공개값이라 임베드해도 안전. __DEV__(로컬 개발)에선
-// 꺼서 노이즈 방지 — 릴리스(비공개 테스트·TestFlight·출시)에서만 수집한다.
-Sentry.init({
-  dsn: 'https://2c56521b4279ec7ea9a644510665e40a@o4511765184708608.ingest.us.sentry.io/4511765222129664',
-  enabled: !__DEV__,
-});
+// 크래시/에러 모니터링 — 네이티브(안드/iOS)에서만 켠다. 웹(운영판 주 사용)은
+// @sentry/react-native가 완전 지원이 아니라 건드리지 않아 안정성 우선. DSN은
+// 공개값이라 임베드 안전. __DEV__(로컬)에선 꺼서 노이즈 방지 → 릴리스에서만 수집.
+if (Platform.OS !== 'web') {
+  Sentry.init({
+    dsn: 'https://2c56521b4279ec7ea9a644510665e40a@o4511765184708608.ingest.us.sentry.io/4511765222129664',
+    enabled: !__DEV__,
+  });
+}
 
 // Web-only patches (must run before any component renders)
 if (Platform.OS === 'web') {
@@ -308,8 +311,8 @@ function RootLayout() {
   );
 }
 
-// Sentry.wrap: 렌더 트리 에러 경계 + 네이티브 크래시 연결. expo-router 루트를 감싼다.
-export default Sentry.wrap(RootLayout);
+// Sentry.wrap: 렌더 트리 에러 경계 + 네이티브 크래시 연결. 웹은 감싸지 않는다(가드).
+export default Platform.OS === 'web' ? RootLayout : Sentry.wrap(RootLayout);
 
 const rootStyles = StyleSheet.create({
   flex: {
