@@ -203,11 +203,6 @@ export default function MoreScreen() {
         <TouchableOpacity style={styles.menuItem} onPress={() => router.push('/notifications')}>
           <Icon name="notification" size={18} color={colors.textSecondary} />
           <Text style={[styles.menuItemText, { color: colors.text }]}>{Strings.notification.title}</Text>
-          {unreadCount > 0 && (
-            <View style={[styles.badge, { backgroundColor: colors.danger }]}>
-              <Text style={styles.badgeText}>{unreadCount}</Text>
-            </View>
-          )}
         </TouchableOpacity>
 
         {/* PLAYER → 운영자 신청. 신청 이력이 있으면 현재 상태를 함께 표시. */}

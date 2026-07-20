@@ -203,7 +203,7 @@ export default function SettingsScreen() {
 
       <MenuSection
         isAdmin={isAdmin}
-        unreadCount={unreadCount}
+        unreadCount={0}
         onNavigate={(route) => router.push(route as any)}
       />
 

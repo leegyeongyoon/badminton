@@ -1,6 +1,7 @@
 import { View, Text, ScrollView, StyleSheet, Platform } from 'react-native';
 import { useRouter } from 'expo-router';
 import { useTheme } from '../hooks/useTheme';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { typography, spacing } from '../constants/theme';
 
 /**
@@ -46,11 +47,12 @@ const SECTIONS: { title: string; body: string }[] = [
 
 export default function DeleteAccountScreen() {
   const { colors } = useTheme();
+  const insets = useSafeAreaInsets();
   const router = useRouter();
 
   return (
     <View style={[styles.container, { backgroundColor: colors.background }]}>
-      <View style={[styles.header, { borderBottomColor: colors.divider, backgroundColor: colors.surface }]}>
+      <View style={[styles.header, { borderBottomColor: colors.divider, backgroundColor: colors.surface, paddingTop: insets.top + 8 }]}>
         <Text
           style={[styles.back, { color: colors.primary }]}
           onPress={() => (router.canGoBack() ? router.back() : router.replace('/'))}

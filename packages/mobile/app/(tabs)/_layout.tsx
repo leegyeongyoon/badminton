@@ -188,15 +188,7 @@ export default function TabsLayout() {
   const { colors } = useTheme();
   const { width } = useResponsiveLayout();
   const useSideRail = width >= breakpoints.tablet;
-  const unreadCount = useNotificationStore((s) => s.unreadCount);
-  const refreshUnread = useNotificationStore((s) => s.refresh);
-
-  useEffect(() => {
-    refreshUnread();
-    const interval = setInterval(refreshUnread, 30000);
-    return () => clearInterval(interval);
-  }, [refreshUnread]);
-
+  // 알림은 푸시 팝업만 사용 — 탭 뱃지(미읽음 숫자)는 표시하지 않는다(사용자 요청).
   const tabs = (
     <Tabs
       // On tablet/desktop render a left vertical side-rail; on phone keep the
@@ -259,9 +251,7 @@ export default function TabsLayout() {
           title: Strings.tabs.more,
           tabBarAccessibilityLabel: A11y.tabs.more,
           tabBarIcon: ({ color, focused }) => (
-            <AnimatedTabIcon name="settings" color={color} focused={focused} activeColor={colors.primary}>
-              <TabBadge count={unreadCount} badgeColor={colors.danger} />
-            </AnimatedTabIcon>
+            <AnimatedTabIcon name="settings" color={color} focused={focused} activeColor={colors.primary} />
           ),
         }}
       />

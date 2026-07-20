@@ -3,6 +3,7 @@ import { View, Text, ScrollView, StyleSheet, Platform } from 'react-native';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { useTheme } from '../hooks/useTheme';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { typography, spacing, radius } from '../constants/theme';
 
 /**
@@ -92,6 +93,7 @@ function StepCard({ index, step, color }: { index: number; step: Step; color: st
 
 export default function GuideScreen() {
   const { colors } = useTheme();
+  const insets = useSafeAreaInsets();
   const router = useRouter();
   const { role } = useLocalSearchParams<{ role?: string }>();
   const operatorFirst = role === 'operator';
@@ -122,7 +124,7 @@ export default function GuideScreen() {
 
   return (
     <View style={[styles.container, { backgroundColor: colors.background }]}>
-      <View style={[styles.header, { borderBottomColor: colors.divider, backgroundColor: colors.surface }]}>
+      <View style={[styles.header, { borderBottomColor: colors.divider, backgroundColor: colors.surface, paddingTop: insets.top + 8 }]}>
         <Text
           style={[styles.back, { color: colors.primary }]}
           onPress={() => (router.canGoBack() ? router.back() : router.replace('/'))}
