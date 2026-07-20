@@ -134,6 +134,13 @@
         {
           "iosUrlScheme": "com.googleusercontent.apps.1020314759155-bsuf7iag4269kp5317obhrbrbs0ihl5f"
         }
+      ],
+      [
+        "@sentry/react-native",
+        {
+          "organization": "cockgo",
+          "project": "react-native"
+        }
       ]
     ],
     "owner": "leegyoungyoon"

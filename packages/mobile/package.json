@@ -16,6 +16,7 @@
     "@react-native-google-signin/google-signin": "^16.1.2",
     "@react-native-kakao/core": "^2.4.5",
     "@react-native-kakao/user": "^2.4.5",
+    "@sentry/react-native": "~7.2.0",
     "@shopify/flash-list": "2.0.2",
     "axios": "^1.13.5",
     "babel-preset-expo": "~54.0.10",
@@ -59,7 +60,9 @@
   "expo": {
     "autolinking": {
       "ios": {
-        "exclude": ["@react-native-google-signin/google-signin"]
+        "exclude": [
+          "@react-native-google-signin/google-signin"
+        ]
       }
     }
   }
