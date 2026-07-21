@@ -18,6 +18,7 @@ import { useClubStore } from '../../../store/clubStore';
 import { useAuthStore } from '../../../store/authStore';
 import { useClubRoom, useSocketEvent } from '../../../hooks/useSocket';
 import { useTheme } from '../../../hooks/useTheme';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useResponsiveLayout } from '../../../hooks/useResponsiveLayout';
 import { BackButton } from '../../../components/ui/BackButton';
 import { getSkillMeta } from '../../../constants/skill';
@@ -63,6 +64,7 @@ export default function ClubChatScreen() {
   const { id: clubId } = useLocalSearchParams<{ id: string }>();
   const router = useRouter();
   const { colors } = useTheme();
+  const insets = useSafeAreaInsets();
   // 태블릿/데스크톱에서 메시지·입력바를 가운데 720 컬럼으로 모음. 폰은 그대로.
   const { isTablet } = useResponsiveLayout();
   const centeredColumn = isTablet
@@ -280,7 +282,7 @@ export default function ClubChatScreen() {
         )}
 
         {/* 입력 바 + 짝 요청 토글 */}
-        <View style={[styles.inputBar, centeredColumn, { backgroundColor: colors.surface, borderTopColor: colors.border }]}>
+        <View style={[styles.inputBar, centeredColumn, { backgroundColor: colors.surface, borderTopColor: colors.border, paddingBottom: insets.bottom + spacing.sm }]}>
           <TouchableOpacity
             style={[styles.requestToggle, { borderColor: colors.warning, backgroundColor: colors.warningBg }]}
             onPress={() => {
