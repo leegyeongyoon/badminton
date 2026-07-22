@@ -58,8 +58,37 @@ api.interceptors.request.use(async (config) => {
   return config;
 });
 
+// ── 한글 NFC 정규화 ────────────────────────────────────────────────
+// Android는 NFD(자모 분해형) 한글을 "ㅜ체ㅐㅑㅎ"처럼 분리된 자모로 렌더한다.
+// Mac/iOS에서 입력된 모임명·이름 등이 NFD로 저장돼 있으면 안드로이드에서 깨져 보여서,
+// 응답 본문의 모든 문자열을 NFC(조합형)로 정규화한다. ASCII(토큰/ID/날짜/URL)는
+// NFC와 항상 동일하므로 정규화하지 않고 건너뛴다(성능). JSON은 순환 참조가 없지만
+// 만일을 대비해 depth 가드를 둔다.
+const NON_ASCII = /[^\x00-\x7F]/;
+function deepNfc(v: any, depth = 0): any {
+  if (v == null || depth > 12) return v;
+  if (typeof v === 'string') return NON_ASCII.test(v) ? v.normalize('NFC') : v;
+  if (Array.isArray(v)) {
+    for (let i = 0; i < v.length; i++) v[i] = deepNfc(v[i], depth + 1);
+    return v;
+  }
+  if (typeof v === 'object') {
+    for (const k in v) {
+      if (Object.prototype.hasOwnProperty.call(v, k)) v[k] = deepNfc(v[k], depth + 1);
+    }
+  }
+  return v;
+}
+
 api.interceptors.response.use(
-  (response) => response,
+  (response) => {
+    try {
+      response.data = deepNfc(response.data);
+    } catch {
+      /* 정규화 실패해도 원본 그대로 사용 (표시 이슈일 뿐) */
+    }
+    return response;
+  },
   async (error) => {
     const originalRequest = error.config;
     if (error.response?.status === 401 && !originalRequest._retry) {
