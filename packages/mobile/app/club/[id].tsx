@@ -41,12 +41,14 @@ const playerStatusColors: Record<string, string> = {
   AVAILABLE: Colors.playerAvailable,
   IN_TURN: Colors.playerInTurn,
   RESTING: Colors.playerResting,
+  QUEUED: Colors.info,
 };
 
 const playerStatusLabels: Record<string, string> = {
   AVAILABLE: Strings.player.status.AVAILABLE,
   IN_TURN: Strings.player.status.IN_TURN,
   RESTING: Strings.player.status.RESTING,
+  QUEUED: Strings.player.status.QUEUED,
 };
 
 const roleLabels: Record<string, string> = {

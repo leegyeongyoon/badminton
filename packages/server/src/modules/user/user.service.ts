@@ -98,6 +98,17 @@ export async function getStats(userId: string): Promise<PlayerStatsResponse> {
     },
   });
 
+  // This month's games (since the 1st, local server time)
+  const startOfMonth = new Date();
+  startOfMonth.setHours(0, 0, 0, 0);
+  startOfMonth.setDate(1);
+  const gamesThisMonth = await prisma.gamePlayer.count({
+    where: {
+      userId,
+      game: { createdAt: { gte: startOfMonth } },
+    },
+  });
+
   const noShowCount = await prisma.noShowRecord.count({
     where: { userId },
   });
@@ -115,6 +126,7 @@ export async function getStats(userId: string): Promise<PlayerStatsResponse> {
     gamesPlayed,
     gamesCompleted,
     gamesPlayedToday,
+    gamesThisMonth,
     noShowCount,
     activePenalty: activePenalty
       ? {

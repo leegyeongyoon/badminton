@@ -155,6 +155,7 @@ export const Strings = {
       AVAILABLE: '대기',
       IN_TURN: '순번중',
       RESTING: '휴식',
+      QUEUED: '편성됨',
     },
     rest: '휴식',
     available: '대기',

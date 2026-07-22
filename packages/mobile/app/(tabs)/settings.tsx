@@ -77,7 +77,14 @@ export default function SettingsScreen() {
   const loadPlayerStats = async () => {
     try {
       const { data } = await statsApi.getMyStats();
-      setPlayerStats(data);
+      // 서버 응답(gamesPlayed/gamesThisMonth/activePenalty)을 카드가 읽는
+      // 필드명(totalGames/thisMonthGames/activePenalties)으로 매핑한다.
+      setPlayerStats({
+        totalGames: data?.gamesPlayed ?? 0,
+        thisMonthGames: data?.gamesThisMonth ?? 0,
+        noShowCount: data?.noShowCount ?? 0,
+        activePenalties: data?.activePenalty ? 1 : 0,
+      });
     } catch { /* silent */ }
   };
 

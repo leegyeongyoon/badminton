@@ -68,7 +68,7 @@ export function PlayerCard({
   compact = false,
   style,
 }: PlayerCardProps) {
-  const { colors } = useTheme();
+  const { colors, isDark } = useTheme();
   const skill = getSkillMeta(player.skillLevel);
   const genderMeta = getGenderMeta(player.gender);
   const name = player.userName || player.name || '?';
@@ -90,12 +90,19 @@ export function PlayerCard({
   const chipDim = compact ? 18 : isCourt ? 20 : 22;
 
   // 카드 색 = 성별(남=파랑/여=연노랑) — 운영판 모드1/2와 동일. 급수는 좌측 배지로.
-  const borderColor = highlighted
-    ? colors.primary
-    : genderMeta ? (genderMeta.gender === 'M' ? '#2563EB' : '#CA8A04') : colors.border;
-  const bg = highlighted
-    ? colors.primaryLight
-    : genderMeta ? (genderMeta.gender === 'M' ? '#EFF6FF' : '#FEFCE8') : colors.surface;
+  // 다크 모드에선 배경을 어둡게 (밝은 틴트 + 밝은 글씨 = 안 보임 버그 방지).
+  const genderBg = genderMeta
+    ? genderMeta.gender === 'M'
+      ? (isDark ? '#172554' : '#EFF6FF')
+      : (isDark ? '#422006' : '#FEFCE8')
+    : colors.surface;
+  const genderBorder = genderMeta
+    ? genderMeta.gender === 'M'
+      ? (isDark ? '#3B82F6' : '#2563EB')
+      : (isDark ? '#CA8A04' : '#CA8A04')
+    : colors.border;
+  const borderColor = highlighted ? colors.primary : genderBorder;
+  const bg = highlighted ? colors.primaryLight : genderBg;
 
   // ── "N게임" fairness chip ──────────────────────────────────
   // Tasteful at-a-glance cue: 0게임 reads as a soft "처음" (needs a game),

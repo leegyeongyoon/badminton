@@ -313,6 +313,7 @@ export interface PlayerStatsResponse {
   gamesPlayed: number;
   gamesCompleted: number;
   gamesPlayedToday: number;
+  gamesThisMonth: number;
   noShowCount: number;
   activePenalty: NoShowRecordResponse | null;
 }
