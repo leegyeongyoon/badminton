@@ -64,36 +64,40 @@ export function MenuSection({ isAdmin, unreadCount, onNavigate }: MenuSectionPro
     <View style={styles.section}>
       <SectionHeader title="메뉴" />
       <Card variant="elevated" style={styles.card}>
-        {/* Dark mode toggle row */}
-        <TouchableOpacity
-          style={styles.menuItem}
-          onPress={cycleThemeMode}
-          activeOpacity={0.6}
-        >
-          <View style={[styles.iconCircle, { backgroundColor: alpha(colors.info, 0.12) }]}>
-            <Icon
-              name={isDark ? 'darkMode' : 'lightMode'}
-              size={18}
-              color={colors.info}
+        {/* 다크 모드 토글 — 출시용으로 숨김(앱을 라이트로 고정). 다크가 아직 일부
+            화면 미대응이라, 그 화면들 테마 대응 완료 후 다시 노출한다. 아래 블록만
+            되살리면 됨(관련 로직 cycleThemeMode/THEME_MODE_LABELS 그대로 보존). */}
+        {false && (
+          <TouchableOpacity
+            style={styles.menuItem}
+            onPress={cycleThemeMode}
+            activeOpacity={0.6}
+          >
+            <View style={[styles.iconCircle, { backgroundColor: alpha(colors.info, 0.12) }]}>
+              <Icon
+                name={isDark ? 'darkMode' : 'lightMode'}
+                size={18}
+                color={colors.info}
+              />
+            </View>
+            <View style={styles.menuInfo}>
+              <Text style={[styles.menuLabel, { color: colors.text }]}>다크 모드</Text>
+              <Text style={[styles.menuDesc, { color: colors.textSecondary }]}>
+                {THEME_MODE_LABELS[mode]}
+              </Text>
+            </View>
+            <Switch
+              value={isDark}
+              onValueChange={(value) => setThemeMode(value ? 'dark' : 'light')}
+              trackColor={{ false: colors.border, true: colors.primary }}
+              thumbColor={colors.surface}
             />
-          </View>
-          <View style={styles.menuInfo}>
-            <Text style={[styles.menuLabel, { color: colors.text }]}>다크 모드</Text>
-            <Text style={[styles.menuDesc, { color: colors.textSecondary }]}>
-              {THEME_MODE_LABELS[mode]}
-            </Text>
-          </View>
-          <Switch
-            value={isDark}
-            onValueChange={(value) => setThemeMode(value ? 'dark' : 'light')}
-            trackColor={{ false: colors.border, true: colors.primary }}
-            thumbColor={colors.surface}
-          />
-        </TouchableOpacity>
+          </TouchableOpacity>
+        )}
 
-        {visibleItems.map((item) => (
+        {visibleItems.map((item, idx) => (
           <React.Fragment key={item.key}>
-            <Divider spacing={0} />
+            {idx > 0 && <Divider spacing={0} />}
             <TouchableOpacity
               style={styles.menuItem}
               onPress={() => onNavigate(item.route)}

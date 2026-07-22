@@ -55,7 +55,13 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
     });
   }, []);
 
-  const isDark = mode === 'dark' || (mode === 'system' && systemScheme === 'dark');
+  // ⚠️ 출시용 라이트 고정: 다크 모드가 아직 일부 화면(club/[id], profile,
+  // change-password, session, facility-select, notifications)에서 라이트로
+  // 하드코딩돼 있어, 다크를 켜면 "라이트 화면 + 다크 조각" 불일치가 생긴다.
+  // 그 화면들을 모두 테마 대응할 때까지 앱 전체를 라이트로 강제한다.
+  // (darkColors/토글 로직은 그대로 보존 — 대응 완료 후 아래 한 줄만 되돌리면 됨.)
+  // const isDark = mode === 'dark' || (mode === 'system' && systemScheme === 'dark');
+  const isDark = false;
 
   const value: ThemeContextValue = {
     mode,

@@ -265,7 +265,7 @@ export default function MoreScreen() {
           onPress={() => router.push('/(tabs)/settings')}
         >
           <Icon name="settings" size={18} color={colors.textSecondary} />
-          <Text style={[styles.menuItemText, { color: colors.text }]}>테마 및 설정</Text>
+          <Text style={[styles.menuItemText, { color: colors.text }]}>설정</Text>
         </TouchableOpacity>
       </View>
 
