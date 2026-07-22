@@ -29,6 +29,10 @@ import { Icon } from '../../components/ui/Icon';
  * Intentionally simplified: no self-rest("쉬기") toggle, no history/stats
  * clutter — a player just enters and sees what's happening.
  */
+// 진행 중(ACTIVE)인 정모의 현황 보드 참조. 여러 모임에 동시에 정모가 열려 있을 수
+// 있어 배열로 든다(내가 체크인한 정모를 맨 앞으로).
+type ActiveBoard = { sessionId: string; clubName: string; isMine: boolean };
+
 export default function MyStatusScreen() {
   const router = useRouter();
   const { colors, shadows } = useTheme();
@@ -37,7 +41,7 @@ export default function MyStatusScreen() {
   const { status: checkinStatus } = useCheckinStore();
   const { clubs, fetchClubs } = useClubStore();
 
-  const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
+  const [activeBoards, setActiveBoards] = useState<ActiveBoard[]>([]);
   // Board-aware status (QUEUED/PLAYING/AVAILABLE) from /users/me/status so a
   // court-less QUEUED entry surfaces as "다음 게임 · 대기 N번째" not a flat 대기 중.
   const [myStatus, setMyStatus] = useState<MyStatusResponse | null>(null);
@@ -53,27 +57,37 @@ export default function MyStatusScreen() {
     }
   }, []);
 
-  // Derive the active session id for the board button:
-  //  1) prefer the session we checked into,
-  //  2) else find any ACTIVE session across the player's clubs.
+  // 현황 보드 버튼용 활성 정모 해석:
+  //  • 내가 속한 모든 모임의 ACTIVE 정모를 전부 모아 보여준다(여러 개면 목록).
+  //  • 내가 체크인한 정모는 맨 앞으로(잘못된 보드로 튀지 않게).
   const resolveActiveSession = useCallback(async () => {
-    if (checkinStatus?.clubSessionId) {
-      setActiveSessionId(checkinStatus.clubSessionId);
-      return;
-    }
     await fetchClubs();
-    const list = useClubStore.getState().clubs as { id: string }[];
-    if (list.length === 0) {
-      setActiveSessionId(null);
-      return;
+    const list = useClubStore.getState().clubs as { id: string; name: string }[];
+    const mineId = checkinStatus?.clubSessionId ?? null;
+
+    const results = list.length
+      ? await Promise.all(
+          list.map((c) =>
+            clubSessionApi
+              .getActive(c.id)
+              .then((r) => (r.data && r.data.status === 'ACTIVE' ? { sessionId: r.data.id as string, clubName: c.name } : null))
+              .catch(() => null),
+          ),
+        )
+      : [];
+
+    const boards: ActiveBoard[] = results
+      .filter((b): b is { sessionId: string; clubName: string } => !!b)
+      .map((b) => ({ ...b, isMine: b.sessionId === mineId }));
+
+    // 체크인한 정모가 내 모임 목록으로 안 잡혀도(예: 방금 QR 체크인) 항상 접근 가능하게.
+    if (mineId && !boards.some((b) => b.sessionId === mineId)) {
+      boards.unshift({ sessionId: mineId, clubName: '내 정모', isMine: true });
     }
-    const results = await Promise.all(
-      list.map((c) =>
-        clubSessionApi.getActive(c.id).then((r) => r.data).catch(() => null),
-      ),
-    );
-    const active = results.find((s: any) => s && s.status === 'ACTIVE');
-    setActiveSessionId(active ? active.id : null);
+
+    // 내가 체크인한 정모를 맨 앞으로.
+    boards.sort((a, b) => Number(b.isMine) - Number(a.isMine));
+    setActiveBoards(boards);
   }, [checkinStatus?.clubSessionId, fetchClubs]);
 
   useEffect(() => {
@@ -222,10 +236,11 @@ export default function MyStatusScreen() {
         )}
       </View>
 
-      {/* Prominent live board entry — the PRIMARY action most players want */}
-      {activeSessionId && (
+      {/* Prominent live board entry — the PRIMARY action most players want.
+          정모가 하나면 큰 버튼, 여러 개면 모임별로 모두 보여주고 체크인한 정모를 강조. */}
+      {activeBoards.length === 1 && (
         <Pressable
-          onPress={() => router.push(`/session/${activeSessionId}/board`)}
+          onPress={() => router.push(`/session/${activeBoards[0].sessionId}/board`)}
           style={({ pressed }) => [
             styles.boardBtn,
             { backgroundColor: colors.primary },
@@ -237,6 +252,39 @@ export default function MyStatusScreen() {
           <Text style={styles.boardBtnText}>현황 보드 보기</Text>
           <Icon name="chevronRight" size={20} color={palette.white} />
         </Pressable>
+      )}
+
+      {activeBoards.length > 1 && (
+        <View style={styles.boardsWrap}>
+          <Text style={[styles.boardsLabel, { color: colors.textSecondary }]}>
+            진행 중인 정모 {activeBoards.length}개
+          </Text>
+          {activeBoards.map((b) => (
+            <Pressable
+              key={b.sessionId}
+              onPress={() => router.push(`/session/${b.sessionId}/board`)}
+              style={({ pressed }) => [
+                styles.boardRow,
+                b.isMine
+                  ? { backgroundColor: colors.primary, borderColor: colors.primary }
+                  : { backgroundColor: colors.surface, borderColor: colors.border },
+                pressed && { opacity: 0.92 },
+              ]}
+            >
+              <Icon name="tv" size={20} color={b.isMine ? palette.white : colors.primary} />
+              <View style={{ flex: 1, minWidth: 0 }}>
+                <Text
+                  style={[styles.boardRowTitle, { color: b.isMine ? palette.white : colors.text }]}
+                  numberOfLines={1}
+                >
+                  {b.clubName} 현황 보드
+                </Text>
+                {b.isMine && <Text style={styles.boardRowMine}>내가 체크인한 정모</Text>}
+              </View>
+              <Icon name="chevronRight" size={18} color={b.isMine ? palette.white : colors.textLight} />
+            </Pressable>
+          ))}
+        </View>
       )}
 
       {/* My active game — lets me end/extend my own turn */}
@@ -315,4 +363,19 @@ const styles = StyleSheet.create({
     borderRadius: radius.card,
   },
   boardBtnText: { color: palette.white, ...typography.button, fontSize: 17 },
+
+  // 진행 중 정모가 여러 개일 때: 모임별 보드 목록.
+  boardsWrap: { gap: spacing.sm, marginBottom: spacing.md },
+  boardsLabel: { ...typography.caption, fontWeight: '700', marginBottom: 2 },
+  boardRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.md,
+    paddingHorizontal: spacing.lg,
+    paddingVertical: spacing.md,
+    borderRadius: radius.lg,
+    borderWidth: 1.5,
+  },
+  boardRowTitle: { ...typography.subtitle2 },
+  boardRowMine: { ...typography.caption, color: 'rgba(255,255,255,0.9)', marginTop: 1 },
 });
