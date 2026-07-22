@@ -1,8 +1,11 @@
 import { useState, useCallback, useEffect, useMemo, useRef } from 'react';
 import {
-  View, Text, ScrollView, StyleSheet, SafeAreaView, ActivityIndicator,
+  View, Text, ScrollView, StyleSheet, ActivityIndicator,
   TouchableOpacity, Platform,
 } from 'react-native';
+// RN 기본 SafeAreaView는 Android에서 상태바 인셋을 무시(iOS 전용) → edge-to-edge에서
+// 헤더가 상태바에 겹친다. safe-area-context 버전은 Android 상태바도 처리한다.
+import { SafeAreaView } from 'react-native-safe-area-context';
 import Animated, {
   useSharedValue, useAnimatedStyle, withRepeat, withTiming, withSequence, Easing,
 } from 'react-native-reanimated';
@@ -321,14 +324,14 @@ export default function ViewBoardScreen() {
   // ─────────────────────────────────────────────────────────
   if (!loaded && !board) {
     return (
-      <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]}>
+      <SafeAreaView edges={['top', 'left', 'right']} style={[styles.container, { backgroundColor: colors.background }]}>
         <ActivityIndicator style={{ marginTop: 120 }} color={colors.primary} size="large" />
       </SafeAreaView>
     );
   }
 
   return (
-    <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]}>
+    <SafeAreaView edges={['top', 'left', 'right']} style={[styles.container, { backgroundColor: colors.background }]}>
       {/* Header — full-bleed app bar; its inner row is width-capped + centered on
           tablet/desktop so it lines up with the centered content below. */}
       <View style={[styles.header, { backgroundColor: colors.surface, borderBottomColor: colors.border }]}>

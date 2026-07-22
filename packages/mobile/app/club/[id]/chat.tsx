@@ -241,7 +241,16 @@ export default function ClubChatScreen() {
       <Stack.Screen options={{ headerShown: false }} />
       <KeyboardAvoidingView
         style={[styles.container, { backgroundColor: colors.background }]}
-        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+        // Android 15+(API 35)는 edge-to-edge가 강제돼 adjustResize가 더 이상 창을
+        // 줄여주지 않아 입력바가 키보드에 가려진다 → KeyboardAvoidingView로 직접
+        // 올린다. 구버전 Android는 기존 adjustResize 동작(undefined) 유지.
+        behavior={
+          Platform.OS === 'ios'
+            ? 'padding'
+            : Number(Platform.Version) >= 35
+              ? 'height'
+              : undefined
+        }
         keyboardVerticalOffset={Platform.OS === 'ios' ? 90 : 0}
       >
         {/* Custom header: BackButton always present (falls back to this club on

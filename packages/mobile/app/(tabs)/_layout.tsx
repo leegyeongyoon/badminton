@@ -1,6 +1,7 @@
 import { useEffect, useRef } from 'react';
 import { Tabs } from 'expo-router';
 import { Text, View, StyleSheet, Platform, Pressable } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { BottomTabBar, type BottomTabBarProps } from '@react-navigation/bottom-tabs';
 import { CommonActions } from '@react-navigation/native';
 import Animated, {
@@ -186,11 +187,15 @@ const railStyles = StyleSheet.create({
 
 export default function TabsLayout() {
   const { colors } = useTheme();
+  const insets = useSafeAreaInsets();
   const { width } = useResponsiveLayout();
   const useSideRail = width >= breakpoints.tablet;
   // 알림은 푸시 팝업만 사용 — 탭 뱃지(미읽음 숫자)는 표시하지 않는다(사용자 요청).
   const tabs = (
     <Tabs
+      // 숨김 탭(설정/프로필)으로 들어갔다 뒤로가기 하면 기본값(firstRoute)이라 홈으로
+      // 튕기던 문제 → history로 직전에 보던 탭(더보기 등)으로 돌아오게 한다.
+      backBehavior="history"
       // On tablet/desktop render a left vertical side-rail; on phone keep the
       // bottom bar exactly as before. Same routes/icons/active logic either way.
       tabBar={(props) => (useSideRail ? <SideRail {...props} /> : <BottomTabBar {...props} />)}
@@ -202,6 +207,14 @@ export default function TabsLayout() {
           backgroundColor: colors.surface,
           borderTopColor: colors.border,
           elevation: 0, // Android: elevation + Fabric 텍스트 이중 그리기(라벨 겹침) 방지
+          // Android edge-to-edge: 시스템 내비게이션 바(제스처/3버튼) 인셋만큼 아래
+          // 여백을 줘서 탭 라벨이 내비바에 가려/잘리지 않게 한다. iOS는 기본 동작이
+          // 홈 인디케이터를 잘 처리하므로 건드리지 않는다.
+          ...(Platform.OS === 'android' && {
+            height: 58 + insets.bottom,
+            paddingBottom: insets.bottom,
+            paddingTop: 6,
+          }),
         },
         // Android Fabric에서 고정 lineHeight + 명시 fontFamily(Roboto)가 탭 라벨을
         // 잘림/겹침으로 만들어, 크기/굵기만 지정(줄높이·폰트패밀리 제거).
