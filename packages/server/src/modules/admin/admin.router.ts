@@ -2,7 +2,7 @@ import { Router, Request, Response, NextFunction } from 'express';
 import { authenticate } from '../../middleware/auth';
 import { ForbiddenError } from '../../utils/errors';
 import { isSuperAdmin } from '../clubSession/clubSession.service';
-import { getAdminMetrics, getMetricsWho, type Granularity, type WhoScope } from './metrics.service';
+import { getAdminMetrics, getMetricsWho, getClubsWithMembers, type Granularity, type WhoScope } from './metrics.service';
 
 const router = Router();
 
@@ -41,6 +41,16 @@ router.get('/metrics/who', authenticate, superAdminOnly, async (req: Request, re
     const from = req.query.from ? String(req.query.from) : undefined;
     const to = req.query.to ? String(req.query.to) : undefined;
     const result = await getMetricsWho(scope, from, to);
+    res.json(result);
+  } catch (err) {
+    next(err);
+  }
+});
+
+// GET /api/v1/admin/clubs - 모임별 멤버 로스터(누가 어느 모임에 가입했나). 슈퍼관리자 전용.
+router.get('/clubs', authenticate, superAdminOnly, async (_req: Request, res: Response, next: NextFunction) => {
+  try {
+    const result = await getClubsWithMembers();
     res.json(result);
   } catch (err) {
     next(err);

@@ -255,6 +255,14 @@ export default function MoreScreen() {
             <Text style={[styles.menuItemText, { color: colors.text }]}>운영 지표 대시보드</Text>
           </TouchableOpacity>
         )}
+
+        {/* SUPER_ADMIN → 모임별 멤버(누가 어느 모임에 가입했나). */}
+        {isSuperAdmin && (
+          <TouchableOpacity style={styles.menuItem} onPress={() => router.push('/admin/clubs')}>
+            <Icon name="people" size={18} color={colors.primary} />
+            <Text style={[styles.menuItemText, { color: colors.text }]}>모임별 멤버</Text>
+          </TouchableOpacity>
+        )}
       </View>
 
       {/* App settings */}

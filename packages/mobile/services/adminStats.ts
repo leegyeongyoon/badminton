@@ -36,6 +36,17 @@ export type WhoScope = 'online' | 'checkedin' | 'today' | 'signups' | 'accessed'
 export interface WhoUser { userId: string; name: string; isGuest: boolean; context?: string; at?: string }
 export interface WhoResponse { scope: WhoScope; count: number; users: WhoUser[] }
 
+// ─── 모임별 멤버 로스터(슈퍼관리자) ───
+export interface AdminClubMember { userId: string; name: string; role: string; isGuest: boolean }
+export interface AdminClubRow {
+  id: string;
+  name: string;
+  inviteCode: string;
+  memberCount: number;
+  createdAt: string;
+  members: AdminClubMember[];
+}
+
 export const adminStatsApi = {
   getMetrics: async (granularity: MetricGranularity = 'day', count?: number): Promise<AdminMetrics> => {
     const { data } = await api.get('/admin/metrics', { params: { granularity, ...(count ? { count } : {}) } });
@@ -44,6 +55,11 @@ export const adminStatsApi = {
   getWho: async (scope: WhoScope, from?: string, to?: string): Promise<WhoResponse> => {
     const { data } = await api.get('/admin/metrics/who', { params: { scope, ...(from ? { from } : {}), ...(to ? { to } : {}) } });
     return data;
+  },
+
+  getClubs: async (): Promise<AdminClubRow[]> => {
+    const { data } = await api.get('/admin/clubs');
+    return data || [];
   },
 
   getWeeklyTrends: async (facilityId: string): Promise<{ day: string; count: number }[]> => {

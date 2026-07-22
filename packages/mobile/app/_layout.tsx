@@ -281,6 +281,7 @@ function RootLayoutInner() {
           <Stack.Screen name="notifications" options={transitions.modalSlideUp} />
           <Stack.Screen name="admin/index" options={transitions.slideFromRight} />
           <Stack.Screen name="admin/operator-requests" options={transitions.slideFromRight} />
+          <Stack.Screen name="admin/clubs" options={transitions.slideFromRight} />
           <Stack.Screen name="club/[id]" options={transitions.slideFromRight} />
           <Stack.Screen name="club/[id]/session" options={transitions.slideFromRight} />
           <Stack.Screen name="club/[id]/qr" options={transitions.slideFromRight} />

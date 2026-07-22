@@ -418,3 +418,68 @@ export async function getMetricsWho(scope: WhoScope, fromISO?: string, toISO?: s
   }
   return { scope, count: users.length, users };
 }
+
+// ─────────────────────────────────────────────────────────────
+// 모임별 멤버 로스터(슈퍼관리자). 각 모임에 누가 가입했는지 한눈에.
+// 멤버 많은 모임 우선, 멤버는 역할순(대표→운영진→회원)→이름순.
+// ─────────────────────────────────────────────────────────────
+export interface AdminClubMember {
+  userId: string;
+  name: string;
+  role: string; // LEADER | STAFF | MEMBER
+  isGuest: boolean;
+}
+export interface AdminClubRow {
+  id: string;
+  name: string;
+  inviteCode: string;
+  memberCount: number;
+  createdAt: string;
+  members: AdminClubMember[];
+}
+
+const CLUB_ROLE_ORDER: Record<string, number> = { LEADER: 0, STAFF: 1, MEMBER: 2 };
+
+export async function getClubsWithMembers(): Promise<AdminClubRow[]> {
+  const clubs = await prisma.club.findMany({
+    select: {
+      id: true,
+      name: true,
+      inviteCode: true,
+      createdAt: true,
+      members: {
+        select: {
+          role: true,
+          user: { select: { id: true, name: true, isGuest: true } },
+        },
+      },
+    },
+    orderBy: { createdAt: 'desc' },
+  });
+
+  const rows: AdminClubRow[] = clubs.map((c) => {
+    const members: AdminClubMember[] = c.members
+      .map((m) => ({
+        userId: m.user.id,
+        name: m.user.name,
+        role: String(m.role),
+        isGuest: m.user.isGuest,
+      }))
+      .sort(
+        (a, b) =>
+          (CLUB_ROLE_ORDER[a.role] ?? 9) - (CLUB_ROLE_ORDER[b.role] ?? 9) ||
+          a.name.localeCompare(b.name, 'ko'),
+      );
+    return {
+      id: c.id,
+      name: c.name,
+      inviteCode: c.inviteCode,
+      memberCount: members.length,
+      createdAt: c.createdAt.toISOString(),
+      members,
+    };
+  });
+
+  rows.sort((a, b) => b.memberCount - a.memberCount);
+  return rows;
+}
