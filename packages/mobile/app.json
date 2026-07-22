@@ -20,7 +20,7 @@
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "com.gylee.badminton",
-      "buildNumber": "23",
+      "buildNumber": "24",
       "associatedDomains": [
         "applinks:badmintoncourt.store"
       ],
@@ -33,7 +33,7 @@
     "android": {
       "package": "com.gylee.badminton",
       "googleServicesFile": "./google-services.json",
-      "versionCode": 23,
+      "versionCode": 24,
       "intentFilters": [
         {
           "action": "VIEW",
