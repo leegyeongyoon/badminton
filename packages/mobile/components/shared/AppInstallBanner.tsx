@@ -18,12 +18,9 @@ const APP_STORE_URL = 'https://apps.apple.com/app/id6788656869';
 const PLAY_STORE_URL = 'https://play.google.com/store/apps/details?id=com.gylee.badminton';
 const ANDROID_AVAILABLE = false; // Android 스토어 출시 후 true
 
-const DISMISS_KEY = 'kokgo_install_banner_dismissed_at';
-const DISMISS_DAYS = 3; // 닫으면 며칠 동안 안 보임
-
-function daysSince(ms: number): number {
-  return (Date.now() - ms) / 86_400_000;
-}
+// 세션 동안만 숨김: 닫으면 이번 방문 중엔 안 뜨고, 다음에 다시 오면(새 세션·탭)
+// 재노출한다. 출시 초반 설치 유도가 목적이라 영구/장기 숨김 대신 세션 단위로 재넛지.
+const DISMISS_KEY = 'kokgo_install_banner_dismissed_session';
 
 export function AppInstallBanner() {
   const { colors, shadows } = useTheme();
@@ -40,12 +37,11 @@ export function AppInstallBanner() {
     if (!isIOS && !isAndroid) return; // 모바일 웹만
     if (isAndroid && !ANDROID_AVAILABLE) return; // Play 출시 전엔 안드로이드 제외
 
-    // 최근에 닫았으면 스킵
+    // 이번 세션에 닫았으면 스킵 (다음 방문·새 탭에선 다시 노출)
     try {
-      const raw = window.localStorage.getItem(DISMISS_KEY);
-      if (raw && daysSince(Number(raw)) < DISMISS_DAYS) return;
+      if (window.sessionStorage.getItem(DISMISS_KEY) === '1') return;
     } catch {
-      /* localStorage 접근 불가 시 그냥 노출 */
+      /* sessionStorage 접근 불가 시 그냥 노출 */
     }
 
     setStore(isIOS ? APP_STORE_URL : PLAY_STORE_URL);
@@ -56,7 +52,7 @@ export function AppInstallBanner() {
 
   const dismiss = () => {
     try {
-      window.localStorage.setItem(DISMISS_KEY, String(Date.now()));
+      window.sessionStorage.setItem(DISMISS_KEY, '1');
     } catch {
       /* ignore */
     }
