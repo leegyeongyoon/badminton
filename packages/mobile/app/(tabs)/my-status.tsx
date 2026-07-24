@@ -93,11 +93,23 @@ export default function MyStatusScreen() {
   useEffect(() => {
     fetchMyTurns();
     fetchMyStatus();
-    resolveActiveSession();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // 활성 정모 보드 목록은 마운트 + 체크인 변경 시에만 재계산한다(모든 모임의 활성 세션을
+  // 조회하는 비용이 크므로, 아래 고빈도 턴/보드 소켓 이벤트마다 다시 돌리지 않는다).
+  useEffect(() => {
+    resolveActiveSession();
+  }, [resolveActiveSession]);
+
+  // 턴/보드 이벤트: 내 상태만 갱신(활성 세션 목록은 이걸로 안 바뀜 → 전 모임 재조회 X).
   const refresh = useCallback(() => {
+    fetchMyTurns();
+    fetchMyStatus();
+  }, [fetchMyTurns, fetchMyStatus]);
+
+  // 정모가 시작/종료될 때만 활성 보드 목록도 함께 재계산.
+  const refreshWithSessions = useCallback(() => {
     fetchMyTurns();
     fetchMyStatus();
     resolveActiveSession();
@@ -107,8 +119,8 @@ export default function MyStatusScreen() {
   useSocketEvent('turn:completed', refresh);
   useSocketEvent('turn:promoted', refresh);
   useSocketEvent('turn:cancelled', refresh);
-  useSocketEvent('clubSession:started', refresh);
-  useSocketEvent('clubSession:ended', refresh);
+  useSocketEvent('clubSession:started', refreshWithSessions);
+  useSocketEvent('clubSession:ended', refreshWithSessions);
   // Board events: my QUEUED/배정 state changes when the operator stages/pushes.
   useSocketEvent('gameBoard:entryAdded', refresh);
   useSocketEvent('gameBoard:entryUpdated', refresh);

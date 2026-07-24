@@ -38,6 +38,11 @@ export interface GameBoard {
    * Used to softly hint over-pairing while staging.
    */
   pairCounts?: Record<string, number>;
+  /**
+   * 4인 조합 key "a|b|c|d" -> 이 정모에서 등장한 게임 수(완료/진행 + 대기열).
+   * 대기열 "중복 점검"에서 반복 편성(count >= 2)을 정확히 세는 데 쓴다.
+   */
+  groupCounts?: Record<string, number>;
   /** 모드2 자석판: { [userId]: { x, y } } 분수 좌표(운영진 공유). */
   tagLayout?: Record<string, { x: number; y: number }>;
 }

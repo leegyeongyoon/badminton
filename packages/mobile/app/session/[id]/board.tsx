@@ -331,7 +331,7 @@ export default function ViewBoardScreen() {
   }
 
   return (
-    <SafeAreaView edges={['top', 'left', 'right']} style={[styles.container, { backgroundColor: colors.background }]}>
+    <SafeAreaView edges={['top', 'bottom', 'left', 'right']} style={[styles.container, { backgroundColor: colors.background }]}>
       {/* Header — full-bleed app bar; its inner row is width-capped + centered on
           tablet/desktop so it lines up with the centered content below. */}
       <View style={[styles.header, { backgroundColor: colors.surface, borderBottomColor: colors.border }]}>

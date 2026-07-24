@@ -627,6 +627,10 @@ export interface GameBoardResponse {
   // pairCounts: key = "<minUserId>|<maxUserId>", value = how many games this
   // session those two players shared. Only pairs with count >= 1 are included.
   pairCounts: Record<string, number>;
+  // groupCounts: key = sorted "a|b|c|d" 4-player group, value = how many games
+  // (completed/playing + queued) this session that exact foursome occurred. Lets
+  // the client's "중복 점검" flag a queued foursome that repeats (count >= 2).
+  groupCounts: Record<string, number>;
 }
 
 export interface GameBoardEntryResponse {

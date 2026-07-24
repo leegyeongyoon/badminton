@@ -745,6 +745,7 @@ async function formatBoard(board: any) {
     busyPlayerIds: await computeBusyPlayerIds(board.clubSessionId, rawEntries),
     playedGroups: composition.playedGroups,
     pairCounts: composition.pairCounts,
+    groupCounts: composition.groupCounts,
     // 모드2 자석판 위치(운영진 공유). { [userId]: { x, y } } 분수 좌표.
     tagLayout: ((board as { tagLayout?: unknown }).tagLayout as Record<string, { x: number; y: number }>) ?? {},
   };
@@ -779,7 +780,7 @@ export async function updateTagLayout(
 async function computeComposition(
   clubSessionId: string,
   rawEntries: any[],
-): Promise<{ playedGroups: string[]; pairCounts: Record<string, number> }> {
+): Promise<{ playedGroups: string[]; pairCounts: Record<string, number>; groupCounts: Record<string, number> }> {
   // Games actually played this 정모 (COMPLETED + currently PLAYING).
   const games = await prisma.game.findMany({
     where: {
@@ -791,6 +792,9 @@ async function computeComposition(
 
   const playedGroupSet = new Set<string>();
   const pairCounts = new Map<string, number>();
+  // groupCounts: 4인 조합 key -> 이 정모에서 그 조합이 등장한 게임 수(완료/진행 + 대기열).
+  // 대기열 일괄 "중복 점검"에서 어떤 편성이 이미 친/이미 편성된 조합인지 정확히 세는 데 쓴다.
+  const groupCounts = new Map<string, number>();
 
   const addPairs = (ids: string[]) => {
     for (let i = 0; i < ids.length; i++) {
@@ -806,7 +810,9 @@ async function computeComposition(
   for (const game of games) {
     const ids = game.players.map((p) => p.userId);
     if (ids.length === 4) {
-      playedGroupSet.add([...ids].sort().join('|'));
+      const key = [...ids].sort().join('|');
+      playedGroupSet.add(key);
+      groupCounts.set(key, (groupCounts.get(key) ?? 0) + 1);
     }
     addPairs(ids);
   }
@@ -817,7 +823,9 @@ async function computeComposition(
     if (e.status !== 'QUEUED') continue;
     const ids = (e.playerIds as string[]) ?? [];
     if (ids.length === 4) {
-      playedGroupSet.add([...ids].sort().join('|'));
+      const key = [...ids].sort().join('|');
+      playedGroupSet.add(key);
+      groupCounts.set(key, (groupCounts.get(key) ?? 0) + 1);
     }
     addPairs(ids);
   }
@@ -825,6 +833,7 @@ async function computeComposition(
   return {
     playedGroups: Array.from(playedGroupSet),
     pairCounts: Object.fromEntries(pairCounts),
+    groupCounts: Object.fromEntries(groupCounts),
   };
 }
 

@@ -969,6 +969,33 @@ export default function OperateScreen() {
     return best;
   }, [staged, pairCounts, pairKey]);
 
+  // ─── 대기열 일괄 "중복 점검" ────────────────────────────────────
+  // 편성된 다음 게임(대기열) 중 이미 친/이미 편성된 4인 조합(반복)을 버튼 하나로 한 번에
+  // 훑는다. groupCounts[key] >= 2 = 그 4인 조합이 이 정모에서 2게임 이상 등장(반복).
+  // 정보성일 뿐 아무것도 막지 않는다.
+  const [dupCheckOpen, setDupCheckOpen] = useState(false);
+  const dupCheck = useMemo(() => {
+    const gc = board?.groupCounts || {};
+    const pc = board?.pairCounts || {};
+    const rows = queuedEntries
+      .filter((e) => e.playerIds.length === 4)
+      .map((e) => {
+        const ids = [...e.playerIds];
+        const key = [...ids].sort().join('|');
+        const isRepeat = (gc[key] || 0) >= 2;
+        let topPair: { a: string; b: string; count: number } | null = null;
+        for (let i = 0; i < ids.length; i += 1) {
+          for (let j = i + 1; j < ids.length; j += 1) {
+            const pk = ids[i] < ids[j] ? `${ids[i]}|${ids[j]}` : `${ids[j]}|${ids[i]}`;
+            const c = pc[pk] || 0;
+            if (c >= 2 && (!topPair || c > topPair.count)) topPair = { a: ids[i], b: ids[j], count: c };
+          }
+        }
+        return { entryId: e.id, courtName: e.courtName, ids, isRepeat, topPair };
+      });
+    return { rows, repeatCount: rows.filter((r) => r.isRepeat).length };
+  }, [queuedEntries, board?.groupCounts, board?.pairCounts]);
+
   // ─── Staging ───
   const toggleStaged = useCallback((userId: string) => {
     animateNext();
@@ -4649,8 +4676,60 @@ export default function OperateScreen() {
           <TouchableOpacity style={[styles.m2AutoBtn, { borderColor: colors.primary }]} onPress={() => autoFillQueue(poolIds)} accessibilityLabel="대기 인원 자동 편성">
             <Icon name="rotation" size={13} color={colors.primary} /><Text style={[styles.m2AutoBtnT, { color: colors.primary }]}>자동 편성</Text>
           </TouchableOpacity>
+          <TouchableOpacity
+            style={[styles.m2AutoBtn, { borderColor: dupCheck.repeatCount > 0 ? colors.warning : colors.border }]}
+            onPress={() => setDupCheckOpen(true)}
+            accessibilityLabel="대기열 중복 조합 점검"
+          >
+            <Text style={[styles.m2AutoBtnT, { color: dupCheck.repeatCount > 0 ? colors.warning : colors.textSecondary }]}>
+              🔁 중복 점검{dupCheck.repeatCount > 0 ? ` ${dupCheck.repeatCount}` : ''}
+            </Text>
+          </TouchableOpacity>
         </View>
       )}
+      {/* 대기열 중복 점검 결과 */}
+      <Modal visible={dupCheckOpen} transparent animationType="fade" onRequestClose={() => setDupCheckOpen(false)}>
+        <View style={styles.dupOverlay}>
+          <View style={[styles.dupSheet, { backgroundColor: colors.surface }]}>
+            <View style={styles.dupHead}>
+              <Text style={[styles.dupTitle, { color: colors.text }]}>🔁 대기열 중복 점검</Text>
+              <TouchableOpacity onPress={() => setDupCheckOpen(false)} hitSlop={8}>
+                <Text style={[styles.dupClose, { color: colors.textLight }]}>✕</Text>
+              </TouchableOpacity>
+            </View>
+            <Text style={[styles.dupSummary, { color: dupCheck.repeatCount > 0 ? colors.warning : colors.secondary }]}>
+              {dupCheck.rows.length === 0
+                ? '편성된 다음 게임이 없어요'
+                : dupCheck.repeatCount > 0
+                  ? `대기 게임 ${dupCheck.rows.length}개 중 ${dupCheck.repeatCount}개가 이미 친 조합이에요`
+                  : `대기 게임 ${dupCheck.rows.length}개 모두 새 조합이에요 ✓`}
+            </Text>
+            <ScrollView style={{ maxHeight: 360 }}>
+              {dupCheck.rows.map((r, i) => (
+                <View key={r.entryId} style={[styles.dupRow, { borderColor: colors.divider }]}>
+                  <View style={[styles.dupBadge, { backgroundColor: r.isRepeat ? colors.warningBg : colors.secondaryBg }]}>
+                    <Text style={[styles.dupBadgeT, { color: r.isRepeat ? colors.warning : colors.secondary }]}>{r.isRepeat ? '중복' : '새'}</Text>
+                  </View>
+                  <View style={{ flex: 1, minWidth: 0 }}>
+                    <Text style={[styles.dupNames, { color: colors.text }]} numberOfLines={2}>
+                      {i + 1}. {r.ids.map((id) => getPlayer(id)?.userName ?? '?').join(' · ')}
+                    </Text>
+                    {r.isRepeat ? (
+                      <Text style={[styles.dupHint, { color: colors.warning }]}>이미 친 조합이에요</Text>
+                    ) : r.topPair ? (
+                      <Text style={[styles.dupHint, { color: colors.textSecondary }]}>
+                        {getPlayer(r.topPair.a)?.userName ?? '?'}·{getPlayer(r.topPair.b)?.userName ?? '?'} 자주 함께 ({r.topPair.count}번)
+                      </Text>
+                    ) : null}
+                  </View>
+                </View>
+              ))}
+            </ScrollView>
+            <Text style={[styles.dupFoot, { color: colors.textLight }]}>* 참고용이에요 — 편성을 막지 않아요. 필요하면 대기열에서 교체·삭제하세요.</Text>
+          </View>
+        </View>
+      </Modal>
+
       {/* 아래: 게임판(가운데) + 대기=게임 기록(오른쪽) */}
       <View style={styles.m2Body}>
         <ScrollView style={styles.m2Center} contentContainerStyle={styles.m2CenterScroll} keyboardShouldPersistTaps="handled">
@@ -6176,6 +6255,20 @@ const styles = StyleSheet.create({
   m2ChatSendT: { ...typography.body2, fontWeight: '800' },
   m2AutoBtn: { flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: spacing.md, paddingVertical: 6, borderWidth: 1.5, borderRadius: radius.lg },
   m2AutoBtnT: { ...typography.buttonSm, fontWeight: '800' },
+
+  // 대기열 중복 점검 모달
+  dupOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.45)', justifyContent: 'center', padding: spacing.xl },
+  dupSheet: { borderRadius: radius.card, padding: spacing.lg, maxWidth: 480, width: '100%', alignSelf: 'center' },
+  dupHead: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: spacing.sm },
+  dupTitle: { ...typography.subtitle1 },
+  dupClose: { fontSize: 18, fontWeight: '700' },
+  dupSummary: { ...typography.subtitle2, marginBottom: spacing.md },
+  dupRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, paddingVertical: spacing.sm, borderTopWidth: StyleSheet.hairlineWidth },
+  dupBadge: { paddingHorizontal: spacing.sm, paddingVertical: 2, borderRadius: radius.sm, minWidth: 40, alignItems: 'center' },
+  dupBadgeT: { fontSize: 11, fontWeight: '800' },
+  dupNames: { ...typography.body2, fontWeight: '600' },
+  dupHint: { fontSize: 11, fontWeight: '700', marginTop: 1 },
+  dupFoot: { fontSize: 11, marginTop: spacing.md },
   gameFrameStart: { flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: spacing.md, paddingVertical: 5, borderRadius: radius.md },
   gameFrameStartT: { ...typography.buttonSm, color: '#fff', fontWeight: '800' },
   gameFrameWait: { ...typography.caption, fontWeight: '700' },
