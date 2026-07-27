@@ -18,7 +18,9 @@ export async function getProfile(userId: string): Promise<PlayerProfileResponse>
   }
 
   const gamesPlayed = await prisma.gamePlayer.count({
-    where: { userId },
+    // 취소된 게임(CANCELLED)의 GamePlayer 행은 삭제되지 않으므로, 상태로 걸러
+    // 실제로 진행/완료된 게임만 센다(취소된 편성이 통계를 부풀리는 버그 방지).
+    where: { userId, game: { status: { not: 'CANCELLED' } } },
   });
 
   const noShowCount = await prisma.noShowRecord.count({
@@ -58,7 +60,9 @@ export async function updateProfile(
   });
 
   const gamesPlayed = await prisma.gamePlayer.count({
-    where: { userId },
+    // 취소된 게임(CANCELLED)의 GamePlayer 행은 삭제되지 않으므로, 상태로 걸러
+    // 실제로 진행/완료된 게임만 센다(취소된 편성이 통계를 부풀리는 버그 방지).
+    where: { userId, game: { status: { not: 'CANCELLED' } } },
   });
 
   const noShowCount = await prisma.noShowRecord.count({
@@ -78,7 +82,9 @@ export async function updateProfile(
 
 export async function getStats(userId: string): Promise<PlayerStatsResponse> {
   const gamesPlayed = await prisma.gamePlayer.count({
-    where: { userId },
+    // 취소된 게임(CANCELLED)의 GamePlayer 행은 삭제되지 않으므로, 상태로 걸러
+    // 실제로 진행/완료된 게임만 센다(취소된 편성이 통계를 부풀리는 버그 방지).
+    where: { userId, game: { status: { not: 'CANCELLED' } } },
   });
 
   const gamesCompleted = await prisma.gamePlayer.count({
@@ -94,7 +100,7 @@ export async function getStats(userId: string): Promise<PlayerStatsResponse> {
   const gamesPlayedToday = await prisma.gamePlayer.count({
     where: {
       userId,
-      game: { createdAt: { gte: startOfDay } },
+      game: { createdAt: { gte: startOfDay }, status: { not: 'CANCELLED' } },
     },
   });
 
@@ -105,7 +111,7 @@ export async function getStats(userId: string): Promise<PlayerStatsResponse> {
   const gamesThisMonth = await prisma.gamePlayer.count({
     where: {
       userId,
-      game: { createdAt: { gte: startOfMonth } },
+      game: { createdAt: { gte: startOfMonth }, status: { not: 'CANCELLED' } },
     },
   });
 
@@ -204,7 +210,7 @@ export async function getWeeklyStats(userId: string): Promise<{ day: string; cou
     const count = await prisma.gamePlayer.count({
       where: {
         userId,
-        game: { createdAt: { gte: startOfDay, lte: endOfDay } },
+        game: { createdAt: { gte: startOfDay, lte: endOfDay }, status: { not: 'CANCELLED' } },
       },
     });
 
@@ -219,7 +225,7 @@ export async function getGameTypeDistribution(
   userId: string,
 ): Promise<{ label: string; value: number; color: string }[]> {
   const gamePlayers = await prisma.gamePlayer.findMany({
-    where: { userId },
+    where: { userId, game: { status: { not: 'CANCELLED' } } },
     include: {
       game: {
         include: { turn: { select: { gameType: true } } },
@@ -243,6 +249,7 @@ export async function getGameTypeDistribution(
     SINGLES: '단식',
     DOUBLES: '복식',
     MIXED_DOUBLES: '혼합복식',
+    LESSON: '레슨',
   };
 
   return Object.entries(typeMap).map(([type, value]) => ({
@@ -255,7 +262,9 @@ export async function getGameTypeDistribution(
 export async function getTotalStats(
   userId: string,
 ): Promise<{ totalGames: number; consecutiveDays: number }> {
-  const totalGames = await prisma.gamePlayer.count({ where: { userId } });
+  const totalGames = await prisma.gamePlayer.count({
+    where: { userId, game: { status: { not: 'CANCELLED' } } },
+  });
 
   // Calculate consecutive days ending today
   const now = new Date();
@@ -272,12 +281,15 @@ export async function getTotalStats(
     const count = await prisma.gamePlayer.count({
       where: {
         userId,
-        game: { createdAt: { gte: startOfDay, lte: endOfDay } },
+        game: { createdAt: { gte: startOfDay, lte: endOfDay }, status: { not: 'CANCELLED' } },
       },
     });
 
     if (count > 0) {
       consecutiveDays++;
+    } else if (i === 0) {
+      // 오늘은 아직 안 쳤을 수 있으니, 오늘의 0은 연속 끊김으로 보지 않고 어제부터 이어센다.
+      continue;
     } else {
       break;
     }

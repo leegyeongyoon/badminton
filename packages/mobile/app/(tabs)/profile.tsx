@@ -188,9 +188,10 @@ export default function ProfileScreen() {
     return `${minutes}분 남음`;
   };
 
-  const activePenalty = penalties.find(
-    (p: any) => p.status === 'ACTIVE' && new Date(p.expiresAt).getTime() > Date.now(),
-  );
+  // 서버가 이미 '유효한 패널티'(penaltyEndsAt > now)를 stats.activePenalty로 계산해준다.
+  // 예전엔 존재하지 않는 필드(status/expiresAt)로 penalties를 걸러 배너가 절대 안 뜨던
+  // 버그가 있었다 → 서버 값 그대로 사용.
+  const activePenalty = stats?.activePenalty ?? null;
 
   const currentSkill = skillLevel ? getSkillMeta(skillLevel) : null;
 
@@ -242,9 +243,9 @@ export default function ProfileScreen() {
             <Text style={styles.penaltyHeaderTitle}>패널티 적용 중</Text>
           </View>
           <View style={styles.penaltyBody}>
-            <Text style={styles.penaltyReason}>{activePenalty.reason || '노쇼'}</Text>
+            <Text style={styles.penaltyReason}>노쇼</Text>
             <Text style={styles.penaltyTime}>
-              {formatRemainingTime(activePenalty.expiresAt)}
+              {activePenalty.penaltyEndsAt ? formatRemainingTime(activePenalty.penaltyEndsAt) : ''}
             </Text>
           </View>
         </View>
@@ -269,17 +270,7 @@ export default function ProfileScreen() {
             <Text style={styles.statLabel}>노쇼</Text>
           </View>
         </View>
-        {stats?.winRate !== undefined && (
-          <View style={styles.winRateCard}>
-            <Text style={styles.winRateLabel}>승률</Text>
-            <View style={styles.winRateBarContainer}>
-              <View style={styles.winRateBar}>
-                <View style={[styles.winRateFill, { width: `${stats.winRate}%` }]} />
-              </View>
-              <Text style={styles.winRateValue}>{stats.winRate}%</Text>
-            </View>
-          </View>
-        )}
+        {/* 승률(winRate)은 서버가 승패를 기록하지 않아 항상 미제공 → 죽은 UI라 제거. */}
       </View>
 
       {/* Player settings section */}
