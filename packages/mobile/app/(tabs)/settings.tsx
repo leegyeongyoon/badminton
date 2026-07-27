@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { View, Text, TouchableOpacity, StyleSheet, ScrollView, Share } from 'react-native';
 import Animated from 'react-native-reanimated';
 import { useRouter } from 'expo-router';
+import Constants from 'expo-constants';
 import { useCheckinStore } from '../../store/checkinStore';
 import { useAuthStore } from '../../store/authStore';
 import { useFacilityStore } from '../../store/facilityStore';
@@ -16,8 +17,6 @@ import { Icon } from '../../components/ui/Icon';
 import api from '../../services/api';
 import { checkinApi } from '../../services/checkin';
 import { profileApi } from '../../services/profile';
-import { statsApi } from '../../services/stats';
-import { useStatsData } from '../../hooks/useStatsData';
 import { typography, radius, spacing, opacity } from '../../constants/theme';
 import { alpha } from '../../utils/color';
 import { useFadeIn } from '../../utils/animations';
@@ -27,10 +26,7 @@ import { FacilitySection } from '../../components/settings/FacilitySection';
 import { ClubsSection } from '../../components/settings/ClubsSection';
 import { MenuSection } from '../../components/settings/MenuSection';
 import { ClubModal } from '../../components/settings/ClubModal';
-import { PlayerStatsCard } from '../../components/settings/PlayerStatsCard';
 import { SettingsSkeleton } from '../../components/settings/SettingsSkeleton';
-import { Skeleton } from '../../components/ui/Skeleton';
-import { useLazyScreen } from '../../hooks/useLazyScreen';
 
 const AnimatedScrollView = Animated.createAnimatedComponent(ScrollView);
 
@@ -44,15 +40,12 @@ export default function SettingsScreen() {
   const unreadCount = useNotificationStore((s) => s.unreadCount);
   const [isAdmin, setIsAdmin] = useState(false);
   const [profileData, setProfileData] = useState<any>(null);
-  const [playerStats, setPlayerStats] = useState<any>(null);
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [showJoinModal, setShowJoinModal] = useState(false);
   const [clubName, setClubName] = useState('');
   const [inviteCode, setInviteCode] = useState('');
 
   const [initialLoaded, setInitialLoaded] = useState(false);
-  const { isReady: chartsReady } = useLazyScreen(100);
-  const { weeklyStats, gameTypeData, loading: statsLoading } = useStatsData();
   const facilityId = checkinStatus?.facilityId;
   const fadeInStyle = useFadeIn();
   const { scrollHandler, headerStyle } = useScrollAnimation();
@@ -63,7 +56,6 @@ export default function SettingsScreen() {
       checkAdminStatus(),
       fetchClubs(),
       loadProfile(),
-      loadPlayerStats(),
     ]).finally(() => setInitialLoaded(true));
   }, [facilityId]);
 
@@ -71,20 +63,6 @@ export default function SettingsScreen() {
     try {
       const { data } = await profileApi.getProfile();
       setProfileData(data);
-    } catch { /* silent */ }
-  };
-
-  const loadPlayerStats = async () => {
-    try {
-      const { data } = await statsApi.getMyStats();
-      // 서버 응답(gamesPlayed/gamesThisMonth/activePenalty)을 카드가 읽는
-      // 필드명(totalGames/thisMonthGames/activePenalties)으로 매핑한다.
-      setPlayerStats({
-        totalGames: data?.gamesPlayed ?? 0,
-        thisMonthGames: data?.gamesThisMonth ?? 0,
-        noShowCount: data?.noShowCount ?? 0,
-        activePenalties: data?.activePenalty ? 1 : 0,
-      });
     } catch { /* silent */ }
   };
 
@@ -151,7 +129,7 @@ export default function SettingsScreen() {
   };
 
   // Show skeleton on initial load before profile and stats arrive
-  if (!initialLoaded && profileData === null && playerStats === null) {
+  if (!initialLoaded && profileData === null) {
     return (
       <ScrollView
         style={[styles.container, { backgroundColor: colors.background }]}
@@ -177,16 +155,8 @@ export default function SettingsScreen() {
         />
       </Animated.View>
 
-      {chartsReady ? (
-        <PlayerStatsCard
-          stats={playerStats}
-          weeklyData={weeklyStats.map((w) => w.count)}
-          gameTypeData={gameTypeData}
-          loading={statsLoading}
-        />
-      ) : (
-        <Skeleton width="100%" height={220} borderRadius={16} />
-      )}
+      {/* 활동 통계는 '내 정보'(프로필) 화면으로 일원화 — 설정 화면에서는 제거.
+          설정은 계정/모임/메뉴 위주로 단순하게 유지한다. */}
 
       {/* Facility management (change gym / checkin-checkout) is an admin concern.
           Regular members/leaders should see settings as a view/account screen,
@@ -227,7 +197,7 @@ export default function SettingsScreen() {
 
       <View style={styles.appInfo}>
         <Text style={[styles.appInfoText, { color: colors.textLight }]}>{Strings.app.name}</Text>
-        <Text style={[styles.versionText, { color: colors.textLight }]}>v1.0.0</Text>
+        <Text style={[styles.versionText, { color: colors.textLight }]}>v{Constants.expoConfig?.version ?? '1.0.2'}</Text>
         <Text
           style={[styles.versionText, { color: colors.primary, marginTop: 6, fontWeight: '600' }]}
           onPress={() => router.push('/guide')}
