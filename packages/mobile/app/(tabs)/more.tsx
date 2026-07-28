@@ -263,6 +263,14 @@ export default function MoreScreen() {
             <Text style={[styles.menuItemText, { color: colors.text }]}>모임별 멤버</Text>
           </TouchableOpacity>
         )}
+
+        {/* SUPER_ADMIN → 실험실(상용 기능 프로토타입, 일반 노출 X). */}
+        {isSuperAdmin && (
+          <TouchableOpacity style={styles.menuItem} onPress={() => router.push('/lab')}>
+            <Icon name="settings" size={18} color={colors.primary} />
+            <Text style={[styles.menuItemText, { color: colors.text }]}>실험실 (베타)</Text>
+          </TouchableOpacity>
+        )}
       </View>
 
       {/* App settings */}
