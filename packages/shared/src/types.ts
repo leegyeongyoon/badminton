@@ -754,3 +754,62 @@ export interface ClientToServerEvents {
   'user:join': (userId: string) => void;
   'user:leave': (userId: string) => void;
 }
+
+// ─────────────────────────────────────────────────────────────
+// 실험실(Lab) — 최고관리자 전용 상용 프로토타입 (일반 노출 X).
+// ─────────────────────────────────────────────────────────────
+
+/** 함께 친 파트너 (전체 기간, 게임 수 내림차순). */
+export interface LabPartnerItem {
+  userId: string;
+  name: string;
+  games: number;
+}
+
+/** 뱃지(성취) — DB 저장 없이 임계 파생. */
+export interface LabBadge {
+  key: string;
+  emoji: string;
+  label: string;
+  hint: string;
+  earned: boolean;
+}
+
+/** 개인 프로필 — 크로스클럽 집계 + 파트너 랭킹 + 뱃지. */
+export interface LabProfileResponse {
+  userId: string;
+  name: string;
+  skillLevel: string | null;
+  totalGames: number; // 취소 제외, 전체 클럽 합산
+  thisMonthGames: number;
+  streakDays: number; // 연속 출석
+  clubGames: { clubId: string; clubName: string; games: number }[];
+  partners: LabPartnerItem[];
+  badges: LabBadge[];
+}
+
+/** 정산 자동화 — 멤버별 청구 상세(회비 + 미납 게스트비). */
+export interface LabSettlementMember {
+  userId: string;
+  name: string;
+  isGuest: boolean;
+  dues: number; // 이번 기간 정기 회비 청구액(주기 billing month에만 > 0)
+  sessions: number; // 이번 기간 정모 참석 횟수
+  sessionFees: number; // 정모 참가비 합(sessions × perSessionFee)
+  splitFees: number; // 대관비 엔빵 합(참석 정모별 rentalCost ÷ 참석 인원)
+  guestFees: number; // 미납 게스트비 누적(CheckIn.feeAmount, feePaid=false)
+  total: number; // dues + sessionFees + splitFees + guestFees
+  duesPaid: boolean; // 정산 완료(DuesPayment) 여부
+  balance: number; // 미납 잔액
+}
+
+/** GET /lab/clubs/:clubId/settlement?period=YYYY-MM */
+export interface LabSettlementResponse {
+  clubId: string;
+  clubName: string;
+  period: string;
+  monthlyDuesAmount: number | null;
+  duesAccountInfo: string | null; // 입금 안내 계좌(자유 텍스트)
+  members: LabSettlementMember[];
+  totals: { billed: number; paid: number; unpaid: number; unpaidCount: number };
+}

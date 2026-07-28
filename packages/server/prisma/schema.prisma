@@ -270,7 +270,17 @@ model Club {
   homeFacilityId String?
   // 월 회비 표준 금액 (KRW). null = 회비 기능 미사용. 회원별 실제 납부액은
   // DuesPayment.amount 가 우선하며, 없으면 이 값을 기대 금액으로 사용한다.
+  // 정기 회비: monthlyDuesAmount = 주기당 청구액. 주기는 duesPeriodType 로 해석.
   monthlyDuesAmount Int?
+  // 회비 주기: NONE | MONTHLY | QUARTERLY | HALF | YEARLY (문자열, 프로토타입).
+  duesPeriodType String @default("NONE")
+  // 정모별 참가비(번개비). null=미사용. 정모 참석 회차마다 청구.
+  perSessionFee Int?
+  // 게스트 기본 참가비. 게스트 등록 시 자동 청구.
+  guestFee Int?
+  // 회비/게스트비 입금 안내 계좌(자유 텍스트, 예: "카카오뱅크 3333-01-1234567 홍길동").
+  // 반자동 정산: 청구 메시지에 넣어 회원이 여기로 송금 → 총무가 입금확인 원클릭.
+  duesAccountInfo String?
   createdAt      DateTime @default(now())
   updatedAt      DateTime @updatedAt
 
@@ -279,6 +289,7 @@ model Club {
   sessions     ClubSession[]
   messages     ClubMessage[]
   duesPayments DuesPayment[]
+  guestApplications GuestApplication[]
 }
 
 // 월 회비 납부 기록. (clubId, userId, period) 당 한 행 — 행이 있으면 그 달에
@@ -508,6 +519,8 @@ model ClubSession {
   facilitySessionId String
   startedById       String
   status            ClubSessionStatus @default(ACTIVE)
+  // 이 정모의 대관비(코트 대여 총액). 정산에서 참석자 수로 엔빵(1/N) 청구. null=미사용.
+  rentalCost        Int?
   courtIds          String[]
   title             String?
   operatorMemo      String?           @db.Text // 운영자 공유 메모(실시간) — 여러 운영자 협업용
@@ -541,4 +554,26 @@ model DailyMetric {
   requestCount    Int      @default(0) // 하루 API 요청 수(누적)
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
+}
+
+// 게스트 사전 신청(실험실 프로토타입) — 비회원이 공개 링크로 미리 신청 →
+// 입금 안내 → 운영자가 입금확인 → 확정. 현장 QR 체크인과 별개의 "사전" 단계.
+model GuestApplication {
+  id        String   @id @default(uuid())
+  clubId    String
+  name      String
+  // 표준 신청 항목: 급수(S~F)·성별(M/F)·참석 희망일(YYYY-MM-DD). 연락처는 부가(선택).
+  skillLevel String?
+  gender     String?
+  visitDate  String?
+  phone     String?
+  note      String?
+  status    String   @default("PENDING") // PENDING | CONFIRMED | CANCELLED
+  feeAmount Int?
+  feePaid   Boolean  @default(false)
+  createdAt DateTime @default(now())
+
+  club Club @relation(fields: [clubId], references: [id], onDelete: Cascade)
+
+  @@index([clubId, createdAt])
 }

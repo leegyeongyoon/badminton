@@ -630,7 +630,7 @@ export async function addGuest(
 ): Promise<AddGuestResponse> {
   const session = await prisma.clubSession.findUnique({
     where: { id: sessionId },
-    include: { facility: true },
+    include: { facility: true, club: { select: { guestFee: true } } },
   });
   if (!session) throw new NotFoundError('모임 세션');
   if (session.status !== 'ACTIVE') {
@@ -665,7 +665,8 @@ export async function addGuest(
       userId: guest.id,
       facilityId: session.facilityId,
       clubSessionId: session.id,
-      feeAmount: input.feeAmount ?? null,
+      // 게스트비: 명시 값 > 모임 기본 게스트비(Club.guestFee) > 없음.
+      feeAmount: input.feeAmount ?? session.club?.guestFee ?? null,
       feePaid: false,
     },
   });

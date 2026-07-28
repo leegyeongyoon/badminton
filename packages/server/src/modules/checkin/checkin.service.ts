@@ -396,6 +396,14 @@ export async function guestCheckIn(
     },
   });
 
+  // 게스트비 기본값: 정모의 모임에 guestFee 가 설정돼 있으면 자동 청구.
+  const clubGuestFee = resolvedSessionId
+    ? ((await prisma.clubSession.findUnique({
+        where: { id: resolvedSessionId },
+        select: { club: { select: { guestFee: true } } },
+      }))?.club?.guestFee ?? null)
+    : null;
+
   const checkIn = await prisma.checkIn.create({
     data: {
       userId: guest.id,
@@ -403,6 +411,7 @@ export async function guestCheckIn(
       clubSessionId: resolvedSessionId,
       checkInLat: latitude,
       checkInLng: longitude,
+      feeAmount: clubGuestFee,
       feePaid: false,
     },
     include: { facility: true },
