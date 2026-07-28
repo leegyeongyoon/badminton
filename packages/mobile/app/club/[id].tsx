@@ -10,6 +10,7 @@ import {
   ScrollView,
   TextInput,
   Platform,
+  Share,
 } from 'react-native';
 import { useLocalSearchParams, useRouter, Stack, useFocusEffect } from 'expo-router';
 import { useClubStore } from '../../store/clubStore';
@@ -429,6 +430,19 @@ export default function ClubDetailScreen() {
               <View style={styles.inviteRow}>
                 <Text style={styles.inviteLabel}>초대코드</Text>
                 <Text style={styles.inviteCode}>{club.inviteCode}</Text>
+                {/* 운영진: 게스트 사전 신청 공개 링크 공유 (비회원이 로그인 없이 신청) */}
+                {isLeaderOrStaff && (
+                  <TouchableOpacity
+                    style={styles.guestApplyShareBtn}
+                    onPress={() => {
+                      const url = `https://badmintoncourt.store/guest-apply?code=${club.inviteCode}`;
+                      Share.share({ message: `[${club.name}] 게스트 신청은 여기서 해주세요 🙌\n${url}` }).catch(() => {});
+                    }}
+                    accessibilityLabel="게스트 신청 링크 공유"
+                  >
+                    <Text style={styles.guestApplyShareText}>게스트 신청 링크</Text>
+                  </TouchableOpacity>
+                )}
               </View>
             </View>
           )}
@@ -873,6 +887,14 @@ const styles = StyleSheet.create({
     color: Colors.textLight,
     fontWeight: '600',
   },
+  guestApplyShareBtn: {
+    marginLeft: 'auto',
+    backgroundColor: Colors.primaryBg,
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 999,
+  },
+  guestApplyShareText: { fontSize: 11, fontWeight: '800', color: Colors.primary },
   inviteCode: {
     fontSize: 14,
     fontWeight: '800',

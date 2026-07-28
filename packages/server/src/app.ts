@@ -21,6 +21,7 @@ import clientErrorRouter from './modules/clientError/clientError.router';
 import adminRouter from './modules/admin/admin.router';
 import labRouter from './modules/lab/lab.router';
 import guestApplyRouter from './modules/guestApply/guestApply.router';
+import clubMoneyRouter from './modules/club/clubMoney.router';
 import { noteRequest } from './modules/admin/metrics.service';
 
 const app = express();
@@ -53,6 +54,7 @@ app.use('/api/v1/turns', turnRouter);   // /turns/:turnId/complete|cancel|requeu
 app.use('/api/v1/checkin', checkinRouter);
 app.use('/api/v1/checkins', checkinRouter);  // /checkins/:checkInId/fee (guest fee)
 app.use('/api/v1/clubs', clubRouter);
+app.use('/api/v1/clubs', clubMoneyRouter);             // /clubs/:id/money/* (모임 회비 관리 — LEADER/STAFF)
 app.use('/api/v1/games', gameRouter);
 app.use('/api/v1/users', userRouter);
 app.use('/api/v1', penaltyRouter);

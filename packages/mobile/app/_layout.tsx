@@ -292,6 +292,7 @@ function RootLayoutInner() {
           <Stack.Screen name="club/[id]/qr" options={transitions.slideFromRight} />
           <Stack.Screen name="club/[id]/chat" options={transitions.slideFromRight} />
           <Stack.Screen name="club/[id]/manage" options={transitions.slideFromRight} />
+          <Stack.Screen name="club/[id]/money" options={transitions.slideFromRight} />
           <Stack.Screen name="checkin-modal" options={transitions.modalSlideUp} />
           <Stack.Screen name="session/[id]/operate" options={transitions.slideFromRight} />
           <Stack.Screen name="session/[id]/qr" options={transitions.slideFromRight} />

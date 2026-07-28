@@ -2,6 +2,7 @@ import { Router, Request, Response, NextFunction } from 'express';
 import { prisma } from '../../utils/prisma';
 import { rateLimit } from '../../middleware/rateLimit';
 import { NotFoundError, BadRequestError } from '../../utils/errors';
+import { sendPushToUsers } from '../notification/notification.service';
 
 // ─────────────────────────────────────────────────────────────
 // 게스트 사전 신청(공개, 비인증) — 실험실 프로토타입.
@@ -59,6 +60,21 @@ router.post('/:inviteCode', applyLimiter, async (req: Request, res: Response, ne
         feeAmount: club.guestFee,
       },
     });
+
+    // 운영진(LEADER/STAFF)에게 신청 접수 푸시(실패해도 신청은 성공).
+    try {
+      const staff = await prisma.clubMember.findMany({
+        where: { clubId: club.id, role: { in: ['LEADER', 'STAFF'] } },
+        select: { userId: true },
+      });
+      const parts = [validSkill && `${validSkill}조`, validGender && (validGender === 'M' ? '남' : '여'), validVisit && `${validVisit.slice(5).replace('-', '/')} 방문`].filter(Boolean).join(' · ');
+      await sendPushToUsers(staff.map((s) => s.userId), {
+        title: '게스트 신청',
+        body: `${trimmedName}님이 신청했어요${parts ? ` (${parts})` : ''} — 모임 관리에서 확인`,
+      });
+    } catch {
+      /* 알림 실패 무시 */
+    }
 
     // 입금 안내(반자동): 계좌·금액을 응답으로 — 신청자 화면에 바로 표시.
     res.status(201).json({

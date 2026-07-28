@@ -48,22 +48,25 @@ export default function ProfileScreen() {
   const [preferredGameTypes, setPreferredGameTypes] = useState<string[]>([]);
   const [stats, setStats] = useState<any>(null);
   const [penalties, setPenalties] = useState<any[]>([]);
+  const [summary, setSummary] = useState<any>(null); // 크로스클럽 요약(뱃지·파트너)
   const [isLoading, setIsLoading] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
 
   const loadProfileData = async () => {
     setIsLoading(true);
     try {
-      const [profileRes, statsRes, penaltiesRes] = await Promise.all([
+      const [profileRes, statsRes, penaltiesRes, summaryRes] = await Promise.all([
         profileApi.getProfile(),
         profileApi.getStats(),
         profileApi.getPenalties(),
+        profileApi.getMySummary().catch(() => ({ data: null })),
       ]);
       setSkillLevel(profileRes.data.skillLevel || '');
       setGender(profileRes.data.gender || '');
       setPreferredGameTypes(profileRes.data.preferredGameTypes || []);
       setStats(statsRes.data);
       setPenalties(penaltiesRes.data || []);
+      setSummary(summaryRes.data);
     } catch {
       showAlert('오류', '프로필 정보를 불러오지 못했습니다');
     } finally {
@@ -272,6 +275,42 @@ export default function ProfileScreen() {
         </View>
         {/* 승률(winRate)은 서버가 승패를 기록하지 않아 항상 미제공 → 죽은 UI라 제거. */}
       </View>
+
+      {/* ── 성취 뱃지 + 함께 많이 친 사람 (크로스클럽 요약) ── */}
+      {summary && (
+        <>
+          <View style={styles.section}>
+            <Text style={styles.sectionTitle}>성취 뱃지</Text>
+            <View style={styles.badgeGrid}>
+              {(summary.badges || []).map((b: any) => (
+                <View key={b.key} style={[styles.badgeCard, !b.earned && styles.badgeCardLocked]}>
+                  <Text style={styles.badgeEmoji}>{b.emoji}</Text>
+                  <Text style={styles.badgeLabel} numberOfLines={1}>{b.label}</Text>
+                  <Text style={styles.badgeHint} numberOfLines={1}>{b.hint}</Text>
+                </View>
+              ))}
+            </View>
+            {summary.streakDays > 0 && (
+              <Text style={styles.badgeStreak}>🔥 연속 출석 {summary.streakDays}일</Text>
+            )}
+          </View>
+
+          {(summary.partners || []).length > 0 && (
+            <View style={styles.section}>
+              <Text style={styles.sectionTitle}>함께 많이 친 사람</Text>
+              <View style={styles.partnerCard}>
+                {(summary.partners || []).slice(0, 5).map((p: any, i: number) => (
+                  <View key={p.userId} style={[styles.partnerRow, i > 0 && styles.partnerRowBorder]}>
+                    <Text style={styles.partnerRank}>{i + 1}</Text>
+                    <Text style={styles.partnerName} numberOfLines={1}>{p.name}</Text>
+                    <Text style={styles.partnerGames}>{p.games}게임</Text>
+                  </View>
+                ))}
+              </View>
+            </View>
+          )}
+        </>
+      )}
 
       {/* Player settings section */}
       <View style={styles.section}>
@@ -846,4 +885,33 @@ const styles = StyleSheet.create({
     color: Colors.text,
     fontWeight: '600',
   },
+
+  // ── 성취 뱃지 / 파트너 랭킹 (크로스클럽 요약) ──
+  badgeGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
+  badgeCard: {
+    width: '31%',
+    alignItems: 'center',
+    paddingVertical: 12,
+    borderRadius: 12,
+    borderWidth: 1.5,
+    borderColor: Colors.primary,
+    backgroundColor: Colors.surface,
+  },
+  badgeCardLocked: { opacity: 0.4, borderColor: Colors.border },
+  badgeEmoji: { fontSize: 24 },
+  badgeLabel: { fontSize: 12, fontWeight: '800', marginTop: 4, color: Colors.text },
+  badgeHint: { fontSize: 9, marginTop: 1, color: Colors.textLight },
+  badgeStreak: { fontSize: 12, fontWeight: '800', color: Colors.warning, marginTop: 10 },
+  partnerCard: {
+    backgroundColor: Colors.surface,
+    borderRadius: 12,
+    paddingHorizontal: 16,
+    borderWidth: 1,
+    borderColor: Colors.border,
+  },
+  partnerRow: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 10 },
+  partnerRowBorder: { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: Colors.divider },
+  partnerRank: { width: 18, textAlign: 'center', fontWeight: '800', color: Colors.textLight },
+  partnerName: { flex: 1, fontSize: 14, fontWeight: '600', color: Colors.text },
+  partnerGames: { fontSize: 14, fontWeight: '800', color: Colors.primary },
 });

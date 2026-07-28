@@ -27,6 +27,9 @@ export const profileApi = {
     api.put('/users/me/profile', data),
   getStats: () =>
     api.get('/users/me/stats'),
+  // 크로스클럽 활동 요약(총게임·스트릭·파트너 랭킹·뱃지) — 내 정보 화면용.
+  getMySummary: () =>
+    api.get('/users/me/summary'),
   getHistory: (page = 1) =>
     api.get('/users/me/history', { params: { page } }),
   getPenalties: () =>

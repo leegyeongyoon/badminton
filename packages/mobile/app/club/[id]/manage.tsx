@@ -376,9 +376,8 @@ export default function ClubManageScreen() {
     [clubId],
   );
 
-  useEffect(() => {
-    loadDues(duesPeriod);
-  }, [loadDues, duesPeriod]);
+  // 회비 UI는 전용 화면(/club/[id]/money)으로 이전 — 여기서는 더 이상 로드하지 않음.
+  // (구 상태/핸들러는 하위호환용으로 남아있으나 미사용.)
 
   // ── 회비: 월 회비 표준 금액 설정/수정 (클럽 PATCH) ──
   const handleSaveDuesAmount = useCallback(async () => {
@@ -802,140 +801,24 @@ export default function ClubManageScreen() {
           )}
         </View>
 
-        {/* ── 회비 (월 회비) ─────────────────────────── */}
-        <View style={[styles.card, { backgroundColor: colors.surface }, shadows.sm]}>
+        {/* ── 회비 관리 (정산·게스트·설정 — 전용 화면) ── */}
+        <TouchableOpacity
+          style={[styles.card, { backgroundColor: colors.surface }, shadows.sm]}
+          onPress={() => router.push(`/club/${clubId}/money`)}
+          activeOpacity={0.7}
+          accessibilityLabel="회비 관리 열기"
+        >
           <View style={styles.cardHeader}>
             <Icon name="medal" size={18} color={colors.primary} />
-            <Text style={[styles.cardTitle, { color: colors.text }]}>회비</Text>
+            <Text style={[styles.cardTitle, { color: colors.text }]}>회비 관리</Text>
+            <View style={{ flex: 1 }} />
+            <Icon name="chevronRight" size={18} color={colors.textLight} />
           </View>
-
-          {club?.monthlyDuesAmount == null ? (
-            // 회비 미설정 — 인라인으로 월 회비 금액을 입력해 PATCH.
-            <>
-              <Text style={[styles.fieldHint, { color: colors.textLight }]}>
-                월 회비 금액을 정하면 매달 회원별 납부 현황을 관리할 수 있어요
-              </Text>
-              <Text style={[styles.fieldLabel, { color: colors.textSecondary, marginTop: spacing.md }]}>
-                월 회비 금액 (원)
-              </Text>
-              <View style={styles.duesAmountRow}>
-                <TextInput
-                  style={[
-                    styles.input,
-                    { flex: 1, backgroundColor: colors.background, color: colors.text, borderColor: colors.border },
-                  ]}
-                  value={duesAmountInput}
-                  onChangeText={(v) => setDuesAmountInput(v.replace(/[^0-9]/g, ''))}
-                  placeholder="예: 30000"
-                  placeholderTextColor={colors.textLight}
-                  keyboardType="number-pad"
-                  accessibilityLabel="월 회비 금액"
-                />
-                <Button
-                  title="설정"
-                  onPress={handleSaveDuesAmount}
-                  variant="primary"
-                  size="md"
-                  loading={duesAmountSaving}
-                />
-              </View>
-            </>
-          ) : (
-            <>
-              {/* 월 선택 + 표준 금액 */}
-              <View style={styles.monthRow}>
-                <TouchableOpacity
-                  style={[styles.monthBtn, { borderColor: colors.border }]}
-                  onPress={() => shiftMonth(-1)}
-                  activeOpacity={0.7}
-                  accessibilityLabel="이전 달"
-                >
-                  <Icon name="chevronLeft" size={18} color={colors.textSecondary} />
-                </TouchableOpacity>
-                <Text style={[styles.monthLabel, { color: colors.text }]}>{duesMonthLabel}</Text>
-                <TouchableOpacity
-                  style={[styles.monthBtn, { borderColor: colors.border }]}
-                  onPress={() => shiftMonth(1)}
-                  activeOpacity={0.7}
-                  accessibilityLabel="다음 달"
-                >
-                  <Icon name="chevronRight" size={18} color={colors.textSecondary} />
-                </TouchableOpacity>
-              </View>
-              <Text style={[styles.fieldHint, { color: colors.textLight, textAlign: 'center' }]}>
-                월 회비 {formatKRW(club.monthlyDuesAmount)} · 멤버를 눌러 회비 금액을 바꿀 수 있어요
-              </Text>
-
-              {/* 합계 (기대 / 납부 / 미납) */}
-              <View style={[styles.duesTotals, { backgroundColor: colors.background }]}>
-                <View style={styles.duesTotalItem}>
-                  <Text style={[styles.duesTotalLabel, { color: colors.textSecondary }]}>기대</Text>
-                  <Text style={[styles.duesTotalValue, { color: colors.text }]}>
-                    {formatKRW(dues?.totals.expected)}
-                  </Text>
-                </View>
-                <View style={styles.duesTotalItem}>
-                  <Text style={[styles.duesTotalLabel, { color: colors.textSecondary }]}>납부</Text>
-                  <Text style={[styles.duesTotalValue, { color: colors.secondary }]}>
-                    {formatKRW(dues?.totals.paid)}
-                  </Text>
-                </View>
-                <View style={styles.duesTotalItem}>
-                  <Text style={[styles.duesTotalLabel, { color: colors.textSecondary }]}>미납</Text>
-                  <Text style={[styles.duesTotalValue, { color: colors.danger }]}>
-                    {formatKRW(dues?.totals.unpaid)}
-                  </Text>
-                </View>
-              </View>
-
-              {/* 회원별 납부/미납 토글 */}
-              {duesLoading && !dues ? (
-                <View style={{ paddingVertical: spacing.lg, alignItems: 'center' }}>
-                  <ActivityIndicator size="small" color={colors.primary} />
-                </View>
-              ) : !dues || dues.items.length === 0 ? (
-                <Text style={[styles.placeholder, { color: colors.textLight }]}>아직 멤버가 없어요</Text>
-              ) : (
-                <View style={{ marginTop: spacing.sm }}>
-                  {dues.items.map((item) => (
-                    <View
-                      key={item.userId}
-                      style={[styles.duesRow, { borderBottomColor: colors.border }]}
-                    >
-                      <Text style={[styles.memberName, { color: colors.text, flex: 1 }]} numberOfLines={1}>
-                        {item.name}
-                      </Text>
-                      <Text style={[styles.duesAmount, { color: colors.textSecondary }]}>
-                        {formatKRW(item.amount)}
-                      </Text>
-                      <TouchableOpacity
-                        style={[
-                          styles.paidToggle,
-                          item.paid
-                            ? { backgroundColor: colors.secondary }
-                            : { backgroundColor: colors.background, borderColor: colors.border, borderWidth: 1 },
-                        ]}
-                        onPress={() => toggleDuesPaid(item)}
-                        disabled={duesBusyUserId === item.userId}
-                        activeOpacity={0.8}
-                        accessibilityLabel={`${item.name} ${item.paid ? '납부 취소' : '납부 처리'}`}
-                      >
-                        <Text
-                          style={[
-                            styles.paidToggleText,
-                            { color: item.paid ? '#fff' : colors.textSecondary },
-                          ]}
-                        >
-                          {item.paid ? '납부 완료' : '미납'}
-                        </Text>
-                      </TouchableOpacity>
-                    </View>
-                  ))}
-                </View>
-              )}
-            </>
-          )}
-        </View>
+          <Text style={[styles.fieldHint, { color: colors.textSecondary }]}>
+            정기 회비(매달·분기·반기·연) · 정모 참가비 · 대관비 엔빵 · 게스트비를 자동 정산하고,
+            게스트 사전 신청을 받고, 입금확인을 원클릭으로 관리해요
+          </Text>
+        </TouchableOpacity>
 
         {/* ── 모임 삭제 (danger, 맨 아래) ───────────── */}
         <View style={[styles.card, { backgroundColor: colors.surface }, shadows.sm]}>

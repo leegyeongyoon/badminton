@@ -5,8 +5,19 @@ import { validate } from '../../middleware/validate';
 import * as userService from './user.service';
 import * as turnService from '../turn/turn.service';
 import { getMyStatus } from '../clubSession/clubSession.service';
+import { getLabProfile } from '../lab/lab.service';
 
 const router = Router();
+
+// GET /users/me/summary - 크로스클럽 활동 요약(총게임·스트릭·파트너 랭킹·뱃지).
+// 실험실에서 검증된 getLabProfile을 본인 데이터 한정으로 정식 노출.
+router.get('/me/summary', authenticate, async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    res.json(await getLabProfile(req.user!.userId));
+  } catch (err) {
+    next(err);
+  }
+});
 
 // GET /users/me/turns/current - get my active turns
 router.get('/me/turns/current', authenticate, async (req: Request, res: Response, next: NextFunction) => {
