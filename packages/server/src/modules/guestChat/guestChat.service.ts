@@ -141,10 +141,11 @@ export async function guestSendMessage(threadId: string, text: string, name?: st
   return mapMsg(msg);
 }
 
-/** 운영진: 클럽 문의 스레드 목록(최근 순). */
+/** 운영진: 클럽 문의 스레드 목록(최근 순). 메시지 없는 빈 스레드(문의 버튼만
+ *  누르고 안 보낸 경우)는 노이즈라 제외 — lastText는 첫 메시지에서 채워진다. */
 export async function listStaffThreads(clubId: string): Promise<StaffThreadRow[]> {
   const rows = await prisma.guestThread.findMany({
-    where: { clubId },
+    where: { clubId, lastText: { not: null } },
     orderBy: { lastMessageAt: 'desc' },
     take: 100,
   });

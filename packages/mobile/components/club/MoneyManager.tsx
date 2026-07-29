@@ -222,7 +222,7 @@ export function MoneyManager({ clubs, api }: { clubs: MoneyClub[]; api: MoneyApi
     <View style={styles.field}>
       <Text style={[styles.fieldLabel, { color: colors.textSecondary }]}>{label}</Text>
       <TextInput
-        style={[styles.fieldInput, { color: colors.text, backgroundColor: colors.background, borderColor: colors.border }]}
+        style={[styles.fieldInput, { color: colors.text, backgroundColor: colors.background }]}
         value={value}
         onChangeText={setter}
         placeholder={ph}
@@ -245,7 +245,7 @@ export function MoneyManager({ clubs, api }: { clubs: MoneyClub[]; api: MoneyApi
               <Pressable
                 key={c.id}
                 onPress={() => setClubId(c.id)}
-                style={[styles.clubChip, active ? { backgroundColor: colors.primary } : { backgroundColor: colors.surface, borderColor: colors.border, borderWidth: 1.5 }]}
+                style={[styles.clubChip, active ? { backgroundColor: colors.primary } : { backgroundColor: colors.surface }]}
               >
                 <Text style={[styles.clubChipText, { color: active ? '#fff' : colors.textSecondary }]} numberOfLines={1}>{c.name}</Text>
               </Pressable>
@@ -303,7 +303,7 @@ export function MoneyManager({ clubs, api }: { clubs: MoneyClub[]; api: MoneyApi
 
             {/* 정모별 대관비 엔빵 */}
             {sessions.length > 0 && (
-              <View style={[styles.card, { backgroundColor: colors.surface }, shadows.sm]}>
+              <View style={[styles.card, { backgroundColor: colors.surface }, shadows.md]}>
                 <Text style={[styles.cardTitle, { color: colors.text }]}>정모별 대관비 (엔빵)</Text>
                 <Text style={[styles.cardHint, { color: colors.textLight }]}>총액을 입력하면 참석자 수로 1/N 자동 청구</Text>
                 {sessions.map((s) => (
@@ -317,7 +317,7 @@ export function MoneyManager({ clubs, api }: { clubs: MoneyClub[]; api: MoneyApi
                       </Text>
                     </View>
                     <TextInput
-                      style={[styles.sessInput, { color: colors.text, borderColor: colors.border, backgroundColor: colors.background }]}
+                      style={[styles.sessInput, { color: colors.text, backgroundColor: colors.background }]}
                       value={costDraft[s.id] ?? ''}
                       onChangeText={(t) => setCostDraft((d) => ({ ...d, [s.id]: t }))}
                       onBlur={() => saveRental(s.id)}
@@ -346,7 +346,7 @@ export function MoneyManager({ clubs, api }: { clubs: MoneyClub[]; api: MoneyApi
             </Pressable>
 
             {/* 멤버별 */}
-            <View style={[styles.card, { backgroundColor: colors.surface }, shadows.sm]}>
+            <View style={[styles.card, { backgroundColor: colors.surface }, shadows.md]}>
               <Text style={[styles.cardTitle, { color: colors.text }]}>멤버별 청구</Text>
               {data.members.length === 0 ? (
                 <Text style={[styles.empty, { color: colors.textLight }]}>멤버가 없어요</Text>
@@ -394,7 +394,7 @@ export function MoneyManager({ clubs, api }: { clubs: MoneyClub[]; api: MoneyApi
               ))}
             </View>
             {/* 사전 신청 — 공개 링크로 들어온 신청서 */}
-            <View style={[styles.card, { backgroundColor: colors.surface }, shadows.sm]}>
+            <View style={[styles.card, { backgroundColor: colors.surface }, shadows.md]}>
               <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
                 <Text style={[styles.cardTitle, { color: colors.text }]}>사전 신청</Text>
                 <Pressable onPress={shareApplyLink} style={[styles.linkBtn, { backgroundColor: alpha(colors.primary, 0.1) }]}>
@@ -452,7 +452,7 @@ export function MoneyManager({ clubs, api }: { clubs: MoneyClub[]; api: MoneyApi
               )}
             </View>
 
-            <View style={[styles.card, { backgroundColor: colors.surface }, shadows.sm]}>
+            <View style={[styles.card, { backgroundColor: colors.surface }, shadows.md]}>
               <Text style={[styles.cardTitle, { color: colors.text }]}>게스트 목록</Text>
               {(guests ?? []).length === 0 ? (
                 <Text style={[styles.empty, { color: colors.textLight }]}>이 기간 게스트가 없어요</Text>
@@ -486,14 +486,14 @@ export function MoneyManager({ clubs, api }: { clubs: MoneyClub[]; api: MoneyApi
           </>
         ) : tab === 'config' ? (
           <>
-            <View style={[styles.card, { backgroundColor: colors.surface }, shadows.sm]}>
+            <View style={[styles.card, { backgroundColor: colors.surface }, shadows.md]}>
               <Text style={[styles.cardTitle, { color: colors.text }]}>정기 회비</Text>
               <Text style={[styles.fieldLabel, { color: colors.textSecondary }]}>주기</Text>
               <View style={styles.periodTypeRow}>
                 {PERIOD_TYPES.map((p) => {
                   const active = p.key === cfgPeriod;
                   return (
-                    <Pressable key={p.key} onPress={() => setCfgPeriod(p.key)} style={[styles.ptChip, active ? { backgroundColor: colors.primary } : { backgroundColor: colors.background, borderWidth: 1.5, borderColor: colors.border }]}>
+                    <Pressable key={p.key} onPress={() => setCfgPeriod(p.key)} style={[styles.ptChip, active ? { backgroundColor: colors.primary } : { backgroundColor: colors.background }]}>
                       <Text style={[styles.ptChipText, { color: active ? '#fff' : colors.textSecondary }]}>{p.label}</Text>
                     </Pressable>
                   );
@@ -502,13 +502,13 @@ export function MoneyManager({ clubs, api }: { clubs: MoneyClub[]; api: MoneyApi
               {cfgPeriod !== 'NONE' && inputField(`회비 금액 (${PERIOD_TYPES.find((p) => p.key === cfgPeriod)?.label}당, 원)`, dues, setDues, '예: 30000')}
             </View>
 
-            <View style={[styles.card, { backgroundColor: colors.surface }, shadows.sm]}>
+            <View style={[styles.card, { backgroundColor: colors.surface }, shadows.md]}>
               <Text style={[styles.cardTitle, { color: colors.text }]}>참가비·게스트비</Text>
               {inputField('정모별 참가비 (번개비, 원 · 선택)', perSession, setPerSession, '예: 5000')}
               {inputField('게스트비 기본 (원 · 선택)', guestFee, setGuestFee, '예: 7000')}
             </View>
 
-            <View style={[styles.card, { backgroundColor: colors.surface }, shadows.sm]}>
+            <View style={[styles.card, { backgroundColor: colors.surface }, shadows.md]}>
               <Text style={[styles.cardTitle, { color: colors.text }]}>입금 안내 계좌</Text>
               {inputField('청구 메시지에 자동 포함돼요', account, setAccount, '예: 카카오뱅크 3333-01-1234567 홍길동', false)}
             </View>
@@ -547,12 +547,12 @@ const styles = StyleSheet.create({
   statValue: { ...typography.subtitle1, fontWeight: '900' },
   statLabel: { ...typography.caption, marginTop: 3, fontWeight: '600' },
 
-  card: { borderRadius: radius.card, padding: spacing.lg, marginBottom: spacing.md },
+  card: { borderRadius: 20, padding: spacing.lg, marginBottom: spacing.md },
   cardTitle: { ...typography.subtitle1, marginBottom: 2 },
   cardHint: { ...typography.caption, marginBottom: spacing.sm },
 
   sessRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.md, paddingVertical: spacing.sm },
-  sessInput: { ...typography.body2, borderWidth: 1.5, borderRadius: radius.md, paddingHorizontal: spacing.md, paddingVertical: spacing.xs, width: 110, textAlign: 'right', fontWeight: '700' },
+  sessInput: { ...typography.body2, borderRadius: 12, paddingHorizontal: spacing.md, paddingVertical: spacing.sm, width: 110, textAlign: 'right', fontWeight: '700' },
 
   mRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.md, paddingVertical: spacing.smd },
   avatar: { width: 38, height: 38, borderRadius: 19, alignItems: 'center', justifyContent: 'center' },
@@ -575,7 +575,7 @@ const styles = StyleSheet.create({
 
   field: { marginTop: spacing.sm },
   fieldLabel: { ...typography.caption, fontWeight: '700', marginBottom: spacing.xs },
-  fieldInput: { ...typography.body1, borderWidth: 1.5, borderRadius: radius.md, paddingHorizontal: spacing.md, paddingVertical: spacing.sm, fontWeight: '700' },
+  fieldInput: { ...typography.body1, borderRadius: 14, paddingHorizontal: spacing.lg, paddingVertical: 13, fontWeight: '700' },
 
   empty: { ...typography.body2, paddingVertical: spacing.lg, textAlign: 'center' },
   note: { ...typography.caption, lineHeight: 17, marginBottom: spacing.md },
