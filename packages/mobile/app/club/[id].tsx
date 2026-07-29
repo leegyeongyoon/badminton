@@ -492,13 +492,13 @@ export default function ClubDetailScreen() {
             </View>
           )}
 
-          {/* ═══ 섹션 탭 — 홈 / 레슨 / 출석왕 / 멤버 ═══ */}
+          {/* ═══ 섹션 탭 — 언더라인형 (홈 / 레슨 / 출석왕 / 멤버) ═══ */}
           <View style={styles.sectionTabs}>
             {([
-              { key: 'home', label: '홈' },
-              { key: 'lesson', label: lessons.length > 0 ? `레슨 ${lessons.length}` : '레슨' },
-              { key: 'rank', label: '출석왕' },
-              { key: 'member', label: `멤버 ${currentMembers.length}` },
+              { key: 'home', label: '홈', count: 0 },
+              { key: 'lesson', label: '레슨', count: lessons.length },
+              { key: 'rank', label: '출석왕', count: 0 },
+              { key: 'member', label: '멤버', count: currentMembers.length },
             ] as const).map((t) => {
               const active = sectionTab === t.key;
               return (
@@ -506,10 +506,17 @@ export default function ClubDetailScreen() {
                   key={t.key}
                   style={[styles.sectionTabBtn, active && styles.sectionTabBtnActive]}
                   onPress={() => setSectionTab(t.key)}
-                  activeOpacity={0.8}
+                  activeOpacity={0.7}
                   accessibilityLabel={`${t.label} 탭`}
                 >
-                  <Text style={[styles.sectionTabText, active && styles.sectionTabTextActive]}>{t.label}</Text>
+                  <View style={styles.sectionTabInner}>
+                    <Text style={[styles.sectionTabText, active && styles.sectionTabTextActive]} numberOfLines={1}>{t.label}</Text>
+                    {t.count > 0 && (
+                      <View style={[styles.sectionTabCount, active && styles.sectionTabCountActive]}>
+                        <Text style={[styles.sectionTabCountText, active && styles.sectionTabCountTextActive]}>{t.count}</Text>
+                      </View>
+                    )}
+                  </View>
                 </TouchableOpacity>
               );
             })}
@@ -1084,21 +1091,34 @@ const styles = StyleSheet.create({
   guestApplyShareBigSub: { fontSize: 11, fontWeight: '600', color: Colors.textSecondary, marginTop: 1 },
   sectionTabs: {
     flexDirection: 'row',
-    backgroundColor: Colors.surface,
-    borderRadius: 14,
-    padding: 4,
-    marginBottom: 14,
-    gap: 4,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: Colors.border,
+    marginBottom: 16,
   },
   sectionTabBtn: {
     flex: 1,
-    paddingVertical: 9,
-    borderRadius: 10,
     alignItems: 'center',
+    paddingVertical: 12,
+    borderBottomWidth: 2.5,
+    borderBottomColor: 'transparent',
+    marginBottom: -StyleSheet.hairlineWidth,
   },
-  sectionTabBtnActive: { backgroundColor: Colors.primary },
-  sectionTabText: { fontSize: 13, fontWeight: '800', color: Colors.textSecondary },
-  sectionTabTextActive: { color: '#fff' },
+  sectionTabBtnActive: { borderBottomColor: Colors.primary },
+  sectionTabInner: { flexDirection: 'row', alignItems: 'center', gap: 5 },
+  sectionTabText: { fontSize: 14, fontWeight: '700', color: Colors.textLight },
+  sectionTabTextActive: { color: Colors.primary, fontWeight: '900' },
+  sectionTabCount: {
+    minWidth: 18,
+    height: 18,
+    borderRadius: 9,
+    backgroundColor: Colors.surface,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 5,
+  },
+  sectionTabCountActive: { backgroundColor: Colors.primary + '18' },
+  sectionTabCountText: { fontSize: 10, fontWeight: '800', color: Colors.textLight },
+  sectionTabCountTextActive: { color: Colors.primary },
   lessonManageLink: { alignSelf: 'flex-end', paddingVertical: 4, marginBottom: 6 },
   lessonManageLinkText: { fontSize: 12, fontWeight: '800', color: Colors.primary },
   lessonEmpty: {

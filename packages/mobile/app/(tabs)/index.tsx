@@ -274,6 +274,32 @@ export default function HomeScreen() {
             모임마다 카드 하나. 각 카드가 그 모임의 "지금" 진행 상황(진행 중 정모 +
             내 상태)과 맥락에 맞는 단 하나의 primary 액션을 보여준다.
             운영판은 그 모임의 LEADER/STAFF에게만 노출(staffClubIds 게이트). */}
+        {/* ─── 퀵액션 — 만들기/참여/찾기를 상단에 (맨 아래 파묻히지 않게) ─── */}
+        {clubs.length > 0 && (
+          <View style={styles.quickRow}>
+            {canCreateClub && (
+              <Pressable onPress={() => setShowCreate(true)} style={({ pressed }) => [styles.quickBtn, { backgroundColor: colors.surface }, pressed && { opacity: 0.85 }]}>
+                <View style={[styles.quickIcon, { backgroundColor: colors.primaryLight }]}>
+                  <Icon name="add" size={18} color={colors.primary} />
+                </View>
+                <Text style={[styles.quickLabel, { color: colors.text }]}>모임 만들기</Text>
+              </Pressable>
+            )}
+            <Pressable onPress={() => setShowJoin(true)} style={({ pressed }) => [styles.quickBtn, { backgroundColor: colors.surface }, pressed && { opacity: 0.85 }]}>
+              <View style={[styles.quickIcon, { backgroundColor: colors.primaryLight }]}>
+                <Icon name="link" size={18} color={colors.primary} />
+              </View>
+              <Text style={[styles.quickLabel, { color: colors.text }]}>초대코드 참여</Text>
+            </Pressable>
+            <Pressable onPress={() => router.push('/discover')} style={({ pressed }) => [styles.quickBtn, { backgroundColor: colors.surface }, pressed && { opacity: 0.85 }]}>
+              <View style={[styles.quickIcon, { backgroundColor: colors.primaryLight }]}>
+                <Icon name="search" size={18} color={colors.primary} />
+              </View>
+              <Text style={[styles.quickLabel, { color: colors.text }]}>모임 찾기</Text>
+            </Pressable>
+          </View>
+        )}
+
         {clubs.length > 0 && (
           <View style={styles.section}>
             {/* Section header: 내 모임 + count badge + quiet subtitle */}
@@ -349,7 +375,10 @@ export default function HomeScreen() {
                         <Text style={[styles.rolePillText, { color: colors.warning }]}>운영진</Text>
                       </View>
                     )}
-                    <Icon name="chevronRight" size={18} color={colors.textLight} />
+                    <Pressable onPress={goClub} hitSlop={6} style={({ pressed }) => [styles.clubHomePill, { backgroundColor: colors.primaryLight }, pressed && { opacity: 0.8 }]}>
+                      <Text style={[styles.clubHomePillText, { color: colors.primary }]}>모임 홈</Text>
+                      <Icon name="chevronRight" size={13} color={colors.primary} />
+                    </Pressable>
                   </View>
 
                   {/* Status row: full-width 정모(일자) · 진행 중 · 내 상태  /  진행 중인 정모 없음 */}
@@ -449,58 +478,10 @@ export default function HomeScreen() {
                       />
                     )
                   )}
-                  {/* 상세 진입 안내 — 카드 어디를 눌러도 모임 홈이지만, 명시적으로도 보여준다 */}
-                  <View style={[styles.clubHomeLinkRow, { borderTopColor: colors.divider }]}>
-                    <Text style={[styles.clubHomeLinkText, { color: colors.textSecondary }]}>
-                      모임 홈 — 레슨 · 출석왕 · 멤버
-                    </Text>
-                    <Icon name="chevronRight" size={14} color={colors.textLight} />
-                  </View>
                 </Pressable>
               );
             })}
 
-            {/* Footer actions — anchored as a tidy section, not floating buttons. */}
-            <View style={[styles.footerCard, { backgroundColor: colors.surface, borderColor: colors.border }]}>
-              <Text style={[styles.footerLabel, { color: colors.textSecondary }]}>
-                다른 모임도 함께 운영해보세요
-              </Text>
-              <View style={styles.footerActions}>
-                {canCreateClub && (
-                  <Button
-                    title="모임 만들기"
-                    icon="add"
-                    variant="outline"
-                    size="md"
-                    onPress={() => setShowCreate(true)}
-                    style={{ flex: 1 }}
-                  />
-                )}
-                <Button
-                  title="모임 참여"
-                  icon="link"
-                  variant="ghost"
-                  size="md"
-                  onPress={() => setShowJoin(true)}
-                  style={{ flex: 1 }}
-                />
-                <Button
-                  title="모임 찾기"
-                  icon="search"
-                  variant="ghost"
-                  size="md"
-                  onPress={() => router.push('/discover')}
-                  style={{ flex: 1 }}
-                />
-              </View>
-              {!canCreateClub && (
-                <Pressable onPress={() => router.push('/(tabs)/more')} hitSlop={6}>
-                  <Text style={[styles.operatorHint, { color: colors.textLight }]}>
-                    모임을 만들려면 <Text style={{ color: colors.primary, fontWeight: '700' }}>운영자 신청</Text>이 필요해요
-                  </Text>
-                </Pressable>
-              )}
-            </View>
           </View>
         )}
 
@@ -746,6 +727,26 @@ const styles = StyleSheet.create({
   },
 
   // ─── 내 모임 — 통합 카드 (모임 + 그 모임의 현재 진행 상황) ───
+  clubHomePill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 2,
+    paddingLeft: 10,
+    paddingRight: 6,
+    paddingVertical: 5,
+    borderRadius: 999,
+  },
+  clubHomePillText: { fontSize: 12, fontWeight: '800' },
+  quickRow: { flexDirection: 'row', gap: 10, marginBottom: 18 },
+  quickBtn: {
+    flex: 1,
+    alignItems: 'center',
+    gap: 6,
+    paddingVertical: 12,
+    borderRadius: 16,
+  },
+  quickIcon: { width: 38, height: 38, borderRadius: 19, alignItems: 'center', justifyContent: 'center' },
+  quickLabel: { fontSize: 12, fontWeight: '800' },
   clubHomeLinkRow: {
     flexDirection: 'row',
     alignItems: 'center',
