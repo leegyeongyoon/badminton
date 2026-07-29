@@ -93,7 +93,9 @@ export default function ClubDetailScreen() {
   // 지난 정모 더보기: 처음엔 ~10개만, 누르면 전체.
   const [showAllPast, setShowAllPast] = useState(false);
   // 멤버 목록 섹션 접이식 — 평소 닫힘.
-  const [showMembers, setShowMembers] = useState(false);
+  const [showMembers, setShowMembers] = useState(true);
+  // 클럽 홈 섹션 탭 — 한 스크롤 덩어리 대신 홈/레슨/출석왕/멤버로 분리(가독성).
+  const [sectionTab, setSectionTab] = useState<'home' | 'lesson' | 'rank' | 'member'>('home');
   const [lessons, setLessons] = useState<LessonOffer[]>([]);
   const [applyingLesson, setApplyingLesson] = useState<string | null>(null);
   const [guestUnread, setGuestUnread] = useState(0);
@@ -467,23 +469,53 @@ export default function ClubDetailScreen() {
               <View style={styles.inviteRow}>
                 <Text style={styles.inviteLabel}>초대코드</Text>
                 <Text style={styles.inviteCode}>{club.inviteCode}</Text>
-                {/* 운영진: 게스트 사전 신청 공개 링크 공유 (비회원이 로그인 없이 신청) */}
-                {isLeaderOrStaff && (
-                  <TouchableOpacity
-                    style={styles.guestApplyShareBtn}
-                    onPress={() => {
-                      const url = `https://badmintoncourt.store/guest-apply?code=${club.inviteCode}`;
-                      Share.share({ message: `[${club.name}] 게스트 신청은 여기서 해주세요 🙌\n${url}` }).catch(() => {});
-                    }}
-                    accessibilityLabel="게스트 신청 링크 공유"
-                  >
-                    <Text style={styles.guestApplyShareText}>게스트 신청 링크</Text>
-                  </TouchableOpacity>
-                )}
               </View>
+              {/* 운영진: 게스트 사전 신청 공개 링크 공유 — 눈에 띄는 풀폭 버튼 */}
+              {isLeaderOrStaff && (
+                <TouchableOpacity
+                  style={styles.guestApplyShareBig}
+                  onPress={() => {
+                    const url = `https://badmintoncourt.store/guest-apply?code=${club.inviteCode}`;
+                    Share.share({ message: `[${club.name}] 게스트 신청은 여기서 해주세요 🙌\n${url}` }).catch(() => {});
+                  }}
+                  activeOpacity={0.85}
+                  accessibilityLabel="게스트 신청 링크 공유"
+                >
+                  <Icon name="share" size={16} color={Colors.primary} />
+                  <View style={{ flex: 1, minWidth: 0 }}>
+                    <Text style={styles.guestApplyShareBigTitle}>게스트 신청 링크 공유</Text>
+                    <Text style={styles.guestApplyShareBigSub}>비회원도 링크로 바로 신청할 수 있어요</Text>
+                  </View>
+                  <Icon name="chevronRight" size={16} color={Colors.primary} />
+                </TouchableOpacity>
+              )}
             </View>
           )}
 
+          {/* ═══ 섹션 탭 — 홈 / 레슨 / 출석왕 / 멤버 ═══ */}
+          <View style={styles.sectionTabs}>
+            {([
+              { key: 'home', label: '홈' },
+              { key: 'lesson', label: lessons.length > 0 ? `레슨 ${lessons.length}` : '레슨' },
+              { key: 'rank', label: '출석왕' },
+              { key: 'member', label: `멤버 ${currentMembers.length}` },
+            ] as const).map((t) => {
+              const active = sectionTab === t.key;
+              return (
+                <TouchableOpacity
+                  key={t.key}
+                  style={[styles.sectionTabBtn, active && styles.sectionTabBtnActive]}
+                  onPress={() => setSectionTab(t.key)}
+                  activeOpacity={0.8}
+                  accessibilityLabel={`${t.label} 탭`}
+                >
+                  <Text style={[styles.sectionTabText, active && styles.sectionTabTextActive]}>{t.label}</Text>
+                </TouchableOpacity>
+              );
+            })}
+          </View>
+
+          {sectionTab === 'home' && (<>
           {/* ═══ 정모 HERO — 화면의 주인공 ═══
               진행 중이면 dated hero 카드 + ONE primary action
                 (운영진 → 운영판 들어가기 / 멤버 → 현황 보기).
@@ -665,11 +697,29 @@ export default function ClubDetailScreen() {
               </View>
             );
           })()}
+          </>)}
 
-          {/* ─── 레슨 — 코치 프로필 카드. 활성 레슨이 있을 때만 ─── */}
-          {lessons.length > 0 && (
+          {/* ─── 레슨 탭 — 코치 프로필 카드 ─── */}
+          {sectionTab === 'lesson' && (
             <View style={styles.section}>
-              <Text style={styles.sectionTitle}>레슨</Text>
+              {isLeaderOrStaff && (
+                <TouchableOpacity
+                  style={styles.lessonManageLink}
+                  onPress={() => router.push(`/club/${clubId}/lessons`)}
+                  activeOpacity={0.8}
+                  accessibilityLabel="레슨 관리 열기"
+                >
+                  <Text style={styles.lessonManageLinkText}>레슨 개설·신청 관리 →</Text>
+                </TouchableOpacity>
+              )}
+              {lessons.length === 0 && (
+                <View style={styles.lessonEmpty}>
+                  <Text style={styles.lessonEmptyTitle}>아직 진행 중인 레슨이 없어요</Text>
+                  <Text style={styles.lessonEmptySub}>
+                    {isLeaderOrStaff ? '위의 레슨 관리에서 코치·요일·레슨비로 개설해 보세요' : '운영진이 레슨을 열면 여기서 바로 신청할 수 있어요'}
+                  </Text>
+                </View>
+              )}
               {lessons.map((o) => {
                 const full = o.capacity != null && o.applicants >= o.capacity;
                 const careerLines = (o.coachCareer ?? '').split('\n').map((l) => l.trim()).filter(Boolean);
@@ -737,11 +787,12 @@ export default function ClubDetailScreen() {
             </View>
           )}
 
-          {/* ═══ 출석왕 — TOP 3로 접고, 전체 보기로 펼침 (내 순위 pill은 항상) ═══ */}
-          {clubId && <AttendanceLeaderboard clubId={clubId} maxRows={3} />}
+          {/* ═══ 출석왕 탭 ═══ */}
+          {sectionTab === 'rank' && clubId && <AttendanceLeaderboard clubId={clubId} maxRows={20} />}
 
           {/* ═══ 멤버 — secondary. "멤버 N명" 접이식 섹션 뒤로. ═══
               열면 체크인됨/오프라인으로 그룹. 진행 중 정모면 운영진은 출석 토글 가능. */}
+          {sectionTab === 'member' && (
           <View style={styles.membersSection}>
             <TouchableOpacity
               style={styles.membersHeader}
@@ -778,6 +829,7 @@ export default function ClubDetailScreen() {
               </View>
             )}
           </View>
+          )}
         </ScrollView>
         </ScreenContainer>
 
@@ -1018,6 +1070,46 @@ const styles = StyleSheet.create({
     paddingVertical: 4,
     borderRadius: 999,
   },
+  guestApplyShareBig: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    backgroundColor: Colors.primary + '10',
+    borderRadius: 14,
+    paddingVertical: 12,
+    paddingHorizontal: 14,
+    marginTop: 10,
+  },
+  guestApplyShareBigTitle: { fontSize: 14, fontWeight: '900', color: Colors.primary },
+  guestApplyShareBigSub: { fontSize: 11, fontWeight: '600', color: Colors.textSecondary, marginTop: 1 },
+  sectionTabs: {
+    flexDirection: 'row',
+    backgroundColor: Colors.surface,
+    borderRadius: 14,
+    padding: 4,
+    marginBottom: 14,
+    gap: 4,
+  },
+  sectionTabBtn: {
+    flex: 1,
+    paddingVertical: 9,
+    borderRadius: 10,
+    alignItems: 'center',
+  },
+  sectionTabBtnActive: { backgroundColor: Colors.primary },
+  sectionTabText: { fontSize: 13, fontWeight: '800', color: Colors.textSecondary },
+  sectionTabTextActive: { color: '#fff' },
+  lessonManageLink: { alignSelf: 'flex-end', paddingVertical: 4, marginBottom: 6 },
+  lessonManageLinkText: { fontSize: 12, fontWeight: '800', color: Colors.primary },
+  lessonEmpty: {
+    backgroundColor: Colors.surface,
+    borderRadius: 16,
+    padding: 24,
+    alignItems: 'center',
+    gap: 4,
+  },
+  lessonEmptyTitle: { fontSize: 14, fontWeight: '800', color: Colors.text },
+  lessonEmptySub: { fontSize: 12, color: Colors.textLight, textAlign: 'center', lineHeight: 17 },
   guestApplyShareText: { fontSize: 11, fontWeight: '800', color: Colors.primary },
   inviteCode: {
     fontSize: 14,

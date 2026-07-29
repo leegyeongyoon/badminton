@@ -349,7 +349,7 @@ export default function HomeScreen() {
                         <Text style={[styles.rolePillText, { color: colors.warning }]}>운영진</Text>
                       </View>
                     )}
-                    {!session && !isStaff && <Icon name="chevronRight" size={18} color={colors.textLight} />}
+                    <Icon name="chevronRight" size={18} color={colors.textLight} />
                   </View>
 
                   {/* Status row: full-width 정모(일자) · 진행 중 · 내 상태  /  진행 중인 정모 없음 */}
@@ -449,6 +449,13 @@ export default function HomeScreen() {
                       />
                     )
                   )}
+                  {/* 상세 진입 안내 — 카드 어디를 눌러도 모임 홈이지만, 명시적으로도 보여준다 */}
+                  <View style={[styles.clubHomeLinkRow, { borderTopColor: colors.divider }]}>
+                    <Text style={[styles.clubHomeLinkText, { color: colors.textSecondary }]}>
+                      모임 홈 — 레슨 · 출석왕 · 멤버
+                    </Text>
+                    <Icon name="chevronRight" size={14} color={colors.textLight} />
+                  </View>
                 </Pressable>
               );
             })}
@@ -739,6 +746,16 @@ const styles = StyleSheet.create({
   },
 
   // ─── 내 모임 — 통합 카드 (모임 + 그 모임의 현재 진행 상황) ───
+  clubHomeLinkRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 4,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    marginTop: 12,
+    paddingTop: 10,
+  },
+  clubHomeLinkText: { fontSize: 12, fontWeight: '700' },
   clubCard: {
     padding: spacing.lg,
     borderRadius: radius.card,
