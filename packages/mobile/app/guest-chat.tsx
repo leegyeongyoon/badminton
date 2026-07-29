@@ -18,7 +18,7 @@ import { getItem, setItem } from '../services/storage';
 const threadKey = (clubKey: string) => `guestthread_${clubKey}`;
 
 export default function GuestChat() {
-  const { code, clubId, name } = useLocalSearchParams<{ code?: string; clubId?: string; name?: string }>();
+  const { code, clubId, name, threadId: threadIdParam } = useLocalSearchParams<{ code?: string; clubId?: string; name?: string; threadId?: string }>();
   const { colors } = useTheme();
   const insets = useSafeAreaInsets();
   const clubKey = String(clubId || code || '');
@@ -33,7 +33,8 @@ export default function GuestChat() {
     let alive = true;
     (async () => {
       try {
-        const saved = clubKey ? await getItem(threadKey(clubKey)) : null;
+        // 푸시 딥링크(?threadId=)가 최우선 — 저장 토큰/시작보다 먼저.
+        const saved = threadIdParam ? String(threadIdParam) : clubKey ? await getItem(threadKey(clubKey)) : null;
         let t: GuestChatThread;
         if (saved) {
           try {
@@ -43,6 +44,7 @@ export default function GuestChat() {
             t = await guestChatApi.start({ clubId, inviteCode: code, name: name ? String(name) : undefined });
           }
         } else {
+          if (!code && !clubId) throw new Error('no-entry');
           t = await guestChatApi.start({ clubId, inviteCode: code, name: name ? String(name) : undefined });
         }
         if (!alive) return;
@@ -56,7 +58,7 @@ export default function GuestChat() {
       }
     })();
     return () => { alive = false; };
-  }, [clubKey, code, clubId, name]);
+  }, [clubKey, code, clubId, name, threadIdParam]);
 
   // 폴링 — 열려있는 동안 5초마다 갱신(내가 보는 화면이라 안 읽음도 리셋됨).
   const refresh = useCallback(async () => {

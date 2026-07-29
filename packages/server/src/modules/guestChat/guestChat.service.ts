@@ -133,6 +133,7 @@ export async function guestSendMessage(threadId: string, text: string, name?: st
     await sendPushToUsers(staff.map((s) => s.userId), {
       title: `게스트 문의 · ${thread.club.name}`,
       body: `${authorName}: ${body.slice(0, 60)}`,
+      data: { type: 'guestChat', clubId: thread.clubId },
     });
   } catch {
     /* 알림 실패 무시 */
@@ -200,6 +201,7 @@ export async function staffSendMessage(clubId: string, threadId: string, staffUs
       await sendPushToUser(thread.guestUserId, {
         title: `${thread.club.name} 운영진 답장`,
         body: body.slice(0, 60),
+        data: { type: 'guestChatReply', threadId },
       });
     } catch {
       /* 알림 실패 무시 */

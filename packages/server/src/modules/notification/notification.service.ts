@@ -12,9 +12,10 @@ interface PushPayload {
 
 export async function sendPushToUser(userId: string, payload: PushPayload) {
   const user = await prisma.user.findUnique({ where: { id: userId } });
-  if (!user?.expoPushToken) return;
+  if (!user) return;
 
-  // Save notification record
+  // 인앱 알림함 기록은 푸시 토큰 유무와 무관하게 항상 남긴다 —
+  // 토큰이 없으면(웹·권한 거부) 푸시만 생략되고, 알림 화면에서는 보인다.
   await prisma.notification.create({
     data: {
       userId,
@@ -23,6 +24,8 @@ export async function sendPushToUser(userId: string, payload: PushPayload) {
       data: payload.data || {},
     },
   });
+
+  if (!user.expoPushToken) return;
 
   if (!Expo.isExpoPushToken(user.expoPushToken)) {
     logger.warn(`Invalid push token for user ${userId}`);

@@ -29,6 +29,7 @@ import { Icon } from '../../components/ui/Icon';
 import { ScreenContainer } from '../../components/ui/ScreenContainer';
 import { AddFacilityModal } from '../../components/AddFacilityModal';
 import { memberLessonApi, type LessonOffer } from '../../services/lab';
+import { staffGuestChatApi } from '../../services/guestChat';
 
 interface ClubMember {
   userId: string;
@@ -95,6 +96,7 @@ export default function ClubDetailScreen() {
   const [showMembers, setShowMembers] = useState(false);
   const [lessons, setLessons] = useState<LessonOffer[]>([]);
   const [applyingLesson, setApplyingLesson] = useState<string | null>(null);
+  const [guestUnread, setGuestUnread] = useState(0);
   const [showStartModal, setShowStartModal] = useState(false);
   const [showRoleModal, setShowRoleModal] = useState(false);
   const [selectedMember, setSelectedMember] = useState<ClubMember | null>(null);
@@ -116,6 +118,12 @@ export default function ClubDetailScreen() {
     if (!clubId) return;
     memberLessonApi.list(clubId).then(setLessons).catch(() => {});
   }, [clubId]);
+
+  // 운영진: 게스트 문의 미읽음 — 있으면 홈 상단에 배너로 보여준다.
+  useEffect(() => {
+    if (!clubId || !isLeaderOrStaff) return;
+    staffGuestChatApi.unreadCount(clubId).then(setGuestUnread).catch(() => {});
+  }, [clubId, isLeaderOrStaff]);
 
   const handleApplyLesson = (offer: LessonOffer) => {
     if (!clubId || applyingLesson) return;
@@ -589,6 +597,22 @@ export default function ClubDetailScreen() {
                 <Text style={styles.heroEmptySub}>정모가 시작되면 여기에서 바로 확인할 수 있어요</Text>
               </View>
             )
+          )}
+
+          {/* ─── 게스트 문의 미읽음 배너(운영진) ─── */}
+          {isLeaderOrStaff && guestUnread > 0 && (
+            <TouchableOpacity
+              style={styles.inquiryBanner}
+              onPress={() => router.push(`/club/${clubId}/guest-inbox`)}
+              activeOpacity={0.85}
+              accessibilityLabel="게스트 문의함 열기"
+            >
+              <View style={styles.inquiryBadge}>
+                <Text style={styles.inquiryBadgeText}>{guestUnread}</Text>
+              </View>
+              <Text style={styles.inquiryText}>답장을 기다리는 게스트 문의가 있어요</Text>
+              <Icon name="chevronRight" size={16} color={Colors.primary} />
+            </TouchableOpacity>
           )}
 
           {/* ─── 지난 정모 (정모 이력) ───
@@ -1560,4 +1584,25 @@ const styles = StyleSheet.create({
   lessonAppliedText: { fontSize: 13, fontWeight: '800', color: Colors.primary },
   lessonConfirmedBadge: { backgroundColor: '#16a34a18' },
   lessonConfirmedText: { color: '#16a34a' },
+  inquiryBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    backgroundColor: Colors.primary + '12',
+    borderRadius: 12,
+    paddingVertical: 10,
+    paddingHorizontal: 14,
+    marginBottom: 12,
+  },
+  inquiryBadge: {
+    backgroundColor: Colors.danger,
+    minWidth: 20,
+    height: 20,
+    borderRadius: 10,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 5,
+  },
+  inquiryBadgeText: { color: '#fff', fontSize: 11, fontWeight: '900' },
+  inquiryText: { flex: 1, fontSize: 13, fontWeight: '800', color: Colors.primary },
 });

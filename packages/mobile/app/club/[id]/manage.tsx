@@ -34,6 +34,7 @@ import { typography, spacing, radius } from '../../../constants/theme';
 import { GENDER_META, type Gender } from '../../../constants/gender';
 import { GenderMarker } from '../../../components/ui/GenderMarker';
 import { ScreenContainer } from '../../../components/ui/ScreenContainer';
+import { staffGuestChatApi } from '../../../services/guestChat';
 import { useResponsiveLayout } from '../../../hooks/useResponsiveLayout';
 
 // 역할/급수 라벨 + 선택지 (멤버·운영진 섹션 전용).
@@ -61,6 +62,13 @@ interface Facility {
 export default function ClubManageScreen() {
   const router = useRouter();
   const { id: clubId } = useLocalSearchParams<{ id: string }>();
+
+  // 게스트 문의 미읽음(뱃지) — 화면 진입 시 1회 조회.
+  const [guestUnread, setGuestUnread] = useState(0);
+  useEffect(() => {
+    if (!clubId) return;
+    staffGuestChatApi.unreadCount(String(clubId)).then(setGuestUnread).catch(() => {});
+  }, [clubId]);
   const { colors, shadows } = useTheme();
   const { clubs, fetchClubs, deleteClub } = useClubStore();
   const myUserId = useAuthStore((s) => s.user?.id);
@@ -912,6 +920,11 @@ export default function ClubManageScreen() {
           <View style={styles.cardHeader}>
             <Icon name="chat" size={18} color={colors.primary} />
             <Text style={[styles.cardTitle, { color: colors.text }]}>게스트 문의</Text>
+            {guestUnread > 0 && (
+              <View style={{ backgroundColor: colors.danger, minWidth: 20, height: 20, borderRadius: 10, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 5, marginLeft: 6 }}>
+                <Text style={{ color: '#fff', fontSize: 11, fontWeight: '900' }}>{guestUnread}</Text>
+              </View>
+            )}
             <View style={{ flex: 1 }} />
             <Icon name="chevronRight" size={18} color={colors.textLight} />
           </View>

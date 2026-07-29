@@ -65,9 +65,18 @@ export function useNotifications() {
     });
 
     const responseSub = Notifications.addNotificationResponseReceivedListener((response) => {
-      const data = response.notification.request.content.data;
+      const data = response.notification.request.content.data as
+        | { type?: string; clubId?: string; threadId?: string }
+        | undefined;
       if (isTurnStart(data)) {
         router.push('/(tabs)/my-status');
+        return;
+      }
+      // 게스트 문의: 운영진은 문의함으로, 게스트(앱 회원)는 대화로 바로 이동.
+      if (data?.type === 'guestChat' && data.clubId) {
+        router.push(`/club/${data.clubId}/guest-inbox` as never);
+      } else if (data?.type === 'guestChatReply' && data.threadId) {
+        router.push(`/guest-chat?threadId=${data.threadId}` as never);
       }
     });
 
