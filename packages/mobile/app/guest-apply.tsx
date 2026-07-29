@@ -128,6 +128,12 @@ export default function GuestApply() {
     }
   };
 
+  const openInAppChat = () => {
+    const q = clubId ? `clubId=${encodeURIComponent(String(clubId))}` : `code=${encodeURIComponent(String(code))}`;
+    const nm = name.trim() ? `&name=${encodeURIComponent(name.trim())}` : '';
+    router.push(`/guest-chat?${q}${nm}` as any);
+  };
+
   const openStore = () => {
     if (Platform.OS === 'web' && typeof window !== 'undefined') {
       try { window.open(APP_STORE_URL, '_blank'); } catch { /* noop */ }
@@ -190,21 +196,17 @@ export default function GuestApply() {
           )}
           <Text style={[styles.desc, { color: colors.textSecondary }]}>입금이 확인되면 운영자가 확정 처리해 드려요.</Text>
 
-          {!!result.contactInfo && (
-            <Pressable
-              onPress={() => openContact(result.contactInfo)}
-              style={({ pressed }) => [styles.contactBtn, { borderColor: colors.border, backgroundColor: colors.background }, pressed && { opacity: 0.8 }]}
-            >
-              <Ionicons name="chatbubble-ellipses-outline" size={16} color={colors.primary} />
-              <View style={{ flex: 1, minWidth: 0 }}>
-                <Text style={[styles.contactBtnTitle, { color: colors.text }]}>운영진에게 문의하기</Text>
-                <Text style={[styles.contactBtnValue, { color: contactIsLink(result.contactInfo) ? colors.primary : colors.textSecondary }]} numberOfLines={1}>
-                  {result.contactInfo}
-                </Text>
-              </View>
-              {contactIsLink(result.contactInfo) && <Ionicons name="open-outline" size={15} color={colors.textLight} />}
-            </Pressable>
-          )}
+          <Pressable
+            onPress={openInAppChat}
+            style={({ pressed }) => [styles.contactBtn, { borderColor: colors.primary, backgroundColor: alpha(colors.primary, 0.06) }, pressed && { opacity: 0.8 }]}
+          >
+            <Ionicons name="chatbubble-ellipses-outline" size={18} color={colors.primary} />
+            <View style={{ flex: 1, minWidth: 0 }}>
+              <Text style={[styles.contactBtnTitle, { color: colors.text }]}>운영진에게 문의하기</Text>
+              <Text style={[styles.contactBtnValue, { color: colors.textSecondary }]}>확정·입금·주차 등 무엇이든 물어보세요</Text>
+            </View>
+            <Ionicons name="chevron-forward" size={16} color={colors.textLight} />
+          </Pressable>
 
           {isAuthenticated ? (
             <Pressable onPress={() => router.replace('/(tabs)')} style={({ pressed }) => [styles.storeBtn, { backgroundColor: colors.primary }, pressed && { opacity: 0.9 }]}>
@@ -407,19 +409,27 @@ export default function GuestApply() {
             </Text>
           </Pressable>
 
-          {!!club.contactInfo && (
+          {/* 인앱 문의 채팅 — 비회원도 로그인 없이 운영진과 대화 */}
+          <Pressable
+            onPress={openInAppChat}
+            style={({ pressed }) => [styles.contactBtn, { borderColor: colors.primary, backgroundColor: alpha(colors.primary, 0.06) }, pressed && { opacity: 0.8 }]}
+          >
+            <Ionicons name="chatbubble-ellipses-outline" size={18} color={colors.primary} />
+            <View style={{ flex: 1, minWidth: 0 }}>
+              <Text style={[styles.contactBtnTitle, { color: colors.text }]}>궁금한 게 있나요? 운영진에게 문의하기</Text>
+              <Text style={[styles.contactBtnValue, { color: colors.textSecondary }]}>앱 안에서 바로 대화해요 · 답장은 알림/이 페이지에서 확인</Text>
+            </View>
+            <Ionicons name="chevron-forward" size={16} color={colors.textLight} />
+          </Pressable>
+
+          {/* 운영자가 외부 채널(오픈채팅 등)을 등록했으면 함께 안내 */}
+          {!!club.contactInfo && contactIsLink(club.contactInfo) && (
             <Pressable
               onPress={() => openContact(club.contactInfo)}
-              style={({ pressed }) => [styles.contactBtn, { borderColor: colors.border, backgroundColor: colors.background }, pressed && { opacity: 0.8 }]}
+              style={({ pressed }) => [styles.contactAltBtn, pressed && { opacity: 0.7 }]}
             >
-              <Ionicons name="chatbubble-ellipses-outline" size={16} color={colors.primary} />
-              <View style={{ flex: 1, minWidth: 0 }}>
-                <Text style={[styles.contactBtnTitle, { color: colors.text }]}>궁금한 게 있나요? 운영진에게 문의하기</Text>
-                <Text style={[styles.contactBtnValue, { color: contactIsLink(club.contactInfo) ? colors.primary : colors.textSecondary }]} numberOfLines={1}>
-                  {club.contactInfo}
-                </Text>
-              </View>
-              {contactIsLink(club.contactInfo) && <Ionicons name="open-outline" size={15} color={colors.textLight} />}
+              <Ionicons name="open-outline" size={13} color={colors.textLight} />
+              <Text style={[styles.contactAltText, { color: colors.textSecondary }]}>외부 채널(오픈채팅 등)로 문의</Text>
             </Pressable>
           )}
         </View>
@@ -477,4 +487,6 @@ const styles = StyleSheet.create({
   contactBtn: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, borderWidth: 1.5, borderRadius: radius.md, paddingHorizontal: spacing.md, paddingVertical: spacing.smd, marginTop: spacing.md },
   contactBtnTitle: { ...typography.caption, fontWeight: '800' },
   contactBtnValue: { fontSize: 11, fontWeight: '700', marginTop: 1 },
+  contactAltBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 4, paddingVertical: spacing.sm, marginTop: spacing.xs },
+  contactAltText: { fontSize: 11, fontWeight: '700' },
 });

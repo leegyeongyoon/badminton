@@ -902,6 +902,24 @@ export default function ClubManageScreen() {
           </Text>
         </TouchableOpacity>
 
+        {/* ── 게스트 문의함 (게스트 ↔ 운영진 채팅) ── */}
+        <TouchableOpacity
+          style={[styles.card, { backgroundColor: colors.surface }, shadows.sm]}
+          onPress={() => router.push(`/club/${clubId}/guest-inbox`)}
+          activeOpacity={0.7}
+          accessibilityLabel="게스트 문의함 열기"
+        >
+          <View style={styles.cardHeader}>
+            <Icon name="chat" size={18} color={colors.primary} />
+            <Text style={[styles.cardTitle, { color: colors.text }]}>게스트 문의</Text>
+            <View style={{ flex: 1 }} />
+            <Icon name="chevronRight" size={18} color={colors.textLight} />
+          </View>
+          <Text style={[styles.fieldHint, { color: colors.textSecondary }]}>
+            게스트 신청 페이지에서 들어온 문의에 1:1로 답장해요 (비회원도 대화 가능)
+          </Text>
+        </TouchableOpacity>
+
         {/* ── 모임 삭제 (danger, 맨 아래) ───────────── */}
         <View style={[styles.card, { backgroundColor: colors.surface }, shadows.sm]}>
           <View style={styles.cardHeader}>

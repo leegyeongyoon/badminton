@@ -21,6 +21,7 @@ import clientErrorRouter from './modules/clientError/clientError.router';
 import adminRouter from './modules/admin/admin.router';
 import labRouter from './modules/lab/lab.router';
 import guestApplyRouter from './modules/guestApply/guestApply.router';
+import guestChatRouter from './modules/guestChat/guestChat.router';
 import clubMoneyRouter from './modules/club/clubMoney.router';
 import { noteRequest } from './modules/admin/metrics.service';
 
@@ -69,6 +70,7 @@ app.use('/api/v1/operator-requests', operatorRequestRouter);
 app.use('/api/v1/admin', adminRouter);                 // /admin/metrics (슈퍼관리자)
 app.use('/api/v1/lab', labRouter);                     // /lab/* (실험실 — 최고관리자 전용 상용 프로토타입)
 app.use('/api/v1/guest-apply', guestApplyRouter);      // 게스트 사전 신청(공개, rate-limit)
+app.use('/api/v1/guest-chat', guestChatRouter);        // 게스트 문의 채팅(공개, rate-limit)
 // Client crash/error sink. Use a tight body limit so a runtime error report
 // (message + stack) can't carry an oversized payload. Mounted before the
 // errorHandler. The global express.json() above already parsed the body; the

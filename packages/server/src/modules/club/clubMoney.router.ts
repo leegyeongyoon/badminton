@@ -24,6 +24,7 @@ import {
   applyLesson,
   updateLessonApplication,
 } from '../lab/lab.service';
+import * as guestChat from '../guestChat/guestChat.service';
 
 // ─────────────────────────────────────────────────────────────
 // 모임 회비 관리(정식) — 실험실에서 검증된 로직(lab.service)을 모임 운영진
@@ -242,6 +243,40 @@ router.post('/:clubId/lessons/:offerId/apply', authenticate, memberGuard, async 
       note: note ?? null,
     });
     res.status(201).json(result);
+  } catch (err) { next(err); }
+});
+
+// ─── 게스트 문의함(운영진) ─────────────────────────────────────
+// GET /clubs/:clubId/guest-threads — 문의 스레드 목록(미읽음 포함)
+router.get('/:clubId/money/guest-threads', authenticate, staffGuard, async (req: Request, res: Response, next: NextFunction) => {
+  try { res.json(await guestChat.listStaffThreads(String(req.params.clubId))); } catch (err) { next(err); }
+});
+
+// GET /clubs/:clubId/guest-threads/unread-count — 뱃지용 미읽음 스레드 수
+router.get('/:clubId/money/guest-threads/unread-count', authenticate, staffGuard, async (req: Request, res: Response, next: NextFunction) => {
+  try { res.json({ count: await guestChat.countStaffUnreadThreads(String(req.params.clubId)) }); } catch (err) { next(err); }
+});
+
+// GET /clubs/:clubId/guest-threads/:threadId — 스레드 대화(소유권 확인)
+router.get('/:clubId/money/guest-threads/:threadId', authenticate, staffGuard, async (req: Request, res: Response, next: NextFunction) => {
+  try { res.json(await guestChat.loadThreadForStaff(String(req.params.clubId), String(req.params.threadId))); } catch (err) { next(err); }
+});
+
+// POST /clubs/:clubId/guest-threads/:threadId/messages — 운영진 답장
+router.post('/:clubId/money/guest-threads/:threadId/messages', authenticate, staffGuard, async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { text } = req.body as { text?: string };
+    const msg = await guestChat.staffSendMessage(String(req.params.clubId), String(req.params.threadId), req.user!.userId, String(text ?? ''));
+    res.status(201).json(msg);
+  } catch (err) { next(err); }
+});
+
+// PUT /clubs/:clubId/guest-threads/:threadId/closed — 종료/재개
+router.put('/:clubId/money/guest-threads/:threadId/closed', authenticate, staffGuard, async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { closed } = req.body as { closed?: boolean };
+    await guestChat.setThreadClosed(String(req.params.clubId), String(req.params.threadId), !!closed);
+    res.json({ ok: true });
   } catch (err) { next(err); }
 });
 

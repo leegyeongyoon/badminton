@@ -91,3 +91,40 @@ ALTER TABLE "LessonOffer" ADD COLUMN IF NOT EXISTS "days" JSONB;
 
 -- 운영진 문의 채널(게스트 신청 페이지 노출)
 ALTER TABLE "Club" ADD COLUMN IF NOT EXISTS "contactInfo" TEXT;
+
+-- 게스트 문의 채팅
+CREATE TABLE IF NOT EXISTS "GuestThread" (
+  "id" TEXT NOT NULL,
+  "clubId" TEXT NOT NULL,
+  "guestUserId" TEXT,
+  "guestName" TEXT,
+  "lastMessageAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  "lastText" VARCHAR(200),
+  "guestUnread" INTEGER NOT NULL DEFAULT 0,
+  "staffUnread" INTEGER NOT NULL DEFAULT 0,
+  "closed" BOOLEAN NOT NULL DEFAULT false,
+  "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  CONSTRAINT "GuestThread_pkey" PRIMARY KEY ("id")
+);
+CREATE INDEX IF NOT EXISTS "GuestThread_clubId_lastMessageAt_idx" ON "GuestThread"("clubId", "lastMessageAt");
+CREATE INDEX IF NOT EXISTS "GuestThread_guestUserId_idx" ON "GuestThread"("guestUserId");
+DO $$ BEGIN
+  ALTER TABLE "GuestThread" ADD CONSTRAINT "GuestThread_clubId_fkey"
+    FOREIGN KEY ("clubId") REFERENCES "Club"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+
+CREATE TABLE IF NOT EXISTS "GuestMessage" (
+  "id" TEXT NOT NULL,
+  "threadId" TEXT NOT NULL,
+  "fromStaff" BOOLEAN NOT NULL,
+  "userId" TEXT,
+  "authorName" TEXT NOT NULL,
+  "text" VARCHAR(1000) NOT NULL,
+  "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  CONSTRAINT "GuestMessage_pkey" PRIMARY KEY ("id")
+);
+CREATE INDEX IF NOT EXISTS "GuestMessage_threadId_createdAt_idx" ON "GuestMessage"("threadId", "createdAt");
+DO $$ BEGIN
+  ALTER TABLE "GuestMessage" ADD CONSTRAINT "GuestMessage_threadId_fkey"
+    FOREIGN KEY ("threadId") REFERENCES "GuestThread"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;

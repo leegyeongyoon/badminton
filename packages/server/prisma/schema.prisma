@@ -301,6 +301,7 @@ model Club {
   duesPayments DuesPayment[]
   guestApplications GuestApplication[]
   lessonOffers LessonOffer[]
+  guestThreads GuestThread[]
 }
 
 // 월 회비 납부 기록. (clubId, userId, period) 당 한 행 — 행이 있으면 그 달에
@@ -630,4 +631,40 @@ model LessonApplication {
   offer LessonOffer @relation(fields: [offerId], references: [id], onDelete: Cascade)
 
   @@index([offerId, createdAt])
+}
+
+// 게스트 문의 채팅 — 비회원(익명)/앱 회원 게스트와 운영진 간 1:1 스레드.
+// thread.id 자체가 익명 게스트의 접근 토큰(UUID, 추측 불가) 역할을 한다.
+// 앱 회원 게스트는 guestUserId로 묶여 기기가 바뀌어도 이어진다.
+model GuestThread {
+  id            String   @id @default(uuid())
+  clubId        String
+  guestUserId   String? // 앱 회원 게스트면 그 userId(기기 무관 지속)
+  guestName     String? // 표시용 이름
+  lastMessageAt DateTime @default(now())
+  lastText      String?  @db.VarChar(200) // 목록 미리보기용
+  guestUnread   Int      @default(0) // 게스트가 안 읽은 수
+  staffUnread   Int      @default(0) // 운영진이 안 읽은 수
+  closed        Boolean  @default(false)
+  createdAt     DateTime @default(now())
+
+  club     Club           @relation(fields: [clubId], references: [id], onDelete: Cascade)
+  messages GuestMessage[]
+
+  @@index([clubId, lastMessageAt])
+  @@index([guestUserId])
+}
+
+model GuestMessage {
+  id         String   @id @default(uuid())
+  threadId   String
+  fromStaff  Boolean // true=운영진, false=게스트
+  userId     String? // 작성자 userId(운영진, 또는 앱 회원 게스트)
+  authorName String
+  text       String   @db.VarChar(1000)
+  createdAt  DateTime @default(now())
+
+  thread GuestThread @relation(fields: [threadId], references: [id], onDelete: Cascade)
+
+  @@index([threadId, createdAt])
 }
