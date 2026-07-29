@@ -361,43 +361,42 @@ export default function HomeScreen() {
                     pressed && { opacity: 0.96 },
                   ]}
                 >
-                  {/* Header row: avatar + 모임 이름 + (운영진) 배지 */}
+                  {/* Header: 아바타 | (이름·운영진 / 상태칩) | 모임 홈 — 흩어지지 않게 한 덩어리로 */}
                   <View style={styles.clubTitleRow}>
                     <View style={[styles.clubIconWrap, { backgroundColor: session ? colors.secondaryLight : colors.primaryLight }]}>
                       <Text style={[styles.clubAvatarLetter, { color: session ? colors.secondary : colors.primary }]}>{c.name[0]}</Text>
                     </View>
-                    <Text style={[styles.clubName, { color: colors.text, flex: 1 }]} numberOfLines={1}>
-                      {c.name}
-                    </Text>
-                    {isStaff && (
-                      <View style={[styles.rolePill, { backgroundColor: colors.warningLight }]}>
-                        <Icon name="leader" size={11} color={colors.warning} />
-                        <Text style={[styles.rolePillText, { color: colors.warning }]}>운영진</Text>
+                    <View style={{ flex: 1, minWidth: 0, gap: 6 }}>
+                      <View style={styles.clubNameRow}>
+                        <Text style={[styles.clubName, { color: colors.text }]} numberOfLines={1}>
+                          {c.name}
+                        </Text>
+                        {isStaff && (
+                          <View style={[styles.rolePill, { backgroundColor: colors.warningLight }]}>
+                            <Icon name="leader" size={11} color={colors.warning} />
+                            <Text style={[styles.rolePillText, { color: colors.warning }]}>운영진</Text>
+                          </View>
+                        )}
                       </View>
-                    )}
+                      <View style={[styles.statusChip, { backgroundColor: stateStrong ? stateTint + '14' : colors.background }]}>
+                        <View style={[styles.statusDot, { backgroundColor: stateStrong ? stateTint : colors.textLight }]} />
+                        <Text
+                          style={[styles.clubStatusText, { color: stateStrong ? stateTint : colors.textLight }, stateStrong && { fontWeight: '800' }]}
+                          numberOfLines={1}
+                        >
+                          {stateText}
+                        </Text>
+                      </View>
+                    </View>
                     <Pressable onPress={goClub} hitSlop={6} style={({ pressed }) => [styles.clubHomePill, { backgroundColor: colors.primaryLight }, pressed && { opacity: 0.8 }]}>
                       <Text style={[styles.clubHomePillText, { color: colors.primary }]}>모임 홈</Text>
                       <Icon name="chevronRight" size={13} color={colors.primary} />
                     </Pressable>
                   </View>
 
-                  {/* Status: 틴트 칩 — 진행 중이면 색, 아니면 조용한 회색 */}
-                  <View style={styles.clubStatusRow}>
-                    <View style={[styles.statusChip, { backgroundColor: stateStrong ? stateTint + '14' : colors.background }]}>
-                      <View style={[styles.statusDot, { backgroundColor: stateStrong ? stateTint : colors.textLight }]} />
-                      <Text
-                        style={[styles.clubStatusText, { color: stateStrong ? stateTint : colors.textLight }, stateStrong && { fontWeight: '800' }]}
-                        numberOfLines={1}
-                      >
-                        {stateText}
-                      </Text>
-                    </View>
-                  </View>
-
-                  {/* hairline divider — gives the action row structure without a shadow */}
-                  {(session || isStaff) && <View style={[styles.clubDivider, { backgroundColor: colors.divider }]} />}
-
                   {/* ONE primary action by context (운영판 = 운영진만). */}
+                  {(session || isStaff) && (
+                  <View style={{ marginTop: spacing.lg }}>
                   {session ? (
                     isStaff ? (
                       <View style={{ gap: spacing.sm + 2 }}>
@@ -476,6 +475,8 @@ export default function HomeScreen() {
                         style={styles.clubPrimaryBtn}
                       />
                     )
+                  )}
+                  </View>
                   )}
                 </Pressable>
               );
@@ -780,12 +781,7 @@ const styles = StyleSheet.create({
     letterSpacing: -0.2,
     fontFamily: typography.subtitle1.fontFamily,
   },
-  clubStatusRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing.xs + 2,
-    marginTop: spacing.md,
-  },
+  clubNameRow: { flexDirection: 'row', alignItems: 'center', gap: 6 },
   statusDot: {
     width: 7,
     height: 7,
