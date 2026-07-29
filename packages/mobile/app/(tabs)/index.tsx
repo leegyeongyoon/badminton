@@ -356,15 +356,15 @@ export default function HomeScreen() {
                   onPress={goClub}
                   style={({ pressed }) => [
                     styles.clubCard,
-                    { backgroundColor: colors.surface, borderColor: colors.border },
-                    session && { borderColor: colors.secondaryLight, backgroundColor: colors.surface },
+                    { backgroundColor: colors.surface },
+                    shadows.md,
                     pressed && { opacity: 0.96 },
                   ]}
                 >
                   {/* Header row: avatar + 모임 이름 + (운영진) 배지 */}
                   <View style={styles.clubTitleRow}>
                     <View style={[styles.clubIconWrap, { backgroundColor: session ? colors.secondaryLight : colors.primaryLight }]}>
-                      <Icon name="club" size={20} color={session ? colors.secondary : colors.primary} />
+                      <Text style={[styles.clubAvatarLetter, { color: session ? colors.secondary : colors.primary }]}>{c.name[0]}</Text>
                     </View>
                     <Text style={[styles.clubName, { color: colors.text, flex: 1 }]} numberOfLines={1}>
                       {c.name}
@@ -381,19 +381,17 @@ export default function HomeScreen() {
                     </Pressable>
                   </View>
 
-                  {/* Status row: full-width 정모(일자) · 진행 중 · 내 상태  /  진행 중인 정모 없음 */}
+                  {/* Status: 틴트 칩 — 진행 중이면 색, 아니면 조용한 회색 */}
                   <View style={styles.clubStatusRow}>
-                    {stateStrong && <View style={[styles.statusDot, { backgroundColor: stateTint }]} />}
-                    <Text
-                      style={[
-                        styles.clubStatusText,
-                        { color: stateStrong ? stateTint : colors.textLight },
-                        stateStrong && { fontWeight: '600' },
-                      ]}
-                      numberOfLines={1}
-                    >
-                      {stateText}
-                    </Text>
+                    <View style={[styles.statusChip, { backgroundColor: stateStrong ? stateTint + '14' : colors.background }]}>
+                      <View style={[styles.statusDot, { backgroundColor: stateStrong ? stateTint : colors.textLight }]} />
+                      <Text
+                        style={[styles.clubStatusText, { color: stateStrong ? stateTint : colors.textLight }, stateStrong && { fontWeight: '800' }]}
+                        numberOfLines={1}
+                      >
+                        {stateText}
+                      </Text>
+                    </View>
                   </View>
 
                   {/* hairline divider — gives the action row structure without a shadow */}
@@ -415,10 +413,10 @@ export default function HomeScreen() {
                           <Button
                             title="현황 보기"
                             icon="tv"
-                            variant="outline"
+                            variant="ghost"
                             size="md"
                             onPress={() => router.push(`/session/${session.id}/board`)}
-                            style={{ flex: 1 }}
+                            style={{ flex: 1, backgroundColor: colors.background }}
                           />
                         </View>
                         {!checkedIn && (
@@ -426,10 +424,11 @@ export default function HomeScreen() {
                           <Button
                             title="QR 체크인"
                             icon="checkin"
-                            variant="outline"
+                            variant="ghost"
                             size="md"
                             fullWidth
                             onPress={() => router.push('/checkin-modal')}
+                            style={{ backgroundColor: colors.background }}
                           />
                         )}
                       </View>
@@ -447,10 +446,10 @@ export default function HomeScreen() {
                         <Button
                           title="현황 보기"
                           icon="tv"
-                          variant="outline"
+                          variant="ghost"
                           size="md"
                           onPress={() => router.push(`/session/${session.id}/board`)}
-                          style={{ flex: 1 }}
+                          style={{ flex: 1, backgroundColor: colors.background }}
                         />
                       </View>
                     ) : (
@@ -470,7 +469,7 @@ export default function HomeScreen() {
                       <Button
                         title="정모 시작"
                         icon="play"
-                        variant="outline"
+                        variant="primary"
                         size="md"
                         fullWidth
                         onPress={goClub}
@@ -759,8 +758,7 @@ const styles = StyleSheet.create({
   clubHomeLinkText: { fontSize: 12, fontWeight: '700' },
   clubCard: {
     padding: spacing.lg,
-    borderRadius: radius.card,
-    borderWidth: 1,
+    borderRadius: 20,
     marginBottom: spacing.md,
   },
   clubTitleRow: {
@@ -794,12 +792,21 @@ const styles = StyleSheet.create({
     borderRadius: 4,
   },
   clubStatusText: {
-    fontSize: 13,
-    fontWeight: '500',
-    lineHeight: 18,
-    flex: 1,
+    fontSize: 12.5,
+    fontWeight: '600',
+    lineHeight: 17,
     fontFamily: typography.body2.fontFamily,
   },
+  statusChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    borderRadius: 999,
+    paddingHorizontal: 11,
+    paddingVertical: 5,
+    alignSelf: 'flex-start',
+  },
+  clubAvatarLetter: { fontSize: 18, fontWeight: '900' },
   clubDivider: {
     height: 1,
     marginTop: spacing.lg,
