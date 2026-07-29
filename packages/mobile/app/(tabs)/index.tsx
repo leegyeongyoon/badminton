@@ -477,6 +477,14 @@ export default function HomeScreen() {
                   onPress={() => setShowJoin(true)}
                   style={{ flex: 1 }}
                 />
+                <Button
+                  title="모임 찾기"
+                  icon="search"
+                  variant="ghost"
+                  size="md"
+                  onPress={() => router.push('/discover')}
+                  style={{ flex: 1 }}
+                />
               </View>
               {!canCreateClub && (
                 <Pressable onPress={() => router.push('/(tabs)/more')} hitSlop={6}>
@@ -497,9 +505,11 @@ export default function HomeScreen() {
               title="아직 참여한 모임이 없어요"
               description="모임에 참여하면 정모 일정과 체크인, 게임 배정을 한눈에 볼 수 있어요."
               action={{ label: '모임 참여하기', onPress: () => setShowJoin(true), icon: 'link' }}
-              {...(canCreateClub
-                ? { secondaryAction: { label: '새 모임 만들기', onPress: () => setShowCreate(true) } }
-                : {})}
+              secondaryAction={
+                canCreateClub
+                  ? { label: '새 모임 만들기', onPress: () => setShowCreate(true) }
+                  : { label: '모임 찾기', onPress: () => router.push('/discover') }
+              }
             />
             {!canCreateClub && (
               <Pressable onPress={() => router.push('/(tabs)/more')} hitSlop={6}>

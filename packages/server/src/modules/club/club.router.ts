@@ -54,6 +54,15 @@ router.post('/', authenticate, roleGuard('SUPER_ADMIN', 'CLUB_LEADER'), validate
   } catch (err) { next(err); }
 });
 
+// GET /api/v1/clubs/discover?query= — PUBLIC 모임 탐색(앱 로그인 유저).
+// '/:id' 계열 라우트보다 먼저 선언해 'discover'가 id로 매칭되지 않게 한다.
+router.get('/discover', authenticate, async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const query = req.query.query ? String(req.query.query) : undefined;
+    res.json(await clubService.discoverClubs(query));
+  } catch (err) { next(err); }
+});
+
 router.get('/', authenticate, async (req: Request, res: Response, next: NextFunction) => {
   try {
     const clubs = await clubService.listMyClubs(req.user!.userId, req.user!.role);

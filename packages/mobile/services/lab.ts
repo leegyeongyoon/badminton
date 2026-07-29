@@ -81,6 +81,7 @@ export interface LabGuestRow {
 export interface LabGuestApplicationRow {
   id: string;
   name: string;
+  isAppUser: boolean;
   skillLevel: string | null;
   gender: string | null;
   visitDate: string | null;

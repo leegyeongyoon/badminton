@@ -278,13 +278,16 @@ export const updateClubSchema = z
     homeFacilityId: z.string().uuid().nullable().optional(),
     description: z.string().max(500).nullable().optional(),
     monthlyDuesAmount: z.number().int().min(0).max(10000000).nullable().optional(),
+    // 모임 공개 여부 — PUBLIC이면 '모임 찾기'에 노출(게스트 신청 가능).
+    visibility: z.enum(['PUBLIC', 'PRIVATE']).optional(),
   })
   .refine(
     (v) =>
       v.name !== undefined ||
       v.homeFacilityId !== undefined ||
       v.description !== undefined ||
-      v.monthlyDuesAmount !== undefined,
+      v.monthlyDuesAmount !== undefined ||
+      v.visibility !== undefined,
     { message: '수정할 항목이 없습니다' },
   );
 

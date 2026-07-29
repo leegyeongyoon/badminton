@@ -368,6 +368,7 @@ export async function setGuestFeePaid(checkInId: string, paid: boolean): Promise
 export interface LabGuestApplicationRow {
   id: string;
   name: string;
+  isAppUser: boolean; // 앱 회원이 로그인 상태로 신청(userId 연결됨)
   skillLevel: string | null;
   gender: string | null;
   visitDate: string | null;
@@ -388,6 +389,7 @@ export async function getGuestApplications(clubId: string): Promise<LabGuestAppl
   return rows.map((r) => ({
     id: r.id,
     name: r.name,
+    isAppUser: !!r.userId,
     skillLevel: r.skillLevel,
     gender: r.gender,
     visitDate: r.visitDate,

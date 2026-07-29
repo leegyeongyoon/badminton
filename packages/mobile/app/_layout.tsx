@@ -287,6 +287,7 @@ function RootLayoutInner() {
           <Stack.Screen name="lab/profile" options={transitions.slideFromRight} />
           <Stack.Screen name="lab/money" options={transitions.slideFromRight} />
           <Stack.Screen name="guest-apply" options={transitions.fadeScale} />
+          <Stack.Screen name="discover" options={transitions.slideFromRight} />
           <Stack.Screen name="club/[id]" options={transitions.slideFromRight} />
           <Stack.Screen name="club/[id]/session" options={transitions.slideFromRight} />
           <Stack.Screen name="club/[id]/qr" options={transitions.slideFromRight} />

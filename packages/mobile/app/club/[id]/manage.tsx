@@ -78,6 +78,9 @@ export default function ClubManageScreen() {
   const [description, setDescription] = useState('');
   const [homeFacilityId, setHomeFacilityId] = useState<string | null>(null);
   const [inviteCode, setInviteCode] = useState('');
+  // 모임 공개 여부 — PUBLIC이면 '모임 찾기'에 노출(게스트 신청 가능). 토글 즉시 저장.
+  const [visibility, setVisibility] = useState<'PUBLIC' | 'PRIVATE'>('PRIVATE');
+  const [visibilitySaving, setVisibilitySaving] = useState(false);
   const [facilities, setFacilities] = useState<Facility[]>([]);
   const [showAddFacility, setShowAddFacility] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -144,6 +147,7 @@ export default function ClubManageScreen() {
     setDescription(club.description ?? '');
     setHomeFacilityId(club.homeFacilityId ?? null);
     setInviteCode(club.inviteCode ?? '');
+    setVisibility(((club as any).visibility === 'PUBLIC' ? 'PUBLIC' : 'PRIVATE'));
   }, [club?.id, club?.name, club?.description, club?.homeFacilityId, club?.inviteCode]);
 
   // 시설 목록 (홈 시설 선택용).
@@ -537,6 +541,48 @@ export default function ClubManageScreen() {
           <View style={styles.cardHeader}>
             <Icon name="club" size={18} color={colors.primary} />
             <Text style={[styles.cardTitle, { color: colors.text }]}>클럽 정보</Text>
+          </View>
+
+          {/* 모임 공개 여부 — PUBLIC이면 '모임 찾기'에 노출(게스트 신청 가능). 토글 즉시 저장. */}
+          <View style={styles.visibilityRow}>
+            <View style={{ flex: 1, minWidth: 0 }}>
+              <Text style={[styles.fieldLabel, { color: colors.textSecondary, marginTop: 0 }]}>모임 공개</Text>
+              <Text style={[styles.fieldHint, { color: colors.textLight }]}>
+                {visibility === 'PUBLIC'
+                  ? '모임 찾기에 노출돼요 — 누구나 게스트 신청 가능'
+                  : '숨김 상태 — 초대코드·공유 링크로만 접근돼요'}
+              </Text>
+            </View>
+            <TouchableOpacity
+              disabled={visibilitySaving}
+              onPress={async () => {
+                if (!clubId) return;
+                const next = visibility === 'PUBLIC' ? 'PRIVATE' : 'PUBLIC';
+                setVisibilitySaving(true);
+                try {
+                  await clubApi.updateClub(clubId, { visibility: next });
+                  setVisibility(next);
+                  await fetchClubs();
+                  showSuccess(next === 'PUBLIC' ? '모임을 공개했어요 — 모임 찾기에 노출돼요' : '모임을 비공개로 전환했어요');
+                } catch (err: any) {
+                  showAlert(Strings.common.error, err?.response?.data?.error || '변경에 실패했습니다');
+                } finally {
+                  setVisibilitySaving(false);
+                }
+              }}
+              style={[
+                styles.visibilityBtn,
+                visibility === 'PUBLIC'
+                  ? { backgroundColor: colors.primary }
+                  : { backgroundColor: colors.background, borderWidth: 1.5, borderColor: colors.border },
+                visibilitySaving && { opacity: 0.5 },
+              ]}
+              accessibilityLabel="모임 공개 전환"
+            >
+              <Text style={[styles.visibilityBtnText, { color: visibility === 'PUBLIC' ? '#fff' : colors.textSecondary }]}>
+                {visibility === 'PUBLIC' ? '공개 중' : '비공개'}
+              </Text>
+            </TouchableOpacity>
           </View>
 
           {/* 모임 이름 */}
@@ -1226,6 +1272,9 @@ const styles = StyleSheet.create({
   cardHeader: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, marginBottom: spacing.md },
   cardTitle: { ...typography.subtitle2 },
 
+  visibilityRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.md, marginBottom: spacing.lg },
+  visibilityBtn: { paddingHorizontal: spacing.lg, paddingVertical: spacing.sm, borderRadius: radius.pill },
+  visibilityBtnText: { ...typography.buttonSm, fontWeight: '800' },
   fieldLabel: { ...typography.caption, fontWeight: '600', marginBottom: spacing.xs },
   fieldHint: { ...typography.caption, marginBottom: spacing.sm },
   input: {

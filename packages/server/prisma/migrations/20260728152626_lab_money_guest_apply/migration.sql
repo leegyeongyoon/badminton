@@ -33,3 +33,7 @@ DO $$ BEGIN
   ALTER TABLE "GuestApplication" ADD CONSTRAINT "GuestApplication_clubId_fkey"
     FOREIGN KEY ("clubId") REFERENCES "Club"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+
+-- 모임 공개/비공개 + 앱 회원 신청 연결
+ALTER TABLE "Club" ADD COLUMN IF NOT EXISTS "visibility" TEXT NOT NULL DEFAULT 'PRIVATE';
+ALTER TABLE "GuestApplication" ADD COLUMN IF NOT EXISTS "userId" TEXT;

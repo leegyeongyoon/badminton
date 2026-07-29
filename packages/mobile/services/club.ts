@@ -64,6 +64,8 @@ export interface UpdateClubBody {
   description?: string | null;
   // 월 회비 표준 금액 (0~10,000,000). null 로 회비 기능 해제.
   monthlyDuesAmount?: number | null;
+  // 모임 공개 여부 — PUBLIC이면 '모임 찾기'에 노출(게스트 신청 가능).
+  visibility?: 'PUBLIC' | 'PRIVATE';
 }
 
 // ─── 멤버별 출석 이력 (GET /clubs/:id/members/:userId/attendance) ───────────

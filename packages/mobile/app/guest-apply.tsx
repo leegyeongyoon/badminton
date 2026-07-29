@@ -1,6 +1,8 @@
 import { useEffect, useState } from 'react';
 import { View, Text, StyleSheet, ScrollView, Pressable, TextInput, ActivityIndicator, Platform } from 'react-native';
-import { useLocalSearchParams } from 'expo-router';
+import { useLocalSearchParams, useRouter } from 'expo-router';
+import { useAuthStore } from '../store/authStore';
+import { profileApi } from '../services/profile';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTheme } from '../hooks/useTheme';
 import { typography, spacing, radius } from '../constants/theme';
@@ -13,7 +15,15 @@ import api from '../services/api';
 // 비회원이 로그인 없이: 모임 확인 → 이름·연락처 입력 → 신청 → 입금 안내 + 앱 설치.
 // ─────────────────────────────────────────────────────────────
 
-interface ClubInfo { clubId: string; clubName: string; guestFee: number | null; accountInfo: string | null }
+interface ClubInfo {
+  clubId: string;
+  clubName: string;
+  description?: string | null;
+  memberCount?: number;
+  region?: string | null;
+  guestFee: number | null;
+  accountInfo: string | null;
+}
 interface ApplyResult { id: string; clubName: string; feeAmount: number | null; accountInfo: string | null; message: string }
 
 const APP_STORE_URL = 'https://apps.apple.com/app/id6788656869';
@@ -32,9 +42,13 @@ function upcomingDates(): { value: string; label: string }[] {
 }
 
 export default function GuestApply() {
-  const { code } = useLocalSearchParams<{ code?: string }>();
+  const { code, clubId } = useLocalSearchParams<{ code?: string; clubId?: string }>();
+  const router = useRouter();
   const { colors, shadows } = useTheme();
   const insets = useSafeAreaInsets();
+  const { user, isAuthenticated } = useAuthStore();
+  // 진입 경로: 초대코드(공유 링크) 또는 clubId(모임 찾기 — PUBLIC 전용).
+  const basePath = clubId ? `/guest-apply/by-id/${encodeURIComponent(String(clubId))}` : code ? `/guest-apply/${encodeURIComponent(String(code))}` : null;
 
   const [club, setClub] = useState<ClubInfo | null>(null);
   const [loading, setLoading] = useState(true);
@@ -50,20 +64,32 @@ export default function GuestApply() {
   const dates = upcomingDates();
 
   useEffect(() => {
-    const c = typeof code === 'string' ? code.trim() : '';
-    if (!c) { setLoading(false); return; }
-    api.get(`/guest-apply/${encodeURIComponent(c)}`, { _silent: true } as any)
+    if (!basePath) { setLoading(false); return; }
+    api.get(basePath, { _silent: true } as any)
       .then(({ data }) => setClub(data))
       .catch(() => setClub(null))
       .finally(() => setLoading(false));
-  }, [code]);
+  }, [basePath]);
+
+  // 로그인 유저면 이름·급수·성별 자동 채움(수정 가능). 신청 요청엔 토큰이 자동
+  // 첨부돼 서버가 userId를 연결한다('앱 회원' 표시).
+  useEffect(() => {
+    if (!isAuthenticated) return;
+    if (user?.name) setName((prev) => prev || user.name);
+    profileApi.getProfile()
+      .then(({ data }) => {
+        if (data?.skillLevel) setSkill((prev) => prev ?? data.skillLevel);
+        if (data?.gender === 'M' || data?.gender === 'F') setGender((prev) => prev ?? data.gender);
+      })
+      .catch(() => {});
+  }, [isAuthenticated, user?.name]);
 
   const submit = async () => {
     if (!club || submitting) return;
     setError(null);
     setSubmitting(true);
     try {
-      const { data } = await api.post(`/guest-apply/${encodeURIComponent(String(code))}`, {
+      const { data } = await api.post(basePath!, {
         name: name.trim(),
         skillLevel: skill ?? undefined,
         gender: gender ?? undefined,
@@ -128,14 +154,29 @@ export default function GuestApply() {
           )}
           <Text style={[styles.desc, { color: colors.textSecondary }]}>입금이 확인되면 운영자가 확정 처리해 드려요.</Text>
 
-          <Pressable onPress={openStore} style={({ pressed }) => [styles.storeBtn, { backgroundColor: colors.primary }, pressed && { opacity: 0.9 }]}>
-            <Text style={styles.storeBtnText}>콕고 앱 설치하고 게임 현황 보기</Text>
-          </Pressable>
+          {isAuthenticated ? (
+            <Pressable onPress={() => router.replace('/(tabs)')} style={({ pressed }) => [styles.storeBtn, { backgroundColor: colors.primary }, pressed && { opacity: 0.9 }]}>
+              <Text style={styles.storeBtnText}>홈으로 돌아가기</Text>
+            </Pressable>
+          ) : (
+            <Pressable onPress={openStore} style={({ pressed }) => [styles.storeBtn, { backgroundColor: colors.primary }, pressed && { opacity: 0.9 }]}>
+              <Text style={styles.storeBtnText}>콕고 앱 설치하고 게임 현황 보기</Text>
+            </Pressable>
+          )}
         </View>
       ) : (
         // ── 신청 폼 ──
         <View style={[styles.card, { backgroundColor: colors.surface }, shadows.sm]}>
           <Text style={[styles.title, { color: colors.text }]}>{club.clubName}</Text>
+          {/* 모임 미리보기 — 지역·멤버수·소개 */}
+          {(club.region || club.memberCount != null) && (
+            <Text style={[styles.previewMeta, { color: colors.textSecondary }]}>
+              {[club.region, club.memberCount != null ? `멤버 ${club.memberCount}명` : null].filter(Boolean).join(' · ')}
+            </Text>
+          )}
+          {club.description && (
+            <Text style={[styles.previewDesc, { color: colors.textLight }]} numberOfLines={3}>{club.description}</Text>
+          )}
           <Text style={[styles.desc, { color: colors.textSecondary }]}>
             게스트 신청서를 작성해 주세요.{club.guestFee != null ? ` 게스트비는 ${club.guestFee.toLocaleString()}원이에요.` : ''}
           </Text>
@@ -247,6 +288,8 @@ const styles = StyleSheet.create({
   center: { paddingVertical: spacing.xxxl, alignItems: 'center' },
   card: { borderRadius: radius.card, padding: spacing.xl },
   title: { ...typography.h3, marginBottom: spacing.sm },
+  previewMeta: { ...typography.caption, fontWeight: '700', marginTop: -4, marginBottom: spacing.xs },
+  previewDesc: { ...typography.caption, lineHeight: 17, marginBottom: spacing.sm },
   desc: { ...typography.body2, lineHeight: 20, marginBottom: spacing.md },
   fieldLabel: { ...typography.caption, fontWeight: '700', marginBottom: spacing.xs, marginTop: spacing.sm },
   input: { ...typography.body1, borderWidth: 1.5, borderRadius: radius.md, paddingHorizontal: spacing.md, paddingVertical: spacing.smd },

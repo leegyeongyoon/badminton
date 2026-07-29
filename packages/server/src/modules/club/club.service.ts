@@ -106,7 +106,12 @@ export async function updateClub(
     homeFacilityId?: string | null;
     description?: string | null;
     monthlyDuesAmount?: number | null;
+    visibility?: string;
   } = {};
+  // 모임 공개/비공개 — PUBLIC이면 '모임 찾기'에 노출.
+  if ((input as { visibility?: string }).visibility !== undefined) {
+    data.visibility = (input as { visibility?: string }).visibility;
+  }
   if (input.name !== undefined) data.name = input.name;
   if (input.homeFacilityId !== undefined) data.homeFacilityId = input.homeFacilityId;
   if (input.description !== undefined) {
@@ -178,6 +183,7 @@ export async function listMyClubs(userId: string, role?: string) {
       inviteCode: club.inviteCode,
       homeFacilityId: club.homeFacilityId,
       monthlyDuesAmount: club.monthlyDuesAmount,
+      visibility: club.visibility,
       memberCount: club._count.members,
       role: 'LEADER' as ClubMemberRole,
       createdAt: club.createdAt.toISOString(),
@@ -198,6 +204,7 @@ export async function listMyClubs(userId: string, role?: string) {
     inviteCode: m.club.inviteCode,
     homeFacilityId: m.club.homeFacilityId,
     monthlyDuesAmount: m.club.monthlyDuesAmount,
+    visibility: m.club.visibility,
     memberCount: m.club._count.members,
     role: m.role,
     createdAt: m.club.createdAt.toISOString(),
@@ -1046,4 +1053,55 @@ export async function setDues(
   }
 
   return getDues(clubId, input.period, requesterId);
+}
+
+// ─── 모임 찾기(탐색) ───────────────────────────────────────────
+// PUBLIC 모임만 노출. inviteCode는 절대 포함하지 않는다(탐색 ≠ 가입 —
+// 가입은 여전히 초대코드, 탐색은 게스트 신청 진입용).
+export interface DiscoverClubRow {
+  clubId: string;
+  name: string;
+  description: string | null;
+  memberCount: number;
+  region: string | null; // 홈 시설 주소 앞부분
+  guestFee: number | null;
+  duesPeriodType: string;
+}
+
+export async function discoverClubs(query?: string): Promise<DiscoverClubRow[]> {
+  const q = (query ?? '').trim();
+  const clubs = await prisma.club.findMany({
+    where: {
+      visibility: 'PUBLIC',
+      ...(q
+        ? {
+            OR: [
+              { name: { contains: q, mode: 'insensitive' } },
+              { description: { contains: q, mode: 'insensitive' } },
+            ],
+          }
+        : {}),
+    },
+    select: {
+      id: true,
+      name: true,
+      description: true,
+      guestFee: true,
+      duesPeriodType: true,
+      homeFacility: { select: { address: true } },
+      _count: { select: { members: true } },
+    },
+    orderBy: { createdAt: 'desc' },
+    take: 50,
+  });
+  return clubs.map((c) => ({
+    clubId: c.id,
+    name: c.name,
+    description: c.description,
+    memberCount: c._count.members,
+    // 주소 앞 두 토큰(예: "서울 강남구")만 노출.
+    region: c.homeFacility?.address ? c.homeFacility.address.split(' ').slice(0, 2).join(' ') : null,
+    guestFee: c.guestFee,
+    duesPeriodType: c.duesPeriodType,
+  }));
 }

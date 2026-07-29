@@ -409,11 +409,18 @@ export function MoneyManager({ clubs, api }: { clubs: MoneyClub[]; api: MoneyApi
                   <View key={a.id} style={[styles.mRow, i > 0 && { borderTopColor: colors.divider, borderTopWidth: StyleSheet.hairlineWidth }]}>
                     <Avatar name={a.name} tint={a.status === 'CONFIRMED' ? colors.secondary : colors.info} />
                     <View style={{ flex: 1, minWidth: 0 }}>
-                      <Text style={[styles.rowName, { color: colors.text }]} numberOfLines={1}>
-                        {a.name}
-                        {a.skillLevel ? ` · ${a.skillLevel}조` : ''}
-                        {a.gender ? ` · ${a.gender === 'M' ? '남' : '여'}` : ''}
-                      </Text>
+                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: spacing.xs }}>
+                        <Text style={[styles.rowName, { color: colors.text }]} numberOfLines={1}>
+                          {a.name}
+                          {a.skillLevel ? ` · ${a.skillLevel}조` : ''}
+                          {a.gender ? ` · ${a.gender === 'M' ? '남' : '여'}` : ''}
+                        </Text>
+                        {a.isAppUser && (
+                          <View style={[styles.appUserTag, { backgroundColor: alpha(colors.info, 0.12) }]}>
+                            <Text style={[styles.appUserTagText, { color: colors.info }]}>앱 회원</Text>
+                          </View>
+                        )}
+                      </View>
                       <Text style={[styles.rowMeta, { color: colors.textLight }]} numberOfLines={1}>
                         {a.visitDate ? `${a.visitDate.slice(5).replace('-', '/')} 방문` : a.createdAt.slice(0, 10)}
                         {a.phone ? ` · ${a.phone}` : ''}
@@ -564,4 +571,6 @@ const styles = StyleSheet.create({
   note: { ...typography.caption, lineHeight: 17, marginBottom: spacing.md },
   linkBtn: { paddingHorizontal: spacing.md, paddingVertical: spacing.xs, borderRadius: radius.pill },
   linkBtnText: { fontSize: 12, fontWeight: '800' },
+  appUserTag: { paddingHorizontal: spacing.sm, paddingVertical: 1, borderRadius: radius.sm },
+  appUserTagText: { fontSize: 10, fontWeight: '800' },
 });
