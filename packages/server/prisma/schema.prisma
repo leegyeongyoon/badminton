@@ -283,6 +283,13 @@ model Club {
   duesAccountInfo String?
   // 모임 공개 여부: PUBLIC = '모임 찾기'에 노출(게스트 신청 가능), PRIVATE = 숨김(기본).
   visibility String @default("PRIVATE")
+  // 정기 운동 일정: [{day:0~6(일~토), start:"HH:mm", end:"HH:mm"}] — 안내 + 게스트
+  // 신청 가능일 계산의 기준. null = 미설정(신청은 아무 날짜나, 기존 호환).
+  weeklySchedule Json?
+  // 게스트 신청 정책: 받기 토글 / 운동 시작 N시간 전 마감(null=시작 전까지) / 1일 정원(null=무제한).
+  guestApplyEnabled Boolean @default(true)
+  guestApplyDeadlineHours Int?
+  maxGuestsPerDay Int?
   createdAt      DateTime @default(now())
   updatedAt      DateTime @updatedAt
 

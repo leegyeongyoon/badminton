@@ -111,6 +111,29 @@ export interface MoneyApi {
   unmarkPaid(clubId: string, userId: string, period: string): Promise<void>;
 }
 
+// ─── 운영 정보(운동 일정·게스트 신청 정책) ───
+export interface WeeklySlot { day: number; start: string; end: string }
+export interface OperationConfig {
+  clubId: string;
+  clubName: string;
+  weeklySchedule: WeeklySlot[];
+  guestApplyEnabled: boolean;
+  guestApplyDeadlineHours: number | null;
+  maxGuestsPerDay: number | null;
+}
+
+/** 운영진용 운영 정보 설정 — /clubs/:id/money/operation-config (staff 가드). */
+export const clubOperationApi = {
+  get: async (clubId: string): Promise<OperationConfig> =>
+    (await api.get(`/clubs/${clubId}/money/operation-config`)).data,
+  set: async (
+    clubId: string,
+    cfg: Partial<{ weeklySchedule: WeeklySlot[]; guestApplyEnabled: boolean; guestApplyDeadlineHours: number | null; maxGuestsPerDay: number | null }>,
+  ): Promise<void> => {
+    await api.put(`/clubs/${clubId}/money/operation-config`, cfg);
+  },
+};
+
 /** 운영진(LEADER/STAFF)용 — /clubs/:id/money/* (정식 경로). */
 export const clubMoneyApi: MoneyApi = {
   getSettlement: async (clubId, period) => (await api.get(`/clubs/${clubId}/money/settlement`, { params: { period } })).data,

@@ -37,3 +37,9 @@ EXCEPTION WHEN duplicate_object THEN NULL; END $$;
 -- 모임 공개/비공개 + 앱 회원 신청 연결
 ALTER TABLE "Club" ADD COLUMN IF NOT EXISTS "visibility" TEXT NOT NULL DEFAULT 'PRIVATE';
 ALTER TABLE "GuestApplication" ADD COLUMN IF NOT EXISTS "userId" TEXT;
+
+-- 운영 정보(운동 일정) + 게스트 신청 정책
+ALTER TABLE "Club" ADD COLUMN IF NOT EXISTS "weeklySchedule" JSONB;
+ALTER TABLE "Club" ADD COLUMN IF NOT EXISTS "guestApplyEnabled" BOOLEAN NOT NULL DEFAULT true;
+ALTER TABLE "Club" ADD COLUMN IF NOT EXISTS "guestApplyDeadlineHours" INTEGER;
+ALTER TABLE "Club" ADD COLUMN IF NOT EXISTS "maxGuestsPerDay" INTEGER;

@@ -15,6 +15,8 @@ import {
   unmarkDuesPaid,
   getGuestApplications,
   updateGuestApplication,
+  getOperationConfig,
+  setOperationConfig,
 } from '../lab/lab.service';
 
 // ─────────────────────────────────────────────────────────────
@@ -55,6 +57,17 @@ router.get('/:clubId/money/config', authenticate, staffGuard, async (req: Reques
 router.put('/:clubId/money/config', authenticate, staffGuard, async (req: Request, res: Response, next: NextFunction) => {
   try {
     await setDuesConfig(String(req.params.clubId), req.body || {});
+    res.json({ ok: true });
+  } catch (err) { next(err); }
+});
+
+// GET/PUT /clubs/:clubId/money/operation-config — 운영 정보(운동 일정·게스트 신청 정책)
+router.get('/:clubId/money/operation-config', authenticate, staffGuard, async (req: Request, res: Response, next: NextFunction) => {
+  try { res.json(await getOperationConfig(String(req.params.clubId))); } catch (err) { next(err); }
+});
+router.put('/:clubId/money/operation-config', authenticate, staffGuard, async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    await setOperationConfig(String(req.params.clubId), req.body || {});
     res.json({ ok: true });
   } catch (err) { next(err); }
 });

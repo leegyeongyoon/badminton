@@ -383,9 +383,11 @@ export interface LabGuestApplicationRow {
 export async function getGuestApplications(clubId: string): Promise<LabGuestApplicationRow[]> {
   const rows = await prisma.guestApplication.findMany({
     where: { clubId },
-    orderBy: { createdAt: 'desc' },
+    // 가까운 방문일 우선(없으면 뒤), 취소는 맨 뒤.
+    orderBy: [{ visitDate: 'asc' }, { createdAt: 'desc' }],
     take: 100,
   });
+  rows.sort((a, b) => Number(a.status === 'CANCELLED') - Number(b.status === 'CANCELLED'));
   return rows.map((r) => ({
     id: r.id,
     name: r.name,
@@ -414,6 +416,69 @@ export async function updateGuestApplication(
   }
   if (patch.status !== undefined) data.status = patch.status;
   await prisma.guestApplication.update({ where: { id }, data });
+}
+
+// ─── 운영 정보(운동 일정) + 게스트 신청 정책 ───────────────────
+export interface WeeklySlot { day: number; start: string; end: string } // day 0(일)~6(토)
+export interface LabOperationConfig {
+  clubId: string;
+  clubName: string;
+  weeklySchedule: WeeklySlot[];
+  guestApplyEnabled: boolean;
+  guestApplyDeadlineHours: number | null;
+  maxGuestsPerDay: number | null;
+}
+
+const HHMM = /^([01][0-9]|2[0-3]):[0-5][0-9]$/;
+
+/** weeklySchedule 입력 검증 — day 0~6, HH:mm, 최대 7슬롯. 잘못된 항목은 버린다. */
+export function sanitizeWeeklySchedule(input: unknown): WeeklySlot[] {
+  if (!Array.isArray(input)) return [];
+  const out: WeeklySlot[] = [];
+  for (const raw of input.slice(0, 7)) {
+    const day = Number((raw as { day?: unknown })?.day);
+    const start = String((raw as { start?: unknown })?.start ?? '');
+    const end = String((raw as { end?: unknown })?.end ?? '');
+    if (Number.isInteger(day) && day >= 0 && day <= 6 && HHMM.test(start) && HHMM.test(end)) {
+      out.push({ day, start, end });
+    }
+  }
+  out.sort((a, b) => a.day - b.day || a.start.localeCompare(b.start));
+  return out;
+}
+
+export async function getOperationConfig(clubId: string): Promise<LabOperationConfig> {
+  const c = await prisma.club.findUnique({
+    where: { id: clubId },
+    select: { id: true, name: true, weeklySchedule: true, guestApplyEnabled: true, guestApplyDeadlineHours: true, maxGuestsPerDay: true },
+  });
+  if (!c) throw new Error('Club not found');
+  return {
+    clubId: c.id,
+    clubName: c.name,
+    weeklySchedule: sanitizeWeeklySchedule(c.weeklySchedule),
+    guestApplyEnabled: c.guestApplyEnabled,
+    guestApplyDeadlineHours: c.guestApplyDeadlineHours,
+    maxGuestsPerDay: c.maxGuestsPerDay,
+  };
+}
+
+export async function setOperationConfig(
+  clubId: string,
+  cfg: Partial<{ weeklySchedule: unknown; guestApplyEnabled: boolean; guestApplyDeadlineHours: number | null; maxGuestsPerDay: number | null }>,
+): Promise<void> {
+  const data: Record<string, unknown> = {};
+  if (cfg.weeklySchedule !== undefined) data.weeklySchedule = sanitizeWeeklySchedule(cfg.weeklySchedule);
+  if (cfg.guestApplyEnabled !== undefined) data.guestApplyEnabled = !!cfg.guestApplyEnabled;
+  if (cfg.guestApplyDeadlineHours !== undefined) {
+    const n = Number(cfg.guestApplyDeadlineHours);
+    data.guestApplyDeadlineHours = Number.isInteger(n) && n >= 0 && n <= 168 ? n : null;
+  }
+  if (cfg.maxGuestsPerDay !== undefined) {
+    const n = Number(cfg.maxGuestsPerDay);
+    data.maxGuestsPerDay = Number.isInteger(n) && n > 0 && n <= 100 ? n : null;
+  }
+  await prisma.club.update({ where: { id: clubId }, data });
 }
 
 // ─── 회비·게스트비 설정 ────────────────────────────────────────

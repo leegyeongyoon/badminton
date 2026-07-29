@@ -30,6 +30,11 @@ export const profileApi = {
   // 크로스클럽 활동 요약(총게임·스트릭·파트너 랭킹·뱃지) — 내 정보 화면용.
   getMySummary: () =>
     api.get('/users/me/summary'),
+  // 내가 넣은 게스트 신청(다른 모임) 목록 / 대기 중 신청 취소.
+  getMyGuestApplications: () =>
+    api.get('/users/me/guest-applications'),
+  cancelGuestApplication: (id: string) =>
+    api.delete(`/users/me/guest-applications/${id}`),
   getHistory: (page = 1) =>
     api.get('/users/me/history', { params: { page } }),
   getPenalties: () =>

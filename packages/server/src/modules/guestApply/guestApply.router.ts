@@ -23,6 +23,10 @@ const CLUB_SELECT = {
   guestFee: true,
   duesAccountInfo: true,
   visibility: true,
+  weeklySchedule: true,
+  guestApplyEnabled: true,
+  guestApplyDeadlineHours: true,
+  maxGuestsPerDay: true,
   homeFacility: { select: { address: true } },
   _count: { select: { members: true } },
 } as const;
@@ -30,10 +34,94 @@ const CLUB_SELECT = {
 type ClubPreviewRow = {
   id: string; name: string; description: string | null; guestFee: number | null;
   duesAccountInfo: string | null; visibility: string;
+  weeklySchedule: unknown; guestApplyEnabled: boolean;
+  guestApplyDeadlineHours: number | null; maxGuestsPerDay: number | null;
   homeFacility: { address: string } | null; _count: { members: number };
 };
 
-function toPreview(club: ClubPreviewRow) {
+const DAY_KO = ['일', '월', '화', '수', '목', '금', '토'];
+
+interface WeeklySlot { day: number; start: string; end: string }
+function parseSchedule(input: unknown): WeeklySlot[] {
+  if (!Array.isArray(input)) return [];
+  return (input as WeeklySlot[]).filter(
+    (s) => Number.isInteger(s?.day) && s.day >= 0 && s.day <= 6 && /^\d{2}:\d{2}$/.test(String(s?.start)) && /^\d{2}:\d{2}$/.test(String(s?.end)),
+  );
+}
+
+/** "매주 화·목 20:00~22:00" 요약(슬롯 시간이 다양하면 요일만). */
+function scheduleSummary(slots: WeeklySlot[]): string | null {
+  if (slots.length === 0) return null;
+  const days = [...new Set(slots.map((s) => s.day))].sort().map((d) => DAY_KO[d]).join('·');
+  const times = [...new Set(slots.map((s) => `${s.start}~${s.end}`))];
+  return times.length === 1 ? `매주 ${days} ${times[0]}` : `매주 ${days}`;
+}
+
+export interface AvailableDate {
+  date: string; // YYYY-MM-DD
+  label: string; // "8/2 (토)"
+  status: 'OPEN' | 'FULL' | 'CLOSED';
+  remaining: number | null; // 정원 설정 시 남은 자리
+}
+
+/**
+ * 게스트 신청 가능 날짜 계산 — 정책의 단일 소스.
+ *  • 일정 설정 시: 다음 14일 중 운동 요일만. 미설정 시: 다음 7일 전부(호환).
+ *  • 마감: 그 날 운동 시작 N시간 전(guestApplyDeadlineHours). null이면 시작 시각까지.
+ *    (일정 미설정 모임은 그 날 00:00 기준 → 오늘은 항상 신청 가능으로 둔다.)
+ *  • 정원: maxGuestsPerDay — 유효 신청(취소 제외) 수가 도달하면 FULL.
+ */
+async function computeAvailableDates(club: ClubPreviewRow, now = new Date()): Promise<AvailableDate[]> {
+  if (!club.guestApplyEnabled) return [];
+  const slots = parseSchedule(club.weeklySchedule);
+  const horizon = slots.length > 0 ? 14 : 7;
+
+  // 날짜별 유효 신청 수(취소 제외).
+  const counts = new Map<string, number>();
+  if (club.maxGuestsPerDay != null) {
+    const grouped = await prisma.guestApplication.groupBy({
+      by: ['visitDate'],
+      where: { clubId: club.id, status: { not: 'CANCELLED' }, visitDate: { not: null } },
+      _count: { _all: true },
+    });
+    for (const g of grouped) if (g.visitDate) counts.set(g.visitDate, g._count._all);
+  }
+
+  const out: AvailableDate[] = [];
+  for (let i = 0; i < horizon; i++) {
+    const d = new Date(now);
+    d.setDate(d.getDate() + i);
+    const day = d.getDay();
+    const daySlots = slots.filter((s) => s.day === day);
+    if (slots.length > 0 && daySlots.length === 0) continue; // 운동 요일 아님
+
+    const date = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+    const label = `${d.getMonth() + 1}/${d.getDate()} (${DAY_KO[day]})`;
+
+    // 마감 계산: 그 날의 가장 이른 시작 시각 - N시간. 일정 미설정이면 마감 없음(그 날 내내).
+    let status: AvailableDate['status'] = 'OPEN';
+    if (daySlots.length > 0) {
+      const earliest = daySlots.map((s) => s.start).sort()[0];
+      const [hh, mm] = earliest.split(':').map(Number);
+      const startAt = new Date(d);
+      startAt.setHours(hh, mm, 0, 0);
+      const deadline = new Date(startAt.getTime() - (club.guestApplyDeadlineHours ?? 0) * 3600_000);
+      if (now >= deadline) status = 'CLOSED';
+    }
+
+    let remaining: number | null = null;
+    if (club.maxGuestsPerDay != null) {
+      remaining = Math.max(0, club.maxGuestsPerDay - (counts.get(date) ?? 0));
+      if (status === 'OPEN' && remaining <= 0) status = 'FULL';
+    }
+
+    out.push({ date, label, status, remaining });
+  }
+  return out;
+}
+
+async function toPreview(club: ClubPreviewRow) {
+  const slots = parseSchedule(club.weeklySchedule);
   return {
     clubId: club.id,
     clubName: club.name,
@@ -42,6 +130,9 @@ function toPreview(club: ClubPreviewRow) {
     region: club.homeFacility?.address ? club.homeFacility.address.split(' ').slice(0, 2).join(' ') : null,
     guestFee: club.guestFee,
     accountInfo: club.duesAccountInfo,
+    scheduleSummary: scheduleSummary(slots),
+    applyClosed: !club.guestApplyEnabled,
+    availableDates: await computeAvailableDates(club),
   };
 }
 
@@ -83,6 +174,15 @@ async function handleApply(club: ClubPreviewRow, req: Request, res: Response) {
   const validSkill = skillLevel && ['S', 'A', 'B', 'C', 'D', 'E', 'F'].includes(String(skillLevel)) ? String(skillLevel) : null;
   const validGender = gender === 'M' || gender === 'F' ? gender : null;
   const validVisit = visitDate && /^\d{4}-\d{2}-\d{2}$/.test(String(visitDate)) ? String(visitDate) : null;
+
+  // 신청 정책 검증 — 받기 여부·가능일(요일/마감/정원)을 서버가 최종 판정.
+  if (!club.guestApplyEnabled) throw new BadRequestError('지금은 게스트 신청을 받지 않아요');
+  if (!validVisit) throw new BadRequestError('참석 희망일을 선택해 주세요');
+  const available = await computeAvailableDates(club);
+  const slot = available.find((a) => a.date === validVisit);
+  if (!slot) throw new BadRequestError('신청할 수 없는 날짜예요 — 운동 요일을 확인해 주세요');
+  if (slot.status === 'FULL') throw new BadRequestError('그 날은 정원이 마감됐어요');
+  if (slot.status === 'CLOSED') throw new BadRequestError('그 날 신청은 마감됐어요');
 
   const app = await prisma.guestApplication.create({
     data: {
@@ -130,7 +230,7 @@ router.get('/by-id/:clubId', async (req: Request, res: Response, next: NextFunct
   try {
     const club = await findPublicById(String(req.params.clubId));
     if (!club) throw new NotFoundError('모임');
-    res.json(toPreview(club));
+    res.json(await toPreview(club));
   } catch (err) {
     next(err);
   }
@@ -151,7 +251,7 @@ router.get('/:inviteCode', async (req: Request, res: Response, next: NextFunctio
   try {
     const club = await findByInvite(String(req.params.inviteCode));
     if (!club) throw new NotFoundError('모임');
-    res.json(toPreview(club));
+    res.json(await toPreview(club));
   } catch (err) {
     next(err);
   }

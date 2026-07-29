@@ -6,6 +6,7 @@ import * as userService from './user.service';
 import * as turnService from '../turn/turn.service';
 import { getMyStatus } from '../clubSession/clubSession.service';
 import { getLabProfile } from '../lab/lab.service';
+import { prisma } from '../../utils/prisma';
 
 const router = Router();
 
@@ -14,6 +15,48 @@ const router = Router();
 router.get('/me/summary', authenticate, async (req: Request, res: Response, next: NextFunction) => {
   try {
     res.json(await getLabProfile(req.user!.userId));
+  } catch (err) {
+    next(err);
+  }
+});
+
+// GET /users/me/guest-applications - 내가 넣은 게스트 신청(다른 모임) 목록.
+router.get('/me/guest-applications', authenticate, async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const rows = await prisma.guestApplication.findMany({
+      where: { userId: req.user!.userId },
+      orderBy: { createdAt: 'desc' },
+      take: 30,
+      include: { club: { select: { name: true } } },
+    });
+    res.json(rows.map((r) => ({
+      id: r.id,
+      clubName: r.club.name,
+      visitDate: r.visitDate,
+      status: r.status,
+      feeAmount: r.feeAmount,
+      feePaid: r.feePaid,
+      createdAt: r.createdAt.toISOString(),
+    })));
+  } catch (err) {
+    next(err);
+  }
+});
+
+// DELETE /users/me/guest-applications/:id - 내 신청 취소(대기 중일 때만).
+router.delete('/me/guest-applications/:id', authenticate, async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const app = await prisma.guestApplication.findUnique({ where: { id: String(req.params.id) } });
+    if (!app || app.userId !== req.user!.userId) {
+      res.status(404).json({ error: '신청을 찾을 수 없습니다' });
+      return;
+    }
+    if (app.status !== 'PENDING') {
+      res.status(400).json({ error: '확정된 신청은 운영자에게 문의해 주세요' });
+      return;
+    }
+    await prisma.guestApplication.update({ where: { id: app.id }, data: { status: 'CANCELLED' } });
+    res.json({ ok: true });
   } catch (err) {
     next(err);
   }

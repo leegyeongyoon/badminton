@@ -847,6 +847,24 @@ export default function ClubManageScreen() {
           )}
         </View>
 
+        {/* ── 운영 정보 (운동 일정·게스트 신청 정책 — 전용 화면) ── */}
+        <TouchableOpacity
+          style={[styles.card, { backgroundColor: colors.surface }, shadows.sm]}
+          onPress={() => router.push(`/club/${clubId}/operation`)}
+          activeOpacity={0.7}
+          accessibilityLabel="운영 정보 열기"
+        >
+          <View style={styles.cardHeader}>
+            <Icon name="calendar" size={18} color={colors.primary} />
+            <Text style={[styles.cardTitle, { color: colors.text }]}>운영 정보</Text>
+            <View style={{ flex: 1 }} />
+            <Icon name="chevronRight" size={18} color={colors.textLight} />
+          </View>
+          <Text style={[styles.fieldHint, { color: colors.textSecondary }]}>
+            정기 운동 요일·시간을 정하고, 게스트 신청 가능 요일·마감·하루 정원을 관리해요
+          </Text>
+        </TouchableOpacity>
+
         {/* ── 회비 관리 (정산·게스트·설정 — 전용 화면) ── */}
         <TouchableOpacity
           style={[styles.card, { backgroundColor: colors.surface }, shadows.sm]}

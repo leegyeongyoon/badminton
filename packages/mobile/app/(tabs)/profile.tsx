@@ -49,17 +49,19 @@ export default function ProfileScreen() {
   const [stats, setStats] = useState<any>(null);
   const [penalties, setPenalties] = useState<any[]>([]);
   const [summary, setSummary] = useState<any>(null); // 크로스클럽 요약(뱃지·파트너)
+  const [myApplications, setMyApplications] = useState<any[]>([]); // 내 게스트 신청
   const [isLoading, setIsLoading] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
 
   const loadProfileData = async () => {
     setIsLoading(true);
     try {
-      const [profileRes, statsRes, penaltiesRes, summaryRes] = await Promise.all([
+      const [profileRes, statsRes, penaltiesRes, summaryRes, appsRes] = await Promise.all([
         profileApi.getProfile(),
         profileApi.getStats(),
         profileApi.getPenalties(),
         profileApi.getMySummary().catch(() => ({ data: null })),
+        profileApi.getMyGuestApplications().catch(() => ({ data: [] })),
       ]);
       setSkillLevel(profileRes.data.skillLevel || '');
       setGender(profileRes.data.gender || '');
@@ -67,6 +69,7 @@ export default function ProfileScreen() {
       setStats(statsRes.data);
       setPenalties(penaltiesRes.data || []);
       setSummary(summaryRes.data);
+      setMyApplications(Array.isArray(appsRes.data) ? appsRes.data : []);
     } catch {
       showAlert('오류', '프로필 정보를 불러오지 못했습니다');
     } finally {
@@ -294,6 +297,43 @@ export default function ProfileScreen() {
               <Text style={styles.badgeStreak}>🔥 연속 출석 {summary.streakDays}일</Text>
             )}
           </View>
+
+          {/* 내 게스트 신청 — 다른 모임에 넣은 신청 상태(대기/확정) + 대기 중 취소 */}
+          {myApplications.length > 0 && (
+            <View style={styles.section}>
+              <Text style={styles.sectionTitle}>내 게스트 신청</Text>
+              <View style={styles.partnerCard}>
+                {myApplications.slice(0, 5).map((a: any, i: number) => (
+                  <View key={a.id} style={[styles.partnerRow, i > 0 && styles.partnerRowBorder]}>
+                    <View style={{ flex: 1, minWidth: 0 }}>
+                      <Text style={styles.partnerName} numberOfLines={1}>{a.clubName}</Text>
+                      <Text style={styles.appMeta} numberOfLines={1}>
+                        {a.visitDate ? `${a.visitDate.slice(5).replace('-', '/')} 방문` : ''}
+                        {a.feeAmount != null ? ` · 게스트비 ${a.feeAmount.toLocaleString()}원` : ''}
+                      </Text>
+                    </View>
+                    {a.status === 'PENDING' ? (
+                      <TouchableOpacity
+                        style={styles.appCancelBtn}
+                        onPress={async () => {
+                          try {
+                            await profileApi.cancelGuestApplication(a.id);
+                            loadProfileData();
+                          } catch { /* noop */ }
+                        }}
+                      >
+                        <Text style={styles.appCancelText}>대기 중 · 취소</Text>
+                      </TouchableOpacity>
+                    ) : (
+                      <Text style={[styles.appStatus, a.status === 'CONFIRMED' ? styles.appStatusOk : styles.appStatusMuted]}>
+                        {a.status === 'CONFIRMED' ? '확정 ✓' : '취소됨'}
+                      </Text>
+                    )}
+                  </View>
+                ))}
+              </View>
+            </View>
+          )}
 
           {(summary.partners || []).length > 0 && (
             <View style={styles.section}>
@@ -914,4 +954,12 @@ const styles = StyleSheet.create({
   partnerRank: { width: 18, textAlign: 'center', fontWeight: '800', color: Colors.textLight },
   partnerName: { flex: 1, fontSize: 14, fontWeight: '600', color: Colors.text },
   partnerGames: { fontSize: 14, fontWeight: '800', color: Colors.primary },
+
+  // 내 게스트 신청
+  appMeta: { fontSize: 11, color: Colors.textLight, marginTop: 1 },
+  appCancelBtn: { backgroundColor: Colors.warningBg, paddingHorizontal: 10, paddingVertical: 5, borderRadius: 8 },
+  appCancelText: { fontSize: 11, fontWeight: '800', color: Colors.warning },
+  appStatus: { fontSize: 12, fontWeight: '800' },
+  appStatusOk: { color: Colors.secondary },
+  appStatusMuted: { color: Colors.textLight },
 });

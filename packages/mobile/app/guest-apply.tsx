@@ -15,6 +15,12 @@ import api from '../services/api';
 // 비회원이 로그인 없이: 모임 확인 → 이름·연락처 입력 → 신청 → 입금 안내 + 앱 설치.
 // ─────────────────────────────────────────────────────────────
 
+interface AvailableDate {
+  date: string;
+  label: string;
+  status: 'OPEN' | 'FULL' | 'CLOSED';
+  remaining: number | null;
+}
 interface ClubInfo {
   clubId: string;
   clubName: string;
@@ -23,6 +29,9 @@ interface ClubInfo {
   region?: string | null;
   guestFee: number | null;
   accountInfo: string | null;
+  scheduleSummary?: string | null;
+  applyClosed?: boolean;
+  availableDates?: AvailableDate[];
 }
 interface ApplyResult { id: string; clubName: string; feeAmount: number | null; accountInfo: string | null; message: string }
 
@@ -113,6 +122,11 @@ export default function GuestApply() {
 
   // 핵심 항목: 이름·급수·성별·희망일. 연락처는 선택(입력 시에만 형식 검사는 서버에서).
   const canSubmit = name.trim().length >= 1 && !!skill && !!gender && !!visitDate;
+  // 서버가 계산한 신청 가능 날짜(정책 반영). 없으면(구버전 응답) 기존 7일 폴백.
+  const availableDates: AvailableDate[] =
+    club?.availableDates && club.availableDates.length > 0
+      ? club.availableDates
+      : dates.map((d) => ({ date: d.value, label: d.label, status: 'OPEN' as const, remaining: null }));
 
   return (
     <ScrollView
@@ -164,14 +178,25 @@ export default function GuestApply() {
             </Pressable>
           )}
         </View>
+      ) : club.applyClosed ? (
+        // ── 신청 받지 않음 ──
+        <View style={[styles.card, { backgroundColor: colors.surface }, shadows.sm]}>
+          <Text style={[styles.title, { color: colors.text }]}>{club.clubName}</Text>
+          {club.scheduleSummary && (
+            <Text style={[styles.previewMeta, { color: colors.textSecondary }]}>{club.scheduleSummary}</Text>
+          )}
+          <Text style={[styles.desc, { color: colors.textSecondary }]}>
+            지금은 게스트 신청을 받지 않아요. 나중에 다시 확인해 주세요.
+          </Text>
+        </View>
       ) : (
         // ── 신청 폼 ──
         <View style={[styles.card, { backgroundColor: colors.surface }, shadows.sm]}>
           <Text style={[styles.title, { color: colors.text }]}>{club.clubName}</Text>
           {/* 모임 미리보기 — 지역·멤버수·소개 */}
-          {(club.region || club.memberCount != null) && (
+          {(club.region || club.memberCount != null || club.scheduleSummary) && (
             <Text style={[styles.previewMeta, { color: colors.textSecondary }]}>
-              {[club.region, club.memberCount != null ? `멤버 ${club.memberCount}명` : null].filter(Boolean).join(' · ')}
+              {[club.region, club.memberCount != null ? `멤버 ${club.memberCount}명` : null, club.scheduleSummary].filter(Boolean).join(' · ')}
             </Text>
           )}
           {club.description && (
@@ -225,20 +250,38 @@ export default function GuestApply() {
             })}
           </View>
 
-          <Text style={[styles.fieldLabel, { color: colors.textSecondary }]}>참석 희망일</Text>
+          <Text style={[styles.fieldLabel, { color: colors.textSecondary }]}>참석 희망일{club.scheduleSummary ? ' (운동 요일만)' : ''}</Text>
           <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.chipRow}>
-            {dates.map((d) => {
-              const active = visitDate === d.value;
+            {availableDates.map((d) => {
+              const active = visitDate === d.date;
+              const disabled = d.status !== 'OPEN';
               return (
                 <Pressable
-                  key={d.value}
-                  onPress={() => setVisitDate(d.value)}
-                  style={[styles.dateChip, active ? { backgroundColor: colors.primary } : { backgroundColor: colors.background, borderWidth: 1.5, borderColor: colors.border }]}
+                  key={d.date}
+                  disabled={disabled}
+                  onPress={() => setVisitDate(d.date)}
+                  style={[
+                    styles.dateChip,
+                    active
+                      ? { backgroundColor: colors.primary }
+                      : { backgroundColor: colors.background, borderWidth: 1.5, borderColor: colors.border },
+                    disabled && { opacity: 0.4 },
+                  ]}
                 >
                   <Text style={[styles.skillChipText, { color: active ? '#fff' : colors.textSecondary }]}>{d.label}</Text>
+                  {d.status === 'FULL' ? (
+                    <Text style={[styles.dateSub, { color: colors.danger }]}>정원 마감</Text>
+                  ) : d.status === 'CLOSED' ? (
+                    <Text style={[styles.dateSub, { color: colors.textLight }]}>마감</Text>
+                  ) : d.remaining != null ? (
+                    <Text style={[styles.dateSub, { color: active ? 'rgba(255,255,255,0.9)' : colors.secondary }]}>{d.remaining}자리</Text>
+                  ) : null}
                 </Pressable>
               );
             })}
+            {availableDates.length === 0 && (
+              <Text style={[styles.dateSub, { color: colors.textLight }]}>신청 가능한 날짜가 없어요</Text>
+            )}
           </ScrollView>
 
           <Text style={[styles.fieldLabel, { color: colors.textSecondary }]}>연락처 (선택)</Text>
@@ -309,6 +352,7 @@ const styles = StyleSheet.create({
   skillChip: { width: 44, height: 40, borderRadius: radius.md, alignItems: 'center', justifyContent: 'center' },
   skillChipText: { ...typography.body2, fontWeight: '900' },
   genderChip: { width: 64, height: 40, borderRadius: radius.md, alignItems: 'center', justifyContent: 'center' },
-  dateChip: { paddingHorizontal: spacing.md, height: 40, borderRadius: radius.md, alignItems: 'center', justifyContent: 'center' },
+  dateChip: { paddingHorizontal: spacing.md, minHeight: 48, borderRadius: radius.md, alignItems: 'center', justifyContent: 'center', paddingVertical: 4 },
+  dateSub: { fontSize: 9, fontWeight: '800', marginTop: 1 },
   chipHint: { ...typography.caption, fontWeight: '800', marginTop: spacing.xs },
 });

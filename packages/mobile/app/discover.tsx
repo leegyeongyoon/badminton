@@ -22,6 +22,8 @@ interface DiscoverClubRow {
   region: string | null;
   guestFee: number | null;
   duesPeriodType: string;
+  scheduleSummary: string | null;
+  applyOpen: boolean;
 }
 
 export default function Discover() {
@@ -94,12 +96,17 @@ export default function Discover() {
                 <Text style={[styles.cardMeta, { color: colors.textSecondary }]} numberOfLines={1}>
                   {[c.region, `멤버 ${c.memberCount}명`, c.guestFee != null ? `게스트비 ${c.guestFee.toLocaleString()}원` : null].filter(Boolean).join(' · ')}
                 </Text>
+                {c.scheduleSummary && (
+                  <Text style={[styles.cardMeta, { color: colors.primary, fontWeight: '700' }]} numberOfLines={1}>{c.scheduleSummary}</Text>
+                )}
                 {c.description && (
                   <Text style={[styles.cardDesc, { color: colors.textLight }]} numberOfLines={2}>{c.description}</Text>
                 )}
               </View>
-              <View style={[styles.applyTag, { backgroundColor: colors.primaryBg }]}>
-                <Text style={[styles.applyTagText, { color: colors.primary }]}>게스트 신청</Text>
+              <View style={[styles.applyTag, { backgroundColor: c.applyOpen ? colors.primaryBg : colors.surfaceSecondary }]}>
+                <Text style={[styles.applyTagText, { color: c.applyOpen ? colors.primary : colors.textLight }]}>
+                  {c.applyOpen ? '게스트 신청' : '신청 마감'}
+                </Text>
               </View>
             </Pressable>
           ))

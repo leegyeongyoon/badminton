@@ -1066,6 +1066,20 @@ export interface DiscoverClubRow {
   region: string | null; // 홈 시설 주소 앞부분
   guestFee: number | null;
   duesPeriodType: string;
+  scheduleSummary: string | null; // "매주 화·목 20:00~22:00"
+  applyOpen: boolean; // 게스트 신청 받는 중인지
+}
+
+const DISCOVER_DAY_KO = ['일', '월', '화', '수', '목', '금', '토'];
+function discoverScheduleSummary(input: unknown): string | null {
+  if (!Array.isArray(input) || input.length === 0) return null;
+  const slots = (input as { day?: number; start?: string; end?: string }[]).filter(
+    (s) => Number.isInteger(s?.day) && (s.day as number) >= 0 && (s.day as number) <= 6,
+  );
+  if (slots.length === 0) return null;
+  const days = [...new Set(slots.map((s) => s.day as number))].sort().map((d) => DISCOVER_DAY_KO[d]).join('·');
+  const times = [...new Set(slots.map((s) => `${s.start}~${s.end}`))];
+  return times.length === 1 ? `매주 ${days} ${times[0]}` : `매주 ${days}`;
 }
 
 export async function discoverClubs(query?: string): Promise<DiscoverClubRow[]> {
@@ -1088,6 +1102,8 @@ export async function discoverClubs(query?: string): Promise<DiscoverClubRow[]> 
       description: true,
       guestFee: true,
       duesPeriodType: true,
+      weeklySchedule: true,
+      guestApplyEnabled: true,
       homeFacility: { select: { address: true } },
       _count: { select: { members: true } },
     },
@@ -1103,5 +1119,7 @@ export async function discoverClubs(query?: string): Promise<DiscoverClubRow[]> 
     region: c.homeFacility?.address ? c.homeFacility.address.split(' ').slice(0, 2).join(' ') : null,
     guestFee: c.guestFee,
     duesPeriodType: c.duesPeriodType,
+    scheduleSummary: discoverScheduleSummary(c.weeklySchedule),
+    applyOpen: c.guestApplyEnabled,
   }));
 }
