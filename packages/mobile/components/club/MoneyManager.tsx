@@ -235,7 +235,7 @@ export function MoneyManager({ clubs, api }: { clubs: MoneyClub[]; api: MoneyApi
   return (
     <View style={{ flex: 1, backgroundColor: colors.background }}>
       {/* 헤더는 감싸는 화면(wrapper)이 렌더 — 본체는 콘텐츠만. */}
-      <ScrollView contentContainerStyle={{ padding: spacing.lg, paddingBottom: insets.bottom + 60 }} keyboardShouldPersistTaps="handled">
+      <ScrollView contentContainerStyle={{ padding: spacing.lg, paddingBottom: insets.bottom + 60, maxWidth: 640, width: '100%' as const, alignSelf: 'center' as const }} keyboardShouldPersistTaps="handled">
         {/* 모임 선택 */}
         {clubs.length > 1 && (
         <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: spacing.sm, paddingBottom: spacing.md }}>

@@ -165,7 +165,7 @@ export default function GuestInbox() {
         <View style={styles.center}><ActivityIndicator size="large" color={colors.primary} /></View>
       ) : (
         <ScrollView
-          contentContainerStyle={{ padding: spacing.lg, paddingBottom: insets.bottom + 40 }}
+          contentContainerStyle={{ padding: spacing.lg, paddingBottom: insets.bottom + 40, maxWidth: 640, width: '100%' as const, alignSelf: 'center' as const }}
           refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); loadList(); }} tintColor={colors.primary} />}
         >
           {threads.length === 0 ? (

@@ -72,7 +72,7 @@ export function ChatThread({
         <ScrollView
           ref={scrollRef}
           style={{ flex: 1 }}
-          contentContainerStyle={{ padding: spacing.lg, gap: spacing.sm }}
+          contentContainerStyle={{ padding: spacing.lg, gap: spacing.sm, maxWidth: 640, width: '100%', alignSelf: 'center' }}
           keyboardShouldPersistTaps="handled"
         >
           {messages.length === 0 && (
@@ -154,7 +154,7 @@ const styles = StyleSheet.create({
   bubble: { paddingHorizontal: spacing.md, paddingVertical: spacing.sm, borderRadius: radius.lg },
   bubbleText: { ...typography.body2, lineHeight: 20 },
   time: { fontSize: 10, marginBottom: 2 },
-  inputBar: { flexDirection: 'row', alignItems: 'flex-end', gap: spacing.sm, paddingHorizontal: spacing.md, paddingVertical: spacing.sm, borderTopWidth: StyleSheet.hairlineWidth },
+  inputBar: { flexDirection: 'row', alignItems: 'flex-end', gap: spacing.sm, paddingHorizontal: spacing.md, paddingVertical: spacing.sm, borderTopWidth: StyleSheet.hairlineWidth, maxWidth: 640, width: '100%', alignSelf: 'center' },
   input: { flex: 1, ...typography.body2, borderWidth: 1.5, borderRadius: radius.lg, paddingHorizontal: spacing.md, paddingVertical: spacing.sm, maxHeight: 100 },
   sendBtn: { width: 40, height: 40, borderRadius: 20, alignItems: 'center', justifyContent: 'center' },
   disabledHint: { ...typography.caption, textAlign: 'center', flex: 1, paddingVertical: spacing.sm },

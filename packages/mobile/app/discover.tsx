@@ -7,6 +7,7 @@ import { typography, spacing, radius } from '../constants/theme';
 import { alpha } from '../utils/color';
 import { BackButton } from '../components/ui/BackButton';
 import { Icon } from '../components/ui/Icon';
+import { Ionicons } from '@expo/vector-icons';
 import api from '../services/api';
 import { useAuthStore } from '../store/authStore';
 
@@ -59,7 +60,7 @@ export default function Discover() {
         <Text style={[styles.title, { color: colors.text }]}>모임 찾기</Text>
       </View>
 
-      <ScrollView contentContainerStyle={{ padding: spacing.lg, paddingBottom: insets.bottom + 40 }} keyboardShouldPersistTaps="handled">
+      <ScrollView contentContainerStyle={{ padding: spacing.lg, paddingBottom: insets.bottom + 40, maxWidth: 640, width: '100%' as const, alignSelf: 'center' as const }} keyboardShouldPersistTaps="handled">
         {/* 검색 */}
         <View style={[styles.searchRow, { backgroundColor: colors.surface, borderColor: colors.border }]}>
           <Icon name="search" size={18} color={colors.textLight} />
@@ -78,6 +79,13 @@ export default function Discover() {
             </Pressable>
           )}
         </View>
+
+        {/* 결과 수 */}
+        {!loading && (rows ?? []).length > 0 && (
+          <Text style={[styles.resultCount, { color: colors.textLight }]}>
+            공개 모임 {(rows ?? []).filter((c) => !regionFilter || c.region === regionFilter).length}개 · 카드를 누르면 게스트 신청으로 이동해요
+          </Text>
+        )}
 
         {/* 지역 필터 — 결과에서 파생된 지역 칩 */}
         {(rows ?? []).length > 0 && (() => {
@@ -113,28 +121,48 @@ export default function Discover() {
             <Pressable
               key={c.clubId}
               onPress={() => router.push(`/guest-apply?clubId=${c.clubId}` as any)}
-              style={({ pressed }) => [styles.card, { backgroundColor: colors.surface }, shadows.sm, pressed && { opacity: 0.9 }]}
+              style={({ pressed }) => [styles.card, { backgroundColor: colors.surface }, shadows.sm, pressed && { opacity: 0.9, transform: [{ scale: 0.99 }] }]}
             >
-              <View style={[styles.avatar, { backgroundColor: alpha(colors.primary, 0.12) }]}>
-                <Text style={[styles.avatarText, { color: colors.primary }]}>{c.name[0]}</Text>
+              <View style={styles.cardHead}>
+                <View style={[styles.avatar, { backgroundColor: alpha(colors.primary, 0.12) }]}>
+                  <Text style={[styles.avatarText, { color: colors.primary }]}>{c.name[0]}</Text>
+                </View>
+                <View style={{ flex: 1, minWidth: 0 }}>
+                  <Text style={[styles.cardTitle, { color: colors.text }]} numberOfLines={1}>{c.name}</Text>
+                  <View style={styles.metaRow}>
+                    {!!c.region && (
+                      <View style={styles.metaItem}>
+                        <Ionicons name="location-outline" size={12} color={colors.textSecondary} />
+                        <Text style={[styles.metaText, { color: colors.textSecondary }]}>{c.region}</Text>
+                      </View>
+                    )}
+                    <View style={styles.metaItem}>
+                      <Ionicons name="people-outline" size={12} color={colors.textSecondary} />
+                      <Text style={[styles.metaText, { color: colors.textSecondary }]}>멤버 {c.memberCount}명</Text>
+                    </View>
+                    {c.guestFee != null && (
+                      <View style={styles.metaItem}>
+                        <Ionicons name="card-outline" size={12} color={colors.textSecondary} />
+                        <Text style={[styles.metaText, { color: colors.textSecondary }]}>게스트비 {c.guestFee.toLocaleString()}원</Text>
+                      </View>
+                    )}
+                  </View>
+                </View>
+                <View style={[styles.applyTag, { backgroundColor: c.applyOpen ? colors.primaryBg : colors.surfaceSecondary }]}>
+                  <Text style={[styles.applyTagText, { color: c.applyOpen ? colors.primary : colors.textLight }]}>
+                    {c.applyOpen ? '게스트 신청' : '신청 마감'}
+                  </Text>
+                </View>
               </View>
-              <View style={{ flex: 1, minWidth: 0 }}>
-                <Text style={[styles.cardTitle, { color: colors.text }]} numberOfLines={1}>{c.name}</Text>
-                <Text style={[styles.cardMeta, { color: colors.textSecondary }]} numberOfLines={1}>
-                  {[c.region, `멤버 ${c.memberCount}명`, c.guestFee != null ? `게스트비 ${c.guestFee.toLocaleString()}원` : null].filter(Boolean).join(' · ')}
-                </Text>
-                {c.scheduleSummary && (
-                  <Text style={[styles.cardMeta, { color: colors.primary, fontWeight: '700' }]} numberOfLines={1}>{c.scheduleSummary}</Text>
-                )}
-                {c.description && (
-                  <Text style={[styles.cardDesc, { color: colors.textLight }]} numberOfLines={2}>{c.description}</Text>
-                )}
-              </View>
-              <View style={[styles.applyTag, { backgroundColor: c.applyOpen ? colors.primaryBg : colors.surfaceSecondary }]}>
-                <Text style={[styles.applyTagText, { color: c.applyOpen ? colors.primary : colors.textLight }]}>
-                  {c.applyOpen ? '게스트 신청' : '신청 마감'}
-                </Text>
-              </View>
+              {c.scheduleSummary && (
+                <View style={[styles.scheduleLine, { backgroundColor: alpha(colors.primary, 0.07) }]}>
+                  <Ionicons name="calendar-outline" size={13} color={colors.primary} />
+                  <Text style={[styles.scheduleLineText, { color: colors.primary }]} numberOfLines={1}>{c.scheduleSummary}</Text>
+                </View>
+              )}
+              {c.description && (
+                <Text style={[styles.cardDesc, { color: colors.textSecondary }]} numberOfLines={2}>{c.description}</Text>
+              )}
             </Pressable>
           ))
         )}
@@ -152,12 +180,18 @@ const styles = StyleSheet.create({
   emptySub: { ...typography.caption },
   searchRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, borderWidth: 1.5, borderRadius: radius.lg, paddingHorizontal: spacing.md, marginBottom: spacing.md },
   searchInput: { ...typography.body1, flex: 1, paddingVertical: spacing.smd },
-  card: { flexDirection: 'row', alignItems: 'center', gap: spacing.md, padding: spacing.lg, borderRadius: radius.card, marginBottom: spacing.md },
-  avatar: { width: 44, height: 44, borderRadius: 22, alignItems: 'center', justifyContent: 'center' },
-  avatarText: { fontSize: 18, fontWeight: '800' },
+  card: { padding: spacing.lg, borderRadius: radius.card, marginBottom: spacing.md },
+  cardHead: { flexDirection: 'row', alignItems: 'center', gap: spacing.md },
+  avatar: { width: 46, height: 46, borderRadius: 23, alignItems: 'center', justifyContent: 'center' },
+  avatarText: { fontSize: 19, fontWeight: '900' },
   cardTitle: { ...typography.subtitle1 },
-  cardMeta: { ...typography.caption, marginTop: 2 },
-  cardDesc: { ...typography.caption, marginTop: 3, lineHeight: 15 },
+  metaRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.md, flexWrap: 'wrap', marginTop: 3 },
+  metaItem: { flexDirection: 'row', alignItems: 'center', gap: 3 },
+  metaText: { ...typography.caption, fontWeight: '700' },
+  scheduleLine: { flexDirection: 'row', alignItems: 'center', gap: 6, borderRadius: radius.md, paddingHorizontal: spacing.md, paddingVertical: spacing.sm, marginTop: spacing.md },
+  scheduleLineText: { ...typography.caption, fontWeight: '800', flex: 1 },
+  cardDesc: { ...typography.caption, marginTop: spacing.sm, lineHeight: 17 },
+  resultCount: { ...typography.caption, marginBottom: spacing.sm },
   applyTag: { paddingHorizontal: spacing.md, paddingVertical: spacing.xs, borderRadius: radius.pill },
   applyTagText: { fontSize: 11, fontWeight: '800' },
   note: { ...typography.caption, marginTop: spacing.sm, lineHeight: 16 },

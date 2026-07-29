@@ -5,6 +5,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTheme } from '../../../hooks/useTheme';
 import { typography, spacing, radius } from '../../../constants/theme';
 import { BackButton } from '../../../components/ui/BackButton';
+import { Ionicons } from '@expo/vector-icons';
 import { showSuccess } from '../../../utils/feedback';
 import { clubOperationApi, type WeeklySlot } from '../../../services/lab';
 
@@ -111,13 +112,18 @@ export default function ClubOperation() {
       {loading ? (
         <View style={styles.center}><ActivityIndicator size="large" color={colors.primary} /></View>
       ) : (
-        <ScrollView contentContainerStyle={{ padding: spacing.lg, paddingBottom: insets.bottom + 60 }} keyboardShouldPersistTaps="handled">
+        <ScrollView contentContainerStyle={{ padding: spacing.lg, paddingBottom: insets.bottom + 60, maxWidth: 640, width: '100%' as const, alignSelf: 'center' as const }} keyboardShouldPersistTaps="handled">
           {/* 정기 운동 일정 */}
           <View style={[styles.card, { backgroundColor: colors.surface }, shadows.sm]}>
-            <Text style={[styles.cardTitle, { color: colors.text }]}>정기 운동 일정</Text>
-            <Text style={[styles.cardHint, { color: colors.textLight }]}>
-              운동 요일을 정하면 게스트 신청도 그 요일에만 받아요
-            </Text>
+            <View style={styles.cardTitleRow}>
+              <View style={[styles.cardIcon, { backgroundColor: colors.primary + '15' }]}>
+                <Ionicons name="calendar-outline" size={16} color={colors.primary} />
+              </View>
+              <View style={{ flex: 1, minWidth: 0 }}>
+                <Text style={[styles.cardTitle, { color: colors.text }]}>정기 운동 일정</Text>
+                <Text style={[styles.cardHint, { color: colors.textLight }]}>운동 요일을 정하면 게스트 신청도 그 요일에만 받아요</Text>
+              </View>
+            </View>
             <View style={styles.dayRow}>
               {DAYS.map((d) => {
                 const active = d.day in slots;
@@ -163,6 +169,9 @@ export default function ClubOperation() {
           {/* 게스트 신청 정책 */}
           <View style={[styles.card, { backgroundColor: colors.surface }, shadows.sm]}>
             <View style={styles.toggleRow}>
+              <View style={[styles.cardIcon, { backgroundColor: colors.primary + '15' }]}>
+                <Ionicons name="person-add-outline" size={16} color={colors.primary} />
+              </View>
               <View style={{ flex: 1, minWidth: 0 }}>
                 <Text style={[styles.cardTitle, { color: colors.text }]}>게스트 신청 받기</Text>
                 <Text style={[styles.cardHint, { color: colors.textLight }]}>
@@ -231,6 +240,8 @@ const styles = StyleSheet.create({
   card: { borderRadius: radius.card, padding: spacing.lg, marginBottom: spacing.md },
   cardTitle: { ...typography.subtitle1 },
   cardHint: { ...typography.caption, marginTop: 2, marginBottom: spacing.sm },
+  cardTitleRow: { flexDirection: 'row', alignItems: 'flex-start', gap: spacing.sm, marginBottom: spacing.xs },
+  cardIcon: { width: 30, height: 30, borderRadius: 15, alignItems: 'center', justifyContent: 'center', marginTop: 1 },
   dayRow: { flexDirection: 'row', gap: spacing.sm, flexWrap: 'wrap', marginBottom: spacing.md },
   dayChip: { width: 40, height: 40, borderRadius: 20, alignItems: 'center', justifyContent: 'center' },
   dayChipText: { ...typography.body2, fontWeight: '900' },

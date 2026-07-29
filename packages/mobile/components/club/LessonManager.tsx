@@ -157,7 +157,7 @@ export function LessonManager({ clubs, api }: { clubs: LessonClub[]; api: Lesson
   const activeApps = apps.filter((a) => a.status !== 'CANCELLED');
 
   return (
-    <ScrollView contentContainerStyle={{ padding: spacing.lg, paddingBottom: 80 }} keyboardShouldPersistTaps="handled">
+    <ScrollView contentContainerStyle={{ padding: spacing.lg, paddingBottom: 80, maxWidth: 640, width: '100%' as const, alignSelf: 'center' as const }} keyboardShouldPersistTaps="handled">
       {/* 클럽 선택(여러 모임 관리 시에만) */}
       {clubs.length > 1 && (
         <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: spacing.md }} contentContainerStyle={{ gap: spacing.sm }}>

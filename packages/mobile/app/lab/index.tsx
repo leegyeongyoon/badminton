@@ -32,7 +32,7 @@ export default function LabHome() {
           <Text style={[styles.betaTagText, { color: colors.primary }]}>BETA</Text>
         </View>
       </View>
-      <ScrollView contentContainerStyle={{ padding: spacing.lg, paddingBottom: insets.bottom + 40 }}>
+      <ScrollView contentContainerStyle={{ padding: spacing.lg, paddingBottom: insets.bottom + 40, maxWidth: 640, width: '100%' as const, alignSelf: 'center' as const }}>
         <View style={[styles.notice, { backgroundColor: colors.primaryBg }]}>
           <Text style={[styles.noticeText, { color: colors.primary }]}>
             최고관리자 전용 — 일반 사용자에게는 보이지 않아요. 상용 기능을 로컬에서 설계·테스트 중입니다.

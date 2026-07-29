@@ -44,7 +44,7 @@ export default function LabProfile() {
           <Text onPress={load} style={{ color: colors.primary, marginTop: 8, fontWeight: '700' }}>다시 시도</Text>
         </View>
       ) : data ? (
-        <ScrollView contentContainerStyle={{ padding: spacing.lg, paddingBottom: insets.bottom + 40 }}>
+        <ScrollView contentContainerStyle={{ padding: spacing.lg, paddingBottom: insets.bottom + 40, maxWidth: 640, width: '100%' as const, alignSelf: 'center' as const }}>
           {/* 헤더: 이름 + 급수 */}
           <View style={[styles.hero, { backgroundColor: colors.surface, borderColor: colors.border }]}>
             <View style={[styles.avatar, { backgroundColor: colors.primaryBg }]}>
