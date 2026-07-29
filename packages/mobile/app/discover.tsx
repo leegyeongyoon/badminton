@@ -8,6 +8,7 @@ import { alpha } from '../utils/color';
 import { BackButton } from '../components/ui/BackButton';
 import { Icon } from '../components/ui/Icon';
 import api from '../services/api';
+import { useAuthStore } from '../store/authStore';
 
 // ─────────────────────────────────────────────────────────────
 // 모임 찾기 — PUBLIC(공개) 모임 탐색. 카드 탭 → 게스트 신청(모임 미리보기).
@@ -33,18 +34,22 @@ export default function Discover() {
   const [query, setQuery] = useState('');
   const [rows, setRows] = useState<DiscoverClubRow[] | null>(null);
   const [loading, setLoading] = useState(true);
+  const [regionFilter, setRegionFilter] = useState<string | null>(null); // null = 전체
+  const { isAuthenticated } = useAuthStore();
 
   const load = useCallback(async (q?: string) => {
     setLoading(true);
     try {
-      const { data } = await api.get('/clubs/discover', { params: q ? { query: q } : {} });
+      // 비로그인(공개 웹)도 탐색 가능 — 공개 엔드포인트(rate-limit) 사용.
+      const path = isAuthenticated ? '/clubs/discover' : '/clubs/discover-public';
+      const { data } = await api.get(path, { params: q ? { query: q } : {}, _silent: true } as any);
       setRows(data || []);
     } catch {
       setRows([]);
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [isAuthenticated]);
   useEffect(() => { load(); }, [load]);
 
   return (
@@ -74,6 +79,28 @@ export default function Discover() {
           )}
         </View>
 
+        {/* 지역 필터 — 결과에서 파생된 지역 칩 */}
+        {(rows ?? []).length > 0 && (() => {
+          const regions = [...new Set((rows ?? []).map((c) => c.region).filter(Boolean))] as string[];
+          if (regions.length < 2) return null;
+          return (
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: spacing.sm, paddingBottom: spacing.md }}>
+              {[null, ...regions].map((r) => {
+                const active = regionFilter === r;
+                return (
+                  <Pressable
+                    key={r ?? '전체'}
+                    onPress={() => setRegionFilter(r)}
+                    style={[styles.regionChip, active ? { backgroundColor: colors.primary } : { backgroundColor: colors.surface, borderWidth: 1.5, borderColor: colors.border }]}
+                  >
+                    <Text style={[styles.regionChipText, { color: active ? '#fff' : colors.textSecondary }]}>{r ?? '전체'}</Text>
+                  </Pressable>
+                );
+              })}
+            </ScrollView>
+          );
+        })()}
+
         {loading && rows == null ? (
           <View style={styles.center}><ActivityIndicator size="large" color={colors.primary} /></View>
         ) : (rows ?? []).length === 0 ? (
@@ -82,7 +109,7 @@ export default function Discover() {
             <Text style={[styles.emptySub, { color: colors.textLight }]}>초대코드가 있다면 홈의 '모임 참여'로 가입할 수 있어요</Text>
           </View>
         ) : (
-          (rows ?? []).map((c) => (
+          (rows ?? []).filter((c) => !regionFilter || c.region === regionFilter).map((c) => (
             <Pressable
               key={c.clubId}
               onPress={() => router.push(`/guest-apply?clubId=${c.clubId}` as any)}
@@ -134,4 +161,6 @@ const styles = StyleSheet.create({
   applyTag: { paddingHorizontal: spacing.md, paddingVertical: spacing.xs, borderRadius: radius.pill },
   applyTagText: { fontSize: 11, fontWeight: '800' },
   note: { ...typography.caption, marginTop: spacing.sm, lineHeight: 16 },
+  regionChip: { paddingHorizontal: spacing.lg, paddingVertical: spacing.sm, borderRadius: radius.pill },
+  regionChipText: { ...typography.body2, fontWeight: '800' },
 });

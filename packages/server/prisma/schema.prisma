@@ -299,6 +299,7 @@ model Club {
   messages     ClubMessage[]
   duesPayments DuesPayment[]
   guestApplications GuestApplication[]
+  lessonOffers LessonOffer[]
 }
 
 // 월 회비 납부 기록. (clubId, userId, period) 당 한 행 — 행이 있으면 그 달에
@@ -582,9 +583,47 @@ model GuestApplication {
   status    String   @default("PENDING") // PENDING | CONFIRMED | CANCELLED
   feeAmount Int?
   feePaid   Boolean  @default(false)
+  // 당일 체크인과 자동 매칭 — 신청자가 실제로 왔는지(노쇼 파악).
+  checkedInAt DateTime?
   createdAt DateTime @default(now())
 
   club Club @relation(fields: [clubId], references: [id], onDelete: Cascade)
 
   @@index([clubId, createdAt])
+}
+
+// 레슨 중개 MVP — 모임 내 레슨 운영(마켓플레이스 아님).
+// 운영진이 레슨 상품(코치·요일·시간·레슨비·정원)을 열고, 앱 회원이 신청하면
+// 운영진이 확정한다. 정산 합산·수수료는 후속.
+model LessonOffer {
+  id        String   @id @default(uuid())
+  clubId    String
+  coachName String
+  day       Int // 0(일)~6(토)
+  start     String // "HH:mm"
+  end       String // "HH:mm"
+  fee       Int? // 회당/월 레슨비(안내용)
+  capacity  Int? // 정원(null=무제한)
+  enabled   Boolean  @default(true)
+  createdAt DateTime @default(now())
+
+  club         Club                @relation(fields: [clubId], references: [id], onDelete: Cascade)
+  applications LessonApplication[]
+
+  @@index([clubId])
+}
+
+model LessonApplication {
+  id        String   @id @default(uuid())
+  offerId   String
+  userId    String?
+  name      String
+  phone     String?
+  note      String?
+  status    String   @default("PENDING") // PENDING | CONFIRMED | CANCELLED
+  createdAt DateTime @default(now())
+
+  offer LessonOffer @relation(fields: [offerId], references: [id], onDelete: Cascade)
+
+  @@index([offerId, createdAt])
 }

@@ -49,12 +49,15 @@ function parseSchedule(input: unknown): WeeklySlot[] {
   );
 }
 
-/** "매주 화·목 20:00~22:00" 요약(슬롯 시간이 다양하면 요일만). */
+/** "매주 화·목 20:00~22:00" 요약. 요일별 시간이 다르면 "매주 화 20:00~22:00 · 토 10:00~13:00". */
 function scheduleSummary(slots: WeeklySlot[]): string | null {
   if (slots.length === 0) return null;
-  const days = [...new Set(slots.map((s) => s.day))].sort().map((d) => DAY_KO[d]).join('·');
-  const times = [...new Set(slots.map((s) => `${s.start}~${s.end}`))];
-  return times.length === 1 ? `매주 ${days} ${times[0]}` : `매주 ${days}`;
+  const sorted = [...slots].sort((a, b) => a.day - b.day);
+  const days = [...new Set(sorted.map((s) => s.day))].map((d) => DAY_KO[d]).join('·');
+  const times = [...new Set(sorted.map((s) => `${s.start}~${s.end}`))];
+  if (times.length === 1) return `매주 ${days} ${times[0]}`;
+  if (sorted.length <= 3) return `매주 ${sorted.map((s) => `${DAY_KO[s.day]} ${s.start}~${s.end}`).join(' · ')}`;
+  return `매주 ${days}`;
 }
 
 export interface AvailableDate {
@@ -79,9 +82,10 @@ async function computeAvailableDates(club: ClubPreviewRow, now = new Date()): Pr
   // 날짜별 유효 신청 수(취소 제외).
   const counts = new Map<string, number>();
   if (club.maxGuestsPerDay != null) {
+    // 정원 카운트는 유효 신청(PENDING/CONFIRMED)만 — WAITLIST(대기)·CANCELLED 제외.
     const grouped = await prisma.guestApplication.groupBy({
       by: ['visitDate'],
-      where: { clubId: club.id, status: { not: 'CANCELLED' }, visitDate: { not: null } },
+      where: { clubId: club.id, status: { in: ['PENDING', 'CONFIRMED'] }, visitDate: { not: null } },
       _count: { _all: true },
     });
     for (const g of grouped) if (g.visitDate) counts.set(g.visitDate, g._count._all);
@@ -181,8 +185,9 @@ async function handleApply(club: ClubPreviewRow, req: Request, res: Response) {
   const available = await computeAvailableDates(club);
   const slot = available.find((a) => a.date === validVisit);
   if (!slot) throw new BadRequestError('신청할 수 없는 날짜예요 — 운동 요일을 확인해 주세요');
-  if (slot.status === 'FULL') throw new BadRequestError('그 날은 정원이 마감됐어요');
   if (slot.status === 'CLOSED') throw new BadRequestError('그 날 신청은 마감됐어요');
+  // 정원이 찬 날짜는 거절하지 않고 '대기(WAITLIST)'로 접수 — 자리가 나면 자동 승격.
+  const waitlisted = slot.status === 'FULL';
 
   const app = await prisma.guestApplication.create({
     data: {
@@ -195,6 +200,7 @@ async function handleApply(club: ClubPreviewRow, req: Request, res: Response) {
       phone: trimmedPhone || null,
       note: note ? String(note).slice(0, 200) : null,
       feeAmount: club.guestFee,
+      ...(waitlisted ? { status: 'WAITLIST' } : {}),
     },
   });
 
@@ -219,9 +225,12 @@ async function handleApply(club: ClubPreviewRow, req: Request, res: Response) {
     clubName: club.name,
     feeAmount: club.guestFee,
     accountInfo: club.duesAccountInfo,
-    message: club.guestFee
-      ? `${club.name} 게스트 신청이 접수됐어요. 게스트비 ${club.guestFee.toLocaleString()}원을 입금하시면 확정됩니다.`
-      : `${club.name} 게스트 신청이 접수됐어요. 운영자 확인 후 확정됩니다.`,
+    waitlisted,
+    message: waitlisted
+      ? `${club.name} 그 날은 정원이 차서 '대기'로 접수됐어요. 자리가 나면 알려드릴게요.`
+      : club.guestFee
+        ? `${club.name} 게스트 신청이 접수됐어요. 게스트비 ${club.guestFee.toLocaleString()}원을 입금하시면 확정됩니다.`
+        : `${club.name} 게스트 신청이 접수됐어요. 운영자 확인 후 확정됩니다.`,
   });
 }
 

@@ -1,4 +1,5 @@
 import { Router, Request, Response, NextFunction } from 'express';
+import { rateLimit } from '../../middleware/rateLimit';
 import {
   createClubSchema,
   updateClubSchema,
@@ -51,6 +52,16 @@ router.post('/', authenticate, roleGuard('SUPER_ADMIN', 'CLUB_LEADER'), validate
   try {
     const club = await clubService.createClub(req.user!.userId, req.body);
     res.status(201).json(club);
+  } catch (err) { next(err); }
+});
+
+// GET /api/v1/clubs/discover-public?query= — PUBLIC 모임 탐색(비로그인 공개, rate-limit).
+// 웹의 badmintoncourt.store/discover 가 로그인 없이 공개 모임을 보여줄 때 사용.
+const discoverPublicLimiter = rateLimit({ windowMs: 60 * 1000, max: 30, keyPrefix: 'discover:public' });
+router.get('/discover-public', discoverPublicLimiter, async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const query = req.query.query ? String(req.query.query) : undefined;
+    res.json(await clubService.discoverClubs(query));
   } catch (err) { next(err); }
 });
 

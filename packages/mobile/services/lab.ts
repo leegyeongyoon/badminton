@@ -82,6 +82,7 @@ export interface LabGuestApplicationRow {
   id: string;
   name: string;
   isAppUser: boolean;
+  isCheckedIn: boolean;
   skillLevel: string | null;
   gender: string | null;
   visitDate: string | null;
@@ -132,6 +133,66 @@ export const clubOperationApi = {
   ): Promise<void> => {
     await api.put(`/clubs/${clubId}/money/operation-config`, cfg);
   },
+};
+
+// ─── 레슨 중개 MVP ───
+export interface LessonOffer {
+  id: string;
+  coachName: string;
+  day: number; // 0(일)~6(토)
+  start: string;
+  end: string;
+  fee: number | null;
+  capacity: number | null;
+  enabled: boolean;
+  summary: string; // "매주 화 19:00~20:00"
+  applicants: number;
+}
+export interface LessonApplicationRow {
+  id: string;
+  offerId: string;
+  offerSummary: string;
+  coachName: string;
+  name: string;
+  isAppUser: boolean;
+  phone: string | null;
+  note: string | null;
+  status: string; // PENDING | CONFIRMED | CANCELLED
+  createdAt: string;
+}
+
+/** 레슨 관리 API 어댑터 — LessonManager가 실험실/운영진 양쪽에서 도는 공용 시그니처. */
+export interface LessonApi {
+  getOffers(clubId: string): Promise<LessonOffer[]>;
+  saveOffer(clubId: string, offer: Partial<LessonOffer> & { id?: string }): Promise<void>;
+  deleteOffer(clubId: string, offerId: string): Promise<void>;
+  getApplications(clubId: string): Promise<LessonApplicationRow[]>;
+  updateApplication(clubId: string, id: string, status: string): Promise<void>;
+}
+
+/** 운영진용 레슨 API — /clubs/:id/money/lessons* (staff 가드). */
+export const clubLessonApi: LessonApi = {
+  getOffers: async (clubId) => (await api.get(`/clubs/${clubId}/money/lessons`)).data || [],
+  saveOffer: async (clubId, offer) => { await api.put(`/clubs/${clubId}/money/lessons`, offer); },
+  deleteOffer: async (clubId, offerId) => { await api.delete(`/clubs/${clubId}/money/lessons/${offerId}`); },
+  getApplications: async (clubId) => (await api.get(`/clubs/${clubId}/money/lesson-applications`)).data || [],
+  updateApplication: async (clubId, id, status) => { await api.put(`/clubs/${clubId}/money/lesson-applications/${id}`, { status }); },
+};
+
+/** 최고관리자(실험실)용 레슨 API — /lab/* 경로. */
+export const labLessonApi: LessonApi = {
+  getOffers: async (clubId) => (await api.get(`/lab/clubs/${clubId}/lessons`)).data || [],
+  saveOffer: async (clubId, offer) => { await api.put(`/lab/clubs/${clubId}/lessons`, offer); },
+  deleteOffer: async (_clubId, offerId) => { await api.delete(`/lab/lesson-offers/${offerId}`); },
+  getApplications: async (clubId) => (await api.get(`/lab/clubs/${clubId}/lesson-applications`)).data || [],
+  updateApplication: async (_clubId, id, status) => { await api.put(`/lab/lesson-applications/${id}`, { status }); },
+};
+
+/** 회원용 — 활성 레슨 목록 + 신청. */
+export const memberLessonApi = {
+  list: async (clubId: string): Promise<LessonOffer[]> => (await api.get(`/clubs/${clubId}/lessons`)).data || [],
+  apply: async (clubId: string, offerId: string, note?: string): Promise<{ id: string; message: string }> =>
+    (await api.post(`/clubs/${clubId}/lessons/${offerId}/apply`, note ? { note } : {})).data,
 };
 
 /** 운영진(LEADER/STAFF)용 — /clubs/:id/money/* (정식 경로). */

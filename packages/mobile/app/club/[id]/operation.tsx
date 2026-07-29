@@ -33,10 +33,9 @@ export default function ClubOperation() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [clubName, setClubName] = useState('');
-  // 운동 일정
-  const [selectedDays, setSelectedDays] = useState<number[]>([]);
-  const [start, setStart] = useState('20:00');
-  const [end, setEnd] = useState('22:00');
+  // 운동 일정 — 요일별 개별 시간. { [day]: {start, end} }
+  const [slots, setSlots] = useState<Record<number, { start: string; end: string }>>({});
+  const [lastTime, setLastTime] = useState({ start: '20:00', end: '22:00' });
   // 게스트 신청 정책
   const [applyEnabled, setApplyEnabled] = useState(true);
   const [deadlineHours, setDeadlineHours] = useState('');
@@ -48,11 +47,10 @@ export default function ClubOperation() {
     try {
       const c = await clubOperationApi.get(clubId);
       setClubName(c.clubName);
-      setSelectedDays([...new Set(c.weeklySchedule.map((s) => s.day))]);
-      if (c.weeklySchedule[0]) {
-        setStart(c.weeklySchedule[0].start);
-        setEnd(c.weeklySchedule[0].end);
-      }
+      const m: Record<number, { start: string; end: string }> = {};
+      for (const slot of c.weeklySchedule) m[slot.day] = { start: slot.start, end: slot.end };
+      setSlots(m);
+      if (c.weeklySchedule[0]) setLastTime({ start: c.weeklySchedule[0].start, end: c.weeklySchedule[0].end });
       setApplyEnabled(c.guestApplyEnabled);
       setDeadlineHours(c.guestApplyDeadlineHours != null ? String(c.guestApplyDeadlineHours) : '');
       setMaxGuests(c.maxGuestsPerDay != null ? String(c.maxGuestsPerDay) : '');
@@ -66,9 +64,11 @@ export default function ClubOperation() {
 
   const save = async () => {
     if (!clubId || saving) return;
-    const s = HHMM.test(start) ? start : '20:00';
-    const e = HHMM.test(end) ? end : '22:00';
-    const weeklySchedule: WeeklySlot[] = selectedDays.map((day) => ({ day, start: s, end: e }));
+    const weeklySchedule: WeeklySlot[] = Object.entries(slots).map(([day, t]) => ({
+      day: Number(day),
+      start: HHMM.test(t.start) ? t.start : '20:00',
+      end: HHMM.test(t.end) ? t.end : '22:00',
+    }));
     setSaving(true);
     try {
       await clubOperationApi.set(clubId, {
@@ -85,7 +85,16 @@ export default function ClubOperation() {
   };
 
   const toggleDay = (day: number) =>
-    setSelectedDays((prev) => (prev.includes(day) ? prev.filter((d) => d !== day) : [...prev, day]));
+    setSlots((prev) => {
+      const next = { ...prev };
+      if (next[day]) delete next[day];
+      else next[day] = { ...lastTime }; // 새 요일은 최근 사용 시간으로 시작
+      return next;
+    });
+  const setSlotTime = (day: number, key: 'start' | 'end', value: string) => {
+    setSlots((prev) => ({ ...prev, [day]: { ...prev[day], [key]: value } }));
+    setLastTime((prev) => ({ ...prev, [key]: value }));
+  };
 
   return (
     <View style={{ flex: 1, backgroundColor: colors.background }}>
@@ -108,7 +117,7 @@ export default function ClubOperation() {
             </Text>
             <View style={styles.dayRow}>
               {DAYS.map((d) => {
-                const active = selectedDays.includes(d.day);
+                const active = d.day in slots;
                 return (
                   <Pressable
                     key={d.day}
@@ -120,31 +129,30 @@ export default function ClubOperation() {
                 );
               })}
             </View>
-            <View style={styles.timeRow}>
-              <View style={{ flex: 1 }}>
-                <Text style={[styles.fieldLabel, { color: colors.textSecondary }]}>시작</Text>
+            {/* 요일별 시간 — 선택된 요일마다 행 */}
+            {DAYS.filter((d) => d.day in slots).map((d) => (
+              <View key={d.day} style={styles.slotRow}>
+                <Text style={[styles.slotDay, { color: colors.text }]}>{d.label}</Text>
                 <TextInput
-                  style={[styles.input, { color: colors.text, backgroundColor: colors.background, borderColor: colors.border }]}
-                  value={start}
-                  onChangeText={setStart}
+                  style={[styles.slotInput, { color: colors.text, backgroundColor: colors.background, borderColor: colors.border }]}
+                  value={slots[d.day]?.start ?? ''}
+                  onChangeText={(v) => setSlotTime(d.day, 'start', v)}
                   placeholder="20:00"
                   placeholderTextColor={colors.textLight}
                   maxLength={5}
                 />
-              </View>
-              <View style={{ flex: 1 }}>
-                <Text style={[styles.fieldLabel, { color: colors.textSecondary }]}>종료</Text>
+                <Text style={{ color: colors.textLight }}>~</Text>
                 <TextInput
-                  style={[styles.input, { color: colors.text, backgroundColor: colors.background, borderColor: colors.border }]}
-                  value={end}
-                  onChangeText={setEnd}
+                  style={[styles.slotInput, { color: colors.text, backgroundColor: colors.background, borderColor: colors.border }]}
+                  value={slots[d.day]?.end ?? ''}
+                  onChangeText={(v) => setSlotTime(d.day, 'end', v)}
                   placeholder="22:00"
                   placeholderTextColor={colors.textLight}
                   maxLength={5}
                 />
               </View>
-            </View>
-            {selectedDays.length === 0 && (
+            ))}
+            {Object.keys(slots).length === 0 && (
               <Text style={[styles.warn, { color: colors.textLight }]}>* 요일 미선택 = 일정 안내 없음, 게스트 신청은 아무 날짜나 가능</Text>
             )}
           </View>
@@ -211,6 +219,9 @@ const styles = StyleSheet.create({
   dayChip: { width: 40, height: 40, borderRadius: 20, alignItems: 'center', justifyContent: 'center' },
   dayChipText: { ...typography.body2, fontWeight: '900' },
   timeRow: { flexDirection: 'row', gap: spacing.md },
+  slotRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, marginBottom: spacing.sm },
+  slotDay: { ...typography.subtitle2, width: 24, fontWeight: '900' },
+  slotInput: { ...typography.body2, flex: 1, borderWidth: 1.5, borderRadius: radius.md, paddingHorizontal: spacing.md, paddingVertical: spacing.sm, fontWeight: '700', textAlign: 'center' },
   fieldLabel: { ...typography.caption, fontWeight: '700', marginBottom: spacing.xs },
   input: { ...typography.body1, borderWidth: 1.5, borderRadius: radius.md, paddingHorizontal: spacing.md, paddingVertical: spacing.sm, fontWeight: '700' },
   toggleRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.md },

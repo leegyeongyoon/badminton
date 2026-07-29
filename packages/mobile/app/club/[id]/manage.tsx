@@ -884,6 +884,24 @@ export default function ClubManageScreen() {
           </Text>
         </TouchableOpacity>
 
+        {/* ── 레슨 (개설·신청 확정 — 전용 화면) ── */}
+        <TouchableOpacity
+          style={[styles.card, { backgroundColor: colors.surface }, shadows.sm]}
+          onPress={() => router.push(`/club/${clubId}/lessons`)}
+          activeOpacity={0.7}
+          accessibilityLabel="레슨 관리 열기"
+        >
+          <View style={styles.cardHeader}>
+            <Icon name="court" size={18} color={colors.primary} />
+            <Text style={[styles.cardTitle, { color: colors.text }]}>레슨</Text>
+            <View style={{ flex: 1 }} />
+            <Icon name="chevronRight" size={18} color={colors.textLight} />
+          </View>
+          <Text style={[styles.fieldHint, { color: colors.textSecondary }]}>
+            코치·요일·시간·정원으로 레슨을 개설하고, 회원 신청을 확정해요
+          </Text>
+        </TouchableOpacity>
+
         {/* ── 모임 삭제 (danger, 맨 아래) ───────────── */}
         <View style={[styles.card, { backgroundColor: colors.surface }, shadows.sm]}>
           <View style={styles.cardHeader}>

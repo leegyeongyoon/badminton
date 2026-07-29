@@ -43,3 +43,43 @@ ALTER TABLE "Club" ADD COLUMN IF NOT EXISTS "weeklySchedule" JSONB;
 ALTER TABLE "Club" ADD COLUMN IF NOT EXISTS "guestApplyEnabled" BOOLEAN NOT NULL DEFAULT true;
 ALTER TABLE "Club" ADD COLUMN IF NOT EXISTS "guestApplyDeadlineHours" INTEGER;
 ALTER TABLE "Club" ADD COLUMN IF NOT EXISTS "maxGuestsPerDay" INTEGER;
+
+-- 신청 ↔ 당일 체크인 매칭
+ALTER TABLE "GuestApplication" ADD COLUMN IF NOT EXISTS "checkedInAt" TIMESTAMP(3);
+
+-- 레슨 중개 MVP
+CREATE TABLE IF NOT EXISTS "LessonOffer" (
+  "id" TEXT NOT NULL,
+  "clubId" TEXT NOT NULL,
+  "coachName" TEXT NOT NULL,
+  "day" INTEGER NOT NULL,
+  "start" TEXT NOT NULL,
+  "end" TEXT NOT NULL,
+  "fee" INTEGER,
+  "capacity" INTEGER,
+  "enabled" BOOLEAN NOT NULL DEFAULT true,
+  "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  CONSTRAINT "LessonOffer_pkey" PRIMARY KEY ("id")
+);
+CREATE INDEX IF NOT EXISTS "LessonOffer_clubId_idx" ON "LessonOffer"("clubId");
+DO $$ BEGIN
+  ALTER TABLE "LessonOffer" ADD CONSTRAINT "LessonOffer_clubId_fkey"
+    FOREIGN KEY ("clubId") REFERENCES "Club"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+
+CREATE TABLE IF NOT EXISTS "LessonApplication" (
+  "id" TEXT NOT NULL,
+  "offerId" TEXT NOT NULL,
+  "userId" TEXT,
+  "name" TEXT NOT NULL,
+  "phone" TEXT,
+  "note" TEXT,
+  "status" TEXT NOT NULL DEFAULT 'PENDING',
+  "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  CONSTRAINT "LessonApplication_pkey" PRIMARY KEY ("id")
+);
+CREATE INDEX IF NOT EXISTS "LessonApplication_offerId_createdAt_idx" ON "LessonApplication"("offerId", "createdAt");
+DO $$ BEGIN
+  ALTER TABLE "LessonApplication" ADD CONSTRAINT "LessonApplication_offerId_fkey"
+    FOREIGN KEY ("offerId") REFERENCES "LessonOffer"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;

@@ -28,6 +28,7 @@ import { AttendanceLeaderboard } from '../../components/club/AttendanceLeaderboa
 import { Icon } from '../../components/ui/Icon';
 import { ScreenContainer } from '../../components/ui/ScreenContainer';
 import { AddFacilityModal } from '../../components/AddFacilityModal';
+import { memberLessonApi, type LessonOffer } from '../../services/lab';
 
 interface ClubMember {
   userId: string;
@@ -92,6 +93,8 @@ export default function ClubDetailScreen() {
   const [showAllPast, setShowAllPast] = useState(false);
   // 멤버 목록 섹션 접이식 — 평소 닫힘.
   const [showMembers, setShowMembers] = useState(false);
+  const [lessons, setLessons] = useState<LessonOffer[]>([]);
+  const [applyingLesson, setApplyingLesson] = useState<string | null>(null);
   const [showStartModal, setShowStartModal] = useState(false);
   const [showRoleModal, setShowRoleModal] = useState(false);
   const [selectedMember, setSelectedMember] = useState<ClubMember | null>(null);
@@ -107,6 +110,32 @@ export default function ClubDetailScreen() {
   const club = clubs.find((c) => c.id === clubId);
   const myMembership = currentMembers.find((m) => m.userId === user?.id);
   const isLeaderOrStaff = myMembership?.role === 'LEADER' || myMembership?.role === 'STAFF';
+
+  // 레슨(활성 상품) — 없으면 섹션 자체를 숨긴다.
+  useEffect(() => {
+    if (!clubId) return;
+    memberLessonApi.list(clubId).then(setLessons).catch(() => {});
+  }, [clubId]);
+
+  const handleApplyLesson = (offer: LessonOffer) => {
+    if (!clubId || applyingLesson) return;
+    showConfirm(
+      '레슨 신청',
+      `${offer.coachName} 코치 · ${offer.summary}${offer.fee != null ? `\n레슨비 ${offer.fee.toLocaleString()}원` : ''}\n신청할까요?`,
+      async () => {
+        setApplyingLesson(offer.id);
+        try {
+          const r = await memberLessonApi.apply(clubId, offer.id);
+          showSuccess(r.message || '레슨 신청이 접수됐어요');
+          memberLessonApi.list(clubId).then(setLessons).catch(() => {});
+        } catch (e: any) {
+          showAlert('레슨 신청', e?.response?.data?.error?.message || e?.response?.data?.message || '신청에 실패했어요');
+        } finally {
+          setApplyingLesson(null);
+        }
+      },
+    );
+  };
   const isLeader = myMembership?.role === 'LEADER';
   const checkedInFacilityId = checkinStatus?.facilityId;
   // Am I currently checked in? Prefer the per-member flag from the club roster
@@ -612,6 +641,35 @@ export default function ClubDetailScreen() {
               </View>
             );
           })()}
+
+          {/* ─── 레슨 — 활성 레슨이 있을 때만. 회원 신청 진입점 ─── */}
+          {lessons.length > 0 && (
+            <View style={styles.section}>
+              <Text style={styles.sectionTitle}>레슨</Text>
+              {lessons.map((o) => {
+                const full = o.capacity != null && o.applicants >= o.capacity;
+                return (
+                  <View key={o.id} style={styles.lessonRow}>
+                    <View style={styles.pastRowLeft}>
+                      <Text style={styles.pastDate}>{o.coachName} 코치 · {o.summary}</Text>
+                      <Text style={styles.pastMeta}>
+                        {[o.fee != null && `${o.fee.toLocaleString()}원`, o.capacity != null ? `정원 ${o.capacity}명 중 ${o.applicants}명` : `신청 ${o.applicants}명`].filter(Boolean).join(' · ')}
+                      </Text>
+                    </View>
+                    <TouchableOpacity
+                      style={[styles.lessonApplyBtn, (full || applyingLesson === o.id) && { opacity: 0.5 }]}
+                      onPress={() => handleApplyLesson(o)}
+                      disabled={full || applyingLesson === o.id}
+                      activeOpacity={0.85}
+                      accessibilityLabel={`${o.coachName} 코치 레슨 신청`}
+                    >
+                      <Text style={styles.lessonApplyText}>{full ? '마감' : applyingLesson === o.id ? '신청 중…' : '신청'}</Text>
+                    </TouchableOpacity>
+                  </View>
+                );
+              })}
+            </View>
+          )}
 
           {/* ═══ 출석왕 — TOP 3로 접고, 전체 보기로 펼침 (내 순위 pill은 항상) ═══ */}
           {clubId && <AttendanceLeaderboard clubId={clubId} maxRows={3} />}
@@ -1410,5 +1468,26 @@ const styles = StyleSheet.create({
     marginTop: 8,
     marginBottom: 6,
     paddingHorizontal: 2,
+  },
+  lessonRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: Colors.surface,
+    borderRadius: 14,
+    paddingVertical: 12,
+    paddingHorizontal: 14,
+    marginBottom: 8,
+    gap: 10,
+  },
+  lessonApplyBtn: {
+    backgroundColor: Colors.primary,
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    borderRadius: 999,
+  },
+  lessonApplyText: {
+    fontSize: 13,
+    fontWeight: '800',
+    color: '#fff',
   },
 });

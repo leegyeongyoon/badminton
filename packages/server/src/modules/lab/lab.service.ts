@@ -370,6 +370,7 @@ export interface LabGuestApplicationRow {
   id: string;
   name: string;
   isAppUser: boolean; // 앱 회원이 로그인 상태로 신청(userId 연결됨)
+  isCheckedIn: boolean; // 당일 체크인과 매칭됨(실제 출석)
   skillLevel: string | null;
   gender: string | null;
   visitDate: string | null;
@@ -393,6 +394,7 @@ export async function getGuestApplications(clubId: string): Promise<LabGuestAppl
     id: r.id,
     name: r.name,
     isAppUser: !!r.userId,
+    isCheckedIn: !!r.checkedInAt,
     skillLevel: r.skillLevel,
     gender: r.gender,
     visitDate: r.visitDate,
@@ -422,6 +424,11 @@ export async function updateGuestApplication(
     include: { club: { select: { name: true } } },
   });
 
+  // 취소로 자리가 났으면 대기열 승격.
+  if (updated.status === 'CANCELLED') {
+    await promoteWaitlist(updated.clubId, updated.visitDate).catch(() => {});
+  }
+
   // 앱 회원 신청자(userId 연결)에게 확정 푸시 — 익명 신청은 보낼 곳이 없어 생략.
   if (updated.userId && updated.status === 'CONFIRMED' && patch.feePaid) {
     try {
@@ -429,6 +436,71 @@ export async function updateGuestApplication(
       await sendPushToUser(updated.userId, {
         title: '게스트 신청 확정 🎉',
         body: `${updated.club.name}${visit}이 확정됐어요. 정모에서 만나요!`,
+      });
+    } catch {
+      /* 알림 실패 무시 */
+    }
+  }
+}
+
+// ─── 신청 ↔ 당일 체크인 자동 매칭 ─────────────────────────────
+/**
+ * 게스트가 실제로 체크인하면 그 클럽의 '오늘 방문' 신청을 찾아 출석 처리.
+ * userId 일치 우선, 없으면 이름 일치. 노쇼 파악용 — 실패해도 체크인엔 영향 없음.
+ */
+export async function matchApplicationOnCheckIn(
+  clubId: string,
+  who: { userId?: string | null; name?: string | null },
+): Promise<void> {
+  const d = new Date();
+  const today = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  const base = {
+    clubId,
+    visitDate: today,
+    checkedInAt: null,
+    status: { in: ['PENDING', 'CONFIRMED', 'WAITLIST'] },
+  };
+
+  let app = who.userId
+    ? await prisma.guestApplication.findFirst({ where: { ...base, userId: who.userId }, orderBy: { createdAt: 'asc' } })
+    : null;
+  if (!app && who.name) {
+    app = await prisma.guestApplication.findFirst({ where: { ...base, name: who.name.trim() }, orderBy: { createdAt: 'asc' } });
+  }
+  if (!app) return;
+  await prisma.guestApplication.update({ where: { id: app.id }, data: { checkedInAt: new Date() } });
+}
+
+// ─── 대기열 자동 승격 ─────────────────────────────────────────
+/**
+ * 자리가 났을 때(취소 등) 그 날짜의 가장 오래된 대기(WAITLIST) 신청을
+ * PENDING으로 승격하고 앱 회원이면 푸시로 알린다. 정원 미설정이면 no-op.
+ */
+export async function promoteWaitlist(clubId: string, visitDate: string | null): Promise<void> {
+  if (!visitDate) return;
+  const club = await prisma.club.findUnique({
+    where: { id: clubId },
+    select: { name: true, maxGuestsPerDay: true },
+  });
+  if (!club?.maxGuestsPerDay) return;
+
+  const active = await prisma.guestApplication.count({
+    where: { clubId, visitDate, status: { in: ['PENDING', 'CONFIRMED'] } },
+  });
+  if (active >= club.maxGuestsPerDay) return; // 자리 없음
+
+  const next = await prisma.guestApplication.findFirst({
+    where: { clubId, visitDate, status: 'WAITLIST' },
+    orderBy: { createdAt: 'asc' },
+  });
+  if (!next) return;
+
+  await prisma.guestApplication.update({ where: { id: next.id }, data: { status: 'PENDING' } });
+  if (next.userId) {
+    try {
+      await sendPushToUser(next.userId, {
+        title: '게스트 자리가 났어요 🙌',
+        body: `${club.name} ${visitDate.slice(5).replace('-', '/')} 방문 대기가 신청으로 전환됐어요.`,
       });
     } catch {
       /* 알림 실패 무시 */
@@ -587,4 +659,197 @@ export async function setDuesConfig(
   if (cfg.guestFee !== undefined) data.guestFee = cfg.guestFee;
   if (cfg.duesAccountInfo !== undefined) data.duesAccountInfo = cfg.duesAccountInfo;
   await prisma.club.update({ where: { id: clubId }, data });
+}
+
+// ─── 레슨 중개 MVP ────────────────────────────────────────────
+// 모임 내 레슨 운영: 운영진이 레슨 상품(코치·요일·시간·레슨비·정원)을 열고
+// 앱 회원이 신청 → 운영진 확정. 정산 합산·수수료는 후속.
+
+const DAY_KO = ['일', '월', '화', '수', '목', '금', '토'];
+
+export interface LabLessonOffer {
+  id: string;
+  coachName: string;
+  day: number;
+  start: string;
+  end: string;
+  fee: number | null;
+  capacity: number | null;
+  enabled: boolean;
+  summary: string; // "매주 화 19:00~20:00"
+  applicants: number; // PENDING+CONFIRMED
+}
+
+export interface LabLessonApplicationRow {
+  id: string;
+  offerId: string;
+  offerSummary: string;
+  coachName: string;
+  name: string;
+  isAppUser: boolean;
+  phone: string | null;
+  note: string | null;
+  status: string; // PENDING | CONFIRMED | CANCELLED
+  createdAt: string;
+}
+
+function lessonSummary(o: { day: number; start: string; end: string }): string {
+  return `매주 ${DAY_KO[o.day] ?? '?'} ${o.start}~${o.end}`;
+}
+
+/** 레슨 상품 목록(신청자 수 포함). enabledOnly면 회원 노출용으로 활성만. */
+export async function getLessonOffers(clubId: string, enabledOnly = false): Promise<LabLessonOffer[]> {
+  const offers = await prisma.lessonOffer.findMany({
+    where: { clubId, ...(enabledOnly ? { enabled: true } : {}) },
+    orderBy: [{ day: 'asc' }, { start: 'asc' }],
+    include: { _count: { select: { applications: { where: { status: { in: ['PENDING', 'CONFIRMED'] } } } } } },
+  });
+  return offers.map((o) => ({
+    id: o.id,
+    coachName: o.coachName,
+    day: o.day,
+    start: o.start,
+    end: o.end,
+    fee: o.fee,
+    capacity: o.capacity,
+    enabled: o.enabled,
+    summary: lessonSummary(o),
+    applicants: o._count.applications,
+  }));
+}
+
+/** 레슨 상품 생성/수정. id 있으면 수정(소유권은 라우터에서 확인). */
+export async function upsertLessonOffer(
+  clubId: string,
+  input: { id?: string; coachName?: string; day?: number; start?: string; end?: string; fee?: number | null; capacity?: number | null; enabled?: boolean },
+): Promise<string> {
+  const coachName = String(input.coachName ?? '').trim();
+  const day = Number(input.day);
+  const start = String(input.start ?? '');
+  const end = String(input.end ?? '');
+  if (input.id) {
+    const data: Record<string, unknown> = {};
+    if (input.coachName !== undefined) data.coachName = coachName;
+    if (input.day !== undefined && Number.isInteger(day) && day >= 0 && day <= 6) data.day = day;
+    if (input.start !== undefined && HHMM.test(start)) data.start = start;
+    if (input.end !== undefined && HHMM.test(end)) data.end = end;
+    if (input.fee !== undefined) data.fee = input.fee != null && Number(input.fee) > 0 ? Number(input.fee) : null;
+    if (input.capacity !== undefined) data.capacity = input.capacity != null && Number(input.capacity) > 0 ? Number(input.capacity) : null;
+    if (input.enabled !== undefined) data.enabled = !!input.enabled;
+    await prisma.lessonOffer.update({ where: { id: input.id }, data });
+    return input.id;
+  }
+  if (!coachName) throw new Error('코치명을 입력해 주세요.');
+  if (!Number.isInteger(day) || day < 0 || day > 6) throw new Error('요일이 올바르지 않아요.');
+  if (!HHMM.test(start) || !HHMM.test(end)) throw new Error('시간 형식은 HH:mm 이에요.');
+  const created = await prisma.lessonOffer.create({
+    data: {
+      clubId,
+      coachName,
+      day,
+      start,
+      end,
+      fee: input.fee != null && Number(input.fee) > 0 ? Number(input.fee) : null,
+      capacity: input.capacity != null && Number(input.capacity) > 0 ? Number(input.capacity) : null,
+      enabled: input.enabled !== false,
+    },
+  });
+  return created.id;
+}
+
+export async function deleteLessonOffer(offerId: string): Promise<void> {
+  await prisma.lessonOffer.delete({ where: { id: offerId } });
+}
+
+/** 클럽의 레슨 신청 목록(운영자용) — CANCELLED는 뒤로. */
+export async function getLessonApplications(clubId: string): Promise<LabLessonApplicationRow[]> {
+  const rows = await prisma.lessonApplication.findMany({
+    where: { offer: { clubId } },
+    orderBy: { createdAt: 'desc' },
+    include: { offer: { select: { coachName: true, day: true, start: true, end: true } } },
+  });
+  const mapped = rows.map((r) => ({
+    id: r.id,
+    offerId: r.offerId,
+    offerSummary: lessonSummary(r.offer),
+    coachName: r.offer.coachName,
+    name: r.name,
+    isAppUser: !!r.userId,
+    phone: r.phone,
+    note: r.note,
+    status: r.status,
+    createdAt: r.createdAt.toISOString(),
+  }));
+  return [...mapped.filter((r) => r.status !== 'CANCELLED'), ...mapped.filter((r) => r.status === 'CANCELLED')];
+}
+
+/** 회원 레슨 신청 — 정원 초과·중복 방지, 운영진 푸시. */
+export async function applyLesson(
+  offerId: string,
+  applicant: { userId: string; name: string; phone?: string | null; note?: string | null },
+): Promise<{ id: string; message: string }> {
+  const offer = await prisma.lessonOffer.findUnique({
+    where: { id: offerId },
+    include: { club: { select: { id: true, name: true } } },
+  });
+  if (!offer || !offer.enabled) throw new Error('신청할 수 없는 레슨이에요.');
+
+  const dup = await prisma.lessonApplication.findFirst({
+    where: { offerId, userId: applicant.userId, status: { in: ['PENDING', 'CONFIRMED'] } },
+  });
+  if (dup) throw new Error('이미 신청한 레슨이에요.');
+
+  if (offer.capacity) {
+    const active = await prisma.lessonApplication.count({
+      where: { offerId, status: { in: ['PENDING', 'CONFIRMED'] } },
+    });
+    if (active >= offer.capacity) throw new Error('레슨 정원이 가득 찼어요.');
+  }
+
+  const app = await prisma.lessonApplication.create({
+    data: {
+      offerId,
+      userId: applicant.userId,
+      name: applicant.name.trim().slice(0, 30),
+      phone: applicant.phone ? String(applicant.phone).slice(0, 20) : null,
+      note: applicant.note ? String(applicant.note).slice(0, 200) : null,
+    },
+  });
+
+  // 운영진에게 신청 접수 푸시(실패해도 신청은 성공).
+  try {
+    const staff = await prisma.clubMember.findMany({
+      where: { clubId: offer.club.id, role: { in: ['LEADER', 'STAFF'] } },
+      select: { userId: true },
+    });
+    const { sendPushToUsers } = await import('../notification/notification.service');
+    await sendPushToUsers(staff.map((s) => s.userId), {
+      title: '레슨 신청',
+      body: `${app.name}님이 ${offer.coachName} 코치 레슨(${lessonSummary(offer)})을 신청했어요`,
+    });
+  } catch {
+    /* 알림 실패 무시 */
+  }
+
+  return { id: app.id, message: `${offer.coachName} 코치 레슨 신청이 접수됐어요. 운영진 확정 후 알림을 보내드려요.` };
+}
+
+/** 레슨 신청 상태 변경(운영자) — CONFIRMED 전환 시 신청자 푸시. */
+export async function updateLessonApplication(id: string, status: string): Promise<void> {
+  if (!['PENDING', 'CONFIRMED', 'CANCELLED'].includes(status)) throw new Error('잘못된 상태예요.');
+  const updated = await prisma.lessonApplication.update({
+    where: { id },
+    data: { status },
+    include: { offer: { include: { club: { select: { name: true } } } } },
+  });
+  if (updated.userId && status === 'CONFIRMED') {
+    try {
+      await sendPushToUser(updated.userId, {
+        title: '레슨 확정 🏸',
+        body: `${updated.offer.club.name} ${updated.offer.coachName} 코치 레슨(${lessonSummary(updated.offer)})이 확정됐어요!`,
+      });
+    } catch {
+      /* 알림 실패 무시 */
+    }
+  }
 }

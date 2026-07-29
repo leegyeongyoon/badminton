@@ -1077,9 +1077,12 @@ function discoverScheduleSummary(input: unknown): string | null {
     (s) => Number.isInteger(s?.day) && (s.day as number) >= 0 && (s.day as number) <= 6,
   );
   if (slots.length === 0) return null;
-  const days = [...new Set(slots.map((s) => s.day as number))].sort().map((d) => DISCOVER_DAY_KO[d]).join('·');
-  const times = [...new Set(slots.map((s) => `${s.start}~${s.end}`))];
-  return times.length === 1 ? `매주 ${days} ${times[0]}` : `매주 ${days}`;
+  const sorted = [...slots].sort((a, b) => (a.day as number) - (b.day as number));
+  const days = [...new Set(sorted.map((s) => s.day as number))].map((d) => DISCOVER_DAY_KO[d]).join('·');
+  const times = [...new Set(sorted.map((s) => `${s.start}~${s.end}`))];
+  if (times.length === 1) return `매주 ${days} ${times[0]}`;
+  if (sorted.length <= 3) return `매주 ${sorted.map((s) => `${DISCOVER_DAY_KO[s.day as number]} ${s.start}~${s.end}`).join(' · ')}`;
+  return `매주 ${days}`;
 }
 
 export async function discoverClubs(query?: string): Promise<DiscoverClubRow[]> {

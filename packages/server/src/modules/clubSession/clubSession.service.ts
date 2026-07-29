@@ -671,6 +671,12 @@ export async function addGuest(
     },
   });
 
+  // 사전 신청 ↔ 당일 체크인 매칭(운영자가 등록한 게스트도 이름으로 출석 처리).
+  {
+    const { matchApplicationOnCheckIn } = await import('../lab/lab.service');
+    await matchApplicationOnCheckIn(session.clubId, { name: input.name }).catch(() => {});
+  }
+
   // Same socket events as a normal check-in so the operator board refreshes.
   const io = getIO();
   const arrivedPayload = {

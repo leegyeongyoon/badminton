@@ -415,6 +415,16 @@ export function MoneyManager({ clubs, api }: { clubs: MoneyClub[]; api: MoneyApi
                           {a.skillLevel ? ` · ${a.skillLevel}조` : ''}
                           {a.gender ? ` · ${a.gender === 'M' ? '남' : '여'}` : ''}
                         </Text>
+                        {a.isCheckedIn && (
+                          <View style={[styles.appUserTag, { backgroundColor: alpha(colors.secondary, 0.12) }]}>
+                            <Text style={[styles.appUserTagText, { color: colors.secondary }]}>출석 ✓</Text>
+                          </View>
+                        )}
+                        {a.status === 'WAITLIST' && (
+                          <View style={[styles.appUserTag, { backgroundColor: alpha(colors.warning, 0.12) }]}>
+                            <Text style={[styles.appUserTagText, { color: colors.warning }]}>대기</Text>
+                          </View>
+                        )}
                         {a.isAppUser && (
                           <View style={[styles.appUserTag, { backgroundColor: alpha(colors.info, 0.12) }]}>
                             <Text style={[styles.appUserTagText, { color: colors.info }]}>앱 회원</Text>

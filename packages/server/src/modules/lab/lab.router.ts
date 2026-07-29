@@ -2,7 +2,13 @@ import { Router, Request, Response, NextFunction } from 'express';
 import { authenticate } from '../../middleware/auth';
 import { ForbiddenError } from '../../utils/errors';
 import { isSuperAdmin } from '../clubSession/clubSession.service';
-import { getLabProfile, getClubSettlement, markDuesPaid, unmarkDuesPaid, setDuesAccount, getDuesConfig, setDuesConfig, getClubSessions, setSessionRentalCost, getClubGuests, setGuestFeePaid, getGuestApplications, updateGuestApplication } from './lab.service';
+import { getLabProfile, getClubSettlement, markDuesPaid, unmarkDuesPaid, setDuesAccount, getDuesConfig, setDuesConfig, getClubSessions, setSessionRentalCost, getClubGuests, setGuestFeePaid, getGuestApplications, updateGuestApplication,
+  getLessonOffers,
+  upsertLessonOffer,
+  deleteLessonOffer,
+  getLessonApplications,
+  updateLessonApplication,
+} from './lab.service';
 
 const router = Router();
 
@@ -166,6 +172,31 @@ router.put('/clubs/:clubId/dues-account', authenticate, superAdminOnly, async (r
   } catch (err) {
     next(err);
   }
+});
+
+
+// ─── 레슨 중개 MVP(최고관리자 미러) ────────────────────────────
+router.get('/clubs/:clubId/lessons', authenticate, superAdminOnly, async (req: Request, res: Response, next: NextFunction) => {
+  try { res.json(await getLessonOffers(String(req.params.clubId))); } catch (err) { next(err); }
+});
+router.put('/clubs/:clubId/lessons', authenticate, superAdminOnly, async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const id = await upsertLessonOffer(String(req.params.clubId), req.body || {});
+    res.json({ ok: true, id });
+  } catch (err) { next(err); }
+});
+router.delete('/lesson-offers/:offerId', authenticate, superAdminOnly, async (req: Request, res: Response, next: NextFunction) => {
+  try { await deleteLessonOffer(String(req.params.offerId)); res.json({ ok: true }); } catch (err) { next(err); }
+});
+router.get('/clubs/:clubId/lesson-applications', authenticate, superAdminOnly, async (req: Request, res: Response, next: NextFunction) => {
+  try { res.json(await getLessonApplications(String(req.params.clubId))); } catch (err) { next(err); }
+});
+router.put('/lesson-applications/:appId', authenticate, superAdminOnly, async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { status } = req.body as { status?: string };
+    await updateLessonApplication(String(req.params.appId), String(status || ''));
+    res.json({ ok: true });
+  } catch (err) { next(err); }
 });
 
 export default router;

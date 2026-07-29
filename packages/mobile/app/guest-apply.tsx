@@ -254,7 +254,8 @@ export default function GuestApply() {
           <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.chipRow}>
             {availableDates.map((d) => {
               const active = visitDate === d.date;
-              const disabled = d.status !== 'OPEN';
+              // 정원 마감(FULL)은 '대기 신청'으로 선택 가능 — 날짜 마감(CLOSED)만 비활성.
+              const disabled = d.status === 'CLOSED';
               return (
                 <Pressable
                   key={d.date}
@@ -270,7 +271,7 @@ export default function GuestApply() {
                 >
                   <Text style={[styles.skillChipText, { color: active ? '#fff' : colors.textSecondary }]}>{d.label}</Text>
                   {d.status === 'FULL' ? (
-                    <Text style={[styles.dateSub, { color: colors.danger }]}>정원 마감</Text>
+                    <Text style={[styles.dateSub, { color: active ? 'rgba(255,255,255,0.9)' : colors.warning }]}>대기 신청</Text>
                   ) : d.status === 'CLOSED' ? (
                     <Text style={[styles.dateSub, { color: colors.textLight }]}>마감</Text>
                   ) : d.remaining != null ? (

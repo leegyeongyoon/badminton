@@ -5,7 +5,7 @@ import { validate } from '../../middleware/validate';
 import * as userService from './user.service';
 import * as turnService from '../turn/turn.service';
 import { getMyStatus } from '../clubSession/clubSession.service';
-import { getLabProfile } from '../lab/lab.service';
+import { getLabProfile, promoteWaitlist } from '../lab/lab.service';
 import { prisma } from '../../utils/prisma';
 
 const router = Router();
@@ -51,11 +51,15 @@ router.delete('/me/guest-applications/:id', authenticate, async (req: Request, r
       res.status(404).json({ error: '신청을 찾을 수 없습니다' });
       return;
     }
-    if (app.status !== 'PENDING') {
+    if (app.status !== 'PENDING' && app.status !== 'WAITLIST') {
       res.status(400).json({ error: '확정된 신청은 운영자에게 문의해 주세요' });
       return;
     }
     await prisma.guestApplication.update({ where: { id: app.id }, data: { status: 'CANCELLED' } });
+    // 유효 신청(PENDING) 취소로 자리가 났으면 대기열 승격.
+    if (app.status === 'PENDING') {
+      await promoteWaitlist(app.clubId, app.visitDate).catch(() => {});
+    }
     res.json({ ok: true });
   } catch (err) {
     next(err);

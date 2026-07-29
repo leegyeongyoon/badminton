@@ -12,7 +12,7 @@ import { Icon, IconName } from '../../components/ui/Icon';
 const CARDS: { key: string; icon: IconName; tint: 'primary' | 'secondary' | 'warning' | 'info'; title: string; desc: string; route: string | null; ready: boolean }[] = [
   { key: 'money', icon: 'stats', tint: 'secondary', title: '회비 관리', desc: '정산(회비·참가비·엔빵·게스트비) · 게스트 · 설정을 한 곳에서', route: '/lab/money', ready: true },
   { key: 'profile', icon: 'trophy', tint: 'primary', title: '내 배드민턴 프로필', desc: '총 게임 · 연속 출석 · 파트너 랭킹 · 성취 뱃지', route: '/lab/profile', ready: true },
-  { key: 'lesson', icon: 'court', tint: 'info', title: '레슨 중개', desc: '코치 ↔ 회원 예약 + 수수료 (준비 중)', route: null, ready: false },
+  { key: 'lesson', icon: 'court', tint: 'info', title: '레슨 중개', desc: '레슨 개설 · 회원 신청 · 확정 관리', route: '/lab/lessons', ready: true },
 ];
 
 export default function LabHome() {

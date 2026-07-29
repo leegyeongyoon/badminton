@@ -312,7 +312,7 @@ export default function ProfileScreen() {
                         {a.feeAmount != null ? ` · 게스트비 ${a.feeAmount.toLocaleString()}원` : ''}
                       </Text>
                     </View>
-                    {a.status === 'PENDING' ? (
+                    {a.status === 'PENDING' || a.status === 'WAITLIST' ? (
                       <TouchableOpacity
                         style={styles.appCancelBtn}
                         onPress={async () => {
@@ -322,7 +322,7 @@ export default function ProfileScreen() {
                           } catch { /* noop */ }
                         }}
                       >
-                        <Text style={styles.appCancelText}>대기 중 · 취소</Text>
+                        <Text style={styles.appCancelText}>{a.status === 'WAITLIST' ? '대기열 · 취소' : '대기 중 · 취소'}</Text>
                       </TouchableOpacity>
                     ) : (
                       <Text style={[styles.appStatus, a.status === 'CONFIRMED' ? styles.appStatusOk : styles.appStatusMuted]}>

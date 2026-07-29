@@ -17,6 +17,12 @@ import {
   updateGuestApplication,
   getOperationConfig,
   setOperationConfig,
+  getLessonOffers,
+  upsertLessonOffer,
+  deleteLessonOffer,
+  getLessonApplications,
+  applyLesson,
+  updateLessonApplication,
 } from '../lab/lab.service';
 
 // ─────────────────────────────────────────────────────────────
@@ -150,6 +156,92 @@ router.put('/:clubId/money/checkins/:checkInId/fee-paid', authenticate, staffGua
     const { paid } = req.body as { paid?: boolean };
     await setGuestFeePaid(String(req.params.checkInId), !!paid);
     res.json({ ok: true });
+  } catch (err) { next(err); }
+});
+
+// ─── 레슨 중개 MVP ────────────────────────────────────────────
+
+// GET /clubs/:clubId/money/lessons — 레슨 상품 목록(운영자, 비활성 포함)
+router.get('/:clubId/money/lessons', authenticate, staffGuard, async (req: Request, res: Response, next: NextFunction) => {
+  try { res.json(await getLessonOffers(String(req.params.clubId))); } catch (err) { next(err); }
+});
+
+// PUT /clubs/:clubId/money/lessons — 생성/수정(id 있으면 수정, 소유권 확인)
+router.put('/:clubId/money/lessons', authenticate, staffGuard, async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const body = (req.body || {}) as Parameters<typeof upsertLessonOffer>[1];
+    if (body.id) {
+      const offer = await prisma.lessonOffer.findUnique({ where: { id: String(body.id) }, select: { clubId: true } });
+      if (!offer || offer.clubId !== String(req.params.clubId)) throw new NotFoundError('레슨');
+    }
+    const id = await upsertLessonOffer(String(req.params.clubId), body);
+    res.json({ ok: true, id });
+  } catch (err) { next(err); }
+});
+
+// DELETE /clubs/:clubId/money/lessons/:offerId — 소유권 확인 후 삭제
+router.delete('/:clubId/money/lessons/:offerId', authenticate, staffGuard, async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const offer = await prisma.lessonOffer.findUnique({ where: { id: String(req.params.offerId) }, select: { clubId: true } });
+    if (!offer || offer.clubId !== String(req.params.clubId)) throw new NotFoundError('레슨');
+    await deleteLessonOffer(String(req.params.offerId));
+    res.json({ ok: true });
+  } catch (err) { next(err); }
+});
+
+// GET /clubs/:clubId/money/lesson-applications — 신청 목록(운영자)
+router.get('/:clubId/money/lesson-applications', authenticate, staffGuard, async (req: Request, res: Response, next: NextFunction) => {
+  try { res.json(await getLessonApplications(String(req.params.clubId))); } catch (err) { next(err); }
+});
+
+// PUT /clubs/:clubId/money/lesson-applications/:appId — 확정/취소(소유권 확인)
+router.put('/:clubId/money/lesson-applications/:appId', authenticate, staffGuard, async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const app = await prisma.lessonApplication.findUnique({
+      where: { id: String(req.params.appId) },
+      select: { offer: { select: { clubId: true } } },
+    });
+    if (!app || app.offer.clubId !== String(req.params.clubId)) throw new NotFoundError('레슨 신청');
+    const { status } = req.body as { status?: string };
+    if (!status) throw new BadRequestError('status 필요');
+    await updateLessonApplication(String(req.params.appId), status);
+    res.json({ ok: true });
+  } catch (err) { next(err); }
+});
+
+// ─── 회원용 레슨(스태프 아님 — 멤버 가드) ──────────────────────
+async function memberGuard(req: Request, _res: Response, next: NextFunction) {
+  try {
+    const member = await prisma.clubMember.findFirst({
+      where: { clubId: String(req.params.clubId), userId: req.user!.userId },
+      select: { id: true },
+    });
+    if (!member) throw new NotFoundError('모임');
+    next();
+  } catch (err) {
+    next(err);
+  }
+}
+
+// GET /clubs/:clubId/lessons — 활성 레슨 목록(회원)
+router.get('/:clubId/lessons', authenticate, memberGuard, async (req: Request, res: Response, next: NextFunction) => {
+  try { res.json(await getLessonOffers(String(req.params.clubId), true)); } catch (err) { next(err); }
+});
+
+// POST /clubs/:clubId/lessons/:offerId/apply — 회원 레슨 신청
+router.post('/:clubId/lessons/:offerId/apply', authenticate, memberGuard, async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const offer = await prisma.lessonOffer.findUnique({ where: { id: String(req.params.offerId) }, select: { clubId: true } });
+    if (!offer || offer.clubId !== String(req.params.clubId)) throw new NotFoundError('레슨');
+    const me = await prisma.user.findUnique({ where: { id: req.user!.userId }, select: { name: true, phone: true } });
+    const { note } = req.body as { note?: string };
+    const result = await applyLesson(String(req.params.offerId), {
+      userId: req.user!.userId,
+      name: me?.name || '회원',
+      phone: me?.phone ?? null,
+      note: note ?? null,
+    });
+    res.status(201).json(result);
   } catch (err) { next(err); }
 });
 
