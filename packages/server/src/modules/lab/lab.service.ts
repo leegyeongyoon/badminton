@@ -1,4 +1,5 @@
 import { prisma } from '../../utils/prisma';
+import { sendPushToUser } from '../notification/notification.service';
 import type {
   LabProfileResponse,
   LabBadge,
@@ -415,7 +416,24 @@ export async function updateGuestApplication(
     data.status = patch.feePaid ? 'CONFIRMED' : 'PENDING';
   }
   if (patch.status !== undefined) data.status = patch.status;
-  await prisma.guestApplication.update({ where: { id }, data });
+  const updated = await prisma.guestApplication.update({
+    where: { id },
+    data,
+    include: { club: { select: { name: true } } },
+  });
+
+  // 앱 회원 신청자(userId 연결)에게 확정 푸시 — 익명 신청은 보낼 곳이 없어 생략.
+  if (updated.userId && updated.status === 'CONFIRMED' && patch.feePaid) {
+    try {
+      const visit = updated.visitDate ? ` ${updated.visitDate.slice(5).replace('-', '/')} 방문` : '';
+      await sendPushToUser(updated.userId, {
+        title: '게스트 신청 확정 🎉',
+        body: `${updated.club.name}${visit}이 확정됐어요. 정모에서 만나요!`,
+      });
+    } catch {
+      /* 알림 실패 무시 */
+    }
+  }
 }
 
 // ─── 운영 정보(운동 일정) + 게스트 신청 정책 ───────────────────
