@@ -561,8 +561,9 @@ export async function setOperationConfig(
   if (cfg.weeklySchedule !== undefined) data.weeklySchedule = sanitizeWeeklySchedule(cfg.weeklySchedule);
   if (cfg.guestApplyEnabled !== undefined) data.guestApplyEnabled = !!cfg.guestApplyEnabled;
   if (cfg.guestApplyDeadlineHours !== undefined) {
+    // 범위 밖 값을 조용히 null(마감 없음)로 바꾸면 운영자 의도와 반대가 되므로 168h(7일)로 클램프.
     const n = Number(cfg.guestApplyDeadlineHours);
-    data.guestApplyDeadlineHours = Number.isInteger(n) && n >= 0 && n <= 168 ? n : null;
+    data.guestApplyDeadlineHours = Number.isInteger(n) && n >= 0 ? Math.min(n, 168) : null;
   }
   if (cfg.maxGuestsPerDay !== undefined) {
     const n = Number(cfg.maxGuestsPerDay);
