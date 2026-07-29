@@ -289,6 +289,7 @@ model Club {
   // 게스트 신청 정책: 받기 토글 / 운동 시작 N시간 전 마감(null=시작 전까지) / 1일 정원(null=무제한).
   guestApplyEnabled Boolean @default(true)
   guestApplyDeadlineHours Int?
+  contactInfo String? // 운영진 문의 채널(오픈채팅 링크·전화 등) — 게스트 신청 페이지 노출
   maxGuestsPerDay Int?
   createdAt      DateTime @default(now())
   updatedAt      DateTime @updatedAt
@@ -596,14 +597,17 @@ model GuestApplication {
 // 운영진이 레슨 상품(코치·요일·시간·레슨비·정원)을 열고, 앱 회원이 신청하면
 // 운영진이 확정한다. 정산 합산·수수료는 후속.
 model LessonOffer {
-  id        String   @id @default(uuid())
-  clubId    String
-  coachName String
-  day       Int // 0(일)~6(토)
-  start     String // "HH:mm"
-  end       String // "HH:mm"
-  fee       Int? // 회당/월 레슨비(안내용)
-  capacity  Int? // 정원(null=무제한)
+  id          String   @id @default(uuid())
+  clubId      String
+  coachName   String
+  coachIntro  String? // 한 줄 소개("전 실업팀 선수 출신")
+  coachCareer String? // 이력·경력(줄바꿈 구분)
+  day         Int // 정렬용 첫 요일 0(일)~6(토)
+  days        Json? // 레슨 요일 묶음 [1,3,5]=월수금 — 없으면 [day]
+  start       String // "HH:mm"
+  end         String // "HH:mm"
+  fee         Int? // 월 레슨비(안내용)
+  capacity    Int? // 정원(null=무제한)
   enabled   Boolean  @default(true)
   createdAt DateTime @default(now())
 

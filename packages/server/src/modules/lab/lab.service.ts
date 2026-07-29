@@ -517,6 +517,7 @@ export interface LabOperationConfig {
   guestApplyEnabled: boolean;
   guestApplyDeadlineHours: number | null;
   maxGuestsPerDay: number | null;
+  contactInfo: string | null; // 운영진 문의 채널(오픈채팅 링크·전화)
 }
 
 const HHMM = /^([01][0-9]|2[0-3]):[0-5][0-9]$/;
@@ -540,7 +541,7 @@ export function sanitizeWeeklySchedule(input: unknown): WeeklySlot[] {
 export async function getOperationConfig(clubId: string): Promise<LabOperationConfig> {
   const c = await prisma.club.findUnique({
     where: { id: clubId },
-    select: { id: true, name: true, weeklySchedule: true, guestApplyEnabled: true, guestApplyDeadlineHours: true, maxGuestsPerDay: true },
+    select: { id: true, name: true, weeklySchedule: true, guestApplyEnabled: true, guestApplyDeadlineHours: true, maxGuestsPerDay: true, contactInfo: true },
   });
   if (!c) throw new Error('Club not found');
   return {
@@ -550,12 +551,13 @@ export async function getOperationConfig(clubId: string): Promise<LabOperationCo
     guestApplyEnabled: c.guestApplyEnabled,
     guestApplyDeadlineHours: c.guestApplyDeadlineHours,
     maxGuestsPerDay: c.maxGuestsPerDay,
+    contactInfo: c.contactInfo,
   };
 }
 
 export async function setOperationConfig(
   clubId: string,
-  cfg: Partial<{ weeklySchedule: unknown; guestApplyEnabled: boolean; guestApplyDeadlineHours: number | null; maxGuestsPerDay: number | null }>,
+  cfg: Partial<{ weeklySchedule: unknown; guestApplyEnabled: boolean; guestApplyDeadlineHours: number | null; maxGuestsPerDay: number | null; contactInfo: string | null }>,
 ): Promise<void> {
   const data: Record<string, unknown> = {};
   if (cfg.weeklySchedule !== undefined) data.weeklySchedule = sanitizeWeeklySchedule(cfg.weeklySchedule);
@@ -568,6 +570,9 @@ export async function setOperationConfig(
   if (cfg.maxGuestsPerDay !== undefined) {
     const n = Number(cfg.maxGuestsPerDay);
     data.maxGuestsPerDay = Number.isInteger(n) && n > 0 && n <= 100 ? n : null;
+  }
+  if (cfg.contactInfo !== undefined) {
+    data.contactInfo = cfg.contactInfo != null ? String(cfg.contactInfo).trim().slice(0, 200) || null : null;
   }
   await prisma.club.update({ where: { id: clubId }, data });
 }
@@ -671,14 +676,17 @@ const DAY_KO = ['일', '월', '화', '수', '목', '금', '토'];
 export interface LabLessonOffer {
   id: string;
   coachName: string;
-  day: number;
+  coachIntro: string | null;
+  coachCareer: string | null;
+  days: number[]; // [1,3,5] = 월수금
   start: string;
   end: string;
-  fee: number | null;
+  fee: number | null; // 월 레슨비
   capacity: number | null;
   enabled: boolean;
-  summary: string; // "매주 화 19:00~20:00"
+  summary: string; // "월·수·금 19:00~20:00"
   applicants: number; // PENDING+CONFIRMED
+  myStatus: string | null; // 조회자 본인의 신청 상태(PENDING/CONFIRMED) — 회원 조회에서만
 }
 
 export interface LabLessonApplicationRow {
@@ -694,21 +702,37 @@ export interface LabLessonApplicationRow {
   createdAt: string;
 }
 
-function lessonSummary(o: { day: number; start: string; end: string }): string {
-  return `매주 ${DAY_KO[o.day] ?? '?'} ${o.start}~${o.end}`;
+/** days Json → 정제된 요일 배열(0~6, 중복 제거, 정렬). 비면 [day] 폴백. */
+function lessonDays(o: { day: number; days?: unknown }): number[] {
+  const raw = Array.isArray(o.days) ? o.days : [];
+  const out = [...new Set(raw.map(Number).filter((d) => Number.isInteger(d) && d >= 0 && d <= 6))].sort();
+  return out.length > 0 ? out : [o.day];
 }
 
-/** 레슨 상품 목록(신청자 수 포함). enabledOnly면 회원 노출용으로 활성만. */
-export async function getLessonOffers(clubId: string, enabledOnly = false): Promise<LabLessonOffer[]> {
+function lessonSummary(o: { day: number; days?: unknown; start: string; end: string }): string {
+  const ds = lessonDays(o).map((d) => DAY_KO[d]).join('·');
+  return `${ds} ${o.start}~${o.end}`;
+}
+
+/** 레슨 상품 목록(신청자 수 포함). enabledOnly면 회원 노출용으로 활성만.
+ *  forUserId를 주면 그 사용자의 신청 상태(myStatus)를 함께 내려준다. */
+export async function getLessonOffers(clubId: string, enabledOnly = false, forUserId?: string): Promise<LabLessonOffer[]> {
   const offers = await prisma.lessonOffer.findMany({
     where: { clubId, ...(enabledOnly ? { enabled: true } : {}) },
     orderBy: [{ day: 'asc' }, { start: 'asc' }],
-    include: { _count: { select: { applications: { where: { status: { in: ['PENDING', 'CONFIRMED'] } } } } } },
+    include: {
+      _count: { select: { applications: { where: { status: { in: ['PENDING', 'CONFIRMED'] } } } } },
+      ...(forUserId
+        ? { applications: { where: { userId: forUserId, status: { in: ['PENDING', 'CONFIRMED'] } }, select: { status: true }, take: 1 } }
+        : {}),
+    },
   });
   return offers.map((o) => ({
     id: o.id,
     coachName: o.coachName,
-    day: o.day,
+    coachIntro: o.coachIntro,
+    coachCareer: o.coachCareer,
+    days: lessonDays(o),
     start: o.start,
     end: o.end,
     fee: o.fee,
@@ -716,22 +740,37 @@ export async function getLessonOffers(clubId: string, enabledOnly = false): Prom
     enabled: o.enabled,
     summary: lessonSummary(o),
     applicants: o._count.applications,
+    myStatus: forUserId ? ((o as unknown as { applications?: { status: string }[] }).applications?.[0]?.status ?? null) : null,
   }));
 }
 
 /** 레슨 상품 생성/수정. id 있으면 수정(소유권은 라우터에서 확인). */
 export async function upsertLessonOffer(
   clubId: string,
-  input: { id?: string; coachName?: string; day?: number; start?: string; end?: string; fee?: number | null; capacity?: number | null; enabled?: boolean },
+  input: {
+    id?: string; coachName?: string; coachIntro?: string | null; coachCareer?: string | null;
+    days?: number[]; day?: number; start?: string; end?: string;
+    fee?: number | null; capacity?: number | null; enabled?: boolean;
+  },
 ): Promise<string> {
   const coachName = String(input.coachName ?? '').trim();
-  const day = Number(input.day);
   const start = String(input.start ?? '');
   const end = String(input.end ?? '');
+  // days 배열 우선, 없으면 단일 day 호환.
+  const rawDays = Array.isArray(input.days) ? input.days : input.day !== undefined ? [input.day] : [];
+  const days = [...new Set(rawDays.map(Number).filter((d) => Number.isInteger(d) && d >= 0 && d <= 6))].sort();
+  const intro = input.coachIntro != null ? String(input.coachIntro).trim().slice(0, 60) || null : input.coachIntro;
+  const career = input.coachCareer != null ? String(input.coachCareer).trim().slice(0, 500) || null : input.coachCareer;
+
   if (input.id) {
     const data: Record<string, unknown> = {};
     if (input.coachName !== undefined) data.coachName = coachName;
-    if (input.day !== undefined && Number.isInteger(day) && day >= 0 && day <= 6) data.day = day;
+    if (input.coachIntro !== undefined) data.coachIntro = intro;
+    if (input.coachCareer !== undefined) data.coachCareer = career;
+    if ((input.days !== undefined || input.day !== undefined) && days.length > 0) {
+      data.days = days;
+      data.day = days[0];
+    }
     if (input.start !== undefined && HHMM.test(start)) data.start = start;
     if (input.end !== undefined && HHMM.test(end)) data.end = end;
     if (input.fee !== undefined) data.fee = input.fee != null && Number(input.fee) > 0 ? Number(input.fee) : null;
@@ -741,13 +780,16 @@ export async function upsertLessonOffer(
     return input.id;
   }
   if (!coachName) throw new Error('코치명을 입력해 주세요.');
-  if (!Number.isInteger(day) || day < 0 || day > 6) throw new Error('요일이 올바르지 않아요.');
+  if (days.length === 0) throw new Error('레슨 요일을 선택해 주세요.');
   if (!HHMM.test(start) || !HHMM.test(end)) throw new Error('시간 형식은 HH:mm 이에요.');
   const created = await prisma.lessonOffer.create({
     data: {
       clubId,
       coachName,
-      day,
+      coachIntro: intro ?? null,
+      coachCareer: career ?? null,
+      day: days[0],
+      days,
       start,
       end,
       fee: input.fee != null && Number(input.fee) > 0 ? Number(input.fee) : null,
@@ -767,7 +809,7 @@ export async function getLessonApplications(clubId: string): Promise<LabLessonAp
   const rows = await prisma.lessonApplication.findMany({
     where: { offer: { clubId } },
     orderBy: { createdAt: 'desc' },
-    include: { offer: { select: { coachName: true, day: true, start: true, end: true } } },
+    include: { offer: { select: { coachName: true, day: true, days: true, start: true, end: true } } },
   });
   const mapped = rows.map((r) => ({
     id: r.id,

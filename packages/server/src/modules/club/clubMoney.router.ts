@@ -225,7 +225,7 @@ async function memberGuard(req: Request, _res: Response, next: NextFunction) {
 
 // GET /clubs/:clubId/lessons — 활성 레슨 목록(회원)
 router.get('/:clubId/lessons', authenticate, memberGuard, async (req: Request, res: Response, next: NextFunction) => {
-  try { res.json(await getLessonOffers(String(req.params.clubId), true)); } catch (err) { next(err); }
+  try { res.json(await getLessonOffers(String(req.params.clubId), true, req.user!.userId)); } catch (err) { next(err); }
 });
 
 // POST /clubs/:clubId/lessons/:offerId/apply — 회원 레슨 신청

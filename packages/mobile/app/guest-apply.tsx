@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { View, Text, StyleSheet, ScrollView, Pressable, TextInput, ActivityIndicator, Platform } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
+import { Ionicons } from '@expo/vector-icons';
 import { useAuthStore } from '../store/authStore';
 import { profileApi } from '../services/profile';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -20,6 +21,9 @@ interface AvailableDate {
   label: string;
   status: 'OPEN' | 'FULL' | 'CLOSED';
   remaining: number | null;
+  capacity?: number | null;
+  applied?: number;
+  waiting?: number;
 }
 interface ClubInfo {
   clubId: string;
@@ -29,11 +33,12 @@ interface ClubInfo {
   region?: string | null;
   guestFee: number | null;
   accountInfo: string | null;
+  contactInfo?: string | null;
   scheduleSummary?: string | null;
   applyClosed?: boolean;
   availableDates?: AvailableDate[];
 }
-interface ApplyResult { id: string; clubName: string; feeAmount: number | null; accountInfo: string | null; message: string }
+interface ApplyResult { id: string; clubName: string; feeAmount: number | null; accountInfo: string | null; contactInfo?: string | null; message: string }
 
 const APP_STORE_URL = 'https://apps.apple.com/app/id6788656869';
 
@@ -114,6 +119,15 @@ export default function GuestApply() {
     }
   };
 
+  // 문의 채널: URL이면 새 탭/브라우저로, 아니면(전화번호 등) 그대로 보여주기만.
+  const contactIsLink = (v?: string | null) => !!v && /^https?:\/\//i.test(v.trim());
+  const openContact = (v?: string | null) => {
+    if (!v) return;
+    if (contactIsLink(v) && Platform.OS === 'web' && typeof window !== 'undefined') {
+      try { window.open(v.trim(), '_blank'); } catch { /* noop */ }
+    }
+  };
+
   const openStore = () => {
     if (Platform.OS === 'web' && typeof window !== 'undefined') {
       try { window.open(APP_STORE_URL, '_blank'); } catch { /* noop */ }
@@ -150,6 +164,14 @@ export default function GuestApply() {
             <Text style={[styles.okBadgeText, { color: colors.secondary }]}>신청 접수 ✓</Text>
           </View>
           <Text style={[styles.title, { color: colors.text }]}>{result.clubName} 게스트 신청 완료</Text>
+          {!!visitDate && (
+            <View style={styles.resultVisitRow}>
+              <Ionicons name="calendar-outline" size={14} color={colors.textSecondary} />
+              <Text style={[styles.resultVisitText, { color: colors.text }]}>
+                방문일 {availableDates.find((d) => d.date === visitDate)?.label ?? visitDate}
+              </Text>
+            </View>
+          )}
           <Text style={[styles.desc, { color: colors.textSecondary }]}>{result.message}</Text>
 
           {result.feeAmount != null && (
@@ -167,6 +189,22 @@ export default function GuestApply() {
             </View>
           )}
           <Text style={[styles.desc, { color: colors.textSecondary }]}>입금이 확인되면 운영자가 확정 처리해 드려요.</Text>
+
+          {!!result.contactInfo && (
+            <Pressable
+              onPress={() => openContact(result.contactInfo)}
+              style={({ pressed }) => [styles.contactBtn, { borderColor: colors.border, backgroundColor: colors.background }, pressed && { opacity: 0.8 }]}
+            >
+              <Ionicons name="chatbubble-ellipses-outline" size={16} color={colors.primary} />
+              <View style={{ flex: 1, minWidth: 0 }}>
+                <Text style={[styles.contactBtnTitle, { color: colors.text }]}>운영진에게 문의하기</Text>
+                <Text style={[styles.contactBtnValue, { color: contactIsLink(result.contactInfo) ? colors.primary : colors.textSecondary }]} numberOfLines={1}>
+                  {result.contactInfo}
+                </Text>
+              </View>
+              {contactIsLink(result.contactInfo) && <Ionicons name="open-outline" size={15} color={colors.textLight} />}
+            </Pressable>
+          )}
 
           {isAuthenticated ? (
             <Pressable onPress={() => router.replace('/(tabs)')} style={({ pressed }) => [styles.storeBtn, { backgroundColor: colors.primary }, pressed && { opacity: 0.9 }]}>
@@ -192,21 +230,47 @@ export default function GuestApply() {
       ) : (
         // ── 신청 폼 ──
         <View style={[styles.card, { backgroundColor: colors.surface }, shadows.sm]}>
-          <Text style={[styles.title, { color: colors.text }]}>{club.clubName}</Text>
-          {/* 모임 미리보기 — 지역·멤버수·소개 */}
-          {(club.region || club.memberCount != null || club.scheduleSummary) && (
-            <Text style={[styles.previewMeta, { color: colors.textSecondary }]}>
-              {[club.region, club.memberCount != null ? `멤버 ${club.memberCount}명` : null, club.scheduleSummary].filter(Boolean).join(' · ')}
-            </Text>
+          {/* 히어로 — 모임 정체성이 한눈에 */}
+          <View style={styles.hero}>
+            <View style={[styles.heroAvatar, { backgroundColor: alpha(colors.primary, 0.14) }]}>
+              <Text style={[styles.heroAvatarText, { color: colors.primary }]}>{club.clubName.slice(0, 1)}</Text>
+            </View>
+            <View style={{ flex: 1, minWidth: 0 }}>
+              <Text style={[styles.title, { color: colors.text, marginBottom: 2 }]}>{club.clubName}</Text>
+              <View style={styles.heroMetaRow}>
+                {!!club.region && (
+                  <View style={styles.heroMetaItem}>
+                    <Ionicons name="location-outline" size={12} color={colors.textSecondary} />
+                    <Text style={[styles.heroMetaText, { color: colors.textSecondary }]}>{club.region}</Text>
+                  </View>
+                )}
+                {club.memberCount != null && (
+                  <View style={styles.heroMetaItem}>
+                    <Ionicons name="people-outline" size={12} color={colors.textSecondary} />
+                    <Text style={[styles.heroMetaText, { color: colors.textSecondary }]}>멤버 {club.memberCount}명</Text>
+                  </View>
+                )}
+              </View>
+            </View>
+          </View>
+          {!!club.scheduleSummary && (
+            <View style={[styles.scheduleBanner, { backgroundColor: alpha(colors.primary, 0.08) }]}>
+              <Ionicons name="calendar-outline" size={14} color={colors.primary} />
+              <Text style={[styles.scheduleBannerText, { color: colors.primary }]}>매주 {club.scheduleSummary.replace(/^매주 /, '')}</Text>
+            </View>
           )}
           {club.description && (
             <Text style={[styles.previewDesc, { color: colors.textLight }]} numberOfLines={3}>{club.description}</Text>
           )}
-          <Text style={[styles.desc, { color: colors.textSecondary }]}>
-            게스트 신청서를 작성해 주세요.{club.guestFee != null ? ` 게스트비는 ${club.guestFee.toLocaleString()}원이에요.` : ''}
-          </Text>
+          {club.guestFee != null && (
+            <View style={[styles.feeBanner, { backgroundColor: colors.background }]}>
+              <Text style={[styles.feeBannerLabel, { color: colors.textSecondary }]}>게스트비</Text>
+              <Text style={[styles.feeBannerAmount, { color: colors.text }]}>{club.guestFee.toLocaleString()}원</Text>
+              <Text style={[styles.feeBannerHint, { color: colors.textLight }]}>신청 후 입금 안내를 드려요</Text>
+            </View>
+          )}
 
-          <Text style={[styles.fieldLabel, { color: colors.textSecondary }]}>이름</Text>
+          <Text style={[styles.fieldLabel, { color: colors.textSecondary }]}>이름 <Text style={{ color: colors.danger }}>*</Text></Text>
           <TextInput
             style={[styles.input, { color: colors.text, borderColor: colors.border, backgroundColor: colors.background }]}
             value={name}
@@ -216,7 +280,7 @@ export default function GuestApply() {
             maxLength={20}
           />
 
-          <Text style={[styles.fieldLabel, { color: colors.textSecondary }]}>급수</Text>
+          <Text style={[styles.fieldLabel, { color: colors.textSecondary }]}>급수 <Text style={{ color: colors.danger }}>*</Text></Text>
           <View style={styles.chipRow}>
             {SKILL_LEVELS.map((lv) => {
               const meta = SKILL_META[lv];
@@ -234,7 +298,7 @@ export default function GuestApply() {
           </View>
           {skill && <Text style={[styles.chipHint, { color: SKILL_META[skill].color }]}>{skill} · {SKILL_META[skill].description}</Text>}
 
-          <Text style={[styles.fieldLabel, { color: colors.textSecondary }]}>성별</Text>
+          <Text style={[styles.fieldLabel, { color: colors.textSecondary }]}>성별 <Text style={{ color: colors.danger }}>*</Text></Text>
           <View style={styles.chipRow}>
             {([{ k: 'M', label: '남' }, { k: 'F', label: '여' }] as const).map((g) => {
               const active = gender === g.k;
@@ -250,7 +314,7 @@ export default function GuestApply() {
             })}
           </View>
 
-          <Text style={[styles.fieldLabel, { color: colors.textSecondary }]}>참석 희망일{club.scheduleSummary ? ' (운동 요일만)' : ''}</Text>
+          <Text style={[styles.fieldLabel, { color: colors.textSecondary }]}>참석 희망일 <Text style={{ color: colors.danger }}>*</Text>{club.scheduleSummary ? '  (운동 요일만)' : ''}</Text>
           <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.chipRow}>
             {availableDates.map((d) => {
               const active = visitDate === d.date;
@@ -269,13 +333,19 @@ export default function GuestApply() {
                     disabled && { opacity: 0.4 },
                   ]}
                 >
-                  <Text style={[styles.skillChipText, { color: active ? '#fff' : colors.textSecondary }]}>{d.label}</Text>
+                  <Text style={[styles.skillChipText, { color: active ? '#fff' : colors.textSecondary }]}>{active ? '✓ ' : ''}{d.label}</Text>
                   {d.status === 'FULL' ? (
-                    <Text style={[styles.dateSub, { color: active ? 'rgba(255,255,255,0.9)' : colors.warning }]}>대기 신청</Text>
+                    <Text style={[styles.dateSub, { color: active ? 'rgba(255,255,255,0.9)' : colors.warning }]}>
+                      {d.capacity != null ? `${d.applied ?? 0}/${d.capacity} 마감` : '마감'}{(d.waiting ?? 0) > 0 ? ` · 대기 ${d.waiting}` : ''} · 대기 신청
+                    </Text>
                   ) : d.status === 'CLOSED' ? (
-                    <Text style={[styles.dateSub, { color: colors.textLight }]}>마감</Text>
-                  ) : d.remaining != null ? (
-                    <Text style={[styles.dateSub, { color: active ? 'rgba(255,255,255,0.9)' : colors.secondary }]}>{d.remaining}자리</Text>
+                    <Text style={[styles.dateSub, { color: colors.textLight }]}>신청 마감</Text>
+                  ) : d.capacity != null ? (
+                    <Text style={[styles.dateSub, { color: active ? 'rgba(255,255,255,0.9)' : colors.secondary }]}>
+                      {`모집 ${d.capacity} · 신청 ${d.applied ?? 0}`}
+                    </Text>
+                  ) : (d.applied ?? 0) > 0 ? (
+                    <Text style={[styles.dateSub, { color: active ? 'rgba(255,255,255,0.9)' : colors.secondary }]}>{`신청 ${d.applied}명`}</Text>
                   ) : null}
                 </Pressable>
               );
@@ -284,6 +354,22 @@ export default function GuestApply() {
               <Text style={[styles.dateSub, { color: colors.textLight }]}>신청 가능한 날짜가 없어요</Text>
             )}
           </ScrollView>
+          {(() => {
+            const sel = availableDates.find((d) => d.date === visitDate);
+            if (!sel) return null;
+            const parts = [
+              sel.capacity != null ? `하루 모집 ${sel.capacity}명` : null,
+              `현재 신청 ${sel.applied ?? 0}명`,
+              (sel.waiting ?? 0) > 0 ? `대기 ${sel.waiting}명` : null,
+              sel.status === 'FULL' ? '정원이 차서 대기로 접수돼요' : sel.remaining != null ? `${sel.remaining}자리 남음` : null,
+            ].filter(Boolean);
+            return (
+              <View style={[styles.selectedDateInfo, { backgroundColor: alpha(sel.status === 'FULL' ? colors.warning : colors.secondary, 0.1) }]}>
+                <Ionicons name={sel.status === 'FULL' ? 'time-outline' : 'checkmark-circle-outline'} size={14} color={sel.status === 'FULL' ? colors.warning : colors.secondary} />
+                <Text style={[styles.selectedDateInfoText, { color: sel.status === 'FULL' ? colors.warning : colors.secondary }]}>{parts.join(' · ')}</Text>
+              </View>
+            );
+          })()}
 
           <Text style={[styles.fieldLabel, { color: colors.textSecondary }]}>연락처 (선택)</Text>
           <TextInput
@@ -320,6 +406,22 @@ export default function GuestApply() {
               {submitting ? '신청 중…' : '게스트 신청하기'}
             </Text>
           </Pressable>
+
+          {!!club.contactInfo && (
+            <Pressable
+              onPress={() => openContact(club.contactInfo)}
+              style={({ pressed }) => [styles.contactBtn, { borderColor: colors.border, backgroundColor: colors.background }, pressed && { opacity: 0.8 }]}
+            >
+              <Ionicons name="chatbubble-ellipses-outline" size={16} color={colors.primary} />
+              <View style={{ flex: 1, minWidth: 0 }}>
+                <Text style={[styles.contactBtnTitle, { color: colors.text }]}>궁금한 게 있나요? 운영진에게 문의하기</Text>
+                <Text style={[styles.contactBtnValue, { color: contactIsLink(club.contactInfo) ? colors.primary : colors.textSecondary }]} numberOfLines={1}>
+                  {club.contactInfo}
+                </Text>
+              </View>
+              {contactIsLink(club.contactInfo) && <Ionicons name="open-outline" size={15} color={colors.textLight} />}
+            </Pressable>
+          )}
         </View>
       )}
     </ScrollView>
@@ -356,4 +458,23 @@ const styles = StyleSheet.create({
   dateChip: { paddingHorizontal: spacing.md, minHeight: 48, borderRadius: radius.md, alignItems: 'center', justifyContent: 'center', paddingVertical: 4 },
   dateSub: { fontSize: 9, fontWeight: '800', marginTop: 1 },
   chipHint: { ...typography.caption, fontWeight: '800', marginTop: spacing.xs },
+  hero: { flexDirection: 'row', alignItems: 'center', gap: spacing.md, marginBottom: spacing.sm },
+  heroAvatar: { width: 52, height: 52, borderRadius: 26, alignItems: 'center', justifyContent: 'center' },
+  heroAvatarText: { fontSize: 22, fontWeight: '900' },
+  heroMetaRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.md, flexWrap: 'wrap' },
+  heroMetaItem: { flexDirection: 'row', alignItems: 'center', gap: 3 },
+  heroMetaText: { ...typography.caption, fontWeight: '700' },
+  scheduleBanner: { flexDirection: 'row', alignItems: 'center', gap: 6, borderRadius: radius.md, paddingHorizontal: spacing.md, paddingVertical: spacing.sm, marginBottom: spacing.sm },
+  scheduleBannerText: { ...typography.caption, fontWeight: '800' },
+  feeBanner: { flexDirection: 'row', alignItems: 'baseline', gap: spacing.sm, borderRadius: radius.md, paddingHorizontal: spacing.md, paddingVertical: spacing.sm, marginBottom: spacing.sm },
+  feeBannerLabel: { ...typography.caption, fontWeight: '700' },
+  feeBannerAmount: { ...typography.subtitle1, fontWeight: '900' },
+  feeBannerHint: { fontSize: 10, fontWeight: '600' },
+  resultVisitRow: { flexDirection: 'row', alignItems: 'center', gap: 4, marginBottom: spacing.sm },
+  resultVisitText: { ...typography.body2, fontWeight: '800' },
+  selectedDateInfo: { flexDirection: 'row', alignItems: 'center', gap: 6, borderRadius: radius.md, paddingHorizontal: spacing.md, paddingVertical: spacing.sm, marginTop: spacing.sm },
+  selectedDateInfoText: { ...typography.caption, fontWeight: '800', flex: 1 },
+  contactBtn: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, borderWidth: 1.5, borderRadius: radius.md, paddingHorizontal: spacing.md, paddingVertical: spacing.smd, marginTop: spacing.md },
+  contactBtnTitle: { ...typography.caption, fontWeight: '800' },
+  contactBtnValue: { fontSize: 11, fontWeight: '700', marginTop: 1 },
 });

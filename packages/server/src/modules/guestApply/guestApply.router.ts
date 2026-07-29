@@ -27,6 +27,7 @@ const CLUB_SELECT = {
   guestApplyEnabled: true,
   guestApplyDeadlineHours: true,
   maxGuestsPerDay: true,
+  contactInfo: true,
   homeFacility: { select: { address: true } },
   _count: { select: { members: true } },
 } as const;
@@ -36,6 +37,7 @@ type ClubPreviewRow = {
   duesAccountInfo: string | null; visibility: string;
   weeklySchedule: unknown; guestApplyEnabled: boolean;
   guestApplyDeadlineHours: number | null; maxGuestsPerDay: number | null;
+  contactInfo: string | null;
   homeFacility: { address: string } | null; _count: { members: number };
 };
 
@@ -65,6 +67,9 @@ export interface AvailableDate {
   label: string; // "8/2 (토)"
   status: 'OPEN' | 'FULL' | 'CLOSED';
   remaining: number | null; // 정원 설정 시 남은 자리
+  capacity: number | null; // 하루 정원(설정 시)
+  applied: number; // 유효 신청(PENDING/CONFIRMED)
+  waiting: number; // 대기(WAITLIST)
 }
 
 /**
@@ -79,16 +84,19 @@ async function computeAvailableDates(club: ClubPreviewRow, now = new Date()): Pr
   const slots = parseSchedule(club.weeklySchedule);
   const horizon = slots.length > 0 ? 14 : 7;
 
-  // 날짜별 유효 신청 수(취소 제외).
+  // 날짜별 신청 현황 — 유효(PENDING/CONFIRMED)와 대기(WAITLIST)를 나눠 집계.
+  // 정원 여부와 무관하게 항상 내려서 신청자가 "몇 명 모집에 몇 명 찼는지" 볼 수 있게 한다.
   const counts = new Map<string, number>();
-  if (club.maxGuestsPerDay != null) {
-    // 정원 카운트는 유효 신청(PENDING/CONFIRMED)만 — WAITLIST(대기)·CANCELLED 제외.
-    const grouped = await prisma.guestApplication.groupBy({
-      by: ['visitDate'],
-      where: { clubId: club.id, status: { in: ['PENDING', 'CONFIRMED'] }, visitDate: { not: null } },
-      _count: { _all: true },
-    });
-    for (const g of grouped) if (g.visitDate) counts.set(g.visitDate, g._count._all);
+  const waitCounts = new Map<string, number>();
+  const grouped = await prisma.guestApplication.groupBy({
+    by: ['visitDate', 'status'],
+    where: { clubId: club.id, status: { in: ['PENDING', 'CONFIRMED', 'WAITLIST'] }, visitDate: { not: null } },
+    _count: { _all: true },
+  });
+  for (const g of grouped) {
+    if (!g.visitDate) continue;
+    if (g.status === 'WAITLIST') waitCounts.set(g.visitDate, (waitCounts.get(g.visitDate) ?? 0) + g._count._all);
+    else counts.set(g.visitDate, (counts.get(g.visitDate) ?? 0) + g._count._all);
   }
 
   const out: AvailableDate[] = [];
@@ -113,13 +121,15 @@ async function computeAvailableDates(club: ClubPreviewRow, now = new Date()): Pr
       if (now >= deadline) status = 'CLOSED';
     }
 
+    const applied = counts.get(date) ?? 0;
+    const waiting = waitCounts.get(date) ?? 0;
     let remaining: number | null = null;
     if (club.maxGuestsPerDay != null) {
-      remaining = Math.max(0, club.maxGuestsPerDay - (counts.get(date) ?? 0));
+      remaining = Math.max(0, club.maxGuestsPerDay - applied);
       if (status === 'OPEN' && remaining <= 0) status = 'FULL';
     }
 
-    out.push({ date, label, status, remaining });
+    out.push({ date, label, status, remaining, capacity: club.maxGuestsPerDay ?? null, applied, waiting });
   }
   return out;
 }
@@ -134,6 +144,7 @@ async function toPreview(club: ClubPreviewRow) {
     region: club.homeFacility?.address ? club.homeFacility.address.split(' ').slice(0, 2).join(' ') : null,
     guestFee: club.guestFee,
     accountInfo: club.duesAccountInfo,
+    contactInfo: club.contactInfo,
     scheduleSummary: scheduleSummary(slots),
     applyClosed: !club.guestApplyEnabled,
     availableDates: await computeAvailableDates(club),
@@ -225,6 +236,7 @@ async function handleApply(club: ClubPreviewRow, req: Request, res: Response) {
     clubName: club.name,
     feeAmount: club.guestFee,
     accountInfo: club.duesAccountInfo,
+    contactInfo: club.contactInfo,
     waitlisted,
     message: waitlisted
       ? `${club.name} 그 날은 정원이 차서 '대기'로 접수됐어요. 자리가 나면 알려드릴게요.`

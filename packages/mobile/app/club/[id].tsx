@@ -642,29 +642,71 @@ export default function ClubDetailScreen() {
             );
           })()}
 
-          {/* ─── 레슨 — 활성 레슨이 있을 때만. 회원 신청 진입점 ─── */}
+          {/* ─── 레슨 — 코치 프로필 카드. 활성 레슨이 있을 때만 ─── */}
           {lessons.length > 0 && (
             <View style={styles.section}>
               <Text style={styles.sectionTitle}>레슨</Text>
               {lessons.map((o) => {
                 const full = o.capacity != null && o.applicants >= o.capacity;
+                const careerLines = (o.coachCareer ?? '').split('\n').map((l) => l.trim()).filter(Boolean);
+                const applied = o.myStatus === 'PENDING' || o.myStatus === 'CONFIRMED';
+                const ratio = o.capacity ? Math.min(1, o.applicants / o.capacity) : 0;
                 return (
-                  <View key={o.id} style={styles.lessonRow}>
-                    <View style={styles.pastRowLeft}>
-                      <Text style={styles.pastDate}>{o.coachName} 코치 · {o.summary}</Text>
-                      <Text style={styles.pastMeta}>
-                        {[o.fee != null && `${o.fee.toLocaleString()}원`, o.capacity != null ? `정원 ${o.capacity}명 중 ${o.applicants}명` : `신청 ${o.applicants}명`].filter(Boolean).join(' · ')}
+                  <View key={o.id} style={styles.lessonCard}>
+                    <View style={styles.lessonHead}>
+                      <View style={styles.lessonAvatar}>
+                        <Text style={styles.lessonAvatarText}>{o.coachName.slice(0, 1)}</Text>
+                      </View>
+                      <View style={{ flex: 1, minWidth: 0 }}>
+                        <Text style={styles.lessonCoach}>{o.coachName} 코치</Text>
+                        {!!o.coachIntro && (
+                          <Text style={styles.lessonIntro} numberOfLines={1}>{o.coachIntro}</Text>
+                        )}
+                      </View>
+                      {o.fee != null && <Text style={styles.lessonFee}>월 {o.fee.toLocaleString()}원</Text>}
+                    </View>
+                    {careerLines.length > 0 && (
+                      <View style={styles.lessonCareerBox}>
+                        {careerLines.slice(0, 3).map((l, idx) => (
+                          <Text key={idx} style={styles.lessonCareerLine}>· {l}</Text>
+                        ))}
+                      </View>
+                    )}
+                    <View style={styles.lessonMetaRow}>
+                      <View style={styles.lessonDayBadges}>
+                        {o.days.map((d) => (
+                          <View key={d} style={styles.lessonDayBadge}>
+                            <Text style={styles.lessonDayBadgeText}>{['일','월','화','수','목','금','토'][d]}</Text>
+                          </View>
+                        ))}
+                        <Text style={styles.lessonTime}>{o.start}~{o.end}</Text>
+                      </View>
+                    </View>
+                    <View style={styles.lessonGaugeRow}>
+                      <View style={styles.lessonGaugeTrack}>
+                        <View style={[styles.lessonGaugeFill, { width: `${o.capacity ? Math.round(ratio * 100) : o.applicants > 0 ? 100 : 0}%` }, full && { backgroundColor: Colors.warning }]} />
+                      </View>
+                      <Text style={[styles.lessonGaugeText, full && { color: Colors.warning }]}>
+                        {o.capacity != null ? `${o.applicants}/${o.capacity}명${full ? ' 마감' : ''}` : `수강 ${o.applicants}명`}
                       </Text>
                     </View>
-                    <TouchableOpacity
-                      style={[styles.lessonApplyBtn, (full || applyingLesson === o.id) && { opacity: 0.5 }]}
-                      onPress={() => handleApplyLesson(o)}
-                      disabled={full || applyingLesson === o.id}
-                      activeOpacity={0.85}
-                      accessibilityLabel={`${o.coachName} 코치 레슨 신청`}
-                    >
-                      <Text style={styles.lessonApplyText}>{full ? '마감' : applyingLesson === o.id ? '신청 중…' : '신청'}</Text>
-                    </TouchableOpacity>
+                    {applied ? (
+                      <View style={[styles.lessonAppliedBadge, o.myStatus === 'CONFIRMED' && styles.lessonConfirmedBadge]}>
+                        <Text style={[styles.lessonAppliedText, o.myStatus === 'CONFIRMED' && styles.lessonConfirmedText]}>
+                          {o.myStatus === 'CONFIRMED' ? '✓ 수강 확정 — 정모에서 만나요!' : '신청 완료 · 운영진 확정 대기 중'}
+                        </Text>
+                      </View>
+                    ) : (
+                      <TouchableOpacity
+                        style={[styles.lessonApplyBtn, (full || applyingLesson === o.id) && { opacity: 0.5 }]}
+                        onPress={() => handleApplyLesson(o)}
+                        disabled={full || applyingLesson === o.id}
+                        activeOpacity={0.85}
+                        accessibilityLabel={`${o.coachName} 코치 레슨 신청`}
+                      >
+                        <Text style={styles.lessonApplyText}>{full ? '정원 마감' : applyingLesson === o.id ? '신청 중…' : '레슨 신청하기'}</Text>
+                      </TouchableOpacity>
+                    )}
                   </View>
                 );
               })}
@@ -1469,25 +1511,53 @@ const styles = StyleSheet.create({
     marginBottom: 6,
     paddingHorizontal: 2,
   },
-  lessonRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
+  lessonCard: {
     backgroundColor: Colors.surface,
-    borderRadius: 14,
-    paddingVertical: 12,
-    paddingHorizontal: 14,
-    marginBottom: 8,
-    gap: 10,
+    borderRadius: 16,
+    padding: 16,
+    marginBottom: 10,
   },
+  lessonHead: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+  lessonAvatar: {
+    width: 42, height: 42, borderRadius: 21,
+    backgroundColor: Colors.primary + '22',
+    alignItems: 'center', justifyContent: 'center',
+  },
+  lessonAvatarText: { fontSize: 17, fontWeight: '900', color: Colors.primary },
+  lessonCoach: { fontSize: 15, fontWeight: '900', color: Colors.text },
+  lessonIntro: { fontSize: 12, color: Colors.textSecondary, marginTop: 1 },
+  lessonFee: { fontSize: 14, fontWeight: '900', color: Colors.text },
+  lessonCareerBox: {
+    backgroundColor: Colors.background,
+    borderRadius: 10, padding: 10, marginTop: 10, gap: 2,
+  },
+  lessonCareerLine: { fontSize: 12, color: Colors.textSecondary, lineHeight: 17 },
+  lessonMetaRow: { flexDirection: 'row', alignItems: 'center', marginTop: 10 },
+  lessonDayBadges: { flexDirection: 'row', alignItems: 'center', gap: 4, flexWrap: 'wrap' },
+  lessonDayBadge: {
+    width: 24, height: 24, borderRadius: 12,
+    backgroundColor: Colors.primary + '18',
+    alignItems: 'center', justifyContent: 'center',
+  },
+  lessonDayBadgeText: { fontSize: 11, fontWeight: '900', color: Colors.primary },
+  lessonTime: { fontSize: 13, fontWeight: '800', color: Colors.text, marginLeft: 4 },
+  lessonGaugeRow: { flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 10 },
+  lessonGaugeTrack: { flex: 1, height: 7, borderRadius: 4, backgroundColor: Colors.background, overflow: 'hidden' },
+  lessonGaugeFill: { height: 7, borderRadius: 4, backgroundColor: Colors.primary },
+  lessonGaugeText: { fontSize: 11, fontWeight: '800', color: Colors.textSecondary, minWidth: 56, textAlign: 'right' },
   lessonApplyBtn: {
     backgroundColor: Colors.primary,
-    paddingHorizontal: 16,
-    paddingVertical: 8,
-    borderRadius: 999,
+    paddingVertical: 12,
+    borderRadius: 12,
+    alignItems: 'center',
+    marginTop: 12,
   },
-  lessonApplyText: {
-    fontSize: 13,
-    fontWeight: '800',
-    color: '#fff',
+  lessonApplyText: { fontSize: 14, fontWeight: '900', color: '#fff' },
+  lessonAppliedBadge: {
+    backgroundColor: Colors.primary + '15',
+    paddingVertical: 10, borderRadius: 12, alignItems: 'center', marginTop: 12,
   },
+  lessonAppliedText: { fontSize: 13, fontWeight: '800', color: Colors.primary },
+  lessonConfirmedBadge: { backgroundColor: '#16a34a18' },
+  lessonConfirmedText: { color: '#16a34a' },
 });

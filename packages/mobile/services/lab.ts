@@ -121,6 +121,7 @@ export interface OperationConfig {
   guestApplyEnabled: boolean;
   guestApplyDeadlineHours: number | null;
   maxGuestsPerDay: number | null;
+  contactInfo: string | null; // 운영진 문의 채널(오픈채팅 링크·전화)
 }
 
 /** 운영진용 운영 정보 설정 — /clubs/:id/money/operation-config (staff 가드). */
@@ -129,7 +130,7 @@ export const clubOperationApi = {
     (await api.get(`/clubs/${clubId}/money/operation-config`)).data,
   set: async (
     clubId: string,
-    cfg: Partial<{ weeklySchedule: WeeklySlot[]; guestApplyEnabled: boolean; guestApplyDeadlineHours: number | null; maxGuestsPerDay: number | null }>,
+    cfg: Partial<{ weeklySchedule: WeeklySlot[]; guestApplyEnabled: boolean; guestApplyDeadlineHours: number | null; maxGuestsPerDay: number | null; contactInfo: string | null }>,
   ): Promise<void> => {
     await api.put(`/clubs/${clubId}/money/operation-config`, cfg);
   },
@@ -139,14 +140,17 @@ export const clubOperationApi = {
 export interface LessonOffer {
   id: string;
   coachName: string;
-  day: number; // 0(일)~6(토)
+  coachIntro: string | null; // 한 줄 소개
+  coachCareer: string | null; // 이력(줄바꿈 구분)
+  days: number[]; // [1,3,5] = 월수금
   start: string;
   end: string;
-  fee: number | null;
+  fee: number | null; // 월 레슨비
   capacity: number | null;
   enabled: boolean;
-  summary: string; // "매주 화 19:00~20:00"
+  summary: string; // "월·수·금 19:00~20:00"
   applicants: number;
+  myStatus: string | null; // 내 신청 상태(회원 조회에서만)
 }
 export interface LessonApplicationRow {
   id: string;

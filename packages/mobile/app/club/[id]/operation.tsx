@@ -40,6 +40,7 @@ export default function ClubOperation() {
   const [applyEnabled, setApplyEnabled] = useState(true);
   const [deadlineHours, setDeadlineHours] = useState('');
   const [maxGuests, setMaxGuests] = useState('');
+  const [contactInfo, setContactInfo] = useState('');
 
   const load = useCallback(async () => {
     if (!clubId) return;
@@ -54,6 +55,7 @@ export default function ClubOperation() {
       setApplyEnabled(c.guestApplyEnabled);
       setDeadlineHours(c.guestApplyDeadlineHours != null ? String(c.guestApplyDeadlineHours) : '');
       setMaxGuests(c.maxGuestsPerDay != null ? String(c.maxGuestsPerDay) : '');
+      setContactInfo(c.contactInfo ?? '');
     } catch {
       /* noop */
     } finally {
@@ -76,6 +78,7 @@ export default function ClubOperation() {
         guestApplyEnabled: applyEnabled,
         guestApplyDeadlineHours: num(deadlineHours),
         maxGuestsPerDay: num(maxGuests),
+        contactInfo: contactInfo.trim() || null,
       });
       showSuccess('저장했어요');
       await load();
@@ -194,6 +197,19 @@ export default function ClubOperation() {
               keyboardType="number-pad"
               maxLength={3}
             />
+            <Text style={[styles.fieldLabel, { color: colors.textSecondary, marginTop: spacing.md }]}>문의 채널 (선택 — 신청 페이지에 노출)</Text>
+            <TextInput
+              style={[styles.input, { color: colors.text, backgroundColor: colors.background, borderColor: colors.border }]}
+              value={contactInfo}
+              onChangeText={setContactInfo}
+              placeholder="예: 오픈채팅 링크 또는 010-1234-5678"
+              placeholderTextColor={colors.textLight}
+              maxLength={200}
+              autoCapitalize="none"
+            />
+            <Text style={[styles.warn, { color: colors.textLight, marginTop: spacing.xs }]}>
+              * 게스트가 신청 전에 궁금한 걸 물어볼 수 있는 연락 수단이에요 (카카오 오픈채팅 링크 추천)
+            </Text>
           </View>
 
           <Pressable onPress={save} disabled={saving} style={({ pressed }) => [styles.saveBtn, { backgroundColor: colors.primary }, (saving || pressed) && { opacity: 0.85 }]}>

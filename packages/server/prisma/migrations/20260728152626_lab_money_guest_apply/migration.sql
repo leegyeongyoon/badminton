@@ -83,3 +83,11 @@ DO $$ BEGIN
   ALTER TABLE "LessonApplication" ADD CONSTRAINT "LessonApplication_offerId_fkey"
     FOREIGN KEY ("offerId") REFERENCES "LessonOffer"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+
+-- 레슨: 코치 프로필 + 요일 묶음(월수금)
+ALTER TABLE "LessonOffer" ADD COLUMN IF NOT EXISTS "coachIntro" TEXT;
+ALTER TABLE "LessonOffer" ADD COLUMN IF NOT EXISTS "coachCareer" TEXT;
+ALTER TABLE "LessonOffer" ADD COLUMN IF NOT EXISTS "days" JSONB;
+
+-- 운영진 문의 채널(게스트 신청 페이지 노출)
+ALTER TABLE "Club" ADD COLUMN IF NOT EXISTS "contactInfo" TEXT;
