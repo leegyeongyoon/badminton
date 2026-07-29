@@ -114,7 +114,7 @@ export default function ClubOperation() {
       ) : (
         <ScrollView contentContainerStyle={{ padding: spacing.lg, paddingBottom: insets.bottom + 60, maxWidth: 640, width: '100%' as const, alignSelf: 'center' as const }} keyboardShouldPersistTaps="handled">
           {/* 정기 운동 일정 */}
-          <View style={[styles.card, { backgroundColor: colors.surface }, shadows.sm]}>
+          <View style={[styles.card, { backgroundColor: colors.surface }, shadows.md]}>
             <View style={styles.cardTitleRow}>
               <View style={[styles.cardIcon, { backgroundColor: colors.primary + '15' }]}>
                 <Ionicons name="calendar-outline" size={16} color={colors.primary} />
@@ -131,7 +131,7 @@ export default function ClubOperation() {
                   <Pressable
                     key={d.day}
                     onPress={() => toggleDay(d.day)}
-                    style={[styles.dayChip, active ? { backgroundColor: colors.primary } : { backgroundColor: colors.background, borderWidth: 1.5, borderColor: colors.border }]}
+                    style={[styles.dayChip, active ? { backgroundColor: colors.primary } : { backgroundColor: colors.background }]}
                   >
                     <Text style={[styles.dayChipText, { color: active ? '#fff' : colors.textSecondary }]}>{d.label}</Text>
                   </Pressable>
@@ -143,7 +143,7 @@ export default function ClubOperation() {
               <View key={d.day} style={styles.slotRow}>
                 <Text style={[styles.slotDay, { color: colors.text }]}>{d.label}</Text>
                 <TextInput
-                  style={[styles.slotInput, { color: colors.text, backgroundColor: colors.background, borderColor: colors.border }]}
+                  style={[styles.slotInput, { color: colors.text, backgroundColor: colors.background }]}
                   value={slots[d.day]?.start ?? ''}
                   onChangeText={(v) => setSlotTime(d.day, 'start', v)}
                   placeholder="20:00"
@@ -152,7 +152,7 @@ export default function ClubOperation() {
                 />
                 <Text style={{ color: colors.textLight }}>~</Text>
                 <TextInput
-                  style={[styles.slotInput, { color: colors.text, backgroundColor: colors.background, borderColor: colors.border }]}
+                  style={[styles.slotInput, { color: colors.text, backgroundColor: colors.background }]}
                   value={slots[d.day]?.end ?? ''}
                   onChangeText={(v) => setSlotTime(d.day, 'end', v)}
                   placeholder="22:00"
@@ -167,7 +167,7 @@ export default function ClubOperation() {
           </View>
 
           {/* 게스트 신청 정책 */}
-          <View style={[styles.card, { backgroundColor: colors.surface }, shadows.sm]}>
+          <View style={[styles.card, { backgroundColor: colors.surface }, shadows.md]}>
             <View style={styles.toggleRow}>
               <View style={[styles.cardIcon, { backgroundColor: colors.primary + '15' }]}>
                 <Ionicons name="person-add-outline" size={16} color={colors.primary} />
@@ -188,7 +188,7 @@ export default function ClubOperation() {
 
             <Text style={[styles.fieldLabel, { color: colors.textSecondary, marginTop: spacing.md }]}>신청 마감 (운동 시작 몇 시간 전, 선택)</Text>
             <TextInput
-              style={[styles.input, { color: colors.text, backgroundColor: colors.background, borderColor: colors.border }]}
+              style={[styles.input, { color: colors.text, backgroundColor: colors.background }]}
               value={deadlineHours}
               onChangeText={setDeadlineHours}
               placeholder="예: 6 (비우면 시작 전까지)"
@@ -198,7 +198,7 @@ export default function ClubOperation() {
             />
             <Text style={[styles.fieldLabel, { color: colors.textSecondary, marginTop: spacing.md }]}>하루 게스트 정원 (선택)</Text>
             <TextInput
-              style={[styles.input, { color: colors.text, backgroundColor: colors.background, borderColor: colors.border }]}
+              style={[styles.input, { color: colors.text, backgroundColor: colors.background }]}
               value={maxGuests}
               onChangeText={setMaxGuests}
               placeholder="예: 4 (비우면 무제한)"
@@ -208,7 +208,7 @@ export default function ClubOperation() {
             />
             <Text style={[styles.fieldLabel, { color: colors.textSecondary, marginTop: spacing.md }]}>문의 채널 (선택 — 신청 페이지에 노출)</Text>
             <TextInput
-              style={[styles.input, { color: colors.text, backgroundColor: colors.background, borderColor: colors.border }]}
+              style={[styles.input, { color: colors.text, backgroundColor: colors.background }]}
               value={contactInfo}
               onChangeText={setContactInfo}
               placeholder="예: 오픈채팅 링크 또는 010-1234-5678"
@@ -221,7 +221,7 @@ export default function ClubOperation() {
             </Text>
           </View>
 
-          <Pressable onPress={save} disabled={saving} style={({ pressed }) => [styles.saveBtn, { backgroundColor: colors.primary }, (saving || pressed) && { opacity: 0.85 }]}>
+          <Pressable onPress={save} disabled={saving} style={({ pressed }) => [styles.saveBtn, { backgroundColor: colors.primary }, shadows.colored(colors.primary), (saving || pressed) && { opacity: 0.85 }]}>
             <Text style={styles.saveText}>{saving ? '저장 중…' : '저장'}</Text>
           </Pressable>
           <Text style={[styles.warn, { color: colors.textLight }]}>
@@ -237,7 +237,7 @@ const styles = StyleSheet.create({
   topBar: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, paddingHorizontal: spacing.lg, paddingBottom: spacing.sm, borderBottomWidth: StyleSheet.hairlineWidth },
   title: { ...typography.subtitle1, flex: 1 },
   center: { flex: 1, alignItems: 'center', justifyContent: 'center' },
-  card: { borderRadius: radius.card, padding: spacing.lg, marginBottom: spacing.md },
+  card: { borderRadius: 20, padding: spacing.lg, marginBottom: spacing.md },
   cardTitle: { ...typography.subtitle1 },
   cardHint: { ...typography.caption, marginTop: 2, marginBottom: spacing.sm },
   cardTitleRow: { flexDirection: 'row', alignItems: 'flex-start', gap: spacing.sm, marginBottom: spacing.xs },
@@ -248,11 +248,11 @@ const styles = StyleSheet.create({
   timeRow: { flexDirection: 'row', gap: spacing.md },
   slotRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, marginBottom: spacing.sm },
   slotDay: { ...typography.subtitle2, width: 24, fontWeight: '900' },
-  slotInput: { ...typography.body2, flex: 1, borderWidth: 1.5, borderRadius: radius.md, paddingHorizontal: spacing.md, paddingVertical: spacing.sm, fontWeight: '700', textAlign: 'center' },
+  slotInput: { ...typography.body2, flex: 1, borderRadius: 12, paddingHorizontal: spacing.md, paddingVertical: 12, fontWeight: '800', textAlign: 'center' },
   fieldLabel: { ...typography.caption, fontWeight: '700', marginBottom: spacing.xs },
-  input: { ...typography.body1, borderWidth: 1.5, borderRadius: radius.md, paddingHorizontal: spacing.md, paddingVertical: spacing.sm, fontWeight: '700' },
+  input: { ...typography.body1, borderRadius: 14, paddingHorizontal: spacing.lg, paddingVertical: 13, fontWeight: '700' },
   toggleRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.md },
-  saveBtn: { paddingVertical: spacing.md, borderRadius: radius.lg, alignItems: 'center', marginBottom: spacing.sm },
-  saveText: { ...typography.button, color: '#fff' },
+  saveBtn: { paddingVertical: 16, borderRadius: 16, alignItems: 'center', marginBottom: spacing.sm },
+  saveText: { ...typography.button, color: '#fff', fontSize: 16, fontWeight: '900' },
   warn: { ...typography.caption, lineHeight: 16, marginBottom: spacing.sm },
 });

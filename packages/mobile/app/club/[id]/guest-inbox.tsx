@@ -181,7 +181,7 @@ export default function GuestInbox() {
               <Pressable
                 key={t.threadId}
                 onPress={() => openThread(t.threadId)}
-                style={[styles.threadRow, { backgroundColor: colors.surface }, shadows.sm, t.closed && { opacity: 0.6 }]}
+                style={[styles.threadRow, { backgroundColor: colors.surface }, shadows.md, t.closed && { opacity: 0.6 }]}
               >
                 <View style={[styles.avatar, { backgroundColor: (t.staffUnread > 0 ? colors.primary : colors.textLight) + '22' }]}>
                   <Text style={[styles.avatarText, { color: t.staffUnread > 0 ? colors.primary : colors.textLight }]}>
@@ -229,7 +229,7 @@ const styles = StyleSheet.create({
   emptyBox: { alignItems: 'center', gap: spacing.sm, paddingVertical: spacing.xxxl },
   emptyTitle: { ...typography.subtitle1 },
   emptyHint: { ...typography.caption, textAlign: 'center', lineHeight: 18, paddingHorizontal: spacing.xl },
-  threadRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.md, borderRadius: radius.card, padding: spacing.md, marginBottom: spacing.sm },
+  threadRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.md, borderRadius: 18, padding: spacing.lg, marginBottom: spacing.sm + 2 },
   avatar: { width: 44, height: 44, borderRadius: 22, alignItems: 'center', justifyContent: 'center' },
   avatarText: { fontSize: 18, fontWeight: '900' },
   threadHead: { flexDirection: 'row', alignItems: 'center', gap: 6 },

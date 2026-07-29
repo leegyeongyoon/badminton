@@ -98,7 +98,7 @@ export function ChatThread({
                         styles.bubble,
                         mine
                           ? { backgroundColor: colors.primary, borderBottomRightRadius: 4 }
-                          : { backgroundColor: colors.surface, borderBottomLeftRadius: 4, borderWidth: 1, borderColor: colors.border },
+                          : { backgroundColor: colors.surface, borderBottomLeftRadius: 4 },
                       ]}
                     >
                       <Text style={[styles.bubbleText, { color: mine ? '#fff' : colors.text }]}>{m.text}</Text>
@@ -119,7 +119,7 @@ export function ChatThread({
       ) : (
         <View style={[styles.inputBar, { backgroundColor: colors.surface, borderTopColor: colors.border }]}>
           <TextInput
-            style={[styles.input, { color: colors.text, backgroundColor: colors.background, borderColor: colors.border }]}
+            style={[styles.input, { color: colors.text, backgroundColor: colors.background }]}
             value={text}
             onChangeText={setText}
             placeholder={placeholder || '메시지 입력'}
@@ -151,11 +151,11 @@ const styles = StyleSheet.create({
   rowOther: { justifyContent: 'flex-start' },
   author: { ...typography.caption, fontWeight: '700', marginBottom: 2, marginLeft: 4 },
   bubbleLine: { flexDirection: 'row', alignItems: 'flex-end', gap: 4 },
-  bubble: { paddingHorizontal: spacing.md, paddingVertical: spacing.sm, borderRadius: radius.lg },
+  bubble: { paddingHorizontal: spacing.md, paddingVertical: spacing.smd, borderRadius: 18 },
   bubbleText: { ...typography.body2, lineHeight: 20 },
   time: { fontSize: 10, marginBottom: 2 },
   inputBar: { flexDirection: 'row', alignItems: 'flex-end', gap: spacing.sm, paddingHorizontal: spacing.md, paddingVertical: spacing.sm, borderTopWidth: StyleSheet.hairlineWidth, maxWidth: 640, width: '100%', alignSelf: 'center' },
-  input: { flex: 1, ...typography.body2, borderWidth: 1.5, borderRadius: radius.lg, paddingHorizontal: spacing.md, paddingVertical: spacing.sm, maxHeight: 100 },
+  input: { flex: 1, ...typography.body2, fontWeight: '600', borderRadius: 20, paddingHorizontal: spacing.lg, paddingVertical: 11, maxHeight: 100 },
   sendBtn: { width: 40, height: 40, borderRadius: 20, alignItems: 'center', justifyContent: 'center' },
   disabledHint: { ...typography.caption, textAlign: 'center', flex: 1, paddingVertical: spacing.sm },
 });

@@ -164,7 +164,7 @@ export function LessonManager({ clubs, api }: { clubs: LessonClub[]; api: Lesson
           {clubs.map((c) => {
             const active = c.id === clubId;
             return (
-              <Pressable key={c.id} onPress={() => setClubId(c.id)} style={[styles.clubChip, active ? { backgroundColor: colors.primary } : { backgroundColor: colors.surface, borderWidth: 1.5, borderColor: colors.border }]}>
+              <Pressable key={c.id} onPress={() => setClubId(c.id)} style={[styles.clubChip, active ? { backgroundColor: colors.primary } : { backgroundColor: colors.surface }]}>
                 <Text style={[styles.clubChipText, { color: active ? '#fff' : colors.textSecondary }]}>{c.name}</Text>
               </Pressable>
             );
@@ -197,14 +197,14 @@ export function LessonManager({ clubs, api }: { clubs: LessonClub[]; api: Lesson
               <Text style={[styles.formTitle, { color: colors.text }]}>{editingId ? '레슨 수정' : '새 레슨'}</Text>
 
               <Text style={[styles.label, { color: colors.textSecondary }]}>코치명 <Text style={{ color: colors.danger }}>*</Text></Text>
-              <TextInput style={[styles.input, { color: colors.text, backgroundColor: colors.background, borderColor: colors.border }]} value={coachName} onChangeText={setCoachName} placeholder="예: 박성우" placeholderTextColor={colors.textLight} maxLength={20} />
+              <TextInput style={[styles.input, { color: colors.text, backgroundColor: colors.background }]} value={coachName} onChangeText={setCoachName} placeholder="예: 박성우" placeholderTextColor={colors.textLight} maxLength={20} />
 
               <Text style={[styles.label, { color: colors.textSecondary }]}>한 줄 소개</Text>
-              <TextInput style={[styles.input, { color: colors.text, backgroundColor: colors.background, borderColor: colors.border }]} value={coachIntro} onChangeText={setCoachIntro} placeholder="예: 전 실업팀 선수 출신 · 지도 경력 10년" placeholderTextColor={colors.textLight} maxLength={60} />
+              <TextInput style={[styles.input, { color: colors.text, backgroundColor: colors.background }]} value={coachIntro} onChangeText={setCoachIntro} placeholder="예: 전 실업팀 선수 출신 · 지도 경력 10년" placeholderTextColor={colors.textLight} maxLength={60} />
 
               <Text style={[styles.label, { color: colors.textSecondary }]}>이력·경력 (줄바꿈으로 구분)</Text>
               <TextInput
-                style={[styles.input, styles.multiline, { color: colors.text, backgroundColor: colors.background, borderColor: colors.border }]}
+                style={[styles.input, styles.multiline, { color: colors.text, backgroundColor: colors.background }]}
                 value={coachCareer} onChangeText={setCoachCareer}
                 placeholder={'예:\n전국체전 단체전 금메달\n생활체육지도자 2급\n○○체육관 전임 코치'}
                 placeholderTextColor={colors.textLight} multiline numberOfLines={4} maxLength={500}
@@ -215,7 +215,7 @@ export function LessonManager({ clubs, api }: { clubs: LessonClub[]; api: Lesson
                 {DAYS.map((d) => {
                   const active = days.includes(d.day);
                   return (
-                    <Pressable key={d.day} onPress={() => toggleFormDay(d.day)} style={[styles.dayChip, active ? { backgroundColor: colors.primary } : { backgroundColor: colors.background, borderWidth: 1.5, borderColor: colors.border }]}>
+                    <Pressable key={d.day} onPress={() => toggleFormDay(d.day)} style={[styles.dayChip, active ? { backgroundColor: colors.primary } : { backgroundColor: colors.background }]}>
                       <Text style={[styles.dayChipText, { color: active ? '#fff' : colors.textSecondary }]}>{d.label}</Text>
                     </Pressable>
                   );
@@ -224,23 +224,23 @@ export function LessonManager({ clubs, api }: { clubs: LessonClub[]; api: Lesson
 
               <Text style={[styles.label, { color: colors.textSecondary }]}>레슨 시간 <Text style={{ color: colors.danger }}>*</Text></Text>
               <View style={styles.rowGap}>
-                <TextInput style={[styles.input, styles.flex1, styles.center, { color: colors.text, backgroundColor: colors.background, borderColor: colors.border }]} value={start} onChangeText={setStart} placeholder="19:00" placeholderTextColor={colors.textLight} maxLength={5} />
+                <TextInput style={[styles.input, styles.flex1, styles.center, { color: colors.text, backgroundColor: colors.background }]} value={start} onChangeText={setStart} placeholder="19:00" placeholderTextColor={colors.textLight} maxLength={5} />
                 <Text style={{ color: colors.textLight }}>~</Text>
-                <TextInput style={[styles.input, styles.flex1, styles.center, { color: colors.text, backgroundColor: colors.background, borderColor: colors.border }]} value={end} onChangeText={setEnd} placeholder="20:00" placeholderTextColor={colors.textLight} maxLength={5} />
+                <TextInput style={[styles.input, styles.flex1, styles.center, { color: colors.text, backgroundColor: colors.background }]} value={end} onChangeText={setEnd} placeholder="20:00" placeholderTextColor={colors.textLight} maxLength={5} />
               </View>
 
               <View style={styles.rowGap}>
                 <View style={styles.flex1}>
                   <Text style={[styles.label, { color: colors.textSecondary }]}>월 레슨비(원)</Text>
-                  <TextInput style={[styles.input, { color: colors.text, backgroundColor: colors.background, borderColor: colors.border }]} value={fee} onChangeText={setFee} placeholder="예: 200000" placeholderTextColor={colors.textLight} keyboardType="number-pad" maxLength={8} />
+                  <TextInput style={[styles.input, { color: colors.text, backgroundColor: colors.background }]} value={fee} onChangeText={setFee} placeholder="예: 200000" placeholderTextColor={colors.textLight} keyboardType="number-pad" maxLength={8} />
                 </View>
                 <View style={styles.flex1}>
                   <Text style={[styles.label, { color: colors.textSecondary }]}>정원(명)</Text>
-                  <TextInput style={[styles.input, { color: colors.text, backgroundColor: colors.background, borderColor: colors.border }]} value={capacity} onChangeText={setCapacity} placeholder="비우면 무제한" placeholderTextColor={colors.textLight} keyboardType="number-pad" maxLength={3} />
+                  <TextInput style={[styles.input, { color: colors.text, backgroundColor: colors.background }]} value={capacity} onChangeText={setCapacity} placeholder="비우면 무제한" placeholderTextColor={colors.textLight} keyboardType="number-pad" maxLength={3} />
                 </View>
               </View>
 
-              <Pressable onPress={saveOffer} disabled={saving} style={[styles.saveBtn, { backgroundColor: colors.primary }, saving && { opacity: 0.7 }]}>
+              <Pressable onPress={saveOffer} disabled={saving} style={[styles.saveBtn, { backgroundColor: colors.primary }, shadows.colored(colors.primary), saving && { opacity: 0.7 }]}>
                 <Text style={styles.saveBtnText}>{saving ? '저장 중…' : editingId ? '수정 저장' : '개설하기'}</Text>
               </Pressable>
             </View>
@@ -259,7 +259,7 @@ export function LessonManager({ clubs, api }: { clubs: LessonClub[]; api: Lesson
               const ratio = o.capacity ? Math.min(1, o.applicants / o.capacity) : 0;
               const full = o.capacity != null && o.applicants >= o.capacity;
               return (
-                <View key={o.id} style={[styles.coachCard, { backgroundColor: colors.surface }, shadows.sm, !o.enabled && { opacity: 0.55 }]}>
+                <View key={o.id} style={[styles.coachCard, { backgroundColor: colors.surface }, shadows.md, !o.enabled && { opacity: 0.55 }]}>
                   <View style={styles.coachHead}>
                     <View style={[styles.avatar, { backgroundColor: colors.primary + '22' }]}>
                       <Text style={[styles.avatarText, { color: colors.primary }]}>{o.coachName.slice(0, 1)}</Text>
@@ -359,7 +359,7 @@ export function LessonManager({ clubs, api }: { clubs: LessonClub[]; api: Lesson
                         <Pressable onPress={() => setAppStatus(a, 'CONFIRMED')} style={[styles.stateBtn, { backgroundColor: colors.primary }]}>
                           <Text style={[styles.stateBtnText, { color: '#fff' }]}>확정</Text>
                         </Pressable>
-                        <Pressable onPress={() => setAppStatus(a, 'CANCELLED')} style={[styles.stateBtn, { backgroundColor: colors.background, borderWidth: 1, borderColor: colors.border }]}>
+                        <Pressable onPress={() => setAppStatus(a, 'CANCELLED')} style={[styles.stateBtn, { backgroundColor: colors.background }]}>
                           <Text style={[styles.stateBtnText, { color: colors.textSecondary }]}>취소</Text>
                         </Pressable>
                       </View>
@@ -383,10 +383,10 @@ const styles = StyleSheet.create({
   headHint: { ...typography.caption, marginTop: 2 },
   addBtn: { flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: spacing.md, paddingVertical: spacing.sm, borderRadius: radius.full },
   addBtnText: { ...typography.body2, fontWeight: '800' },
-  formCard: { borderRadius: radius.card, padding: spacing.lg, marginBottom: spacing.md },
+  formCard: { borderRadius: 20, padding: spacing.lg, marginBottom: spacing.md },
   formTitle: { ...typography.subtitle1, marginBottom: spacing.sm },
   label: { ...typography.caption, fontWeight: '700', marginTop: spacing.sm, marginBottom: spacing.xs },
-  input: { ...typography.body2, borderWidth: 1.5, borderRadius: radius.md, paddingHorizontal: spacing.md, paddingVertical: spacing.sm, fontWeight: '700' },
+  input: { ...typography.body2, borderRadius: 13, paddingHorizontal: spacing.md, paddingVertical: 12, fontWeight: '700' },
   multiline: { minHeight: 88, textAlignVertical: 'top' },
   rowGap: { flexDirection: 'row', alignItems: 'flex-end', gap: spacing.sm },
   flex1: { flex: 1 },
@@ -394,12 +394,12 @@ const styles = StyleSheet.create({
   dayRow: { flexDirection: 'row', gap: 6, flexWrap: 'wrap' },
   dayChip: { width: 40, height: 40, borderRadius: 20, alignItems: 'center', justifyContent: 'center' },
   dayChipText: { ...typography.body2, fontWeight: '900' },
-  saveBtn: { paddingVertical: spacing.md, borderRadius: radius.lg, alignItems: 'center', marginTop: spacing.md },
+  saveBtn: { paddingVertical: 15, borderRadius: 15, alignItems: 'center', marginTop: spacing.md },
   saveBtnText: { ...typography.button, color: '#fff' },
   emptyCard: { borderRadius: radius.card, padding: spacing.xl, alignItems: 'center', gap: spacing.sm, marginBottom: spacing.md },
   emptyTitle: { ...typography.subtitle1 },
   emptyHint: { ...typography.caption, textAlign: 'center', lineHeight: 18 },
-  coachCard: { borderRadius: radius.card, padding: spacing.lg, marginBottom: spacing.md },
+  coachCard: { borderRadius: 20, padding: spacing.lg, marginBottom: spacing.md },
   coachHead: { flexDirection: 'row', alignItems: 'center', gap: spacing.md },
   avatar: { width: 44, height: 44, borderRadius: 22, alignItems: 'center', justifyContent: 'center' },
   avatarText: { fontSize: 18, fontWeight: '900' },
@@ -422,7 +422,7 @@ const styles = StyleSheet.create({
   cardActions: { flexDirection: 'row', gap: spacing.sm, marginTop: spacing.md },
   editBtn: { flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: spacing.md, paddingVertical: 6, borderRadius: radius.full },
   editBtnText: { ...typography.caption, fontWeight: '800' },
-  card: { borderRadius: radius.card, padding: spacing.lg, marginBottom: spacing.md },
+  card: { borderRadius: 20, padding: spacing.lg, marginBottom: spacing.md },
   cardTitle: { ...typography.subtitle1, marginBottom: spacing.xs },
   empty: { ...typography.body2, paddingVertical: spacing.md, lineHeight: 20 },
   appRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, paddingVertical: spacing.md, borderTopWidth: StyleSheet.hairlineWidth },

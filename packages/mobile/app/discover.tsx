@@ -62,7 +62,7 @@ export default function Discover() {
 
       <ScrollView contentContainerStyle={{ padding: spacing.lg, paddingBottom: insets.bottom + 40, maxWidth: 640, width: '100%' as const, alignSelf: 'center' as const }} keyboardShouldPersistTaps="handled">
         {/* 검색 */}
-        <View style={[styles.searchRow, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+        <View style={[styles.searchRow, { backgroundColor: colors.surface }, shadows.sm]}>
           <Icon name="search" size={18} color={colors.textLight} />
           <TextInput
             style={[styles.searchInput, { color: colors.text }]}
@@ -99,7 +99,7 @@ export default function Discover() {
                   <Pressable
                     key={r ?? '전체'}
                     onPress={() => setRegionFilter(r)}
-                    style={[styles.regionChip, active ? { backgroundColor: colors.primary } : { backgroundColor: colors.surface, borderWidth: 1.5, borderColor: colors.border }]}
+                    style={[styles.regionChip, active ? { backgroundColor: colors.primary } : { backgroundColor: colors.surface }]}
                   >
                     <Text style={[styles.regionChipText, { color: active ? '#fff' : colors.textSecondary }]}>{r ?? '전체'}</Text>
                   </Pressable>
@@ -121,7 +121,7 @@ export default function Discover() {
             <Pressable
               key={c.clubId}
               onPress={() => router.push(`/guest-apply?clubId=${c.clubId}` as any)}
-              style={({ pressed }) => [styles.card, { backgroundColor: colors.surface }, shadows.sm, pressed && { opacity: 0.9, transform: [{ scale: 0.99 }] }]}
+              style={({ pressed }) => [styles.card, { backgroundColor: colors.surface }, shadows.md, pressed && { opacity: 0.9, transform: [{ scale: 0.99 }] }]}
             >
               <View style={styles.cardHead}>
                 <View style={[styles.avatar, { backgroundColor: alpha(colors.primary, 0.12) }]}>
@@ -178,9 +178,9 @@ const styles = StyleSheet.create({
   center: { alignItems: 'center', paddingVertical: spacing.xxxl, gap: spacing.xs },
   emptyTitle: { ...typography.subtitle2 },
   emptySub: { ...typography.caption },
-  searchRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, borderWidth: 1.5, borderRadius: radius.lg, paddingHorizontal: spacing.md, marginBottom: spacing.md },
+  searchRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, borderRadius: radius.full, paddingHorizontal: spacing.lg, marginBottom: spacing.md },
   searchInput: { ...typography.body1, flex: 1, paddingVertical: spacing.smd },
-  card: { padding: spacing.lg, borderRadius: radius.card, marginBottom: spacing.md },
+  card: { padding: spacing.lg, borderRadius: 20, marginBottom: spacing.md },
   cardHead: { flexDirection: 'row', alignItems: 'center', gap: spacing.md },
   avatar: { width: 46, height: 46, borderRadius: 23, alignItems: 'center', justifyContent: 'center' },
   avatarText: { fontSize: 19, fontWeight: '900' },

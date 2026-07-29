@@ -159,13 +159,13 @@ export default function GuestApply() {
       {loading ? (
         <View style={styles.center}><ActivityIndicator size="large" color={colors.primary} /></View>
       ) : !club ? (
-        <View style={[styles.card, { backgroundColor: colors.surface }, shadows.sm]}>
+        <View style={[styles.card, { backgroundColor: colors.surface }, shadows.md]}>
           <Text style={[styles.title, { color: colors.text }]}>모임을 찾을 수 없어요</Text>
           <Text style={[styles.desc, { color: colors.textSecondary }]}>초대 링크를 다시 확인해 주세요.</Text>
         </View>
       ) : result ? (
         // ── 신청 완료: 입금 안내 ──
-        <View style={[styles.card, { backgroundColor: colors.surface }, shadows.sm]}>
+        <View style={[styles.card, { backgroundColor: colors.surface }, shadows.md]}>
           <View style={[styles.okBadge, { backgroundColor: alpha(colors.secondary, 0.12) }]}>
             <Text style={[styles.okBadgeText, { color: colors.secondary }]}>신청 접수 ✓</Text>
           </View>
@@ -220,7 +220,7 @@ export default function GuestApply() {
         </View>
       ) : club.applyClosed ? (
         // ── 신청 받지 않음 ──
-        <View style={[styles.card, { backgroundColor: colors.surface }, shadows.sm]}>
+        <View style={[styles.card, { backgroundColor: colors.surface }, shadows.md]}>
           <Text style={[styles.title, { color: colors.text }]}>{club.clubName}</Text>
           {club.scheduleSummary && (
             <Text style={[styles.previewMeta, { color: colors.textSecondary }]}>{club.scheduleSummary}</Text>
@@ -231,7 +231,7 @@ export default function GuestApply() {
         </View>
       ) : (
         // ── 신청 폼 ──
-        <View style={[styles.card, { backgroundColor: colors.surface }, shadows.sm]}>
+        <View style={[styles.card, { backgroundColor: colors.surface }, shadows.md]}>
           {/* 히어로 — 모임 정체성이 한눈에 */}
           <View style={styles.hero}>
             <View style={[styles.heroAvatar, { backgroundColor: alpha(colors.primary, 0.14) }]}>
@@ -274,7 +274,7 @@ export default function GuestApply() {
 
           <Text style={[styles.fieldLabel, { color: colors.textSecondary }]}>이름 <Text style={{ color: colors.danger }}>*</Text></Text>
           <TextInput
-            style={[styles.input, { color: colors.text, borderColor: colors.border, backgroundColor: colors.background }]}
+            style={[styles.input, { color: colors.text, backgroundColor: colors.background }]}
             value={name}
             onChangeText={setName}
             placeholder="홍길동"
@@ -291,7 +291,7 @@ export default function GuestApply() {
                 <Pressable
                   key={lv}
                   onPress={() => setSkill(lv)}
-                  style={[styles.skillChip, active ? { backgroundColor: meta.color } : { backgroundColor: colors.background, borderWidth: 1.5, borderColor: colors.border }]}
+                  style={[styles.skillChip, active ? { backgroundColor: meta.color } : { backgroundColor: colors.background }]}
                 >
                   <Text style={[styles.skillChipText, { color: active ? '#fff' : colors.textSecondary }]}>{lv}</Text>
                 </Pressable>
@@ -308,7 +308,7 @@ export default function GuestApply() {
                 <Pressable
                   key={g.k}
                   onPress={() => setGender(g.k)}
-                  style={[styles.genderChip, active ? { backgroundColor: colors.primary } : { backgroundColor: colors.background, borderWidth: 1.5, borderColor: colors.border }]}
+                  style={[styles.genderChip, active ? { backgroundColor: colors.primary } : { backgroundColor: colors.background }]}
                 >
                   <Text style={[styles.skillChipText, { color: active ? '#fff' : colors.textSecondary }]}>{g.label}</Text>
                 </Pressable>
@@ -331,7 +331,7 @@ export default function GuestApply() {
                     styles.dateChip,
                     active
                       ? { backgroundColor: colors.primary }
-                      : { backgroundColor: colors.background, borderWidth: 1.5, borderColor: colors.border },
+                      : { backgroundColor: colors.background },
                     disabled && { opacity: 0.4 },
                   ]}
                 >
@@ -375,7 +375,7 @@ export default function GuestApply() {
 
           <Text style={[styles.fieldLabel, { color: colors.textSecondary }]}>연락처 (선택)</Text>
           <TextInput
-            style={[styles.input, { color: colors.text, borderColor: colors.border, backgroundColor: colors.background }]}
+            style={[styles.input, { color: colors.text, backgroundColor: colors.background }]}
             value={phone}
             onChangeText={setPhone}
             placeholder="01012345678"
@@ -385,7 +385,7 @@ export default function GuestApply() {
           />
           <Text style={[styles.fieldLabel, { color: colors.textSecondary }]}>한마디 (선택)</Text>
           <TextInput
-            style={[styles.input, { color: colors.text, borderColor: colors.border, backgroundColor: colors.background }]}
+            style={[styles.input, { color: colors.text, backgroundColor: colors.background }]}
             value={note}
             onChangeText={setNote}
             placeholder="예: C조입니다, 이번 주 토요일 참석 희망"
@@ -401,6 +401,7 @@ export default function GuestApply() {
             style={({ pressed }) => [
               styles.submitBtn,
               { backgroundColor: canSubmit ? colors.primary : colors.surface3 },
+              canSubmit && shadows.colored(colors.primary),
               (pressed || submitting) && { opacity: 0.85 },
             ]}
           >
@@ -442,30 +443,30 @@ const styles = StyleSheet.create({
   content: { padding: spacing.xl, maxWidth: 480, width: '100%', alignSelf: 'center' },
   brand: { ...typography.h2, textAlign: 'center', marginBottom: spacing.lg },
   center: { paddingVertical: spacing.xxxl, alignItems: 'center' },
-  card: { borderRadius: radius.card, padding: spacing.xl },
+  card: { borderRadius: 24, padding: spacing.xl },
   title: { ...typography.h3, marginBottom: spacing.sm },
   previewMeta: { ...typography.caption, fontWeight: '700', marginTop: -4, marginBottom: spacing.xs },
   previewDesc: { ...typography.caption, lineHeight: 17, marginBottom: spacing.sm },
   desc: { ...typography.body2, lineHeight: 20, marginBottom: spacing.md },
   fieldLabel: { ...typography.caption, fontWeight: '700', marginBottom: spacing.xs, marginTop: spacing.sm },
-  input: { ...typography.body1, borderWidth: 1.5, borderRadius: radius.md, paddingHorizontal: spacing.md, paddingVertical: spacing.smd },
+  input: { ...typography.body1, fontWeight: '600', borderRadius: 14, paddingHorizontal: spacing.lg, paddingVertical: 14 },
   error: { ...typography.caption, fontWeight: '700', marginTop: spacing.sm },
-  submitBtn: { paddingVertical: spacing.md, borderRadius: radius.lg, alignItems: 'center', marginTop: spacing.lg },
-  submitBtnText: { ...typography.button },
+  submitBtn: { paddingVertical: 17, borderRadius: 16, alignItems: 'center', marginTop: spacing.xl },
+  submitBtnText: { ...typography.button, fontSize: 16, fontWeight: '900' },
   okBadge: { alignSelf: 'flex-start', paddingHorizontal: spacing.md, paddingVertical: 4, borderRadius: radius.pill, marginBottom: spacing.md },
   okBadgeText: { fontSize: 12, fontWeight: '900' },
   payBox: { borderRadius: radius.lg, padding: spacing.lg, marginBottom: spacing.md },
   payLabel: { ...typography.caption, fontWeight: '700' },
   payAmount: { ...typography.h2, marginTop: 2 },
   payAccount: { ...typography.subtitle1, marginTop: 2 },
-  storeBtn: { paddingVertical: spacing.md, borderRadius: radius.lg, alignItems: 'center', marginTop: spacing.sm },
+  storeBtn: { paddingVertical: 16, borderRadius: 16, alignItems: 'center', marginTop: spacing.sm },
   storeBtnText: { ...typography.button, color: '#fff' },
 
   chipRow: { flexDirection: 'row', gap: spacing.sm, flexWrap: 'wrap', paddingVertical: 2 },
-  skillChip: { width: 44, height: 40, borderRadius: radius.md, alignItems: 'center', justifyContent: 'center' },
+  skillChip: { width: 46, height: 44, borderRadius: 14, alignItems: 'center', justifyContent: 'center' },
   skillChipText: { ...typography.body2, fontWeight: '900' },
-  genderChip: { width: 64, height: 40, borderRadius: radius.md, alignItems: 'center', justifyContent: 'center' },
-  dateChip: { paddingHorizontal: spacing.md, minHeight: 48, borderRadius: radius.md, alignItems: 'center', justifyContent: 'center', paddingVertical: 4 },
+  genderChip: { width: 68, height: 44, borderRadius: 14, alignItems: 'center', justifyContent: 'center' },
+  dateChip: { paddingHorizontal: spacing.lg, minHeight: 54, borderRadius: 14, alignItems: 'center', justifyContent: 'center', paddingVertical: 6 },
   dateSub: { fontSize: 9, fontWeight: '800', marginTop: 1 },
   chipHint: { ...typography.caption, fontWeight: '800', marginTop: spacing.xs },
   hero: { flexDirection: 'row', alignItems: 'center', gap: spacing.md, marginBottom: spacing.sm },
