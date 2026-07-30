@@ -98,6 +98,16 @@ jobs:
           ssh_pi "cd /opt/badminton && touch .env.prod && sed -i '/^SLACK_WEBHOOK_URL=/d' .env.prod && echo 'SLACK_WEBHOOK_URL=$SLACK_URL' >> .env.prod && echo 'SLACK webhook injected'" \
             || echo "주입 실패(무시) — 가입 신청 알림은 웹훅 설정 전까지 비활성"
 
+      - name: Inject JWT 만료 정책 into .env.prod (Pi)
+        env:
+          SSHPASS: ${{ secrets.SSH_PASSWORD }}
+        run: |
+          ssh_pi() { sshpass -e ssh -o ConnectTimeout=25 "${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}" "$1"; }
+          # 세션 유지 = refresh 30일, access 12시간(탈취 창 최소화). 비밀값 아님 → 워크플로에 고정.
+          # 기존 값이 있으면 지우고 다시 써서 서버 .env.prod의 옛 7d 등을 idempotent 하게 덮어쓴다.
+          ssh_pi "cd /opt/badminton && touch .env.prod && sed -i '/^JWT_EXPIRES_IN=/d; /^JWT_REFRESH_EXPIRES_IN=/d' .env.prod && printf 'JWT_EXPIRES_IN=12h\nJWT_REFRESH_EXPIRES_IN=30d\n' >> .env.prod && echo 'JWT expiry set (access 12h / refresh 30d)'" \
+            || echo "JWT 만료 주입 실패(무시) — 코드 기본값(access 12h / refresh 30d) 사용"
+
       - name: Build & deploy on Pi (detached) + poll
         env:
           SSHPASS: ${{ secrets.SSH_PASSWORD }}
