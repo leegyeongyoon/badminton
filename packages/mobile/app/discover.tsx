@@ -123,46 +123,83 @@ export default function Discover() {
             </View>
           )}
 
-          {/* 핀 선택 시 하단 카드 */}
+          {/* 핀 선택 → 프로필 시트 (라벨-값 구조, 절제된 톤) */}
           {selected && (
-            <View style={[styles.sheet, { backgroundColor: colors.surface, paddingBottom: insets.bottom + spacing.md }, shadows.xl]}>
+            <View style={[styles.sheet, { backgroundColor: colors.surface }, shadows.xl]}>
+              <View style={styles.sheetHandle} />
               <View style={styles.sheetHead}>
-                <View style={[styles.sheetAvatar, { backgroundColor: alpha(colors.primary, 0.12) }]}>
-                  <Text style={[styles.sheetAvatarText, { color: colors.primary }]}>{selected.name[0]}</Text>
-                </View>
                 <View style={{ flex: 1, minWidth: 0 }}>
-                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
                     <Text style={[styles.sheetTitle, { color: colors.text }]} numberOfLines={1}>{selected.name}</Text>
-                    <View style={[styles.typeBadge, { backgroundColor: selected.clubType === 'MEETUP' ? colors.warning + '18' : colors.primaryBg }]}>
-                      <Text style={[styles.typeBadgeText, { color: selected.clubType === 'MEETUP' ? colors.warning : colors.primary }]}>
-                        {selected.clubType === 'MEETUP' ? '번개' : '클럽'}
-                      </Text>
-                    </View>
+                    <Text style={[styles.sheetType, { color: colors.textLight }]}>{selected.clubType === 'MEETUP' ? '번개 모임' : '정기 클럽'}</Text>
                   </View>
-                  <Text style={[styles.sheetMeta, { color: colors.textSecondary }]} numberOfLines={1}>
-                    {[selected.region, `멤버 ${selected.memberCount}명`, selected.scheduleSummary].filter(Boolean).join(' · ')}
+                  <Text style={[styles.sheetSub, { color: colors.textSecondary }]} numberOfLines={1}>
+                    {[selected.region, `멤버 ${selected.memberCount}명`].filter(Boolean).join(' · ')}
                   </Text>
                 </View>
-                <Pressable onPress={() => setSelected(null)} hitSlop={10}>
-                  <Ionicons name="close" size={20} color={colors.textLight} />
+                <Pressable onPress={() => setSelected(null)} hitSlop={10} style={styles.sheetClose}>
+                  <Ionicons name="close" size={18} color={colors.textLight} />
                 </Pressable>
               </View>
-              {selected.coaches.length > 0 && (
-                <View style={[styles.sheetCoaches, { backgroundColor: alpha(colors.info, 0.06) }]}>
-                  {selected.coaches.map((co, i) => (
-                    <Text key={i} style={[styles.sheetCoachText, { color: colors.text }]} numberOfLines={1}>
-                      <Text style={{ fontWeight: '900' }}>{co.coachName} 코치</Text>
-                      {co.fee != null ? ` · 월 ${co.fee.toLocaleString()}원` : ''}{co.coachIntro ? ` · ${co.coachIntro}` : ''}
-                    </Text>
-                  ))}
+
+              <View style={[styles.sheetDivider, { backgroundColor: colors.border }]} />
+
+              {!!selected.scheduleSummary && (
+                <View style={styles.infoRow}>
+                  <Text style={[styles.infoLabel, { color: colors.textLight }]}>일정</Text>
+                  <Text style={[styles.infoValue, { color: colors.text }]} numberOfLines={2}>{selected.scheduleSummary}</Text>
                 </View>
               )}
+              {selected.guestFee != null && (
+                <View style={styles.infoRow}>
+                  <Text style={[styles.infoLabel, { color: colors.textLight }]}>게스트비</Text>
+                  <Text style={[styles.infoValue, { color: colors.text }]}>{selected.guestFee.toLocaleString()}원</Text>
+                </View>
+              )}
+              {!!selected.address && (
+                <View style={styles.infoRow}>
+                  <Text style={[styles.infoLabel, { color: colors.textLight }]}>위치</Text>
+                  <Text style={[styles.infoValue, { color: colors.text }]} numberOfLines={1}>{selected.address}</Text>
+                </View>
+              )}
+
+              {selected.coaches.length > 0 && (
+                <>
+                  <Text style={[styles.sheetSection, { color: colors.textLight }]}>코치 프로필</Text>
+                  {selected.coaches.map((co, i) => (
+                    <View key={i} style={[styles.sheetCoach, { backgroundColor: colors.background }]}>
+                      <View style={[styles.sheetCoachAvatar, { backgroundColor: colors.surface }]}>
+                        <Text style={[styles.sheetCoachAvatarText, { color: colors.text }]}>{co.coachName[0]}</Text>
+                      </View>
+                      <View style={{ flex: 1, minWidth: 0 }}>
+                        <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
+                          <Text style={[styles.sheetCoachName, { color: colors.text }]}>{co.coachName}</Text>
+                          {co.fee != null && <Text style={[styles.sheetCoachFee, { color: colors.text }]}>월 {co.fee.toLocaleString()}원</Text>}
+                        </View>
+                        {!!co.coachIntro && (
+                          <Text style={[styles.sheetCoachIntro, { color: colors.textSecondary }]} numberOfLines={2}>{co.coachIntro}</Text>
+                        )}
+                        <Text style={[styles.sheetCoachTime, { color: colors.textLight }]}>
+                          {co.days.map((d) => ['일','월','화','수','목','금','토'][d]).join('·')} {co.start}~{co.end}
+                        </Text>
+                      </View>
+                    </View>
+                  ))}
+                </>
+              )}
+
               <View style={styles.sheetActions}>
-                <Pressable onPress={() => router.push(`/guest-apply?clubId=${selected.clubId}` as never)} style={[styles.sheetBtn, { backgroundColor: colors.primary }]}>
-                  <Text style={styles.sheetBtnText}>게스트 신청</Text>
+                <Pressable
+                  onPress={() => router.push(`/guest-apply?clubId=${selected.clubId}` as any)}
+                  style={({ pressed }) => [styles.sheetBtnPrimary, { backgroundColor: colors.primary }, pressed && { opacity: 0.9 }]}
+                >
+                  <Text style={styles.sheetBtnPrimaryText}>게스트 신청</Text>
                 </Pressable>
-                <Pressable onPress={() => router.push(`/guest-chat?clubId=${selected.clubId}` as never)} style={[styles.sheetBtn, { backgroundColor: colors.background }]}>
-                  <Text style={[styles.sheetBtnText, { color: colors.primary }]}>문의하기</Text>
+                <Pressable
+                  onPress={() => router.push(`/guest-chat?clubId=${selected.clubId}` as any)}
+                  style={({ pressed }) => [styles.sheetBtnGhost, { borderColor: colors.border }, pressed && { opacity: 0.7 }]}
+                >
+                  <Text style={[styles.sheetBtnGhostText, { color: colors.text }]}>문의</Text>
                 </Pressable>
               </View>
             </View>
@@ -250,11 +287,7 @@ export default function Discover() {
                 <View style={{ flex: 1, minWidth: 0 }}>
                   <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
                     <Text style={[styles.cardTitle, { color: colors.text }]} numberOfLines={1}>{c.name}</Text>
-                    <View style={[styles.typeBadge, { backgroundColor: c.clubType === 'MEETUP' ? colors.warning + '18' : colors.primaryBg }]}>
-                      <Text style={[styles.typeBadgeText, { color: c.clubType === 'MEETUP' ? colors.warning : colors.primary }]}>
-                        {c.clubType === 'MEETUP' ? '번개' : '클럽'}
-                      </Text>
-                    </View>
+                    <Text style={[styles.typeText, { color: colors.textLight }]}>{c.clubType === 'MEETUP' ? '번개 모임' : '정기 클럽'}</Text>
                   </View>
                   <View style={styles.metaRow}>
                     {!!c.region && (
@@ -292,22 +325,21 @@ export default function Discover() {
                 <Text style={[styles.cardDesc, { color: colors.textSecondary }]} numberOfLines={2}>{c.description}</Text>
               )}
               {c.coaches.length > 0 && (
-                <View style={[styles.coachBox, { backgroundColor: alpha(colors.info, 0.06) }]}>
+                <View style={[styles.coachBox, { backgroundColor: colors.background }]}>
+                  <Text style={[styles.coachBoxLabel, { color: colors.textLight }]}>코치 프로필</Text>
                   {c.coaches.map((co, ci) => (
                     <View key={ci} style={styles.coachRow}>
-                      <View style={[styles.coachAvatar, { backgroundColor: alpha(colors.info, 0.16) }]}>
-                        <Text style={[styles.coachAvatarText, { color: colors.info }]}>{co.coachName[0]}</Text>
+                      <View style={[styles.coachAvatar, { backgroundColor: colors.surface }]}>
+                        <Text style={[styles.coachAvatarText, { color: colors.text }]}>{co.coachName[0]}</Text>
                       </View>
                       <View style={{ flex: 1, minWidth: 0 }}>
-                        <Text style={[styles.coachRowName, { color: colors.text }]} numberOfLines={1}>
-                          {co.coachName} 코치{co.fee != null ? ` · 월 ${co.fee.toLocaleString()}원` : ''}
-                        </Text>
+                        <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
+                          <Text style={[styles.coachRowName, { color: colors.text }]} numberOfLines={1}>{co.coachName}</Text>
+                          {co.fee != null && <Text style={[styles.coachRowFee, { color: colors.text }]}>월 {co.fee.toLocaleString()}원</Text>}
+                        </View>
                         {!!co.coachIntro && (
                           <Text style={[styles.coachRowIntro, { color: colors.textSecondary }]} numberOfLines={1}>{co.coachIntro}</Text>
                         )}
-                      </View>
-                      <View style={[styles.coachLessonTag, { backgroundColor: alpha(colors.info, 0.14) }]}>
-                        <Text style={[styles.coachLessonTagText, { color: colors.info }]}>레슨</Text>
                       </View>
                     </View>
                   ))}
@@ -369,7 +401,7 @@ const styles = StyleSheet.create({
   cardHead: { flexDirection: 'row', alignItems: 'center', gap: spacing.md },
   avatar: { width: 46, height: 46, borderRadius: 23, alignItems: 'center', justifyContent: 'center' },
   avatarText: { fontSize: 19, fontWeight: '900' },
-  cardTitle: { fontSize: 17, fontWeight: '900', letterSpacing: -0.2 },
+  cardTitle: { fontSize: 17, fontWeight: '800', letterSpacing: -0.3 },
   metaRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.md, flexWrap: 'wrap', marginTop: 3 },
   metaItem: { flexDirection: 'row', alignItems: 'center', gap: 3 },
   metaText: { ...typography.caption, fontWeight: '700' },
@@ -385,30 +417,42 @@ const styles = StyleSheet.create({
   viewToggleText: { fontSize: 12, fontWeight: '800' },
   mapEmptyOverlay: { position: 'absolute', top: spacing.lg, alignSelf: 'center', borderRadius: 999, paddingHorizontal: spacing.lg, paddingVertical: spacing.sm },
   mapEmptyText: { ...typography.caption, fontWeight: '700' },
-  sheet: { position: 'absolute', left: spacing.md, right: spacing.md, bottom: spacing.md, borderRadius: 24, padding: spacing.lg, maxWidth: 560, alignSelf: 'center', width: 'auto' },
-  sheetHead: { flexDirection: 'row', alignItems: 'center', gap: spacing.md },
-  sheetAvatar: { width: 44, height: 44, borderRadius: 22, alignItems: 'center', justifyContent: 'center' },
-  sheetAvatarText: { fontSize: 18, fontWeight: '900' },
-  sheetTitle: { ...typography.subtitle1, flexShrink: 1 },
-  sheetMeta: { ...typography.caption, marginTop: 2 },
-  sheetCoaches: { borderRadius: radius.lg, padding: spacing.md, marginTop: spacing.md, gap: 4 },
-  sheetCoachText: { ...typography.caption, lineHeight: 18 },
+  sheet: { position: 'absolute', left: spacing.md, right: spacing.md, bottom: spacing.md, borderRadius: 20, paddingHorizontal: spacing.lg, paddingBottom: spacing.lg, paddingTop: spacing.sm, maxWidth: 560, marginHorizontal: 'auto' },
+  sheetHandle: { width: 36, height: 4, borderRadius: 2, backgroundColor: '#E2E8F0', alignSelf: 'center', marginBottom: spacing.md },
+  sheetHead: { flexDirection: 'row', alignItems: 'flex-start', gap: spacing.sm },
+  sheetTitle: { fontSize: 18, fontWeight: '800', letterSpacing: -0.3, flexShrink: 1 },
+  sheetType: { fontSize: 12, fontWeight: '600' },
+  sheetSub: { fontSize: 13, marginTop: 3 },
+  sheetClose: { padding: 4 },
+  sheetDivider: { height: StyleSheet.hairlineWidth, marginVertical: spacing.md },
+  infoRow: { flexDirection: 'row', alignItems: 'flex-start', gap: spacing.md, marginBottom: spacing.sm },
+  infoLabel: { fontSize: 13, fontWeight: '600', width: 52 },
+  infoValue: { fontSize: 13.5, fontWeight: '600', flex: 1, lineHeight: 19 },
+  sheetSection: { fontSize: 11.5, fontWeight: '700', letterSpacing: 0.4, marginTop: spacing.sm, marginBottom: spacing.sm },
+  sheetCoach: { flexDirection: 'row', gap: spacing.md, borderRadius: 12, padding: spacing.md, marginBottom: spacing.sm },
+  sheetCoachAvatar: { width: 38, height: 38, borderRadius: 19, alignItems: 'center', justifyContent: 'center' },
+  sheetCoachAvatarText: { fontSize: 15, fontWeight: '700' },
+  sheetCoachName: { fontSize: 14.5, fontWeight: '700' },
+  sheetCoachFee: { fontSize: 13.5, fontWeight: '700' },
+  sheetCoachIntro: { fontSize: 12.5, marginTop: 2, lineHeight: 17 },
+  sheetCoachTime: { fontSize: 12, marginTop: 3 },
   sheetActions: { flexDirection: 'row', gap: spacing.sm, marginTop: spacing.md },
-  sheetBtn: { flex: 1, paddingVertical: 13, borderRadius: 14, alignItems: 'center' },
-  sheetBtnText: { ...typography.button, fontSize: 14, fontWeight: '900', color: '#fff' },
-  typeBadge: { paddingHorizontal: 7, paddingVertical: 2, borderRadius: 999 },
-  typeBadgeText: { fontSize: 10, fontWeight: '900' },
-  coachBox: { borderRadius: radius.lg, padding: spacing.sm, gap: 4, marginTop: spacing.sm },
-  coachRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, paddingVertical: 4, paddingHorizontal: 4 },
-  coachAvatar: { width: 30, height: 30, borderRadius: 15, alignItems: 'center', justifyContent: 'center' },
-  coachAvatarText: { fontSize: 13, fontWeight: '900' },
-  coachRowName: { ...typography.caption, fontSize: 12.5, fontWeight: '800' },
-  coachRowIntro: { fontSize: 11, marginTop: 1 },
-  coachLessonTag: { paddingHorizontal: 7, paddingVertical: 3, borderRadius: 999 },
-  coachLessonTagText: { fontSize: 10, fontWeight: '900' },
+  sheetBtnPrimary: { flex: 1.4, paddingVertical: 13, borderRadius: 12, alignItems: 'center' },
+  sheetBtnPrimaryText: { fontSize: 14.5, fontWeight: '700', color: '#fff' },
+  sheetBtnGhost: { flex: 1, paddingVertical: 13, borderRadius: 12, alignItems: 'center', borderWidth: 1 },
+  sheetBtnGhostText: { fontSize: 14.5, fontWeight: '700' },
+  typeText: { fontSize: 12, fontWeight: '600' },
+  coachBox: { borderRadius: 12, padding: spacing.md, gap: 6, marginTop: spacing.sm },
+  coachBoxLabel: { fontSize: 11, fontWeight: '700', letterSpacing: 0.4 },
+  coachRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
+  coachAvatar: { width: 34, height: 34, borderRadius: 17, alignItems: 'center', justifyContent: 'center' },
+  coachAvatarText: { fontSize: 14, fontWeight: '700' },
+  coachRowName: { fontSize: 13.5, fontWeight: '700' },
+  coachRowFee: { fontSize: 13, fontWeight: '700' },
+  coachRowIntro: { fontSize: 12, marginTop: 1 },
   cardActions: { flexDirection: 'row', gap: spacing.sm, marginTop: spacing.md },
   cardActionBtn: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 5, paddingVertical: 11, borderRadius: 12 },
-  cardActionText: { fontSize: 13, fontWeight: '900' },
+  cardActionText: { fontSize: 13.5, fontWeight: '700' },
   applyTag: { paddingHorizontal: spacing.md, paddingVertical: spacing.xs, borderRadius: radius.pill },
   applyTagText: { fontSize: 11, fontWeight: '800' },
   note: { ...typography.caption, marginTop: spacing.sm, lineHeight: 16 },

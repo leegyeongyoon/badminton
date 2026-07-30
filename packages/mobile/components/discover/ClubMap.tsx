@@ -29,11 +29,10 @@ function buildMapHtml(pins: MapPin[], center: { lat: number; lng: number } | nul
 <meta charset="utf-8"/>
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
 <style>html,body,#map{margin:0;padding:0;height:100%;width:100%}
-.kpin{position:relative;display:flex;align-items:center;gap:5px;background:#fff;border-radius:999px;padding:4px 10px 4px 5px;border:2px solid #0D9488;box-shadow:0 3px 12px rgba(15,23,42,.22);cursor:pointer;white-space:nowrap;font-family:-apple-system,'Pretendard','Noto Sans KR',sans-serif}
-.kpin-ic{display:flex;align-items:center;justify-content:center;width:22px;height:22px;border-radius:50%;font-size:12px}
-.kpin-nm{font-size:12px;font-weight:800;color:#1E293B}
-.kpin-ls{font-size:9px;font-weight:900;color:#7C3AED;background:#7C3AED18;border-radius:999px;padding:2px 5px}
-.kpin-tail{position:absolute;left:50%;bottom:-7px;transform:translateX(-50%);width:0;height:0;border-left:6px solid transparent;border-right:6px solid transparent;border-top:7px solid #0D9488}
+.kpin{position:relative;display:flex;align-items:center;gap:6px;background:#0F766E;border-radius:999px;padding:7px 12px;box-shadow:0 4px 14px rgba(15,118,110,.4);cursor:pointer;white-space:nowrap;font-family:-apple-system,'Pretendard','Noto Sans KR',sans-serif;border:2px solid #fff}
+.kpin-nm{font-size:12.5px;font-weight:800;color:#fff;letter-spacing:-0.2px}
+.kpin-ls{font-size:9.5px;font-weight:900;color:#0F766E;background:#fff;border-radius:999px;padding:2px 6px}
+.kpin-tail{position:absolute;left:50%;bottom:-7px;transform:translateX(-50%);width:0;height:0;border-left:6px solid transparent;border-right:6px solid transparent;border-top:8px solid #0F766E}
 .kpin-wrap{transform:translate(-50%,-100%)}
 .me{width:16px;height:16px;border-radius:50%;background:#2563EB;border:3px solid #fff;box-shadow:0 0 0 5px rgba(37,99,235,.25)}</style>
 </head><body><div id="map"></div><script>
@@ -44,13 +43,11 @@ var HAS_ME=${center ? 'true' : 'false'};
 var ready=false;
 function post(m){try{if(window.ReactNativeWebView)window.ReactNativeWebView.postMessage(JSON.stringify(m));else if(window.parent)window.parent.postMessage(JSON.stringify(m),'*');}catch(e){}}
 function pinHtml(lesson,name){
-  var color=lesson?'#7C3AED':'#0D9488';
   var label=(name||'').length>8?(name||'').slice(0,8)+'\u2026':(name||'');
-  return '<div class="kpin" style="border-color:'+color+'">'
-    +'<span class="kpin-ic" style="background:'+color+'">\uD83C\uDFF8</span>'
+  return '<div class="kpin">'
     +'<span class="kpin-nm">'+label+'</span>'
     +(lesson?'<span class="kpin-ls">\uB808\uC2A8</span>':'')
-    +'<i class="kpin-tail" style="border-top-color:'+color+'"></i></div>';
+    +'<i class="kpin-tail"></i></div>';
 }
 
 // ── 카카오맵 ──
@@ -148,13 +145,11 @@ function useKakaoWebMap(
           withCoords.forEach((m) => {
             const pos = new w.kakao.maps.LatLng(m.lat, m.lng);
             const div = document.createElement('div');
-            const color = m.hasLessons ? '#7C3AED' : '#0D9488';
             const label = m.name.length > 8 ? `${m.name.slice(0, 8)}…` : m.name;
-            div.innerHTML = `<div style="position:relative;display:flex;align-items:center;gap:5px;background:#fff;border-radius:999px;padding:4px 10px 4px 5px;border:2px solid ${color};box-shadow:0 3px 12px rgba(15,23,42,.22);cursor:pointer;white-space:nowrap;font-family:-apple-system,'Pretendard','Noto Sans KR',sans-serif">`
-              + `<span style="display:flex;align-items:center;justify-content:center;width:22px;height:22px;border-radius:50%;font-size:12px;background:${color}">🏸</span>`
-              + `<span style="font-size:12px;font-weight:800;color:#1E293B">${label}</span>`
-              + (m.hasLessons ? '<span style="font-size:9px;font-weight:900;color:#7C3AED;background:#7C3AED18;border-radius:999px;padding:2px 5px">레슨</span>' : '')
-              + `<i style="position:absolute;left:50%;bottom:-7px;transform:translateX(-50%);width:0;height:0;border-left:6px solid transparent;border-right:6px solid transparent;border-top:7px solid ${color}"></i></div>`;
+            div.innerHTML = `<div style="position:relative;display:flex;align-items:center;gap:6px;background:#0F766E;border-radius:999px;padding:7px 12px;box-shadow:0 4px 14px rgba(15,118,110,.4);cursor:pointer;white-space:nowrap;font-family:-apple-system,'Pretendard','Noto Sans KR',sans-serif;border:2px solid #fff">`
+              + `<span style="font-size:12.5px;font-weight:800;color:#fff;letter-spacing:-0.2px">${label}</span>`
+              + (m.hasLessons ? '<span style="font-size:9.5px;font-weight:900;color:#0F766E;background:#fff;border-radius:999px;padding:2px 6px">레슨</span>' : '')
+              + `<i style="position:absolute;left:50%;bottom:-7px;transform:translateX(-50%);width:0;height:0;border-left:6px solid transparent;border-right:6px solid transparent;border-top:8px solid #0F766E"></i></div>`;
             div.onclick = () => onSelectClub(m.clubId);
             new w.kakao.maps.CustomOverlay({ position: pos, content: div, yAnchor: 1, zIndex: 2 }).setMap(map);
             bounds.extend(pos);
