@@ -10,13 +10,12 @@ import { typography, spacing, radius } from '../../constants/theme';
 //    받을 수 있어요" 를 안내하고 스토어로 보낸다.
 //  • 네이티브 앱 안에서는 렌더 안 함(Platform.OS === 'web' 게이트). 데스크톱 웹,
 //    이미 닫은 사용자에게도 안 뜬다.
-//  • 안드로이드 앱이 아직 스토어에 없으므로 지금은 iOS(App Store)만 노출.
-//    Play 출시되면 ANDROID_AVAILABLE 를 true 로.
+//  • iOS(App Store) + Android(Play) 모두 노출 — Play 프로덕션 출시 완료.
 // ─────────────────────────────────────────────────────────
 
 const APP_STORE_URL = 'https://apps.apple.com/app/id6788656869';
 const PLAY_STORE_URL = 'https://play.google.com/store/apps/details?id=com.gylee.badminton';
-const ANDROID_AVAILABLE = false; // Android 스토어 출시 후 true
+const ANDROID_AVAILABLE = true; // Play 프로덕션 출시됨 (2026-07)
 
 // 세션 동안만 숨김: 닫으면 이번 방문 중엔 안 뜨고, 다음에 다시 오면(새 세션·탭)
 // 재노출한다. 출시 초반 설치 유도가 목적이라 영구/장기 숨김 대신 세션 단위로 재넛지.

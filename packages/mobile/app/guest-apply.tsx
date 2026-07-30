@@ -41,6 +41,7 @@ interface ClubInfo {
 interface ApplyResult { id: string; clubName: string; feeAmount: number | null; accountInfo: string | null; contactInfo?: string | null; message: string }
 
 const APP_STORE_URL = 'https://apps.apple.com/app/id6788656869';
+const PLAY_STORE_URL = 'https://play.google.com/store/apps/details?id=com.gylee.badminton';
 
 // 오늘부터 7일치 방문 희망일 후보 — {value: 'YYYY-MM-DD', label: '8/2 (토)'}.
 function upcomingDates(): { value: string; label: string }[] {
@@ -136,7 +137,10 @@ export default function GuestApply() {
 
   const openStore = () => {
     if (Platform.OS === 'web' && typeof window !== 'undefined') {
-      try { window.open(APP_STORE_URL, '_blank'); } catch { /* noop */ }
+      // OS별 스토어 — Android는 Play, 그 외(iOS·데스크톱)는 App Store.
+      const isAndroid = /Android/.test(navigator.userAgent || '');
+      const url = isAndroid ? PLAY_STORE_URL : APP_STORE_URL;
+      try { window.open(url, '_blank'); } catch { /* noop */ }
     }
   };
 
