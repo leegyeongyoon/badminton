@@ -193,8 +193,8 @@ router.get('/clubs/:clubId/lesson-applications', authenticate, superAdminOnly, a
 });
 router.put('/lesson-applications/:appId', authenticate, superAdminOnly, async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const { status } = req.body as { status?: string };
-    await updateLessonApplication(String(req.params.appId), String(status || ''));
+    const { status, feePaid } = req.body as { status?: string; feePaid?: boolean };
+    await updateLessonApplication(String(req.params.appId), { status, feePaid });
     res.json({ ok: true });
   } catch (err) { next(err); }
 });

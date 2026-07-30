@@ -1067,6 +1067,10 @@ export interface DiscoverClubRow {
   guestFee: number | null;
   duesPeriodType: string;
   scheduleSummary: string | null; // "매주 화·목 20:00~22:00"
+  address: string | null;
+  lat: number | null;
+  lng: number | null;
+  hasLessons: boolean;
   applyOpen: boolean; // 게스트 신청 받는 중인지
 }
 
@@ -1107,8 +1111,9 @@ export async function discoverClubs(query?: string): Promise<DiscoverClubRow[]> 
       duesPeriodType: true,
       weeklySchedule: true,
       guestApplyEnabled: true,
-      homeFacility: { select: { address: true } },
-      _count: { select: { members: true } },
+      homeFacility: { select: { address: true, latitude: true, longitude: true } },
+      _count: { select: { members: true, lessonOffers: true } },
+      lessonOffers: { where: { enabled: true }, select: { id: true }, take: 1 },
     },
     orderBy: { createdAt: 'desc' },
     take: 50,
@@ -1120,9 +1125,13 @@ export async function discoverClubs(query?: string): Promise<DiscoverClubRow[]> 
     memberCount: c._count.members,
     // 주소 앞 두 토큰(예: "서울 강남구")만 노출.
     region: c.homeFacility?.address ? c.homeFacility.address.split(' ').slice(0, 2).join(' ') : null,
+    address: c.homeFacility?.address ?? null, // 지도 링크용 전체 주소
+    lat: c.homeFacility?.latitude ?? null,
+    lng: c.homeFacility?.longitude ?? null,
     guestFee: c.guestFee,
     duesPeriodType: c.duesPeriodType,
     scheduleSummary: discoverScheduleSummary(c.weeklySchedule),
     applyOpen: c.guestApplyEnabled,
+    hasLessons: c.lessonOffers.length > 0, // 레슨 모집 중 태그
   }));
 }

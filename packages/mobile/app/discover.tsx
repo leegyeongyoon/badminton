@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import { View, Text, StyleSheet, ScrollView, Pressable, TextInput, ActivityIndicator } from 'react-native';
+import { View, Text, StyleSheet, ScrollView, Pressable, TextInput, ActivityIndicator, Linking, Platform } from 'react-native';
 import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTheme } from '../hooks/useTheme';
@@ -26,6 +26,10 @@ interface DiscoverClubRow {
   duesPeriodType: string;
   scheduleSummary: string | null;
   applyOpen: boolean;
+  address: string | null;
+  lat: number | null;
+  lng: number | null;
+  hasLessons: boolean;
 }
 
 export default function Discover() {
@@ -36,7 +40,28 @@ export default function Discover() {
   const [rows, setRows] = useState<DiscoverClubRow[] | null>(null);
   const [loading, setLoading] = useState(true);
   const [regionFilter, setRegionFilter] = useState<string | null>(null); // null = 전체
+  const [myLoc, setMyLoc] = useState<{ lat: number; lng: number } | null>(null);
   const { isAuthenticated } = useAuthStore();
+
+  // 내 위치(선택) — 허용하면 거리 표시 + 가까운 순 정렬. 웹은 브라우저 geolocation.
+  useEffect(() => {
+    if (Platform.OS === 'web' && typeof navigator !== 'undefined' && navigator.geolocation) {
+      navigator.geolocation.getCurrentPosition(
+        (pos) => setMyLoc({ lat: pos.coords.latitude, lng: pos.coords.longitude }),
+        () => {},
+        { timeout: 5000 },
+      );
+    } else if (Platform.OS !== 'web') {
+      import('expo-location')
+        .then(async (Location) => {
+          const { status } = await Location.requestForegroundPermissionsAsync();
+          if (status !== 'granted') return;
+          const pos = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
+          setMyLoc({ lat: pos.coords.latitude, lng: pos.coords.longitude });
+        })
+        .catch(() => {});
+    }
+  }, []);
 
   const load = useCallback(async (q?: string) => {
     setLoading(true);
@@ -117,7 +142,18 @@ export default function Discover() {
             <Text style={[styles.emptySub, { color: colors.textLight }]}>초대코드가 있다면 홈의 '모임 참여'로 가입할 수 있어요</Text>
           </View>
         ) : (
-          (rows ?? []).filter((c) => !regionFilter || c.region === regionFilter).map((c) => (
+          (() => {
+            const kmOf = (c: DiscoverClubRow): number | null => {
+              if (!myLoc || c.lat == null || c.lng == null) return null;
+              const R = 6371, dLat = (c.lat - myLoc.lat) * Math.PI / 180, dLng = (c.lng - myLoc.lng) * Math.PI / 180;
+              const a = Math.sin(dLat / 2) ** 2 + Math.cos(myLoc.lat * Math.PI / 180) * Math.cos(c.lat * Math.PI / 180) * Math.sin(dLng / 2) ** 2;
+              return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+            };
+            const list = (rows ?? [])
+              .filter((c) => !regionFilter || c.region === regionFilter)
+              .map((c) => ({ c, km: kmOf(c) }))
+              .sort((a, b) => (a.km ?? 1e9) - (b.km ?? 1e9));
+            return list.map(({ c, km }) => (
             <Pressable
               key={c.clubId}
               onPress={() => router.push(`/guest-apply?clubId=${c.clubId}` as any)}
@@ -146,12 +182,25 @@ export default function Discover() {
                         <Text style={[styles.metaText, { color: colors.textSecondary }]}>게스트비 {c.guestFee.toLocaleString()}원</Text>
                       </View>
                     )}
+                    {km != null && (
+                      <View style={styles.metaItem}>
+                        <Ionicons name="navigate-outline" size={12} color={colors.primary} />
+                        <Text style={[styles.metaText, { color: colors.primary }]}>{km < 1 ? `${Math.round(km * 1000)}m` : `${km.toFixed(1)}km`}</Text>
+                      </View>
+                    )}
                   </View>
                 </View>
-                <View style={[styles.applyTag, { backgroundColor: c.applyOpen ? colors.primaryBg : colors.surfaceSecondary }]}>
-                  <Text style={[styles.applyTagText, { color: c.applyOpen ? colors.primary : colors.textLight }]}>
-                    {c.applyOpen ? '게스트 신청' : '신청 마감'}
-                  </Text>
+                <View style={{ alignItems: 'flex-end', gap: 4 }}>
+                  <View style={[styles.applyTag, { backgroundColor: c.applyOpen ? colors.primaryBg : colors.surfaceSecondary }]}>
+                    <Text style={[styles.applyTagText, { color: c.applyOpen ? colors.primary : colors.textLight }]}>
+                      {c.applyOpen ? '게스트 신청' : '신청 마감'}
+                    </Text>
+                  </View>
+                  {c.hasLessons && (
+                    <View style={[styles.applyTag, { backgroundColor: colors.info + '18' }]}>
+                      <Text style={[styles.applyTagText, { color: colors.info }]}>레슨 모집</Text>
+                    </View>
+                  )}
                 </View>
               </View>
               {c.scheduleSummary && (
@@ -163,8 +212,23 @@ export default function Discover() {
               {c.description && (
                 <Text style={[styles.cardDesc, { color: colors.textSecondary }]} numberOfLines={2}>{c.description}</Text>
               )}
+              {!!c.address && (
+                <Pressable
+                  onPress={() => {
+                    const url = `https://map.kakao.com/link/search/${encodeURIComponent(c.address!)}`;
+                    Linking.openURL(url).catch(() => {});
+                  }}
+                  style={({ pressed }) => [styles.mapRow, pressed && { opacity: 0.7 }]}
+                  hitSlop={4}
+                >
+                  <Ionicons name="map-outline" size={13} color={colors.textSecondary} />
+                  <Text style={[styles.mapRowText, { color: colors.textSecondary }]} numberOfLines={1}>{c.address}</Text>
+                  <Text style={[styles.mapRowLink, { color: colors.primary }]}>지도</Text>
+                </Pressable>
+              )}
             </Pressable>
-          ))
+            ));
+          })()
         )}
         <Text style={[styles.note, { color: colors.textLight }]}>* 공개로 설정한 모임만 보여요. 모임 가입은 초대코드로만 가능해요.</Text>
       </ScrollView>
@@ -192,6 +256,9 @@ const styles = StyleSheet.create({
   scheduleLineText: { ...typography.caption, fontWeight: '800', flex: 1 },
   cardDesc: { ...typography.caption, marginTop: spacing.sm, lineHeight: 17 },
   resultCount: { ...typography.caption, marginBottom: spacing.sm },
+  mapRow: { flexDirection: 'row', alignItems: 'center', gap: 5, marginTop: spacing.sm },
+  mapRowText: { ...typography.caption, flex: 1 },
+  mapRowLink: { ...typography.caption, fontWeight: '800' },
   applyTag: { paddingHorizontal: spacing.md, paddingVertical: spacing.xs, borderRadius: radius.pill },
   applyTagText: { fontSize: 11, fontWeight: '800' },
   note: { ...typography.caption, marginTop: spacing.sm, lineHeight: 16 },

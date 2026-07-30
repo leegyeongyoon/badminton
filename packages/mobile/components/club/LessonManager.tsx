@@ -145,9 +145,20 @@ export function LessonManager({ clubs, api }: { clubs: LessonClub[]; api: Lesson
   const setAppStatus = async (app: LessonApplicationRow, status: string) => {
     if (!clubId) return;
     try {
-      await api.updateApplication(clubId, app.id, status);
+      await api.updateApplication(clubId, app.id, { status });
       if (status === 'CONFIRMED') showSuccess(`${app.name}님 레슨 확정${app.isAppUser ? ' — 알림을 보냈어요' : ''}`);
       else if (status === 'CANCELLED') showSuccess(`${app.name}님 신청을 취소했어요`);
+      await load();
+    } catch {
+      showError('처리에 실패했어요');
+    }
+  };
+
+  const toggleFeePaid = async (app: LessonApplicationRow) => {
+    if (!clubId) return;
+    try {
+      await api.updateApplication(clubId, app.id, { feePaid: !app.feePaid });
+      showSuccess(app.feePaid ? '입금확인을 취소했어요' : `${app.name}님 레슨비 입금확인 ✓`);
       await load();
     } catch {
       showError('처리에 실패했어요');
@@ -351,9 +362,19 @@ export function LessonManager({ clubs, api }: { clubs: LessonClub[]; api: Lesson
                     {cancelled ? (
                       <Text style={[styles.statusText, { color: colors.textLight }]}>취소됨</Text>
                     ) : confirmed ? (
-                      <Pressable onPress={() => setAppStatus(a, 'PENDING')} style={[styles.stateBtn, { backgroundColor: colors.secondary + '22' }]}>
-                        <Text style={[styles.stateBtnText, { color: colors.secondary }]}>확정 ✓</Text>
-                      </Pressable>
+                      <View style={{ flexDirection: 'row', gap: 6 }}>
+                        <Pressable
+                          onPress={() => toggleFeePaid(a)}
+                          style={[styles.stateBtn, a.feePaid ? { backgroundColor: colors.secondary } : { backgroundColor: colors.warning + '22' }]}
+                        >
+                          <Text style={[styles.stateBtnText, { color: a.feePaid ? '#fff' : colors.warning }]}>
+                            {a.feePaid ? '입금 ✓' : '입금확인'}
+                          </Text>
+                        </Pressable>
+                        <Pressable onPress={() => setAppStatus(a, 'PENDING')} style={[styles.stateBtn, { backgroundColor: colors.secondary + '22' }]}>
+                          <Text style={[styles.stateBtnText, { color: colors.secondary }]}>확정 ✓</Text>
+                        </Pressable>
+                      </View>
                     ) : (
                       <View style={{ flexDirection: 'row', gap: 6 }}>
                         <Pressable onPress={() => setAppStatus(a, 'CONFIRMED')} style={[styles.stateBtn, { backgroundColor: colors.primary }]}>

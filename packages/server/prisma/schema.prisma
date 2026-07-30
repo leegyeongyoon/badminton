@@ -626,6 +626,7 @@ model LessonApplication {
   phone     String?
   note      String?
   status    String   @default("PENDING") // PENDING | CONFIRMED | CANCELLED
+  feePaid   Boolean  @default(false) // 레슨비 입금확인(운영자 토글)
   createdAt DateTime @default(now())
 
   offer LessonOffer @relation(fields: [offerId], references: [id], onDelete: Cascade)

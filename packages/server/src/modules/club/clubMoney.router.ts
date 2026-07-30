@@ -25,6 +25,7 @@ import {
   updateLessonApplication,
 } from '../lab/lab.service';
 import * as guestChat from '../guestChat/guestChat.service';
+import { getMyDues, getMoneyStats } from '../lab/lab.service';
 
 // ─────────────────────────────────────────────────────────────
 // 모임 회비 관리(정식) — 실험실에서 검증된 로직(lab.service)을 모임 운영진
@@ -203,9 +204,9 @@ router.put('/:clubId/money/lesson-applications/:appId', authenticate, staffGuard
       select: { offer: { select: { clubId: true } } },
     });
     if (!app || app.offer.clubId !== String(req.params.clubId)) throw new NotFoundError('레슨 신청');
-    const { status } = req.body as { status?: string };
-    if (!status) throw new BadRequestError('status 필요');
-    await updateLessonApplication(String(req.params.appId), status);
+    const { status, feePaid } = req.body as { status?: string; feePaid?: boolean };
+    if (status === undefined && feePaid === undefined) throw new BadRequestError('status 또는 feePaid 필요');
+    await updateLessonApplication(String(req.params.appId), { status, feePaid });
     res.json({ ok: true });
   } catch (err) { next(err); }
 });
@@ -277,6 +278,27 @@ router.put('/:clubId/money/guest-threads/:threadId/closed', authenticate, staffG
     const { closed } = req.body as { closed?: boolean };
     await guestChat.setThreadClosed(String(req.params.clubId), String(req.params.threadId), !!closed);
     res.json({ ok: true });
+  } catch (err) { next(err); }
+});
+
+// ─── 회원용 "내 회비" + 운영자 통계 ───────────────────────────
+// GET /clubs/:clubId/my-dues — 내 기간별 청구/납부 타임라인(멤버 본인)
+router.get('/:clubId/my-dues', authenticate, async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const member = await prisma.clubMember.findFirst({
+      where: { clubId: String(req.params.clubId), userId: req.user!.userId },
+      select: { id: true },
+    });
+    if (!member) throw new NotFoundError('모임');
+    res.json(await getMyDues(String(req.params.clubId), req.user!.userId));
+  } catch (err) { next(err); }
+});
+
+// GET /clubs/:clubId/money/stats — 월별 청구/납부 추이(운영자)
+router.get('/:clubId/money/stats', authenticate, staffGuard, async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const months = Math.min(12, Math.max(3, parseInt(String(req.query.months || '6'), 10) || 6));
+    res.json(await getMoneyStats(String(req.params.clubId), months));
   } catch (err) { next(err); }
 });
 

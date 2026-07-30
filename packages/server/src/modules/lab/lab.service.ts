@@ -687,6 +687,7 @@ export interface LabLessonOffer {
   summary: string; // "월·수·금 19:00~20:00"
   applicants: number; // PENDING+CONFIRMED
   myStatus: string | null; // 조회자 본인의 신청 상태(PENDING/CONFIRMED) — 회원 조회에서만
+  myFeePaid: boolean; // 본인 레슨비 입금확인 여부(회원 조회에서만)
 }
 
 export interface LabLessonApplicationRow {
@@ -699,6 +700,7 @@ export interface LabLessonApplicationRow {
   phone: string | null;
   note: string | null;
   status: string; // PENDING | CONFIRMED | CANCELLED
+  feePaid: boolean; // 레슨비 입금확인
   createdAt: string;
 }
 
@@ -723,7 +725,7 @@ export async function getLessonOffers(clubId: string, enabledOnly = false, forUs
     include: {
       _count: { select: { applications: { where: { status: { in: ['PENDING', 'CONFIRMED'] } } } } },
       ...(forUserId
-        ? { applications: { where: { userId: forUserId, status: { in: ['PENDING', 'CONFIRMED'] } }, select: { status: true }, take: 1 } }
+        ? { applications: { where: { userId: forUserId, status: { in: ['PENDING', 'CONFIRMED'] } }, select: { status: true, feePaid: true }, take: 1 } }
         : {}),
     },
   });
@@ -741,6 +743,7 @@ export async function getLessonOffers(clubId: string, enabledOnly = false, forUs
     summary: lessonSummary(o),
     applicants: o._count.applications,
     myStatus: forUserId ? ((o as unknown as { applications?: { status: string }[] }).applications?.[0]?.status ?? null) : null,
+    myFeePaid: forUserId ? ((o as unknown as { applications?: { feePaid: boolean }[] }).applications?.[0]?.feePaid ?? false) : false,
   }));
 }
 
@@ -821,6 +824,7 @@ export async function getLessonApplications(clubId: string): Promise<LabLessonAp
     phone: r.phone,
     note: r.note,
     status: r.status,
+    feePaid: r.feePaid,
     createdAt: r.createdAt.toISOString(),
   }));
   return [...mapped.filter((r) => r.status !== 'CANCELLED'), ...mapped.filter((r) => r.status === 'CANCELLED')];
@@ -877,14 +881,20 @@ export async function applyLesson(
   return { id: app.id, message: `${offer.coachName} 코치 레슨 신청이 접수됐어요. 운영진 확정 후 알림을 보내드려요.` };
 }
 
-/** 레슨 신청 상태 변경(운영자) — CONFIRMED 전환 시 신청자 푸시. */
-export async function updateLessonApplication(id: string, status: string): Promise<void> {
-  if (!['PENDING', 'CONFIRMED', 'CANCELLED'].includes(status)) throw new Error('잘못된 상태예요.');
+/** 레슨 신청 갱신(운영자) — 상태 변경·레슨비 입금확인. CONFIRMED 전환 시 신청자 푸시. */
+export async function updateLessonApplication(id: string, patch: { status?: string; feePaid?: boolean }): Promise<void> {
+  const data: Record<string, unknown> = {};
+  if (patch.status !== undefined) {
+    if (!['PENDING', 'CONFIRMED', 'CANCELLED'].includes(patch.status)) throw new Error('잘못된 상태예요.');
+    data.status = patch.status;
+  }
+  if (patch.feePaid !== undefined) data.feePaid = !!patch.feePaid;
   const updated = await prisma.lessonApplication.update({
     where: { id },
-    data: { status },
+    data,
     include: { offer: { include: { club: { select: { name: true } } } } },
   });
+  const status = patch.status;
   if (updated.userId && status === 'CONFIRMED') {
     try {
       await sendPushToUser(updated.userId, {
@@ -895,4 +905,131 @@ export async function updateLessonApplication(id: string, status: string): Promi
       /* 알림 실패 무시 */
     }
   }
+}
+
+// ─── 회원용 "내 회비" — 기간별 청구/납부 타임라인 ─────────────
+// 상용 필수: 회원이 자기가 몇 월에 냈고 뭐가 밀렸는지 직접 본다.
+export interface MyDuesPeriodRow {
+  period: string; // YYYY-MM
+  label: string; // "2026년 7월"
+  dues: number; // 정기 회비(청구월만)
+  sessions: number; // 참석 정모 수
+  sessionFees: number; // 정모 참가비
+  splitFees: number; // 대관비 엔빵
+  total: number;
+  paid: boolean;
+  paidAt: string | null;
+  paidAmount: number | null;
+}
+export interface MyDuesResponse {
+  clubId: string;
+  clubName: string;
+  duesPeriodType: string;
+  duesAmount: number | null;
+  accountInfo: string | null;
+  periods: MyDuesPeriodRow[]; // 최신순
+  totals: { paidThisYear: number; unpaidCount: number; unpaidAmount: number };
+}
+
+export async function getMyDues(clubId: string, userId: string, monthsBack = 6): Promise<MyDuesResponse> {
+  const club = await prisma.club.findUnique({
+    where: { id: clubId },
+    select: { id: true, name: true, monthlyDuesAmount: true, duesPeriodType: true, perSessionFee: true, duesAccountInfo: true },
+  });
+  if (!club) throw new Error('Club not found');
+  const periodType = club.duesPeriodType || 'NONE';
+  const perSessionFee = club.perSessionFee ?? 0;
+  const now = new Date();
+
+  const rows: MyDuesPeriodRow[] = [];
+  for (let i = 0; i < monthsBack; i++) {
+    const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+    const y = d.getFullYear();
+    const mo = d.getMonth(); // 0-based
+    const period = `${y}-${String(mo + 1).padStart(2, '0')}`;
+    const start = new Date(y, mo, 1);
+    const end = new Date(y, mo + 1, 1);
+
+    const month1 = mo + 1;
+    const billingMonth =
+      periodType === 'MONTHLY' ? true :
+      periodType === 'QUARTERLY' ? month1 % 3 === 1 :
+      periodType === 'HALF' ? month1 === 1 || month1 === 7 :
+      periodType === 'YEARLY' ? month1 === 1 :
+      false;
+    const dues = billingMonth ? (club.monthlyDuesAmount ?? 0) : 0;
+
+    // 내 참석 정모(이 클럽, 이 달)
+    const myCheckins = await prisma.checkIn.findMany({
+      where: { userId, checkedInAt: { gte: start, lt: end }, clubSession: { clubId } },
+      select: { clubSessionId: true },
+    });
+    const mySessionIds = [...new Set(myCheckins.map((c) => c.clubSessionId).filter(Boolean))] as string[];
+    const sessionFees = perSessionFee * mySessionIds.length;
+
+    // 대관비 엔빵: 내가 참석한 정모 중 rentalCost 설정된 것
+    let splitFees = 0;
+    if (mySessionIds.length > 0) {
+      const rentals = await prisma.clubSession.findMany({
+        where: { id: { in: mySessionIds }, rentalCost: { gt: 0 } },
+        select: { id: true, rentalCost: true },
+      });
+      for (const r of rentals) {
+        const attendees = await prisma.checkIn.groupBy({ by: ['userId'], where: { clubSessionId: r.id } });
+        const n = attendees.length;
+        if (n > 0 && r.rentalCost) splitFees += Math.ceil(r.rentalCost / n / 10) * 10;
+      }
+    }
+
+    const payment = await prisma.duesPayment.findUnique({
+      where: { clubId_userId_period: { clubId, userId, period } },
+    });
+
+    rows.push({
+      period,
+      label: `${y}년 ${month1}월`,
+      dues,
+      sessions: mySessionIds.length,
+      sessionFees,
+      splitFees,
+      total: dues + sessionFees + splitFees,
+      paid: !!payment,
+      paidAt: payment?.paidAt.toISOString() ?? null,
+      paidAmount: payment?.amount ?? null,
+    });
+  }
+
+  const yearStart = `${now.getFullYear()}-01`;
+  const yearPayments = await prisma.duesPayment.findMany({
+    where: { clubId, userId, period: { gte: yearStart } },
+    select: { amount: true },
+  });
+  const unpaid = rows.filter((r) => r.total > 0 && !r.paid);
+  return {
+    clubId: club.id,
+    clubName: club.name,
+    duesPeriodType: periodType,
+    duesAmount: club.monthlyDuesAmount,
+    accountInfo: club.duesAccountInfo,
+    periods: rows,
+    totals: {
+      paidThisYear: yearPayments.reduce((a, p) => a + p.amount, 0),
+      unpaidCount: unpaid.length,
+      unpaidAmount: unpaid.reduce((a, r) => a + r.total, 0),
+    },
+  };
+}
+
+// ─── 운영자 월별 정산 추이(통계) ──────────────────────────────
+export interface MoneyStatRow { period: string; billed: number; paid: number; unpaid: number }
+export async function getMoneyStats(clubId: string, monthsBack = 6): Promise<MoneyStatRow[]> {
+  const now = new Date();
+  const out: MoneyStatRow[] = [];
+  for (let i = monthsBack - 1; i >= 0; i--) {
+    const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+    const period = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+    const s = await getClubSettlement(clubId, period);
+    out.push({ period, billed: s.totals.billed, paid: s.totals.paid, unpaid: s.totals.unpaid });
+  }
+  return out;
 }

@@ -151,6 +151,7 @@ export interface LessonOffer {
   summary: string; // "월·수·금 19:00~20:00"
   applicants: number;
   myStatus: string | null; // 내 신청 상태(회원 조회에서만)
+  myFeePaid: boolean; // 내 레슨비 입금확인 여부(회원 조회에서만)
 }
 export interface LessonApplicationRow {
   id: string;
@@ -162,6 +163,7 @@ export interface LessonApplicationRow {
   phone: string | null;
   note: string | null;
   status: string; // PENDING | CONFIRMED | CANCELLED
+  feePaid: boolean; // 레슨비 입금확인
   createdAt: string;
 }
 
@@ -171,7 +173,7 @@ export interface LessonApi {
   saveOffer(clubId: string, offer: Partial<LessonOffer> & { id?: string }): Promise<void>;
   deleteOffer(clubId: string, offerId: string): Promise<void>;
   getApplications(clubId: string): Promise<LessonApplicationRow[]>;
-  updateApplication(clubId: string, id: string, status: string): Promise<void>;
+  updateApplication(clubId: string, id: string, patch: { status?: string; feePaid?: boolean }): Promise<void>;
 }
 
 /** 운영진용 레슨 API — /clubs/:id/money/lessons* (staff 가드). */
@@ -180,7 +182,7 @@ export const clubLessonApi: LessonApi = {
   saveOffer: async (clubId, offer) => { await api.put(`/clubs/${clubId}/money/lessons`, offer); },
   deleteOffer: async (clubId, offerId) => { await api.delete(`/clubs/${clubId}/money/lessons/${offerId}`); },
   getApplications: async (clubId) => (await api.get(`/clubs/${clubId}/money/lesson-applications`)).data || [],
-  updateApplication: async (clubId, id, status) => { await api.put(`/clubs/${clubId}/money/lesson-applications/${id}`, { status }); },
+  updateApplication: async (clubId, id, patch) => { await api.put(`/clubs/${clubId}/money/lesson-applications/${id}`, patch); },
 };
 
 /** 최고관리자(실험실)용 레슨 API — /lab/* 경로. */
@@ -189,7 +191,7 @@ export const labLessonApi: LessonApi = {
   saveOffer: async (clubId, offer) => { await api.put(`/lab/clubs/${clubId}/lessons`, offer); },
   deleteOffer: async (_clubId, offerId) => { await api.delete(`/lab/lesson-offers/${offerId}`); },
   getApplications: async (clubId) => (await api.get(`/lab/clubs/${clubId}/lesson-applications`)).data || [],
-  updateApplication: async (_clubId, id, status) => { await api.put(`/lab/lesson-applications/${id}`, { status }); },
+  updateApplication: async (_clubId, id, patch) => { await api.put(`/lab/lesson-applications/${id}`, patch); },
 };
 
 /** 회원용 — 활성 레슨 목록 + 신청. */
@@ -197,6 +199,39 @@ export const memberLessonApi = {
   list: async (clubId: string): Promise<LessonOffer[]> => (await api.get(`/clubs/${clubId}/lessons`)).data || [],
   apply: async (clubId: string, offerId: string, note?: string): Promise<{ id: string; message: string }> =>
     (await api.post(`/clubs/${clubId}/lessons/${offerId}/apply`, note ? { note } : {})).data,
+};
+
+// ─── 내 회비(회원) + 정산 통계(운영자) ───
+export interface MyDuesPeriodRow {
+  period: string;
+  label: string;
+  dues: number;
+  sessions: number;
+  sessionFees: number;
+  splitFees: number;
+  total: number;
+  paid: boolean;
+  paidAt: string | null;
+  paidAmount: number | null;
+}
+export interface MyDuesResponse {
+  clubId: string;
+  clubName: string;
+  duesPeriodType: string;
+  duesAmount: number | null;
+  accountInfo: string | null;
+  periods: MyDuesPeriodRow[];
+  totals: { paidThisYear: number; unpaidCount: number; unpaidAmount: number };
+}
+export interface MoneyStatRow { period: string; billed: number; paid: number; unpaid: number }
+
+export const myDuesApi = {
+  get: async (clubId: string): Promise<MyDuesResponse> =>
+    (await api.get(`/clubs/${clubId}/my-dues`)).data,
+};
+export const moneyStatsApi = {
+  get: async (clubId: string, months = 6): Promise<MoneyStatRow[]> =>
+    (await api.get(`/clubs/${clubId}/money/stats`, { params: { months } })).data || [],
 };
 
 /** 운영진(LEADER/STAFF)용 — /clubs/:id/money/* (정식 경로). */

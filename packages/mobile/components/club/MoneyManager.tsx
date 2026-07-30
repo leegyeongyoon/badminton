@@ -7,6 +7,8 @@ import { alpha } from '../../utils/color';
 import { Icon } from '../../components/ui/Icon';
 import { showSuccess } from '../../utils/feedback';
 import {
+  moneyStatsApi,
+  type MoneyStatRow,
   type MoneyApi,
   type LabSettlementResponse,
   type LabSessionRow,
@@ -65,6 +67,7 @@ export function MoneyManager({ clubs, api }: { clubs: MoneyClub[]; api: MoneyApi
   const [clubId, setClubId] = useState<string | null>(clubs[0]?.id ?? null);
   const [period, setPeriod] = useState(currentPeriod());
   const [tab, setTab] = useState<TabKey>('settle');
+  const [stats, setStats] = useState<MoneyStatRow[]>([]);
 
   // 정산
   const [data, setData] = useState<LabSettlementResponse | null>(null);
@@ -93,6 +96,7 @@ export function MoneyManager({ clubs, api }: { clubs: MoneyClub[]; api: MoneyApi
     setLoading(true);
     try {
       if (tab === 'settle') {
+        moneyStatsApi.get(clubId, 6).then(setStats).catch(() => {});
         const [d, ss] = await Promise.all([
           api.getSettlement(clubId, period),
           api.getSessions(clubId, period).catch(() => [] as LabSessionRow[]),
@@ -299,6 +303,30 @@ export function MoneyManager({ clubs, api }: { clubs: MoneyClub[]; api: MoneyApi
 
             {data.monthlyDuesAmount == null && (
               <Text style={[styles.note, { color: colors.textLight }]}>* 정기 회비 미설정 — 설정 탭에서 주기·금액을 정하면 자동 청구돼요.</Text>
+            )}
+
+            {/* 월별 추이 — 청구(연한 바) 대비 납부(진한 바) 6개월 */}
+            {stats.length > 0 && stats.some((r) => r.billed > 0) && (
+              <View style={[styles.card, { backgroundColor: colors.surface }, shadows.md]}>
+                <Text style={[styles.cardTitle, { color: colors.text }]}>월별 추이</Text>
+                <View style={styles.trendRow}>
+                  {stats.map((r) => {
+                    const max = Math.max(...stats.map((x) => x.billed), 1);
+                    const bh = Math.max(4, Math.round((r.billed / max) * 64));
+                    const ph = Math.max(r.paid > 0 ? 4 : 0, Math.round((r.paid / max) * 64));
+                    return (
+                      <View key={r.period} style={styles.trendCol}>
+                        <View style={styles.trendBars}>
+                          <View style={[styles.trendBar, { height: bh, backgroundColor: alpha(colors.primary, 0.18) }]} />
+                          <View style={[styles.trendBar, styles.trendBarPaid, { height: ph, backgroundColor: colors.primary }]} />
+                        </View>
+                        <Text style={[styles.trendLabel, { color: colors.textLight }]}>{parseInt(r.period.slice(5), 10)}월</Text>
+                      </View>
+                    );
+                  })}
+                </View>
+                <Text style={[styles.trendHint, { color: colors.textLight }]}>연한 색 = 청구 · 진한 색 = 납부 확인</Text>
+              </View>
             )}
 
             {/* 정모별 대관비 엔빵 */}
@@ -548,6 +576,13 @@ const styles = StyleSheet.create({
   statLabel: { ...typography.caption, marginTop: 3, fontWeight: '600' },
 
   card: { borderRadius: 20, padding: spacing.lg, marginBottom: spacing.md },
+  trendRow: { flexDirection: 'row', alignItems: 'flex-end', gap: spacing.sm, marginTop: spacing.md },
+  trendCol: { flex: 1, alignItems: 'center', gap: 4 },
+  trendBars: { width: '100%', height: 64, justifyContent: 'flex-end', position: 'relative' },
+  trendBar: { width: '100%', borderRadius: 4, position: 'absolute', bottom: 0 },
+  trendBarPaid: {},
+  trendLabel: { fontSize: 10, fontWeight: '700' },
+  trendHint: { ...typography.caption, marginTop: spacing.sm },
   cardTitle: { ...typography.subtitle1, marginBottom: 2 },
   cardHint: { ...typography.caption, marginBottom: spacing.sm },
 

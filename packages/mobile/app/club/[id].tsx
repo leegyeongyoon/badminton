@@ -28,7 +28,7 @@ import { AttendanceLeaderboard } from '../../components/club/AttendanceLeaderboa
 import { Icon } from '../../components/ui/Icon';
 import { ScreenContainer } from '../../components/ui/ScreenContainer';
 import { AddFacilityModal } from '../../components/AddFacilityModal';
-import { memberLessonApi, type LessonOffer } from '../../services/lab';
+import { memberLessonApi, myDuesApi, type LessonOffer, type MyDuesResponse } from '../../services/lab';
 import { staffGuestChatApi } from '../../services/guestChat';
 
 interface ClubMember {
@@ -95,7 +95,8 @@ export default function ClubDetailScreen() {
   // 멤버 목록 섹션 접이식 — 평소 닫힘.
   const [showMembers, setShowMembers] = useState(true);
   // 클럽 홈 섹션 탭 — 한 스크롤 덩어리 대신 홈/레슨/출석왕/멤버로 분리(가독성).
-  const [sectionTab, setSectionTab] = useState<'home' | 'lesson' | 'rank' | 'member'>('home');
+  const [sectionTab, setSectionTab] = useState<'home' | 'lesson' | 'dues' | 'rank' | 'member'>('home');
+  const [myDues, setMyDues] = useState<MyDuesResponse | null>(null);
   const [lessons, setLessons] = useState<LessonOffer[]>([]);
   const [applyingLesson, setApplyingLesson] = useState<string | null>(null);
   const [guestUnread, setGuestUnread] = useState(0);
@@ -120,6 +121,12 @@ export default function ClubDetailScreen() {
     if (!clubId) return;
     memberLessonApi.list(clubId).then(setLessons).catch(() => {});
   }, [clubId]);
+
+  // 내 회비 — 회비 탭 열 때 로드.
+  useEffect(() => {
+    if (!clubId || sectionTab !== 'dues') return;
+    myDuesApi.get(clubId).then(setMyDues).catch(() => {});
+  }, [clubId, sectionTab]);
 
   // 운영진: 게스트 문의 미읽음 — 있으면 홈 상단에 배너로 보여준다.
   useEffect(() => {
@@ -497,6 +504,7 @@ export default function ClubDetailScreen() {
             {([
               { key: 'home', label: '홈', count: 0 },
               { key: 'lesson', label: '레슨', count: lessons.length },
+              { key: 'dues', label: '회비', count: 0 },
               { key: 'rank', label: '출석왕', count: 0 },
               { key: 'member', label: '멤버', count: currentMembers.length },
             ] as const).map((t) => {
@@ -774,7 +782,11 @@ export default function ClubDetailScreen() {
                     {applied ? (
                       <View style={[styles.lessonAppliedBadge, o.myStatus === 'CONFIRMED' && styles.lessonConfirmedBadge]}>
                         <Text style={[styles.lessonAppliedText, o.myStatus === 'CONFIRMED' && styles.lessonConfirmedText]}>
-                          {o.myStatus === 'CONFIRMED' ? '✓ 수강 확정 — 정모에서 만나요!' : '신청 완료 · 운영진 확정 대기 중'}
+                          {o.myStatus === 'CONFIRMED'
+                            ? o.myFeePaid
+                              ? '✓ 수강 확정 · 레슨비 입금 확인됨'
+                              : `✓ 수강 확정 — 레슨비${o.fee != null ? ` ${o.fee.toLocaleString()}원` : ''} 입금해 주세요 (계좌는 회비 탭)`
+                            : '신청 완료 · 운영진 확정 대기 중'}
                         </Text>
                       </View>
                     ) : (
@@ -791,6 +803,76 @@ export default function ClubDetailScreen() {
                   </View>
                 );
               })}
+            </View>
+          )}
+
+          {/* ═══ 회비 탭 — 내 납부 타임라인(상용 필수) ═══ */}
+          {sectionTab === 'dues' && (
+            <View>
+              {!myDues ? (
+                <View style={styles.duesLoading}><Text style={styles.pastEmptyText}>불러오는 중…</Text></View>
+              ) : (
+                <>
+                  {/* 요약 */}
+                  <View style={styles.duesSummaryRow}>
+                    <View style={[styles.duesSummaryCard, { backgroundColor: Colors.primary + '10' }]}>
+                      <Text style={styles.duesSummaryLabel}>올해 납부</Text>
+                      <Text style={[styles.duesSummaryValue, { color: Colors.primary }]}>
+                        {myDues.totals.paidThisYear.toLocaleString()}원
+                      </Text>
+                    </View>
+                    <View style={[styles.duesSummaryCard, myDues.totals.unpaidCount > 0 ? { backgroundColor: Colors.danger + '10' } : { backgroundColor: Colors.surface }]}>
+                      <Text style={styles.duesSummaryLabel}>미납</Text>
+                      <Text style={[styles.duesSummaryValue, { color: myDues.totals.unpaidCount > 0 ? Colors.danger : Colors.textLight }]}>
+                        {myDues.totals.unpaidCount > 0 ? `${myDues.totals.unpaidCount}건 · ${myDues.totals.unpaidAmount.toLocaleString()}원` : '없음'}
+                      </Text>
+                    </View>
+                  </View>
+
+                  {/* 입금 계좌 */}
+                  {!!myDues.accountInfo && (
+                    <View style={styles.duesAccountCard}>
+                      <Icon name="medal" size={16} color={Colors.primary} />
+                      <View style={{ flex: 1, minWidth: 0 }}>
+                        <Text style={styles.duesAccountLabel}>입금 계좌</Text>
+                        <Text style={styles.duesAccountValue} selectable>{myDues.accountInfo}</Text>
+                      </View>
+                    </View>
+                  )}
+
+                  {/* 기간별 타임라인 */}
+                  {myDues.periods.map((pd) => (
+                    <View key={pd.period} style={[styles.duesRow, pd.total === 0 && { opacity: 0.5 }]}>
+                      <View style={{ flex: 1, minWidth: 0 }}>
+                        <Text style={styles.duesRowLabel}>{pd.label}</Text>
+                        <Text style={styles.duesRowMeta}>
+                          {pd.total === 0
+                            ? '청구 없음'
+                            : [pd.dues > 0 && `회비 ${pd.dues.toLocaleString()}`, pd.sessionFees > 0 && `정모 ${pd.sessions}회 ${pd.sessionFees.toLocaleString()}`, pd.splitFees > 0 && `대관 엔빵 ${pd.splitFees.toLocaleString()}`].filter(Boolean).join(' · ')}
+                        </Text>
+                      </View>
+                      {pd.total > 0 && (
+                        <Text style={styles.duesRowAmount}>{pd.total.toLocaleString()}원</Text>
+                      )}
+                      {pd.total > 0 && (
+                        <View style={[styles.duesBadge, pd.paid ? { backgroundColor: '#16a34a18' } : { backgroundColor: Colors.danger + '15' }]}>
+                          <Text style={[styles.duesBadgeText, { color: pd.paid ? '#16a34a' : Colors.danger }]}>
+                            {pd.paid ? '완납 ✓' : '미납'}
+                          </Text>
+                        </View>
+                      )}
+                    </View>
+                  ))}
+                  <Text style={styles.duesHint}>
+                    * 입금 후 운영진이 확인하면 완납으로 바뀌어요. 문의는 채팅으로!
+                  </Text>
+                  {isLeaderOrStaff && (
+                    <TouchableOpacity style={styles.lessonManageLink} onPress={() => router.push(`/club/${clubId}/money`)} activeOpacity={0.8}>
+                      <Text style={styles.lessonManageLinkText}>전체 정산·입금확인 관리 →</Text>
+                    </TouchableOpacity>
+                  )}
+                </>
+              )}
             </View>
           )}
 
@@ -1129,6 +1211,27 @@ const styles = StyleSheet.create({
     gap: 4,
   },
   lessonEmptyTitle: { fontSize: 14, fontWeight: '800', color: Colors.text },
+  duesLoading: { paddingVertical: 40, alignItems: 'center' },
+  duesSummaryRow: { flexDirection: 'row', gap: 10, marginBottom: 10 },
+  duesSummaryCard: { flex: 1, borderRadius: 16, padding: 14, gap: 4 },
+  duesSummaryLabel: { fontSize: 11, fontWeight: '700', color: Colors.textSecondary },
+  duesSummaryValue: { fontSize: 16, fontWeight: '900' },
+  duesAccountCard: {
+    flexDirection: 'row', alignItems: 'center', gap: 10,
+    backgroundColor: Colors.surface, borderRadius: 16, padding: 14, marginBottom: 10,
+  },
+  duesAccountLabel: { fontSize: 11, fontWeight: '700', color: Colors.textSecondary },
+  duesAccountValue: { fontSize: 14, fontWeight: '800', color: Colors.text, marginTop: 1 },
+  duesRow: {
+    flexDirection: 'row', alignItems: 'center', gap: 10,
+    backgroundColor: Colors.surface, borderRadius: 14, paddingVertical: 12, paddingHorizontal: 14, marginBottom: 8,
+  },
+  duesRowLabel: { fontSize: 14, fontWeight: '800', color: Colors.text },
+  duesRowMeta: { fontSize: 11, color: Colors.textLight, marginTop: 2 },
+  duesRowAmount: { fontSize: 14, fontWeight: '900', color: Colors.text },
+  duesBadge: { paddingHorizontal: 8, paddingVertical: 4, borderRadius: 999 },
+  duesBadgeText: { fontSize: 11, fontWeight: '900' },
+  duesHint: { fontSize: 11, color: Colors.textLight, lineHeight: 16, marginTop: 4, marginBottom: 8 },
   lessonEmptySub: { fontSize: 12, color: Colors.textLight, textAlign: 'center', lineHeight: 17 },
   guestApplyShareText: { fontSize: 11, fontWeight: '800', color: Colors.primary },
   inviteCode: {
