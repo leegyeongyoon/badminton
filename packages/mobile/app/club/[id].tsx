@@ -116,11 +116,12 @@ export default function ClubDetailScreen() {
   const myMembership = currentMembers.find((m) => m.userId === user?.id);
   const isLeaderOrStaff = myMembership?.role === 'LEADER' || myMembership?.role === 'STAFF';
 
-  // 레슨(활성 상품) — 없으면 섹션 자체를 숨긴다.
+  // 레슨(활성 상품) — 없으면 섹션 자체를 숨긴다. 번개 모임(MEETUP)은 스킵.
   useEffect(() => {
     if (!clubId) return;
+    if (((club as any)?.clubType ?? 'CLUB') === 'MEETUP') { setLessons([]); return; }
     memberLessonApi.list(clubId).then(setLessons).catch(() => {});
-  }, [clubId]);
+  }, [clubId, (club as any)?.clubType]);
 
   // 내 회비 — 회비 탭 열 때 로드.
   useEffect(() => {
@@ -503,11 +504,12 @@ export default function ClubDetailScreen() {
           <View style={styles.sectionTabs}>
             {([
               { key: 'home', label: '홈', count: 0 },
-              { key: 'lesson', label: '레슨', count: lessons.length },
+              // 번개 모임(MEETUP)은 레슨 기능 없음 — 탭 자체를 숨긴다.
+              ...(((club as any)?.clubType ?? 'CLUB') !== 'MEETUP' ? [{ key: 'lesson', label: '레슨', count: lessons.length }] : []),
               { key: 'dues', label: '회비', count: 0 },
               { key: 'rank', label: '출석왕', count: 0 },
               { key: 'member', label: '멤버', count: currentMembers.length },
-            ] as const).map((t) => {
+            ] as { key: 'home' | 'lesson' | 'dues' | 'rank' | 'member'; label: string; count: number }[]).map((t) => {
               const active = sectionTab === t.key;
               return (
                 <TouchableOpacity

@@ -66,6 +66,7 @@ export interface UpdateClubBody {
   monthlyDuesAmount?: number | null;
   // 모임 공개 여부 — PUBLIC이면 '모임 찾기'에 노출(게스트 신청 가능).
   visibility?: 'PUBLIC' | 'PRIVATE';
+  clubType?: 'CLUB' | 'MEETUP';
 }
 
 // ─── 멤버별 출석 이력 (GET /clubs/:id/members/:userId/attendance) ───────────
@@ -140,7 +141,7 @@ export interface ClubInfo {
 
 export const clubApi = {
   list: () => api.get('/clubs'),
-  create: (name: string) => api.post('/clubs', { name }),
+  create: (name: string, clubType: 'CLUB' | 'MEETUP' = 'CLUB') => api.post('/clubs', { name, clubType }),
   // 모임 정보 수정 (이름/홈시설/소개). 서버 권한: 해당 모임 LEADER 또는 SUPER_ADMIN.
   updateClub: (id: string, body: UpdateClubBody) =>
     api.patch<ClubInfo>(`/clubs/${id}`, body),

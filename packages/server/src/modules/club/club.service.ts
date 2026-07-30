@@ -30,6 +30,7 @@ export async function createClub(userId: string, input: CreateClubInput) {
   const club = await prisma.club.create({
     data: {
       name: input.name,
+      clubType: (input as { clubType?: string }).clubType === 'MEETUP' ? 'MEETUP' : 'CLUB',
       inviteCode: generateInviteCode(),
       members: { create: { userId, role: 'LEADER' } },
     },
@@ -112,6 +113,11 @@ export async function updateClub(
   if ((input as { visibility?: string }).visibility !== undefined) {
     data.visibility = (input as { visibility?: string }).visibility;
   }
+  // 모임 유형 — CLUB(정기)/MEETUP(번개). 레슨 등 기능 노출이 달라진다.
+  const ct = (input as { clubType?: string }).clubType;
+  if (ct !== undefined && (ct === 'CLUB' || ct === 'MEETUP')) {
+    (data as Record<string, unknown>).clubType = ct;
+  }
   if (input.name !== undefined) data.name = input.name;
   if (input.homeFacilityId !== undefined) data.homeFacilityId = input.homeFacilityId;
   if (input.description !== undefined) {
@@ -184,6 +190,7 @@ export async function listMyClubs(userId: string, role?: string) {
       homeFacilityId: club.homeFacilityId,
       monthlyDuesAmount: club.monthlyDuesAmount,
       visibility: club.visibility,
+      clubType: club.clubType,
       memberCount: club._count.members,
       role: 'LEADER' as ClubMemberRole,
       createdAt: club.createdAt.toISOString(),
@@ -205,6 +212,7 @@ export async function listMyClubs(userId: string, role?: string) {
     homeFacilityId: m.club.homeFacilityId,
     monthlyDuesAmount: m.club.monthlyDuesAmount,
     visibility: m.club.visibility,
+    clubType: m.club.clubType,
     memberCount: m.club._count.members,
     role: m.role,
     createdAt: m.club.createdAt.toISOString(),
@@ -1071,6 +1079,8 @@ export interface DiscoverClubRow {
   lat: number | null;
   lng: number | null;
   hasLessons: boolean;
+  clubType: string;
+  coaches: { coachName: string; coachIntro: string | null; fee: number | null; days: number[]; start: string; end: string }[];
   applyOpen: boolean; // 게스트 신청 받는 중인지
 }
 
@@ -1109,11 +1119,16 @@ export async function discoverClubs(query?: string): Promise<DiscoverClubRow[]> 
       description: true,
       guestFee: true,
       duesPeriodType: true,
+      clubType: true,
       weeklySchedule: true,
       guestApplyEnabled: true,
       homeFacility: { select: { address: true, latitude: true, longitude: true } },
       _count: { select: { members: true, lessonOffers: true } },
-      lessonOffers: { where: { enabled: true }, select: { id: true }, take: 1 },
+      lessonOffers: {
+        where: { enabled: true },
+        select: { coachName: true, coachIntro: true, fee: true, day: true, days: true, start: true, end: true },
+        take: 3,
+      },
     },
     orderBy: { createdAt: 'desc' },
     take: 50,
@@ -1132,6 +1147,16 @@ export async function discoverClubs(query?: string): Promise<DiscoverClubRow[]> 
     duesPeriodType: c.duesPeriodType,
     scheduleSummary: discoverScheduleSummary(c.weeklySchedule),
     applyOpen: c.guestApplyEnabled,
+    clubType: c.clubType,
     hasLessons: c.lessonOffers.length > 0, // 레슨 모집 중 태그
+    // 지도/카드용 코치 요약 — 이 지역에 누가 레슨하는지.
+    coaches: c.lessonOffers.map((o) => ({
+      coachName: o.coachName,
+      coachIntro: o.coachIntro,
+      fee: o.fee,
+      days: Array.isArray(o.days) && (o.days as number[]).length > 0 ? (o.days as number[]) : [o.day],
+      start: o.start,
+      end: o.end,
+    })),
   }));
 }

@@ -1,4 +1,5 @@
 import { prisma } from '../../utils/prisma';
+import { BadRequestError } from '../../utils/errors';
 import { sendPushToUser } from '../notification/notification.service';
 import type {
   LabProfileResponse,
@@ -782,9 +783,12 @@ export async function upsertLessonOffer(
     await prisma.lessonOffer.update({ where: { id: input.id }, data });
     return input.id;
   }
-  if (!coachName) throw new Error('코치명을 입력해 주세요.');
-  if (days.length === 0) throw new Error('레슨 요일을 선택해 주세요.');
-  if (!HHMM.test(start) || !HHMM.test(end)) throw new Error('시간 형식은 HH:mm 이에요.');
+  if (!coachName) throw new BadRequestError('코치명을 입력해 주세요.');
+  if (days.length === 0) throw new BadRequestError('레슨 요일을 선택해 주세요.');
+  // 번개 모임(MEETUP)은 레슨 기능 없음 — 정기 클럽으로 전환 후 개설.
+  const clubType = await prisma.club.findUnique({ where: { id: clubId }, select: { clubType: true } });
+  if (clubType?.clubType === 'MEETUP') throw new BadRequestError('번개 모임에서는 레슨을 열 수 없어요. 모임 관리에서 정기 클럽으로 전환해 주세요.');
+  if (!HHMM.test(start) || !HHMM.test(end)) throw new BadRequestError('시간 형식은 HH:mm 이에요.');
   const created = await prisma.lessonOffer.create({
     data: {
       clubId,
@@ -839,18 +843,18 @@ export async function applyLesson(
     where: { id: offerId },
     include: { club: { select: { id: true, name: true } } },
   });
-  if (!offer || !offer.enabled) throw new Error('신청할 수 없는 레슨이에요.');
+  if (!offer || !offer.enabled) throw new BadRequestError('신청할 수 없는 레슨이에요.');
 
   const dup = await prisma.lessonApplication.findFirst({
     where: { offerId, userId: applicant.userId, status: { in: ['PENDING', 'CONFIRMED'] } },
   });
-  if (dup) throw new Error('이미 신청한 레슨이에요.');
+  if (dup) throw new BadRequestError('이미 신청한 레슨이에요.');
 
   if (offer.capacity) {
     const active = await prisma.lessonApplication.count({
       where: { offerId, status: { in: ['PENDING', 'CONFIRMED'] } },
     });
-    if (active >= offer.capacity) throw new Error('레슨 정원이 가득 찼어요.');
+    if (active >= offer.capacity) throw new BadRequestError('레슨 정원이 가득 찼어요.');
   }
 
   const app = await prisma.lessonApplication.create({
@@ -885,7 +889,7 @@ export async function applyLesson(
 export async function updateLessonApplication(id: string, patch: { status?: string; feePaid?: boolean }): Promise<void> {
   const data: Record<string, unknown> = {};
   if (patch.status !== undefined) {
-    if (!['PENDING', 'CONFIRMED', 'CANCELLED'].includes(patch.status)) throw new Error('잘못된 상태예요.');
+    if (!['PENDING', 'CONFIRMED', 'CANCELLED'].includes(patch.status)) throw new BadRequestError('잘못된 상태예요.');
     data.status = patch.status;
   }
   if (patch.feePaid !== undefined) data.feePaid = !!patch.feePaid;

@@ -67,6 +67,7 @@ export default function HomeScreen() {
 
   // Club create / join modals (reuse the existing entry from 더보기)
   const [showCreate, setShowCreate] = useState(false);
+  const [newClubType, setNewClubType] = useState<'CLUB' | 'MEETUP'>('CLUB');
   const [showJoin, setShowJoin] = useState(false);
   const [clubName, setClubName] = useState('');
   const [inviteCode, setInviteCode] = useState('');
@@ -517,10 +518,12 @@ export default function HomeScreen() {
         visible={showCreate}
         value={clubName}
         onChangeText={setClubName}
+        clubType={newClubType}
+        onChangeClubType={setNewClubType}
         onConfirm={async () => {
           if (!clubName.trim()) return;
           try {
-            await createClub(clubName.trim());
+            await createClub(clubName.trim(), newClubType);
             setClubName('');
             setShowCreate(false);
             await loadAll();

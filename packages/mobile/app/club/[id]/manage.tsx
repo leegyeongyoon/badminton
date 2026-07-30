@@ -89,6 +89,8 @@ export default function ClubManageScreen() {
   // 모임 공개 여부 — PUBLIC이면 '모임 찾기'에 노출(게스트 신청 가능). 토글 즉시 저장.
   const [visibility, setVisibility] = useState<'PUBLIC' | 'PRIVATE'>('PRIVATE');
   const [visibilitySaving, setVisibilitySaving] = useState(false);
+  const [clubType, setClubType] = useState<'CLUB' | 'MEETUP'>('CLUB');
+  const [clubTypeSaving, setClubTypeSaving] = useState(false);
   const [facilities, setFacilities] = useState<Facility[]>([]);
   const [showAddFacility, setShowAddFacility] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -156,6 +158,7 @@ export default function ClubManageScreen() {
     setHomeFacilityId(club.homeFacilityId ?? null);
     setInviteCode(club.inviteCode ?? '');
     setVisibility(((club as any).visibility === 'PUBLIC' ? 'PUBLIC' : 'PRIVATE'));
+    setClubType(((club as any).clubType === 'MEETUP' ? 'MEETUP' : 'CLUB'));
   }, [club?.id, club?.name, club?.description, club?.homeFacilityId, club?.inviteCode]);
 
   // 시설 목록 (홈 시설 선택용).
@@ -549,6 +552,46 @@ export default function ClubManageScreen() {
           <View style={styles.cardHeader}>
             <Icon name="club" size={18} color={colors.primary} />
             <Text style={[styles.cardTitle, { color: colors.text }]}>클럽 정보</Text>
+          </View>
+
+          {/* 모임 유형 — 정기 클럽(풀기능) / 번개 모임(라이트). 레슨 등 노출이 달라진다. */}
+          <View style={{ marginBottom: spacing.md }}>
+            <Text style={[styles.fieldLabel, { color: colors.textSecondary, marginTop: 0 }]}>모임 유형</Text>
+            <View style={{ flexDirection: 'row', gap: spacing.sm, marginTop: spacing.xs }}>
+              {([
+                { key: 'CLUB' as const, title: '정기 클럽', desc: '레슨·정기회비·게스트 풀기능' },
+                { key: 'MEETUP' as const, title: '번개 모임', desc: '가볍게 모여 치기·엔빵 정산' },
+              ]).map((t) => {
+                const active = clubType === t.key;
+                return (
+                  <TouchableOpacity
+                    key={t.key}
+                    disabled={clubTypeSaving || active}
+                    onPress={async () => {
+                      if (!clubId) return;
+                      setClubTypeSaving(true);
+                      try {
+                        await clubApi.updateClub(clubId, { clubType: t.key });
+                        setClubType(t.key);
+                        await fetchClubs();
+                        showSuccess(t.key === 'CLUB' ? '정기 클럽으로 전환했어요 — 레슨 기능이 열려요' : '번개 모임으로 전환했어요');
+                      } catch (err: any) {
+                        showAlert(Strings.common.error, err?.response?.data?.error || '변경에 실패했습니다');
+                      } finally {
+                        setClubTypeSaving(false);
+                      }
+                    }}
+                    style={{
+                      flex: 1, borderRadius: 14, padding: spacing.md, gap: 2,
+                      backgroundColor: active ? colors.primary : colors.background,
+                    }}
+                  >
+                    <Text style={{ fontSize: 13, fontWeight: '900', color: active ? '#fff' : colors.text }}>{t.title}</Text>
+                    <Text style={{ fontSize: 10, lineHeight: 14, color: active ? 'rgba(255,255,255,0.85)' : colors.textLight }}>{t.desc}</Text>
+                  </TouchableOpacity>
+                );
+              })}
+            </View>
           </View>
 
           {/* 모임 공개 여부 — PUBLIC이면 '모임 찾기'에 노출(게스트 신청 가능). 토글 즉시 저장. */}

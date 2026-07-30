@@ -1,0 +1,2 @@
+-- 모임 유형: CLUB(정기 클럽) | MEETUP(번개 모임)
+ALTER TABLE "Club" ADD COLUMN IF NOT EXISTS "clubType" TEXT NOT NULL DEFAULT 'CLUB';

@@ -29,7 +29,7 @@ interface ClubState {
   currentMembers: ClubMember[];
   isLoading: boolean;
   fetchClubs: () => Promise<void>;
-  createClub: (name: string) => Promise<void>;
+  createClub: (name: string, clubType?: 'CLUB' | 'MEETUP') => Promise<void>;
   /** Joins the club for the given invite code and returns the joined club's id. */
   joinClub: (inviteCode: string) => Promise<string>;
   /** Hard-deletes a club, then drops it from the local list. */
@@ -57,8 +57,8 @@ export const useClubStore = create<ClubState>((set) => ({
     }
   },
 
-  createClub: async (name) => {
-    await clubApi.create(name);
+  createClub: async (name, clubType) => {
+    await clubApi.create(name, clubType ?? 'CLUB');
   },
 
   joinClub: async (inviteCode) => {

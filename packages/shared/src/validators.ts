@@ -260,6 +260,7 @@ export type AttendancePeriodInput = z.infer<typeof attendancePeriodSchema>;
 
 // Club
 export const createClubSchema = z.object({
+  clubType: z.enum(['CLUB', 'MEETUP']).optional(),
   name: z.string().min(1).max(50),
 });
 
@@ -274,6 +275,7 @@ export const joinClubSchema = z.object({
 //  • monthlyDuesAmount 월 회비 표준 금액 (0~10,000,000; null 로 회비 기능 해제)
 export const updateClubSchema = z
   .object({
+    clubType: z.enum(['CLUB', 'MEETUP']).optional(),
     name: z.string().min(1).max(50).optional(),
     homeFacilityId: z.string().uuid().nullable().optional(),
     description: z.string().max(500).nullable().optional(),
@@ -287,7 +289,8 @@ export const updateClubSchema = z
       v.homeFacilityId !== undefined ||
       v.description !== undefined ||
       v.monthlyDuesAmount !== undefined ||
-      v.visibility !== undefined,
+      v.visibility !== undefined ||
+      v.clubType !== undefined,
     { message: '수정할 항목이 없습니다' },
   );
 

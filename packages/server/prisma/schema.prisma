@@ -283,6 +283,7 @@ model Club {
   duesAccountInfo String?
   // 모임 공개 여부: PUBLIC = '모임 찾기'에 노출(게스트 신청 가능), PRIVATE = 숨김(기본).
   visibility String @default("PRIVATE")
+  clubType String @default("CLUB") // CLUB(정기 클럽: 레슨·정기회비 등 풀기능) | MEETUP(번개 모임: 라이트)
   // 정기 운동 일정: [{day:0~6(일~토), start:"HH:mm", end:"HH:mm"}] — 안내 + 게스트
   // 신청 가능일 계산의 기준. null = 미설정(신청은 아무 날짜나, 기존 호환).
   weeklySchedule Json?

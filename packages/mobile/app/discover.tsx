@@ -30,6 +30,8 @@ interface DiscoverClubRow {
   lat: number | null;
   lng: number | null;
   hasLessons: boolean;
+  clubType: string;
+  coaches: { coachName: string; coachIntro: string | null; fee: number | null; days: number[]; start: string; end: string }[];
 }
 
 export default function Discover() {
@@ -83,6 +85,14 @@ export default function Discover() {
       <View style={[styles.topBar, { backgroundColor: colors.surface, borderBottomColor: colors.border, paddingTop: insets.top + spacing.sm }]}>
         <BackButton />
         <Text style={[styles.title, { color: colors.text }]}>모임 찾기</Text>
+        <View style={{ flex: 1 }} />
+        <Pressable
+          onPress={() => router.push('/map' as never)}
+          style={({ pressed }) => [styles.mapBtn, { backgroundColor: colors.primaryBg }, pressed && { opacity: 0.8 }]}
+        >
+          <Ionicons name="map-outline" size={15} color={colors.primary} />
+          <Text style={[styles.mapBtnText, { color: colors.primary }]}>지도</Text>
+        </Pressable>
       </View>
 
       <ScrollView contentContainerStyle={{ padding: spacing.lg, paddingBottom: insets.bottom + 40, maxWidth: 640, width: '100%' as const, alignSelf: 'center' as const }} keyboardShouldPersistTaps="handled">
@@ -164,7 +174,14 @@ export default function Discover() {
                   <Text style={[styles.avatarText, { color: colors.primary }]}>{c.name[0]}</Text>
                 </View>
                 <View style={{ flex: 1, minWidth: 0 }}>
-                  <Text style={[styles.cardTitle, { color: colors.text }]} numberOfLines={1}>{c.name}</Text>
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                    <Text style={[styles.cardTitle, { color: colors.text }]} numberOfLines={1}>{c.name}</Text>
+                    <View style={[styles.typeBadge, { backgroundColor: c.clubType === 'MEETUP' ? colors.warning + '18' : colors.primaryBg }]}>
+                      <Text style={[styles.typeBadgeText, { color: c.clubType === 'MEETUP' ? colors.warning : colors.primary }]}>
+                        {c.clubType === 'MEETUP' ? '번개' : '클럽'}
+                      </Text>
+                    </View>
+                  </View>
                   <View style={styles.metaRow}>
                     {!!c.region && (
                       <View style={styles.metaItem}>
@@ -211,6 +228,14 @@ export default function Discover() {
               )}
               {c.description && (
                 <Text style={[styles.cardDesc, { color: colors.textSecondary }]} numberOfLines={2}>{c.description}</Text>
+              )}
+              {c.coaches.length > 0 && (
+                <View style={[styles.coachLine, { backgroundColor: colors.info + '10' }]}>
+                  <Ionicons name="school-outline" size={13} color={colors.info} />
+                  <Text style={[styles.coachLineText, { color: colors.info }]} numberOfLines={1}>
+                    {c.coaches.map((co) => `${co.coachName} 코치${co.fee != null ? ` 월${Math.round(co.fee / 10000)}만` : ''}`).join(' · ')}
+                  </Text>
+                </View>
               )}
               {!!c.address && (
                 <Pressable
@@ -259,6 +284,12 @@ const styles = StyleSheet.create({
   mapRow: { flexDirection: 'row', alignItems: 'center', gap: 5, marginTop: spacing.sm },
   mapRowText: { ...typography.caption, flex: 1 },
   mapRowLink: { ...typography.caption, fontWeight: '800' },
+  mapBtn: { flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: spacing.md, paddingVertical: 7, borderRadius: 999 },
+  mapBtnText: { fontSize: 13, fontWeight: '800' },
+  typeBadge: { paddingHorizontal: 7, paddingVertical: 2, borderRadius: 999 },
+  typeBadgeText: { fontSize: 10, fontWeight: '900' },
+  coachLine: { flexDirection: 'row', alignItems: 'center', gap: 6, borderRadius: radius.md, paddingHorizontal: spacing.md, paddingVertical: spacing.sm, marginTop: spacing.sm },
+  coachLineText: { ...typography.caption, fontWeight: '800', flex: 1 },
   applyTag: { paddingHorizontal: spacing.md, paddingVertical: spacing.xs, borderRadius: radius.pill },
   applyTagText: { fontSize: 11, fontWeight: '800' },
   note: { ...typography.caption, marginTop: spacing.sm, lineHeight: 16 },
