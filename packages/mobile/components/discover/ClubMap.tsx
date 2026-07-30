@@ -7,6 +7,8 @@ import { View, Platform } from 'react-native';
 // 시트/카드 UI는 부모(discover)가 그린다 — 이 컴포넌트는 지도만.
 // ─────────────────────────────────────────────────────────────
 
+import { CLUB_MARKER_ICON } from './clubMarkerIcon';
+
 const KAKAO_MAP_KEY = process.env.EXPO_PUBLIC_KAKAO_MAP_KEY || '';
 
 export interface MapPin {
@@ -29,11 +31,12 @@ function buildMapHtml(pins: MapPin[], center: { lat: number; lng: number } | nul
 <meta charset="utf-8"/>
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
 <style>html,body,#map{margin:0;padding:0;height:100%;width:100%}
-.kpin{position:relative;display:flex;align-items:center;gap:6px;background:#0F766E;border-radius:999px;padding:7px 12px;box-shadow:0 4px 14px rgba(15,118,110,.4);cursor:pointer;white-space:nowrap;font-family:-apple-system,'Pretendard','Noto Sans KR',sans-serif;border:2px solid #fff}
-.kpin-nm{font-size:12.5px;font-weight:800;color:#fff;letter-spacing:-0.2px}
-.kpin-ls{font-size:9.5px;font-weight:900;color:#0F766E;background:#fff;border-radius:999px;padding:2px 6px}
-.kpin-tail{position:absolute;left:50%;bottom:-7px;transform:translateX(-50%);width:0;height:0;border-left:6px solid transparent;border-right:6px solid transparent;border-top:8px solid #0F766E}
-.kpin-wrap{transform:translate(-50%,-100%)}
+.kpin{display:flex;flex-direction:column;align-items:center;cursor:pointer;font-family:-apple-system,'Pretendard','Noto Sans KR',sans-serif}
+.kpin-dot{width:40px;height:40px;border-radius:13px;border:2.5px solid #fff;box-shadow:0 4px 12px rgba(0,0,0,.32);object-fit:cover}
+.kpin-tip{width:0;height:0;border-left:5px solid transparent;border-right:5px solid transparent;border-top:7px solid #0D9488;margin-top:-1px}
+.kpin-lb{margin-top:2px;font-size:13px;font-weight:800;color:#111827;letter-spacing:-0.2px;white-space:nowrap;text-shadow:-1.5px -1.5px 0 #fff,1.5px -1.5px 0 #fff,-1.5px 1.5px 0 #fff,1.5px 1.5px 0 #fff,0 0 4px #fff}
+.kpin-ls{font-size:10.5px;font-weight:800;color:#0B7A6E;white-space:nowrap;text-shadow:-1.5px -1.5px 0 #fff,1.5px -1.5px 0 #fff,-1.5px 1.5px 0 #fff,1.5px 1.5px 0 #fff,0 0 4px #fff}
+.kpin-wrap{transform:translate(-50%,-58%)}
 .me{width:16px;height:16px;border-radius:50%;background:#2563EB;border:3px solid #fff;box-shadow:0 0 0 5px rgba(37,99,235,.25)}</style>
 </head><body><div id="map"></div><script>
 var KAKAO_KEY=${JSON.stringify(KAKAO_MAP_KEY)};
@@ -42,12 +45,15 @@ var CENTER=${centerJs};
 var HAS_ME=${center ? 'true' : 'false'};
 var ready=false;
 function post(m){try{if(window.ReactNativeWebView)window.ReactNativeWebView.postMessage(JSON.stringify(m));else if(window.parent)window.parent.postMessage(JSON.stringify(m),'*');}catch(e){}}
+var ICON=${JSON.stringify(CLUB_MARKER_ICON)};
 function pinHtml(lesson,name){
-  var label=(name||'').length>8?(name||'').slice(0,8)+'\u2026':(name||'');
+  var label=(name||'').length>10?(name||'').slice(0,10)+'\u2026':(name||'');
   return '<div class="kpin">'
-    +'<span class="kpin-nm">'+label+'</span>'
-    +(lesson?'<span class="kpin-ls">\uB808\uC2A8</span>':'')
-    +'<i class="kpin-tail"></i></div>';
+    +'<img class="kpin-dot" src="'+ICON+'" alt=""/>'
+    +'<div class="kpin-tip"></div>'
+    +'<div class="kpin-lb">'+label+'</div>'
+    +(lesson?'<div class="kpin-ls">\uB808\uC2A8</div>':'')
+    +'</div>';
 }
 
 // ── 카카오맵 ──
@@ -60,7 +66,7 @@ function initKakao(){
     var el=document.createElement('div');
     el.innerHTML=pinHtml(m.lesson,m.name);
     el.onclick=function(){post({type:'club',id:m.id});};
-    new kakao.maps.CustomOverlay({position:pos,content:el,yAnchor:1,zIndex:2}).setMap(map);
+    new kakao.maps.CustomOverlay({position:pos,content:el,yAnchor:0.58,zIndex:2}).setMap(map);
     bounds.extend(pos);
   });
   if(HAS_ME){
@@ -145,13 +151,16 @@ function useKakaoWebMap(
           withCoords.forEach((m) => {
             const pos = new w.kakao.maps.LatLng(m.lat, m.lng);
             const div = document.createElement('div');
-            const label = m.name.length > 8 ? `${m.name.slice(0, 8)}…` : m.name;
-            div.innerHTML = `<div style="position:relative;display:flex;align-items:center;gap:6px;background:#0F766E;border-radius:999px;padding:7px 12px;box-shadow:0 4px 14px rgba(15,118,110,.4);cursor:pointer;white-space:nowrap;font-family:-apple-system,'Pretendard','Noto Sans KR',sans-serif;border:2px solid #fff">`
-              + `<span style="font-size:12.5px;font-weight:800;color:#fff;letter-spacing:-0.2px">${label}</span>`
-              + (m.hasLessons ? '<span style="font-size:9.5px;font-weight:900;color:#0F766E;background:#fff;border-radius:999px;padding:2px 6px">레슨</span>' : '')
-              + `<i style="position:absolute;left:50%;bottom:-7px;transform:translateX(-50%);width:0;height:0;border-left:6px solid transparent;border-right:6px solid transparent;border-top:8px solid #0F766E"></i></div>`;
+            const label = m.name.length > 10 ? `${m.name.slice(0, 10)}…` : m.name;
+            const OUTLINE = '-1.5px -1.5px 0 #fff,1.5px -1.5px 0 #fff,-1.5px 1.5px 0 #fff,1.5px 1.5px 0 #fff,0 0 4px #fff';
+            div.innerHTML = `<div style="display:flex;flex-direction:column;align-items:center;cursor:pointer;font-family:-apple-system,'Pretendard','Noto Sans KR',sans-serif">`
+              + `<img src="${CLUB_MARKER_ICON}" style="width:40px;height:40px;border-radius:13px;border:2.5px solid #fff;box-shadow:0 4px 12px rgba(0,0,0,.32);object-fit:cover" alt=""/>`
+              + `<div style="width:0;height:0;border-left:5px solid transparent;border-right:5px solid transparent;border-top:7px solid #0D9488;margin-top:-1px"></div>`
+              + `<div style="margin-top:2px;font-size:13px;font-weight:800;color:#111827;letter-spacing:-0.2px;white-space:nowrap;text-shadow:${OUTLINE}">${label}</div>`
+              + (m.hasLessons ? `<div style="font-size:10.5px;font-weight:800;color:#0B7A6E;white-space:nowrap;text-shadow:${OUTLINE}">레슨</div>` : '')
+              + `</div>`;
             div.onclick = () => onSelectClub(m.clubId);
-            new w.kakao.maps.CustomOverlay({ position: pos, content: div, yAnchor: 1, zIndex: 2 }).setMap(map);
+            new w.kakao.maps.CustomOverlay({ position: pos, content: div, yAnchor: 0.58, zIndex: 2 }).setMap(map);
             bounds.extend(pos);
           });
           if (myLoc) {
