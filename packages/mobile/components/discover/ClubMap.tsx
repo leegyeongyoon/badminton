@@ -29,9 +29,12 @@ function buildMapHtml(pins: MapPin[], center: { lat: number; lng: number } | nul
 <meta charset="utf-8"/>
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
 <style>html,body,#map{margin:0;padding:0;height:100%;width:100%}
-.pin{display:flex;align-items:center;justify-content:center;width:34px;height:34px;border-radius:50% 50% 50% 0;transform:rotate(-45deg);border:2.5px solid #fff;box-shadow:0 2px 8px rgba(0,0,0,.25);cursor:pointer}
-.pin span{transform:rotate(45deg);font-size:15px}
-.pin-club{background:#0D9488}.pin-lesson{background:#7C3AED}
+.kpin{position:relative;display:flex;align-items:center;gap:5px;background:#fff;border-radius:999px;padding:4px 10px 4px 5px;border:2px solid #0D9488;box-shadow:0 3px 12px rgba(15,23,42,.22);cursor:pointer;white-space:nowrap;font-family:-apple-system,'Pretendard','Noto Sans KR',sans-serif}
+.kpin-ic{display:flex;align-items:center;justify-content:center;width:22px;height:22px;border-radius:50%;font-size:12px}
+.kpin-nm{font-size:12px;font-weight:800;color:#1E293B}
+.kpin-ls{font-size:9px;font-weight:900;color:#7C3AED;background:#7C3AED18;border-radius:999px;padding:2px 5px}
+.kpin-tail{position:absolute;left:50%;bottom:-7px;transform:translateX(-50%);width:0;height:0;border-left:6px solid transparent;border-right:6px solid transparent;border-top:7px solid #0D9488}
+.kpin-wrap{transform:translate(-50%,-100%)}
 .me{width:16px;height:16px;border-radius:50%;background:#2563EB;border:3px solid #fff;box-shadow:0 0 0 5px rgba(37,99,235,.25)}</style>
 </head><body><div id="map"></div><script>
 var KAKAO_KEY=${JSON.stringify(KAKAO_MAP_KEY)};
@@ -40,7 +43,15 @@ var CENTER=${centerJs};
 var HAS_ME=${center ? 'true' : 'false'};
 var ready=false;
 function post(m){try{if(window.ReactNativeWebView)window.ReactNativeWebView.postMessage(JSON.stringify(m));else if(window.parent)window.parent.postMessage(JSON.stringify(m),'*');}catch(e){}}
-function pinHtml(lesson){return '<div class="pin '+(lesson?'pin-lesson':'pin-club')+'"><span>'+(lesson?'\\uD83C\\uDF93':'\\uD83C\\uDFF8')+'</span></div>';}
+function pinHtml(lesson,name){
+  var color=lesson?'#7C3AED':'#0D9488';
+  var label=(name||'').length>8?(name||'').slice(0,8)+'\u2026':(name||'');
+  return '<div class="kpin" style="border-color:'+color+'">'
+    +'<span class="kpin-ic" style="background:'+color+'">\uD83C\uDFF8</span>'
+    +'<span class="kpin-nm">'+label+'</span>'
+    +(lesson?'<span class="kpin-ls">\uB808\uC2A8</span>':'')
+    +'<i class="kpin-tail" style="border-top-color:'+color+'"></i></div>';
+}
 
 // ── 카카오맵 ──
 function initKakao(){
@@ -50,7 +61,7 @@ function initKakao(){
   MARKERS.forEach(function(m){
     var pos=new kakao.maps.LatLng(m.lat,m.lng);
     var el=document.createElement('div');
-    el.innerHTML=pinHtml(m.lesson);
+    el.innerHTML=pinHtml(m.lesson,m.name);
     el.onclick=function(){post({type:'club',id:m.id});};
     new kakao.maps.CustomOverlay({position:pos,content:el,yAnchor:1,zIndex:2}).setMap(map);
     bounds.extend(pos);
@@ -74,7 +85,7 @@ function initLeaflet(){
     L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{attribution:'&copy; OpenStreetMap',maxZoom:19}).addTo(map);
     var group=[];
     MARKERS.forEach(function(m){
-      var icon=L.divIcon({className:'',html:pinHtml(m.lesson),iconSize:[34,44],iconAnchor:[17,40]});
+      var icon=L.divIcon({className:'kpin-wrap',html:pinHtml(m.lesson,m.name),iconSize:null});
       L.marker([m.lat,m.lng],{icon:icon}).addTo(map).on('click',function(){post({type:'club',id:m.id});});
       group.push(L.latLng(m.lat,m.lng));
     });
@@ -137,7 +148,13 @@ function useKakaoWebMap(
           withCoords.forEach((m) => {
             const pos = new w.kakao.maps.LatLng(m.lat, m.lng);
             const div = document.createElement('div');
-            div.innerHTML = `<div style="display:flex;align-items:center;justify-content:center;width:34px;height:34px;border-radius:50% 50% 50% 0;transform:rotate(-45deg);border:2.5px solid #fff;box-shadow:0 2px 8px rgba(0,0,0,.25);cursor:pointer;background:${m.hasLessons ? '#7C3AED' : '#0D9488'}"><span style="transform:rotate(45deg);font-size:15px">${m.hasLessons ? '🎓' : '🏸'}</span></div>`;
+            const color = m.hasLessons ? '#7C3AED' : '#0D9488';
+            const label = m.name.length > 8 ? `${m.name.slice(0, 8)}…` : m.name;
+            div.innerHTML = `<div style="position:relative;display:flex;align-items:center;gap:5px;background:#fff;border-radius:999px;padding:4px 10px 4px 5px;border:2px solid ${color};box-shadow:0 3px 12px rgba(15,23,42,.22);cursor:pointer;white-space:nowrap;font-family:-apple-system,'Pretendard','Noto Sans KR',sans-serif">`
+              + `<span style="display:flex;align-items:center;justify-content:center;width:22px;height:22px;border-radius:50%;font-size:12px;background:${color}">🏸</span>`
+              + `<span style="font-size:12px;font-weight:800;color:#1E293B">${label}</span>`
+              + (m.hasLessons ? '<span style="font-size:9px;font-weight:900;color:#7C3AED;background:#7C3AED18;border-radius:999px;padding:2px 5px">레슨</span>' : '')
+              + `<i style="position:absolute;left:50%;bottom:-7px;transform:translateX(-50%);width:0;height:0;border-left:6px solid transparent;border-right:6px solid transparent;border-top:7px solid ${color}"></i></div>`;
             div.onclick = () => onSelectClub(m.clubId);
             new w.kakao.maps.CustomOverlay({ position: pos, content: div, yAnchor: 1, zIndex: 2 }).setMap(map);
             bounds.extend(pos);

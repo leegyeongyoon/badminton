@@ -281,18 +281,6 @@ export default function Discover() {
                     )}
                   </View>
                 </View>
-                <View style={{ alignItems: 'flex-end', gap: 4 }}>
-                  <View style={[styles.applyTag, { backgroundColor: c.applyOpen ? colors.primaryBg : colors.surfaceSecondary }]}>
-                    <Text style={[styles.applyTagText, { color: c.applyOpen ? colors.primary : colors.textLight }]}>
-                      {c.applyOpen ? '게스트 신청' : '신청 마감'}
-                    </Text>
-                  </View>
-                  {c.hasLessons && (
-                    <View style={[styles.applyTag, { backgroundColor: colors.info + '18' }]}>
-                      <Text style={[styles.applyTagText, { color: colors.info }]}>레슨 모집</Text>
-                    </View>
-                  )}
-                </View>
               </View>
               {c.scheduleSummary && (
                 <View style={[styles.scheduleLine, { backgroundColor: alpha(colors.primary, 0.07) }]}>
@@ -304,11 +292,25 @@ export default function Discover() {
                 <Text style={[styles.cardDesc, { color: colors.textSecondary }]} numberOfLines={2}>{c.description}</Text>
               )}
               {c.coaches.length > 0 && (
-                <View style={[styles.coachLine, { backgroundColor: colors.info + '10' }]}>
-                  <Ionicons name="school-outline" size={13} color={colors.info} />
-                  <Text style={[styles.coachLineText, { color: colors.info }]} numberOfLines={1}>
-                    {c.coaches.map((co) => `${co.coachName} 코치${co.fee != null ? ` 월${Math.round(co.fee / 10000)}만` : ''}`).join(' · ')}
-                  </Text>
+                <View style={[styles.coachBox, { backgroundColor: alpha(colors.info, 0.06) }]}>
+                  {c.coaches.map((co, ci) => (
+                    <View key={ci} style={styles.coachRow}>
+                      <View style={[styles.coachAvatar, { backgroundColor: alpha(colors.info, 0.16) }]}>
+                        <Text style={[styles.coachAvatarText, { color: colors.info }]}>{co.coachName[0]}</Text>
+                      </View>
+                      <View style={{ flex: 1, minWidth: 0 }}>
+                        <Text style={[styles.coachRowName, { color: colors.text }]} numberOfLines={1}>
+                          {co.coachName} 코치{co.fee != null ? ` · 월 ${co.fee.toLocaleString()}원` : ''}
+                        </Text>
+                        {!!co.coachIntro && (
+                          <Text style={[styles.coachRowIntro, { color: colors.textSecondary }]} numberOfLines={1}>{co.coachIntro}</Text>
+                        )}
+                      </View>
+                      <View style={[styles.coachLessonTag, { backgroundColor: alpha(colors.info, 0.14) }]}>
+                        <Text style={[styles.coachLessonTagText, { color: colors.info }]}>레슨</Text>
+                      </View>
+                    </View>
+                  ))}
                 </View>
               )}
               {!!c.address && (
@@ -325,6 +327,25 @@ export default function Discover() {
                   <Text style={[styles.mapRowLink, { color: colors.primary }]}>지도</Text>
                 </Pressable>
               )}
+              {/* 카드 안에서 바로 액션 — 신청/문의 (깊이 축소) */}
+              <View style={styles.cardActions}>
+                <Pressable
+                  onPress={() => router.push(`/guest-apply?clubId=${c.clubId}` as any)}
+                  style={({ pressed }) => [styles.cardActionBtn, { backgroundColor: c.applyOpen ? colors.primary : colors.surfaceSecondary }, pressed && { opacity: 0.85 }]}
+                  disabled={!c.applyOpen}
+                >
+                  <Text style={[styles.cardActionText, { color: c.applyOpen ? '#fff' : colors.textLight }]}>
+                    {c.applyOpen ? '게스트 신청' : '신청 마감'}
+                  </Text>
+                </Pressable>
+                <Pressable
+                  onPress={() => router.push(`/guest-chat?clubId=${c.clubId}` as any)}
+                  style={({ pressed }) => [styles.cardActionBtn, { backgroundColor: colors.background }, pressed && { opacity: 0.85 }]}
+                >
+                  <Ionicons name="chatbubble-ellipses-outline" size={14} color={colors.primary} />
+                  <Text style={[styles.cardActionText, { color: colors.primary }]}>문의</Text>
+                </Pressable>
+              </View>
             </Pressable>
             ));
           })()
@@ -348,7 +369,7 @@ const styles = StyleSheet.create({
   cardHead: { flexDirection: 'row', alignItems: 'center', gap: spacing.md },
   avatar: { width: 46, height: 46, borderRadius: 23, alignItems: 'center', justifyContent: 'center' },
   avatarText: { fontSize: 19, fontWeight: '900' },
-  cardTitle: { ...typography.subtitle1 },
+  cardTitle: { fontSize: 17, fontWeight: '900', letterSpacing: -0.2 },
   metaRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.md, flexWrap: 'wrap', marginTop: 3 },
   metaItem: { flexDirection: 'row', alignItems: 'center', gap: 3 },
   metaText: { ...typography.caption, fontWeight: '700' },
@@ -377,8 +398,17 @@ const styles = StyleSheet.create({
   sheetBtnText: { ...typography.button, fontSize: 14, fontWeight: '900', color: '#fff' },
   typeBadge: { paddingHorizontal: 7, paddingVertical: 2, borderRadius: 999 },
   typeBadgeText: { fontSize: 10, fontWeight: '900' },
-  coachLine: { flexDirection: 'row', alignItems: 'center', gap: 6, borderRadius: radius.md, paddingHorizontal: spacing.md, paddingVertical: spacing.sm, marginTop: spacing.sm },
-  coachLineText: { ...typography.caption, fontWeight: '800', flex: 1 },
+  coachBox: { borderRadius: radius.lg, padding: spacing.sm, gap: 4, marginTop: spacing.sm },
+  coachRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, paddingVertical: 4, paddingHorizontal: 4 },
+  coachAvatar: { width: 30, height: 30, borderRadius: 15, alignItems: 'center', justifyContent: 'center' },
+  coachAvatarText: { fontSize: 13, fontWeight: '900' },
+  coachRowName: { ...typography.caption, fontSize: 12.5, fontWeight: '800' },
+  coachRowIntro: { fontSize: 11, marginTop: 1 },
+  coachLessonTag: { paddingHorizontal: 7, paddingVertical: 3, borderRadius: 999 },
+  coachLessonTagText: { fontSize: 10, fontWeight: '900' },
+  cardActions: { flexDirection: 'row', gap: spacing.sm, marginTop: spacing.md },
+  cardActionBtn: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 5, paddingVertical: 11, borderRadius: 12 },
+  cardActionText: { fontSize: 13, fontWeight: '900' },
   applyTag: { paddingHorizontal: spacing.md, paddingVertical: spacing.xs, borderRadius: radius.pill },
   applyTagText: { fontSize: 11, fontWeight: '800' },
   note: { ...typography.caption, marginTop: spacing.sm, lineHeight: 16 },
