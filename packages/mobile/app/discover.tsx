@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import { View, Text, StyleSheet, ScrollView, Pressable, TextInput, ActivityIndicator, Linking, Platform } from 'react-native';
-import { useRouter } from 'expo-router';
+import { useRouter, useLocalSearchParams } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTheme } from '../hooks/useTheme';
 import { typography, spacing, radius } from '../constants/theme';
@@ -10,6 +10,7 @@ import { Icon } from '../components/ui/Icon';
 import { Ionicons } from '@expo/vector-icons';
 import api from '../services/api';
 import { useAuthStore } from '../store/authStore';
+import { ClubMap } from '../components/discover/ClubMap';
 
 // ─────────────────────────────────────────────────────────────
 // 모임 찾기 — PUBLIC(공개) 모임 탐색. 카드 탭 → 게스트 신청(모임 미리보기).
@@ -43,6 +44,9 @@ export default function Discover() {
   const [loading, setLoading] = useState(true);
   const [regionFilter, setRegionFilter] = useState<string | null>(null); // null = 전체
   const [myLoc, setMyLoc] = useState<{ lat: number; lng: number } | null>(null);
+  const { view } = useLocalSearchParams<{ view?: string }>();
+  const [viewMode, setViewMode] = useState<'list' | 'map'>(view === 'map' ? 'map' : 'list');
+  const [selected, setSelected] = useState<DiscoverClubRow | null>(null);
   const { isAuthenticated } = useAuthStore();
 
   // 내 위치(선택) — 허용하면 거리 표시 + 가까운 순 정렬. 웹은 브라우저 geolocation.
@@ -86,15 +90,85 @@ export default function Discover() {
         <BackButton />
         <Text style={[styles.title, { color: colors.text }]}>모임 찾기</Text>
         <View style={{ flex: 1 }} />
-        <Pressable
-          onPress={() => router.push('/map' as never)}
-          style={({ pressed }) => [styles.mapBtn, { backgroundColor: colors.primaryBg }, pressed && { opacity: 0.8 }]}
-        >
-          <Ionicons name="map-outline" size={15} color={colors.primary} />
-          <Text style={[styles.mapBtnText, { color: colors.primary }]}>지도</Text>
-        </Pressable>
+        <View style={[styles.viewToggle, { backgroundColor: colors.background }]}>
+          {([
+            { key: 'list' as const, icon: 'list-outline' as const, label: '목록' },
+            { key: 'map' as const, icon: 'map-outline' as const, label: '지도' },
+          ]).map((v) => {
+            const active = viewMode === v.key;
+            return (
+              <Pressable
+                key={v.key}
+                onPress={() => { setViewMode(v.key); setSelected(null); }}
+                style={[styles.viewToggleBtn, active && { backgroundColor: colors.surface }, active && shadows.sm]}
+              >
+                <Ionicons name={v.icon} size={14} color={active ? colors.primary : colors.textLight} />
+                <Text style={[styles.viewToggleText, { color: active ? colors.primary : colors.textLight }]}>{v.label}</Text>
+              </Pressable>
+            );
+          })}
+        </View>
       </View>
 
+      {viewMode === 'map' ? (
+        <View style={{ flex: 1 }}>
+          <ClubMap
+            pins={(rows ?? []).map((c) => ({ clubId: c.clubId, name: c.name, lat: c.lat, lng: c.lng, hasLessons: c.hasLessons }))}
+            myLoc={myLoc}
+            onSelectClub={(id) => setSelected((rows ?? []).find((c) => c.clubId === id) ?? null)}
+          />
+          {(rows ?? []).filter((c) => c.lat != null).length === 0 && (
+            <View style={[styles.mapEmptyOverlay, { backgroundColor: colors.surface }, shadows.md]}>
+              <Text style={[styles.mapEmptyText, { color: colors.textSecondary }]}>위치가 등록된 공개 모임이 아직 없어요</Text>
+            </View>
+          )}
+
+          {/* 핀 선택 시 하단 카드 */}
+          {selected && (
+            <View style={[styles.sheet, { backgroundColor: colors.surface, paddingBottom: insets.bottom + spacing.md }, shadows.xl]}>
+              <View style={styles.sheetHead}>
+                <View style={[styles.sheetAvatar, { backgroundColor: alpha(colors.primary, 0.12) }]}>
+                  <Text style={[styles.sheetAvatarText, { color: colors.primary }]}>{selected.name[0]}</Text>
+                </View>
+                <View style={{ flex: 1, minWidth: 0 }}>
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                    <Text style={[styles.sheetTitle, { color: colors.text }]} numberOfLines={1}>{selected.name}</Text>
+                    <View style={[styles.typeBadge, { backgroundColor: selected.clubType === 'MEETUP' ? colors.warning + '18' : colors.primaryBg }]}>
+                      <Text style={[styles.typeBadgeText, { color: selected.clubType === 'MEETUP' ? colors.warning : colors.primary }]}>
+                        {selected.clubType === 'MEETUP' ? '번개' : '클럽'}
+                      </Text>
+                    </View>
+                  </View>
+                  <Text style={[styles.sheetMeta, { color: colors.textSecondary }]} numberOfLines={1}>
+                    {[selected.region, `멤버 ${selected.memberCount}명`, selected.scheduleSummary].filter(Boolean).join(' · ')}
+                  </Text>
+                </View>
+                <Pressable onPress={() => setSelected(null)} hitSlop={10}>
+                  <Ionicons name="close" size={20} color={colors.textLight} />
+                </Pressable>
+              </View>
+              {selected.coaches.length > 0 && (
+                <View style={[styles.sheetCoaches, { backgroundColor: alpha(colors.info, 0.06) }]}>
+                  {selected.coaches.map((co, i) => (
+                    <Text key={i} style={[styles.sheetCoachText, { color: colors.text }]} numberOfLines={1}>
+                      <Text style={{ fontWeight: '900' }}>{co.coachName} 코치</Text>
+                      {co.fee != null ? ` · 월 ${co.fee.toLocaleString()}원` : ''}{co.coachIntro ? ` · ${co.coachIntro}` : ''}
+                    </Text>
+                  ))}
+                </View>
+              )}
+              <View style={styles.sheetActions}>
+                <Pressable onPress={() => router.push(`/guest-apply?clubId=${selected.clubId}` as never)} style={[styles.sheetBtn, { backgroundColor: colors.primary }]}>
+                  <Text style={styles.sheetBtnText}>게스트 신청</Text>
+                </Pressable>
+                <Pressable onPress={() => router.push(`/guest-chat?clubId=${selected.clubId}` as never)} style={[styles.sheetBtn, { backgroundColor: colors.background }]}>
+                  <Text style={[styles.sheetBtnText, { color: colors.primary }]}>문의하기</Text>
+                </Pressable>
+              </View>
+            </View>
+          )}
+        </View>
+      ) : (
       <ScrollView contentContainerStyle={{ padding: spacing.lg, paddingBottom: insets.bottom + 40, maxWidth: 640, width: '100%' as const, alignSelf: 'center' as const }} keyboardShouldPersistTaps="handled">
         {/* 검색 */}
         <View style={[styles.searchRow, { backgroundColor: colors.surface }, shadows.sm]}>
@@ -257,6 +331,7 @@ export default function Discover() {
         )}
         <Text style={[styles.note, { color: colors.textLight }]}>* 공개로 설정한 모임만 보여요. 모임 가입은 초대코드로만 가능해요.</Text>
       </ScrollView>
+      )}
     </View>
   );
 }
@@ -284,8 +359,22 @@ const styles = StyleSheet.create({
   mapRow: { flexDirection: 'row', alignItems: 'center', gap: 5, marginTop: spacing.sm },
   mapRowText: { ...typography.caption, flex: 1 },
   mapRowLink: { ...typography.caption, fontWeight: '800' },
-  mapBtn: { flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: spacing.md, paddingVertical: 7, borderRadius: 999 },
-  mapBtnText: { fontSize: 13, fontWeight: '800' },
+  viewToggle: { flexDirection: 'row', borderRadius: 999, padding: 3, gap: 2 },
+  viewToggleBtn: { flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: spacing.md, paddingVertical: 6, borderRadius: 999 },
+  viewToggleText: { fontSize: 12, fontWeight: '800' },
+  mapEmptyOverlay: { position: 'absolute', top: spacing.lg, alignSelf: 'center', borderRadius: 999, paddingHorizontal: spacing.lg, paddingVertical: spacing.sm },
+  mapEmptyText: { ...typography.caption, fontWeight: '700' },
+  sheet: { position: 'absolute', left: spacing.md, right: spacing.md, bottom: spacing.md, borderRadius: 24, padding: spacing.lg, maxWidth: 560, alignSelf: 'center', width: 'auto' },
+  sheetHead: { flexDirection: 'row', alignItems: 'center', gap: spacing.md },
+  sheetAvatar: { width: 44, height: 44, borderRadius: 22, alignItems: 'center', justifyContent: 'center' },
+  sheetAvatarText: { fontSize: 18, fontWeight: '900' },
+  sheetTitle: { ...typography.subtitle1, flexShrink: 1 },
+  sheetMeta: { ...typography.caption, marginTop: 2 },
+  sheetCoaches: { borderRadius: radius.lg, padding: spacing.md, marginTop: spacing.md, gap: 4 },
+  sheetCoachText: { ...typography.caption, lineHeight: 18 },
+  sheetActions: { flexDirection: 'row', gap: spacing.sm, marginTop: spacing.md },
+  sheetBtn: { flex: 1, paddingVertical: 13, borderRadius: 14, alignItems: 'center' },
+  sheetBtnText: { ...typography.button, fontSize: 14, fontWeight: '900', color: '#fff' },
   typeBadge: { paddingHorizontal: 7, paddingVertical: 2, borderRadius: 999 },
   typeBadgeText: { fontSize: 10, fontWeight: '900' },
   coachLine: { flexDirection: 'row', alignItems: 'center', gap: 6, borderRadius: radius.md, paddingHorizontal: spacing.md, paddingVertical: spacing.sm, marginTop: spacing.sm },
