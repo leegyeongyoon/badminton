@@ -9,7 +9,9 @@ import type { RegisterInput, RegisterOperatorInput, LoginInput, KakaoLoginInput,
 const JWT_SECRET = process.env.JWT_SECRET || 'dev-secret';
 const JWT_REFRESH_SECRET = process.env.JWT_REFRESH_SECRET || 'dev-refresh-secret';
 const JWT_EXPIRES_IN = process.env.JWT_EXPIRES_IN || '15m';
-const JWT_REFRESH_EXPIRES_IN = process.env.JWT_REFRESH_EXPIRES_IN || '7d';
+// 체감 세션 = refresh 수명. 30일로 두되 access는 짧게 유지(탈취 창 최소화).
+// refresh는 DB 저장·회전이라 필요 시 서버에서 즉시 무효화 가능.
+const JWT_REFRESH_EXPIRES_IN = process.env.JWT_REFRESH_EXPIRES_IN || '30d';
 
 export function generateTokens(payload: AuthPayload) {
   const accessToken = jwt.sign(payload, JWT_SECRET, { expiresIn: JWT_EXPIRES_IN as jwt.SignOptions['expiresIn'] });

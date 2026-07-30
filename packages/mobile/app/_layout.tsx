@@ -15,6 +15,7 @@ import { ConfirmDialogContainer } from '../components/ui/ConfirmDialog';
 import { ErrorBoundary } from '../components/shared/ErrorBoundary';
 import { NetworkStatusBar } from '../components/shared/NetworkStatusBar';
 import { AppInstallBanner } from '../components/shared/AppInstallBanner';
+import { AppGate } from '../components/shared/AppGate';
 import { ThemeProvider, useThemeContext } from '../contexts/ThemeContext';
 import { useNetworkStatus } from '../hooks/useNetworkStatus';
 import { useDeepLinking } from '../hooks/useDeepLinking';
@@ -312,6 +313,7 @@ function RootLayoutInner() {
         <TurnBanner />
         <ConfirmDialogContainer />
         <AppInstallBanner />
+        <AppGate />
       </ErrorBoundary>
     </GestureHandlerRootView>
   );
