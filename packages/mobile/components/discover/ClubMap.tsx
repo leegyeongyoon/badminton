@@ -1,4 +1,4 @@
-import { useEffect, useMemo } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { View, Platform } from 'react-native';
 
 // ─────────────────────────────────────────────────────────────
@@ -101,6 +101,79 @@ if(KAKAO_KEY){
 </script></body></html>`;
 }
 
+declare global {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  interface Window { kakao: any }
+}
+
+/** 웹 전용: 부모 문서에 카카오 SDK를 직접 로드해 렌더(referer=현재 도메인).
+ *  실패/타임아웃이면 false 콜백 → 부모가 Leaflet iframe 폴백. */
+function useKakaoWebMap(
+  enabled: boolean,
+  pins: MapPin[],
+  myLoc: { lat: number; lng: number } | null,
+  onSelectClub: (clubId: string) => void,
+  onFail: () => void,
+) {
+  const containerRef = { current: null as HTMLDivElement | null };
+  useEffect(() => {
+    if (!enabled || Platform.OS !== 'web' || !KAKAO_MAP_KEY) { if (enabled) onFail(); return; }
+    let dead = false;
+    const fail = () => { if (!dead) { dead = true; onFail(); } };
+    const timer = setTimeout(fail, 4000);
+
+    const init = () => {
+      try {
+        const w = window as Window;
+        w.kakao.maps.load(() => {
+          if (dead) return;
+          clearTimeout(timer);
+          const el = document.getElementById('club-kakao-map');
+          if (!el) return fail();
+          const withCoords = pins.filter((p) => p.lat != null && p.lng != null);
+          const center = myLoc ?? (withCoords[0] ? { lat: withCoords[0].lat!, lng: withCoords[0].lng! } : { lat: 37.5665, lng: 126.978 });
+          const map = new w.kakao.maps.Map(el, { center: new w.kakao.maps.LatLng(center.lat, center.lng), level: 6 });
+          const bounds = new w.kakao.maps.LatLngBounds();
+          withCoords.forEach((m) => {
+            const pos = new w.kakao.maps.LatLng(m.lat, m.lng);
+            const div = document.createElement('div');
+            div.innerHTML = `<div style="display:flex;align-items:center;justify-content:center;width:34px;height:34px;border-radius:50% 50% 50% 0;transform:rotate(-45deg);border:2.5px solid #fff;box-shadow:0 2px 8px rgba(0,0,0,.25);cursor:pointer;background:${m.hasLessons ? '#7C3AED' : '#0D9488'}"><span style="transform:rotate(45deg);font-size:15px">${m.hasLessons ? '🎓' : '🏸'}</span></div>`;
+            div.onclick = () => onSelectClub(m.clubId);
+            new w.kakao.maps.CustomOverlay({ position: pos, content: div, yAnchor: 1, zIndex: 2 }).setMap(map);
+            bounds.extend(pos);
+          });
+          if (myLoc) {
+            const me = new w.kakao.maps.LatLng(myLoc.lat, myLoc.lng);
+            new w.kakao.maps.CustomOverlay({ position: me, content: '<div style="width:16px;height:16px;border-radius:50%;background:#2563EB;border:3px solid #fff;box-shadow:0 0 0 5px rgba(37,99,235,.25)"></div>', zIndex: 1 }).setMap(map);
+            bounds.extend(me);
+          }
+          if (withCoords.length > 0) map.setBounds(bounds, 60, 60, 60, 60);
+        });
+      } catch {
+        fail();
+      }
+    };
+
+    const w = window as Window;
+    if (w.kakao?.maps) { init(); return () => { dead = true; clearTimeout(timer); }; }
+    const existing = document.getElementById('kakao-maps-sdk') as HTMLScriptElement | null;
+    if (existing) {
+      existing.addEventListener('load', init);
+      existing.addEventListener('error', fail);
+    } else {
+      const sc = document.createElement('script');
+      sc.id = 'kakao-maps-sdk';
+      sc.src = `https://dapi.kakao.com/v2/maps/sdk.js?appkey=${KAKAO_MAP_KEY}&autoload=false`;
+      sc.onload = init;
+      sc.onerror = fail;
+      document.head.appendChild(sc);
+    }
+    return () => { dead = true; clearTimeout(timer); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [enabled, pins, myLoc]);
+  return containerRef;
+}
+
 export function ClubMap({
   pins,
   myLoc,
@@ -110,7 +183,9 @@ export function ClubMap({
   myLoc: { lat: number; lng: number } | null;
   onSelectClub: (clubId: string) => void;
 }) {
+  const [webFallback, setWebFallback] = useState(false);
   const html = useMemo(() => buildMapHtml(pins, myLoc), [pins, myLoc]);
+  useKakaoWebMap(Platform.OS === 'web' && !webFallback, pins, myLoc, onSelectClub, () => setWebFallback(true));
 
   const onMessage = (raw: string) => {
     try {
@@ -135,11 +210,16 @@ export function ClubMap({
     const React = require('react');
     return (
       <View style={{ flex: 1 }}>
-        {React.createElement('iframe', {
-          srcDoc: html,
-          style: { border: 'none', width: '100%', height: '100%' },
-          sandbox: 'allow-scripts allow-same-origin',
-        })}
+        {webFallback
+          ? React.createElement('iframe', {
+              srcDoc: html,
+              style: { border: 'none', width: '100%', height: '100%' },
+              sandbox: 'allow-scripts allow-same-origin',
+            })
+          : React.createElement('div', {
+              id: 'club-kakao-map',
+              style: { width: '100%', height: '100%' },
+            })}
       </View>
     );
   }

@@ -12,7 +12,8 @@
       "distribution": "internal",
       "env": {
         "EXPO_PUBLIC_API_URL": "https://api.badmintoncourt.store",
-        "EXPO_PUBLIC_KAKAO_REST_KEY": "5a202bd90ab8dff01348f24cb1c37f3f"
+        "EXPO_PUBLIC_KAKAO_REST_KEY": "5a202bd90ab8dff01348f24cb1c37f3f",
+        "EXPO_PUBLIC_KAKAO_MAP_KEY": "5a202bd90ab8dff01348f24cb1c37f3f"
       }
     },
     "production": {
@@ -20,7 +21,8 @@
       "env": {
         "EXPO_PUBLIC_API_URL": "https://api.badmintoncourt.store",
         "EXPO_PUBLIC_KAKAO_REST_KEY": "5a202bd90ab8dff01348f24cb1c37f3f",
-        "SENTRY_DISABLE_AUTO_UPLOAD": "true"
+        "SENTRY_DISABLE_AUTO_UPLOAD": "true",
+        "EXPO_PUBLIC_KAKAO_MAP_KEY": "5a202bd90ab8dff01348f24cb1c37f3f"
       }
     }
   },
