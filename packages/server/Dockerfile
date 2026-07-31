@@ -80,6 +80,10 @@ COPY --from=builder /app/packages/server/prisma ./packages/server/prisma
 # 볼륨이 root 소유로 생성돼 winston 파일 로깅이 조용히 비활성됨.)
 RUN mkdir -p /app/logs && chown -R node:node /app/logs
 
+# 업로드 디렉토리(UPLOAD_DIR=/app/uploads)도 동일 — uploads 명명 볼륨이 처음 마운트될 때
+# node 소유가 되도록 미리 생성해 둔다. (root 소유면 이미지 업로드 저장이 EACCES 로 실패)
+RUN mkdir -p /app/uploads && chown -R node:node /app/uploads
+
 # Run as the unprivileged user that the node images ship with.
 USER node
 

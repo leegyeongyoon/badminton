@@ -1,5 +1,5 @@
 import { prisma } from '../../utils/prisma';
-import { BadRequestError } from '../../utils/errors';
+import { BadRequestError, NotFoundError } from '../../utils/errors';
 import { sendPushToUser } from '../notification/notification.service';
 import type {
   LabProfileResponse,
@@ -679,6 +679,10 @@ export interface LabLessonOffer {
   coachName: string;
   coachIntro: string | null;
   coachCareer: string | null;
+  // 등록 코치 프로필 연결(숨고식) — 연결 시 사진·인증 뱃지 노출, 코치 본인이 로스터 접근.
+  coachProfileId: string | null;
+  coachPhotoUrl: string | null;
+  coachCertified: boolean;
   days: number[]; // [1,3,5] = 월수금
   start: string;
   end: string;
@@ -724,6 +728,7 @@ export async function getLessonOffers(clubId: string, enabledOnly = false, forUs
     where: { clubId, ...(enabledOnly ? { enabled: true } : {}) },
     orderBy: [{ day: 'asc' }, { start: 'asc' }],
     include: {
+      coachProfile: { select: { id: true, photoUrl: true, certified: true } },
       _count: { select: { applications: { where: { status: { in: ['PENDING', 'CONFIRMED'] } } } } },
       ...(forUserId
         ? { applications: { where: { userId: forUserId, status: { in: ['PENDING', 'CONFIRMED'] } }, select: { status: true, feePaid: true }, take: 1 } }
@@ -735,6 +740,9 @@ export async function getLessonOffers(clubId: string, enabledOnly = false, forUs
     coachName: o.coachName,
     coachIntro: o.coachIntro,
     coachCareer: o.coachCareer,
+    coachProfileId: o.coachProfile?.id ?? null,
+    coachPhotoUrl: o.coachProfile?.photoUrl ?? null,
+    coachCertified: o.coachProfile?.certified ?? false,
     days: lessonDays(o),
     start: o.start,
     end: o.end,
@@ -753,11 +761,25 @@ export async function upsertLessonOffer(
   clubId: string,
   input: {
     id?: string; coachName?: string; coachIntro?: string | null; coachCareer?: string | null;
+    coachProfileId?: string | null;
     days?: number[]; day?: number; start?: string; end?: string;
     fee?: number | null; capacity?: number | null; enabled?: boolean;
   },
 ): Promise<string> {
-  const coachName = String(input.coachName ?? '').trim();
+  let coachName = String(input.coachName ?? '').trim();
+
+  // 등록 코치 연결(숨고식): 프로필 존재·활성 확인. 이름이 비어 있으면 프로필
+  // 이름으로 자동 채움(하위호환 텍스트 필드는 유지).
+  let linkedProfile: { id: string; displayName: string; intro: string | null; career: string | null } | null = null;
+  if (input.coachProfileId) {
+    const p = await prisma.coachProfile.findUnique({
+      where: { id: String(input.coachProfileId) },
+      select: { id: true, displayName: true, intro: true, career: true, active: true },
+    });
+    if (!p || !p.active) throw new BadRequestError('연결할 코치 프로필을 찾을 수 없어요.');
+    linkedProfile = p;
+    if (!coachName) coachName = p.displayName;
+  }
   const start = String(input.start ?? '');
   const end = String(input.end ?? '');
   // days 배열 우선, 없으면 단일 day 호환.
@@ -771,6 +793,15 @@ export async function upsertLessonOffer(
     if (input.coachName !== undefined) data.coachName = coachName;
     if (input.coachIntro !== undefined) data.coachIntro = intro;
     if (input.coachCareer !== undefined) data.coachCareer = career;
+    if (input.coachProfileId !== undefined) {
+      data.coachProfileId = linkedProfile?.id ?? null;
+      if (linkedProfile) {
+        // 연결 시 텍스트 필드를 프로필 값으로 동기화(입력 안 했을 때만).
+        if (input.coachName === undefined) data.coachName = linkedProfile.displayName;
+        if (input.coachIntro === undefined && linkedProfile.intro) data.coachIntro = linkedProfile.intro.slice(0, 60);
+        if (input.coachCareer === undefined && linkedProfile.career) data.coachCareer = linkedProfile.career.slice(0, 500);
+      }
+    }
     if ((input.days !== undefined || input.day !== undefined) && days.length > 0) {
       data.days = days;
       data.day = days[0];
@@ -793,8 +824,9 @@ export async function upsertLessonOffer(
     data: {
       clubId,
       coachName,
-      coachIntro: intro ?? null,
-      coachCareer: career ?? null,
+      coachIntro: intro ?? (linkedProfile?.intro?.slice(0, 60) || null),
+      coachCareer: career ?? (linkedProfile?.career?.slice(0, 500) || null),
+      coachProfileId: linkedProfile?.id ?? null,
       day: days[0],
       days,
       start,
@@ -909,6 +941,143 @@ export async function updateLessonApplication(id: string, patch: { status?: stri
       /* 알림 실패 무시 */
     }
   }
+}
+
+// ─── 레슨 상세: 수강생 로스터 + 회차 출석 (운영자 또는 담당 코치) ─────────────
+
+export interface LessonStudentRow {
+  id: string; // applicationId
+  name: string;
+  phone: string | null;
+  isAppUser: boolean;
+  status: string; // PENDING | CONFIRMED | CANCELLED
+  feePaid: boolean;
+  enrollState: string; // ACTIVE | PAUSED | ENDED
+  note: string | null;
+  attendCount: number; // 누적 출석 회수
+  createdAt: string;
+}
+
+export interface LessonDetailView {
+  offer: LabLessonOffer & { clubId: string; clubName: string };
+  isCoach: boolean; // 조회자가 이 레슨의 담당 코치 본인인지
+  roster: LessonStudentRow[];
+}
+
+/** 이 레슨의 담당 코치 본인인지 — staff 가 아니어도 로스터·출석 접근을 허용하는 가드. */
+export async function isOfferCoach(offerId: string, userId: string): Promise<boolean> {
+  const offer = await prisma.lessonOffer.findUnique({
+    where: { id: offerId },
+    select: { coachProfile: { select: { userId: true } } },
+  });
+  return offer?.coachProfile?.userId === userId;
+}
+
+/** 레슨 상세(코치 헤더 + 로스터). CANCELLED 신청은 로스터에서 제외. */
+export async function getLessonDetail(offerId: string, viewerUserId?: string): Promise<LessonDetailView> {
+  const offer = await prisma.lessonOffer.findUnique({
+    where: { id: offerId },
+    include: {
+      club: { select: { id: true, name: true } },
+      coachProfile: { select: { id: true, photoUrl: true, certified: true, userId: true } },
+      _count: { select: { applications: { where: { status: { in: ['PENDING', 'CONFIRMED'] } } } } },
+    },
+  });
+  if (!offer) throw new NotFoundError('레슨');
+
+  const apps = await prisma.lessonApplication.findMany({
+    where: { offerId, status: { not: 'CANCELLED' } },
+    orderBy: [{ status: 'asc' }, { createdAt: 'asc' }], // CONFIRMED 먼저(알파벳순 우연 일치)
+    include: { _count: { select: { attendance: { where: { present: true } } } } },
+  });
+
+  return {
+    offer: {
+      id: offer.id,
+      clubId: offer.club.id,
+      clubName: offer.club.name,
+      coachName: offer.coachName,
+      coachIntro: offer.coachIntro,
+      coachCareer: offer.coachCareer,
+      coachProfileId: offer.coachProfile?.id ?? null,
+      coachPhotoUrl: offer.coachProfile?.photoUrl ?? null,
+      coachCertified: offer.coachProfile?.certified ?? false,
+      days: lessonDays(offer),
+      start: offer.start,
+      end: offer.end,
+      fee: offer.fee,
+      capacity: offer.capacity,
+      enabled: offer.enabled,
+      summary: lessonSummary(offer),
+      applicants: offer._count.applications,
+      myStatus: null,
+      myFeePaid: false,
+    },
+    isCoach: !!viewerUserId && offer.coachProfile?.userId === viewerUserId,
+    roster: apps.map((a) => ({
+      id: a.id,
+      name: a.name,
+      phone: a.phone,
+      isAppUser: !!a.userId,
+      status: a.status,
+      feePaid: a.feePaid,
+      enrollState: a.enrollState,
+      note: a.note,
+      attendCount: a._count.attendance,
+      createdAt: a.createdAt.toISOString(),
+    })),
+  };
+}
+
+/** 수강생 상태 갱신(수강중/휴식/종료 + 메모). 소유권은 라우터에서 확인. */
+export async function updateLessonStudent(
+  applicationId: string,
+  patch: { enrollState?: string; note?: string | null },
+): Promise<void> {
+  const data: Record<string, unknown> = {};
+  if (patch.enrollState !== undefined) {
+    if (!['ACTIVE', 'PAUSED', 'ENDED'].includes(patch.enrollState)) throw new BadRequestError('잘못된 수강 상태예요.');
+    data.enrollState = patch.enrollState;
+  }
+  if (patch.note !== undefined) {
+    data.note = patch.note ? String(patch.note).trim().slice(0, 200) || null : null;
+  }
+  if (Object.keys(data).length === 0) return;
+  await prisma.lessonApplication.update({ where: { id: applicationId }, data });
+}
+
+const DATE_YMD = /^\d{4}-\d{2}-\d{2}$/;
+
+/** 특정 날짜의 출석 현황 — { applicationId → present } 목록. */
+export async function getLessonAttendance(offerId: string, date: string): Promise<{ applicationId: string; present: boolean }[]> {
+  if (!DATE_YMD.test(date)) throw new BadRequestError('날짜 형식은 YYYY-MM-DD 이에요.');
+  const rows = await prisma.lessonAttendance.findMany({ where: { offerId, date }, select: { applicationId: true, present: true } });
+  return rows;
+}
+
+/** 특정 날짜 출석 일괄 저장(업서트). 이 레슨의 신청만 허용. */
+export async function setLessonAttendance(
+  offerId: string,
+  date: string,
+  entries: { applicationId: string; present: boolean }[],
+): Promise<void> {
+  if (!DATE_YMD.test(date)) throw new BadRequestError('날짜 형식은 YYYY-MM-DD 이에요.');
+  if (!Array.isArray(entries) || entries.length === 0) return;
+  const valid = await prisma.lessonApplication.findMany({
+    where: { offerId, id: { in: entries.map((e) => String(e.applicationId)) } },
+    select: { id: true },
+  });
+  const validIds = new Set(valid.map((v) => v.id));
+  const ops = entries
+    .filter((e) => validIds.has(String(e.applicationId)))
+    .map((e) =>
+      prisma.lessonAttendance.upsert({
+        where: { applicationId_date: { applicationId: String(e.applicationId), date } },
+        create: { offerId, applicationId: String(e.applicationId), date, present: !!e.present },
+        update: { present: !!e.present },
+      }),
+    );
+  await prisma.$transaction(ops);
 }
 
 // ─── 회원용 "내 회비" — 기간별 청구/납부 타임라인 ─────────────

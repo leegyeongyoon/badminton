@@ -28,3 +28,5 @@ const API_BASE = __DEV__ ? devApiBase : configuredApiUrl ?? devApiBase;
 
 export const API_URL = `${API_BASE}/api/v1`;
 export const SOCKET_URL = API_BASE;
+// 서버가 주는 상대 경로(/uploads/xxx.webp)를 절대 URL로 만들 때 쓰는 origin.
+export const API_ORIGIN = API_BASE;

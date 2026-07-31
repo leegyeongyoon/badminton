@@ -142,6 +142,10 @@ export interface LessonOffer {
   coachName: string;
   coachIntro: string | null; // 한 줄 소개
   coachCareer: string | null; // 이력(줄바꿈 구분)
+  // 등록 코치 프로필 연결(숨고식) — 연결 시 사진·인증 뱃지 노출.
+  coachProfileId: string | null;
+  coachPhotoUrl: string | null;
+  coachCertified: boolean;
   days: number[]; // [1,3,5] = 월수금
   start: string;
   end: string;

@@ -127,6 +127,7 @@ model User {
   createdGameBoards   GameBoard[]         @relation("GameBoardCreator")
   clubMessages        ClubMessage[]
   operatorRequests    OperatorRequest[]   @relation("OperatorRequester")
+  coachProfile        CoachProfile?
 }
 
 // 운영자(모임 생성 권한) 신청. PLAYER 가 운영자 권한을 신청하면 SUPER_ADMIN 이
@@ -604,6 +605,9 @@ model LessonOffer {
   coachName   String
   coachIntro  String? // 한 줄 소개("전 실업팀 선수 출신")
   coachCareer String? // 이력·경력(줄바꿈 구분)
+  // 등록된 코치 프로필과의 연결(숨고식). 연결되면 코치 사진·인증 뱃지가 노출되고
+  // 그 코치 본인이 로스터·출석에 접근할 수 있다. 텍스트 필드는 하위호환 유지.
+  coachProfileId String?
   day         Int // 정렬용 첫 요일 0(일)~6(토)
   days        Json? // 레슨 요일 묶음 [1,3,5]=월수금 — 없으면 [day]
   start       String // "HH:mm"
@@ -614,9 +618,12 @@ model LessonOffer {
   createdAt DateTime @default(now())
 
   club         Club                @relation(fields: [clubId], references: [id], onDelete: Cascade)
+  coachProfile CoachProfile?       @relation(fields: [coachProfileId], references: [id], onDelete: SetNull)
   applications LessonApplication[]
+  attendance   LessonAttendance[]
 
   @@index([clubId])
+  @@index([coachProfileId])
 }
 
 model LessonApplication {
@@ -628,11 +635,30 @@ model LessonApplication {
   note      String?
   status    String   @default("PENDING") // PENDING | CONFIRMED | CANCELLED
   feePaid   Boolean  @default(false) // 레슨비 입금확인(운영자 토글)
+  // 확정자(CONFIRMED)의 수강 상태 — 로스터에서 운영자·코치가 관리.
+  enrollState String @default("ACTIVE") // ACTIVE(수강중) | PAUSED(휴식) | ENDED(종료)
   createdAt DateTime @default(now())
 
-  offer LessonOffer @relation(fields: [offerId], references: [id], onDelete: Cascade)
+  offer      LessonOffer        @relation(fields: [offerId], references: [id], onDelete: Cascade)
+  attendance LessonAttendance[]
 
   @@index([offerId, createdAt])
+}
+
+// 레슨 회차 출석 — 날짜별로 로스터 인원 출석을 체크(운영자 또는 담당 코치).
+model LessonAttendance {
+  id            String   @id @default(uuid())
+  offerId       String
+  applicationId String
+  date          String // "YYYY-MM-DD"
+  present       Boolean  @default(true)
+  createdAt     DateTime @default(now())
+
+  offer       LessonOffer       @relation(fields: [offerId], references: [id], onDelete: Cascade)
+  application LessonApplication @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+
+  @@unique([applicationId, date])
+  @@index([offerId, date])
 }
 
 // 게스트 문의 채팅 — 비회원(익명)/앱 회원 게스트와 운영진 간 1:1 스레드.
@@ -667,6 +693,64 @@ model GuestMessage {
   createdAt  DateTime @default(now())
 
   thread GuestThread @relation(fields: [threadId], references: [id], onDelete: Cascade)
+
+  @@index([threadId, createdAt])
+}
+
+// ── 코치 마켓(숨고식) ────────────────────────────────────────────
+// 코치가 앱 계정으로 직접 등록·관리하는 프로필. 등록 즉시 활동(active=true),
+// 최고관리자가 '인증 코치' 뱃지(certified)를 부여한다. 사진은 /uploads 업로드 URL.
+model CoachProfile {
+  id              String   @id @default(uuid())
+  userId          String   @unique
+  displayName     String
+  photoUrl        String?
+  intro           String?  @db.VarChar(200) // 한 줄 소개
+  career          String? // 경력(줄바꿈 구분)
+  regions         String? // 활동 지역("서울 송파, 하남" 자유 텍스트)
+  pricePerMonth   Int? // 월 레슨비(안내용)
+  pricePerSession Int? // 회당 레슨비(안내용)
+  availableTimes  String? // 레슨 가능 시간(자유 텍스트)
+  certified       Boolean  @default(false)
+  active          Boolean  @default(true)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  user         User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  lessonOffers LessonOffer[]
+
+  @@index([active, certified])
+}
+
+// 코치 문의 채팅 — 클럽 담당자(또는 회원)와 코치의 1:1 스레드.
+// 양쪽 다 로그인 유저라 익명 토큰이 필요 없고 (coachUserId, userId)로 find-or-create.
+model CoachThread {
+  id            String   @id @default(uuid())
+  coachUserId   String // 코치(프로필 소유자) userId
+  userId        String // 문의자 userId
+  clubId        String? // 특정 모임 맥락에서 시작한 문의면 그 모임
+  lastMessageAt DateTime @default(now())
+  lastText      String?  @db.VarChar(200)
+  coachUnread   Int      @default(0)
+  userUnread    Int      @default(0)
+  createdAt     DateTime @default(now())
+
+  messages CoachMessage[]
+
+  @@unique([coachUserId, userId])
+  @@index([coachUserId, lastMessageAt])
+  @@index([userId, lastMessageAt])
+}
+
+model CoachMessage {
+  id         String   @id @default(uuid())
+  threadId   String
+  fromCoach  Boolean // true=코치, false=문의자
+  authorName String
+  text       String   @db.VarChar(1000)
+  createdAt  DateTime @default(now())
+
+  thread CoachThread @relation(fields: [threadId], references: [id], onDelete: Cascade)
 
   @@index([threadId, createdAt])
 }

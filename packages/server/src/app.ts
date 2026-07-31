@@ -23,6 +23,9 @@ import labRouter from './modules/lab/lab.router';
 import guestApplyRouter from './modules/guestApply/guestApply.router';
 import guestChatRouter from './modules/guestChat/guestChat.router';
 import clubMoneyRouter from './modules/club/clubMoney.router';
+import uploadRouter, { UPLOAD_DIR } from './modules/upload/upload.router';
+import coachRouter from './modules/coach/coach.router';
+import coachChatRouter from './modules/coachChat/coachChat.router';
 import { noteRequest } from './modules/admin/metrics.service';
 
 const app = express();
@@ -39,6 +42,21 @@ app.use(express.json());
 app.get('/api/v1/health', (_req, res) => {
   res.json({ status: 'ok' });
 });
+
+// 업로드된 이미지 정적 서빙(코치 프로필 사진 등). 파일명이 uuid(불변)라 장기 캐시.
+// 웹앱이 API 와 다른 origin 에서 이미지를 임베드하므로 helmet 의 기본
+// Cross-Origin-Resource-Policy(same-origin)를 이 경로에서만 cross-origin 으로 완화.
+app.use(
+  '/uploads',
+  express.static(UPLOAD_DIR, {
+    maxAge: '7d',
+    immutable: true,
+    setHeaders: (res) => {
+      res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin');
+      res.setHeader('Access-Control-Allow-Origin', '*');
+    },
+  }),
+);
 
 // 트래픽 집계 — health/정적을 제외한 API 요청 수를 하루 단위로 카운트(슈퍼관리자 대시보드).
 // 가벼운 카운터만 증가(동기, DB 접근 없음). 실제 저장은 metrics 서비스가 주기적으로 flush.
@@ -71,6 +89,9 @@ app.use('/api/v1/admin', adminRouter);                 // /admin/metrics (슈퍼
 app.use('/api/v1/lab', labRouter);                     // /lab/* (실험실 — 최고관리자 전용 상용 프로토타입)
 app.use('/api/v1/guest-apply', guestApplyRouter);      // 게스트 사전 신청(공개, rate-limit)
 app.use('/api/v1/guest-chat', guestChatRouter);        // 게스트 문의 채팅(공개, rate-limit)
+app.use('/api/v1/uploads', uploadRouter);              // 이미지 업로드(인증, rate-limit)
+app.use('/api/v1/coaches', coachRouter);               // 코치 마켓(목록/상세 공개, me/인증 관리)
+app.use('/api/v1/coach-chat', coachChatRouter);        // 코치 문의 채팅(인증)
 // Client crash/error sink. Use a tight body limit so a runtime error report
 // (message + stack) can't carry an oversized payload. Mounted before the
 // errorHandler. The global express.json() above already parsed the body; the

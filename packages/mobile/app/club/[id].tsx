@@ -11,6 +11,7 @@ import {
   TextInput,
   Platform,
   Share,
+  Image,
 } from 'react-native';
 import { useLocalSearchParams, useRouter, Stack, useFocusEffect } from 'expo-router';
 import { useClubStore } from '../../store/clubStore';
@@ -30,6 +31,7 @@ import { ScreenContainer } from '../../components/ui/ScreenContainer';
 import { AddFacilityModal } from '../../components/AddFacilityModal';
 import { memberLessonApi, myDuesApi, type LessonOffer, type MyDuesResponse } from '../../services/lab';
 import { staffGuestChatApi } from '../../services/guestChat';
+import { absolutizeUploadUrl } from '../../services/upload';
 
 interface ClubMember {
   userId: string;
@@ -744,18 +746,37 @@ export default function ClubDetailScreen() {
                 const ratio = o.capacity ? Math.min(1, o.applicants / o.capacity) : 0;
                 return (
                   <View key={o.id} style={styles.lessonCard}>
-                    <View style={styles.lessonHead}>
-                      <View style={styles.lessonAvatar}>
-                        <Text style={styles.lessonAvatarText}>{o.coachName.slice(0, 1)}</Text>
-                      </View>
+                    {/* 코치 헤더 — 등록 코치가 연결돼 있으면 사진·인증 + 프로필로 이동 */}
+                    <TouchableOpacity
+                      style={styles.lessonHead}
+                      disabled={!o.coachProfileId}
+                      activeOpacity={0.7}
+                      onPress={() => o.coachProfileId && router.push(`/coach/${o.coachProfileId}` as never)}
+                      accessibilityLabel={`${o.coachName} 코치 프로필`}
+                    >
+                      {absolutizeUploadUrl(o.coachPhotoUrl) ? (
+                        <Image source={{ uri: absolutizeUploadUrl(o.coachPhotoUrl)! }} style={styles.lessonAvatar} />
+                      ) : (
+                        <View style={styles.lessonAvatar}>
+                          <Text style={styles.lessonAvatarText}>{o.coachName.slice(0, 1)}</Text>
+                        </View>
+                      )}
                       <View style={{ flex: 1, minWidth: 0 }}>
-                        <Text style={styles.lessonCoach}>{o.coachName} 코치</Text>
+                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5 }}>
+                          <Text style={styles.lessonCoach}>{o.coachName} 코치</Text>
+                          {o.coachCertified && (
+                            <View style={styles.lessonCertBadge}>
+                              <Text style={styles.lessonCertText}>인증</Text>
+                            </View>
+                          )}
+                          {!!o.coachProfileId && <Icon name="chevronRight" size={14} color={Colors.textLight} />}
+                        </View>
                         {!!o.coachIntro && (
                           <Text style={styles.lessonIntro} numberOfLines={1}>{o.coachIntro}</Text>
                         )}
                       </View>
                       {o.fee != null && <Text style={styles.lessonFee}>월 {o.fee.toLocaleString()}원</Text>}
-                    </View>
+                    </TouchableOpacity>
                     {careerLines.length > 0 && (
                       <View style={styles.lessonCareerBox}>
                         {careerLines.slice(0, 3).map((l, idx) => (
@@ -1765,6 +1786,8 @@ const styles = StyleSheet.create({
     alignItems: 'center', justifyContent: 'center',
   },
   lessonAvatarText: { fontSize: 17, fontWeight: '900', color: Colors.primary },
+  lessonCertBadge: { backgroundColor: Colors.primary + '16', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 7 },
+  lessonCertText: { fontSize: 10, fontWeight: '800', color: Colors.primary },
   lessonCoach: { fontSize: 15, fontWeight: '900', color: Colors.text },
   lessonIntro: { fontSize: 12, color: Colors.textSecondary, marginTop: 1 },
   lessonFee: { fontSize: 14, fontWeight: '900', color: Colors.text },

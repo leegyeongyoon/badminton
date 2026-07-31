@@ -16,3 +16,4 @@ export { Chip } from './Chip';
 export { AnimatedPressable } from './AnimatedPressable';
 export type { AnimatedPressableProps } from './AnimatedPressable';
 export { ConfirmDialog, ConfirmDialogContainer } from './ConfirmDialog';
+export { PhotoPickerField } from './PhotoPickerField';

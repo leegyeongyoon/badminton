@@ -298,6 +298,12 @@ export default function HomeScreen() {
               </View>
               <Text style={[styles.quickLabel, { color: colors.text }]}>모임 찾기</Text>
             </Pressable>
+            <Pressable onPress={() => router.push('/coaches' as never)} style={({ pressed }) => [styles.quickBtn, { backgroundColor: colors.surface }, pressed && { opacity: 0.85 }]}>
+              <View style={[styles.quickIcon, { backgroundColor: colors.primaryLight }]}>
+                <Icon name="activity" size={18} color={colors.primary} />
+              </View>
+              <Text style={[styles.quickLabel, { color: colors.text }]}>코치 찾기</Text>
+            </Pressable>
           </View>
         )}
 

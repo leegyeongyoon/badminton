@@ -12,6 +12,7 @@ import { Icon } from '../../components/ui/Icon';
 import api from '../../services/api';
 import { profileApi } from '../../services/profile';
 import { operatorRequestApi } from '../../services/operatorRequest';
+import { coachApi, coachChatApi } from '../../services/coach';
 import type { OperatorRequestResponse } from '@badminton/shared';
 import { typography, radius, spacing, opacity } from '../../constants/theme';
 import { alpha } from '../../utils/color';
@@ -52,6 +53,10 @@ export default function MoreScreen() {
   const isSuperAdmin = user?.role === 'SUPER_ADMIN';
   const isPlayer = user?.role === 'PLAYER';
 
+  // 코치 마켓(숨고식) — 내 코치 프로필 유무 + 레슨 문의 미읽음.
+  const [hasCoachProfile, setHasCoachProfile] = useState(false);
+  const [coachChatUnread, setCoachChatUnread] = useState(0);
+
   // 내가 모임장(LEADER)인 — 또는 최고관리자면 전체 — 모임. 여기서 모임 삭제 가능.
   const managedClubs = clubs.filter(
     (c) => isSuperAdmin || c.isLeader || c.role === 'LEADER',
@@ -66,6 +71,8 @@ export default function MoreScreen() {
       loadProfile(),
       loadOperatorRequest(),
     ]);
+    coachApi.me().then((p) => setHasCoachProfile(!!p)).catch(() => {});
+    coachChatApi.unreadCount().then(setCoachChatUnread).catch(() => {});
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -197,6 +204,40 @@ export default function MoreScreen() {
           ))}
         </View>
       )}
+
+      {/* 레슨 · 코치(숨고식 마켓) — 코치 찾기 / 문의함 / 코치 활동 */}
+      <View style={[styles.section, { backgroundColor: colors.surface }, shadows.sm]}>
+        <Text style={[styles.sectionTitle, { color: colors.text }]}>레슨 · 코치</Text>
+        <TouchableOpacity style={styles.menuItem} onPress={() => router.push('/coaches' as never)}>
+          <Icon name="search" size={18} color={colors.textSecondary} />
+          <Text style={[styles.menuItemText, { color: colors.text }]}>코치 찾기</Text>
+          <Icon name="chevronRight" size={18} color={colors.textLight} />
+        </TouchableOpacity>
+        <TouchableOpacity style={styles.menuItem} onPress={() => router.push('/coach/inbox' as never)}>
+          <Icon name="chat" size={18} color={colors.textSecondary} />
+          <Text style={[styles.menuItemText, { color: colors.text }]}>레슨 문의함</Text>
+          {coachChatUnread > 0 && (
+            <View style={[styles.badge, { backgroundColor: colors.danger }]}>
+              <Text style={styles.badgeText}>{coachChatUnread}</Text>
+            </View>
+          )}
+          <Icon name="chevronRight" size={18} color={colors.textLight} />
+        </TouchableOpacity>
+        <TouchableOpacity style={styles.menuItem} onPress={() => router.push('/coach/edit' as never)}>
+          <Icon name="edit" size={18} color={colors.textSecondary} />
+          <Text style={[styles.menuItemText, { color: colors.text }]}>
+            {hasCoachProfile ? '내 코치 프로필' : '코치로 활동하기'}
+          </Text>
+          <Icon name="chevronRight" size={18} color={colors.textLight} />
+        </TouchableOpacity>
+        {hasCoachProfile && (
+          <TouchableOpacity style={styles.menuItem} onPress={() => router.push('/coach/lessons' as never)}>
+            <Icon name="board" size={18} color={colors.textSecondary} />
+            <Text style={[styles.menuItemText, { color: colors.text }]}>내 레슨 (수강생·출석)</Text>
+            <Icon name="chevronRight" size={18} color={colors.textLight} />
+          </TouchableOpacity>
+        )}
+      </View>
 
       {/* Menu items */}
       <View style={[styles.section, { backgroundColor: colors.surface }, shadows.sm]}>

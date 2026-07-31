@@ -30,3 +30,6 @@ packages/mobile/web-build/
 
 # Claude
 .claude/
+
+# 업로드 이미지(로컬 개발용 저장소 — 프로덕션은 도커 볼륨)
+packages/server/uploads/

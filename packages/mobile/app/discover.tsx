@@ -90,6 +90,9 @@ export default function Discover() {
         <BackButton />
         <Text style={[styles.title, { color: colors.text }]}>모임 찾기</Text>
         <View style={{ flex: 1 }} />
+        <Pressable onPress={() => router.push('/coaches' as never)} hitSlop={8} style={{ marginRight: spacing.sm }}>
+          <Text style={{ fontSize: 13, fontWeight: '800', color: colors.primary }}>코치 찾기</Text>
+        </Pressable>
         <View style={[styles.viewToggle, { backgroundColor: colors.background }]}>
           {([
             { key: 'list' as const, icon: 'list-outline' as const, label: '목록' },

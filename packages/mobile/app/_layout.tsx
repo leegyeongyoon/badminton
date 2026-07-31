@@ -291,7 +291,14 @@ function RootLayoutInner() {
           <Stack.Screen name="club/[id]/money" options={transitions.slideFromRight} />
           <Stack.Screen name="club/[id]/operation" options={transitions.slideFromRight} />
           <Stack.Screen name="club/[id]/lessons" options={transitions.slideFromRight} />
+          <Stack.Screen name="club/[id]/lesson/[offerId]" options={transitions.slideFromRight} />
           <Stack.Screen name="club/[id]/guest-inbox" options={transitions.slideFromRight} />
+          <Stack.Screen name="coaches" options={transitions.slideFromRight} />
+          <Stack.Screen name="coach/[id]" options={transitions.slideFromRight} />
+          <Stack.Screen name="coach/edit" options={transitions.slideFromRight} />
+          <Stack.Screen name="coach/inbox" options={transitions.slideFromRight} />
+          <Stack.Screen name="coach/lessons" options={transitions.slideFromRight} />
+          <Stack.Screen name="coach-chat/[threadId]" options={transitions.slideFromRight} />
           <Stack.Screen name="guest-chat" options={transitions.slideFromRight} />
           <Stack.Screen name="map" options={transitions.slideFromRight} />
           <Stack.Screen name="checkin-modal" options={transitions.modalSlideUp} />

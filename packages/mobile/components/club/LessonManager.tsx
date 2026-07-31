@@ -1,10 +1,13 @@
 import { useCallback, useEffect, useState } from 'react';
-import { View, Text, StyleSheet, ScrollView, Pressable, TextInput, ActivityIndicator, Switch, Alert, Platform } from 'react-native';
+import { View, Text, StyleSheet, ScrollView, Pressable, TextInput, ActivityIndicator, Switch, Alert, Platform, Image } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import { useRouter } from 'expo-router';
 import { useTheme } from '../../hooks/useTheme';
 import { typography, spacing, radius } from '../../constants/theme';
 import { showSuccess, showError } from '../../utils/feedback';
 import type { LessonApi, LessonOffer, LessonApplicationRow } from '../../services/lab';
+import { coachApi, type CoachCard } from '../../services/coach';
+import { absolutizeUploadUrl } from '../../services/upload';
 
 // ─────────────────────────────────────────────────────────────
 // 레슨 관리(공용) — 실험실(최고관리자)과 모임 관리(운영진) 양쪽에서
@@ -43,6 +46,7 @@ const confirmAsk = (title: string, message: string, onOk: () => void) => {
 
 export function LessonManager({ clubs, api }: { clubs: LessonClub[]; api: LessonApi }) {
   const { colors, shadows } = useTheme();
+  const router = useRouter();
   const [clubId, setClubId] = useState<string | null>(clubs[0]?.id ?? null);
   const [loading, setLoading] = useState(true);
   const [offers, setOffers] = useState<LessonOffer[]>([]);
@@ -60,6 +64,34 @@ export function LessonManager({ clubs, api }: { clubs: LessonClub[]; api: Lesson
   const [fee, setFee] = useState('');
   const [capacity, setCapacity] = useState('');
   const [saving, setSaving] = useState(false);
+
+  // 등록 코치 연결(숨고식) — 연결 시 텍스트 필드 자동 채움·잠금.
+  const [linkedCoach, setLinkedCoach] = useState<{ id: string; name: string; photoUrl: string | null; certified: boolean } | null>(null);
+  const [showCoachPicker, setShowCoachPicker] = useState(false);
+  const [coachList, setCoachList] = useState<CoachCard[] | null>(null); // null=미로드
+
+  const openCoachPicker = async () => {
+    setShowCoachPicker(true);
+    if (coachList === null) {
+      try {
+        setCoachList(await coachApi.list());
+      } catch {
+        setCoachList([]);
+      }
+    }
+  };
+
+  const linkCoach = (c: CoachCard) => {
+    setLinkedCoach({ id: c.id, name: c.displayName, photoUrl: c.photoUrl, certified: c.certified });
+    setCoachName(c.displayName);
+    if (c.intro) setCoachIntro(c.intro.slice(0, 60));
+    setShowCoachPicker(false);
+  };
+
+  const unlinkCoach = () => {
+    setLinkedCoach(null);
+    setShowCoachPicker(false);
+  };
 
   useEffect(() => {
     if (!clubId && clubs[0]) setClubId(clubs[0].id);
@@ -84,6 +116,7 @@ export function LessonManager({ clubs, api }: { clubs: LessonClub[]; api: Lesson
     setEditingId(null);
     setCoachName(''); setCoachIntro(''); setCoachCareer('');
     setDays([1, 3, 5]); setStart('19:00'); setEnd('20:00'); setFee(''); setCapacity('');
+    setLinkedCoach(null); setShowCoachPicker(false);
   };
 
   const openEdit = (o: LessonOffer) => {
@@ -95,6 +128,12 @@ export function LessonManager({ clubs, api }: { clubs: LessonClub[]; api: Lesson
     setStart(o.start); setEnd(o.end);
     setFee(o.fee != null ? String(o.fee) : '');
     setCapacity(o.capacity != null ? String(o.capacity) : '');
+    setLinkedCoach(
+      o.coachProfileId
+        ? { id: o.coachProfileId, name: o.coachName, photoUrl: o.coachPhotoUrl, certified: o.coachCertified }
+        : null,
+    );
+    setShowCoachPicker(false);
     setShowForm(true);
   };
 
@@ -113,6 +152,7 @@ export function LessonManager({ clubs, api }: { clubs: LessonClub[]; api: Lesson
         coachName: coachName.trim(),
         coachIntro: coachIntro.trim() || null,
         coachCareer: coachCareer.trim() || null,
+        coachProfileId: linkedCoach?.id ?? null,
         days, start, end,
         fee: num(fee), capacity: num(capacity),
       });
@@ -207,8 +247,70 @@ export function LessonManager({ clubs, api }: { clubs: LessonClub[]; api: Lesson
             <View style={[styles.formCard, { backgroundColor: colors.surface }, shadows.sm]}>
               <Text style={[styles.formTitle, { color: colors.text }]}>{editingId ? '레슨 수정' : '새 레슨'}</Text>
 
-              <Text style={[styles.label, { color: colors.textSecondary }]}>코치명 <Text style={{ color: colors.danger }}>*</Text></Text>
-              <TextInput style={[styles.input, { color: colors.text, backgroundColor: colors.background }]} value={coachName} onChangeText={setCoachName} placeholder="예: 박성우" placeholderTextColor={colors.textLight} maxLength={20} />
+              {/* 등록 코치 연결 — 연결하면 코치 사진·인증이 노출되고 코치 본인이 수강생·출석을 관리 */}
+              <Text style={[styles.label, { color: colors.textSecondary }]}>담당 코치</Text>
+              {linkedCoach ? (
+                <View style={[styles.linkedCoachRow, { backgroundColor: colors.background }]}>
+                  {absolutizeUploadUrl(linkedCoach.photoUrl) ? (
+                    <Image source={{ uri: absolutizeUploadUrl(linkedCoach.photoUrl)! }} style={styles.linkedCoachPhoto} />
+                  ) : (
+                    <View style={[styles.linkedCoachPhoto, { backgroundColor: colors.primary + '22', alignItems: 'center', justifyContent: 'center' }]}>
+                      <Text style={{ color: colors.primary, fontWeight: '900' }}>{linkedCoach.name.slice(0, 1)}</Text>
+                    </View>
+                  )}
+                  <View style={{ flex: 1, minWidth: 0, flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+                    <Text style={[styles.linkedCoachName, { color: colors.text }]} numberOfLines={1}>{linkedCoach.name} 코치</Text>
+                    {linkedCoach.certified && <Ionicons name="checkmark-circle" size={13} color={colors.primary} />}
+                  </View>
+                  <Pressable onPress={unlinkCoach} hitSlop={8}>
+                    <Text style={[styles.linkOff, { color: colors.textLight }]}>연결 해제</Text>
+                  </Pressable>
+                </View>
+              ) : (
+                <Pressable onPress={openCoachPicker} style={[styles.linkBtn, { borderColor: colors.border }]}>
+                  <Ionicons name="link-outline" size={15} color={colors.primary} />
+                  <Text style={[styles.linkBtnText, { color: colors.primary }]}>등록 코치 연결</Text>
+                  <Text style={[styles.linkHint, { color: colors.textLight }]}>사진·인증 노출, 코치가 직접 출석 관리</Text>
+                </Pressable>
+              )}
+              {showCoachPicker && !linkedCoach && (
+                <View style={[styles.pickerBox, { backgroundColor: colors.background }]}>
+                  {coachList === null ? (
+                    <ActivityIndicator color={colors.primary} style={{ paddingVertical: spacing.md }} />
+                  ) : coachList.length === 0 ? (
+                    <Text style={[styles.pickerEmpty, { color: colors.textLight }]}>
+                      아직 등록된 코치가 없어요. 코치에게 앱에서 '코치로 활동하기' 등록을 요청해 보세요.
+                    </Text>
+                  ) : (
+                    coachList.slice(0, 8).map((c) => (
+                      <Pressable key={c.id} onPress={() => linkCoach(c)} style={styles.pickerRow}>
+                        {absolutizeUploadUrl(c.photoUrl) ? (
+                          <Image source={{ uri: absolutizeUploadUrl(c.photoUrl)! }} style={styles.pickerPhoto} />
+                        ) : (
+                          <View style={[styles.pickerPhoto, { backgroundColor: colors.primary + '22', alignItems: 'center', justifyContent: 'center' }]}>
+                            <Text style={{ color: colors.primary, fontWeight: '900', fontSize: 12 }}>{c.displayName.slice(0, 1)}</Text>
+                          </View>
+                        )}
+                        <View style={{ flex: 1, minWidth: 0 }}>
+                          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+                            <Text style={[styles.pickerName, { color: colors.text }]} numberOfLines={1}>{c.displayName}</Text>
+                            {c.certified && <Ionicons name="checkmark-circle" size={12} color={colors.primary} />}
+                          </View>
+                          {!!(c.regions || c.intro) && (
+                            <Text style={[styles.pickerMeta, { color: colors.textLight }]} numberOfLines={1}>
+                              {c.regions || c.intro}
+                            </Text>
+                          )}
+                        </View>
+                        <Ionicons name="add-circle-outline" size={18} color={colors.primary} />
+                      </Pressable>
+                    ))
+                  )}
+                </View>
+              )}
+
+              <Text style={[styles.label, { color: colors.textSecondary }]}>코치명 <Text style={{ color: colors.danger }}>*</Text>{linkedCoach ? <Text style={{ color: colors.textLight }}>  (연결된 프로필 이름)</Text> : null}</Text>
+              <TextInput style={[styles.input, { color: colors.text, backgroundColor: colors.background }, linkedCoach && { opacity: 0.6 }]} value={coachName} onChangeText={setCoachName} placeholder="예: 박성우" placeholderTextColor={colors.textLight} maxLength={20} editable={!linkedCoach} />
 
               <Text style={[styles.label, { color: colors.textSecondary }]}>한 줄 소개</Text>
               <TextInput style={[styles.input, { color: colors.text, backgroundColor: colors.background }]} value={coachIntro} onChangeText={setCoachIntro} placeholder="예: 전 실업팀 선수 출신 · 지도 경력 10년" placeholderTextColor={colors.textLight} maxLength={60} />
@@ -272,12 +374,17 @@ export function LessonManager({ clubs, api }: { clubs: LessonClub[]; api: Lesson
               return (
                 <View key={o.id} style={[styles.coachCard, { backgroundColor: colors.surface }, shadows.md, !o.enabled && { opacity: 0.55 }]}>
                   <View style={styles.coachHead}>
-                    <View style={[styles.avatar, { backgroundColor: colors.primary + '22' }]}>
-                      <Text style={[styles.avatarText, { color: colors.primary }]}>{o.coachName.slice(0, 1)}</Text>
-                    </View>
+                    {absolutizeUploadUrl(o.coachPhotoUrl) ? (
+                      <Image source={{ uri: absolutizeUploadUrl(o.coachPhotoUrl)! }} style={styles.avatar} />
+                    ) : (
+                      <View style={[styles.avatar, { backgroundColor: colors.primary + '22', alignItems: 'center', justifyContent: 'center' }]}>
+                        <Text style={[styles.avatarText, { color: colors.primary }]}>{o.coachName.slice(0, 1)}</Text>
+                      </View>
+                    )}
                     <View style={{ flex: 1, minWidth: 0 }}>
                       <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
                         <Text style={[styles.coachName, { color: colors.text }]}>{o.coachName} 코치</Text>
+                        {o.coachCertified && <Ionicons name="checkmark-circle" size={14} color={colors.primary} />}
                         {!o.enabled && (
                           <View style={[styles.hiddenTag, { backgroundColor: colors.background }]}>
                             <Text style={[styles.hiddenTagText, { color: colors.textLight }]}>숨김</Text>
@@ -321,6 +428,13 @@ export function LessonManager({ clubs, api }: { clubs: LessonClub[]; api: Lesson
                   </View>
 
                   <View style={styles.cardActions}>
+                    <Pressable
+                      onPress={() => router.push(`/club/${clubId}/lesson/${o.id}` as never)}
+                      style={[styles.editBtn, { backgroundColor: colors.primary + '14' }]}
+                    >
+                      <Ionicons name="people-outline" size={14} color={colors.primary} />
+                      <Text style={[styles.editBtnText, { color: colors.primary }]}>수강생 · 출석</Text>
+                    </Pressable>
                     <Pressable onPress={() => openEdit(o)} style={[styles.editBtn, { backgroundColor: colors.background }]}>
                       <Ionicons name="create-outline" size={14} color={colors.textSecondary} />
                       <Text style={[styles.editBtnText, { color: colors.textSecondary }]}>수정</Text>
@@ -406,6 +520,19 @@ const styles = StyleSheet.create({
   addBtnText: { ...typography.body2, fontWeight: '800' },
   formCard: { borderRadius: 20, padding: spacing.lg, marginBottom: spacing.md },
   formTitle: { ...typography.subtitle1, marginBottom: spacing.sm },
+  linkBtn: { flexDirection: 'row', alignItems: 'center', gap: 6, borderWidth: 1, borderStyle: 'dashed', borderRadius: 13, paddingHorizontal: spacing.md, paddingVertical: 11 },
+  linkBtnText: { ...typography.body2, fontWeight: '800' },
+  linkHint: { fontSize: 10.5, fontWeight: '600', flex: 1, textAlign: 'right' },
+  linkedCoachRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, borderRadius: 13, paddingHorizontal: spacing.md, paddingVertical: spacing.sm },
+  linkedCoachPhoto: { width: 32, height: 32, borderRadius: 16 },
+  linkedCoachName: { ...typography.body2, fontWeight: '800', flexShrink: 1 },
+  linkOff: { fontSize: 12, fontWeight: '700', textDecorationLine: 'underline' },
+  pickerBox: { borderRadius: 13, marginTop: spacing.xs, paddingVertical: spacing.xs },
+  pickerRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, paddingHorizontal: spacing.md, paddingVertical: spacing.sm },
+  pickerPhoto: { width: 30, height: 30, borderRadius: 15 },
+  pickerName: { ...typography.body2, fontWeight: '800', flexShrink: 1 },
+  pickerMeta: { fontSize: 11, fontWeight: '600', marginTop: 1 },
+  pickerEmpty: { ...typography.caption, lineHeight: 17, padding: spacing.md },
   label: { ...typography.caption, fontWeight: '700', marginTop: spacing.sm, marginBottom: spacing.xs },
   input: { ...typography.body2, borderRadius: 13, paddingHorizontal: spacing.md, paddingVertical: 12, fontWeight: '700' },
   multiline: { minHeight: 88, textAlignVertical: 'top' },

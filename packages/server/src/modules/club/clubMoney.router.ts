@@ -23,6 +23,11 @@ import {
   getLessonApplications,
   applyLesson,
   updateLessonApplication,
+  isOfferCoach,
+  getLessonDetail,
+  updateLessonStudent,
+  getLessonAttendance,
+  setLessonAttendance,
 } from '../lab/lab.service';
 import * as guestChat from '../guestChat/guestChat.service';
 import { getMyDues, getMoneyStats } from '../lab/lab.service';
@@ -187,6 +192,60 @@ router.delete('/:clubId/money/lessons/:offerId', authenticate, staffGuard, async
     const offer = await prisma.lessonOffer.findUnique({ where: { id: String(req.params.offerId) }, select: { clubId: true } });
     if (!offer || offer.clubId !== String(req.params.clubId)) throw new NotFoundError('레슨');
     await deleteLessonOffer(String(req.params.offerId));
+    res.json({ ok: true });
+  } catch (err) { next(err); }
+});
+
+// ─── 레슨 상세: 로스터·회차 출석 — 운영진 또는 "담당 코치 본인" ───
+// 코치는 그 클럽 staff 가 아니어도 자기 레슨의 수강생·출석은 관리할 수 있어야 한다.
+async function staffOrLessonCoach(req: Request, _res: Response, next: NextFunction) {
+  try {
+    const offerId = String(req.params.offerId);
+    const offer = await prisma.lessonOffer.findUnique({ where: { id: offerId }, select: { clubId: true } });
+    if (!offer || offer.clubId !== String(req.params.clubId)) throw new NotFoundError('레슨');
+    try {
+      await verifyClubStaff(String(req.params.clubId), req.user!.userId);
+      return next();
+    } catch {
+      if (await isOfferCoach(offerId, req.user!.userId)) return next();
+      throw new NotFoundError('레슨');
+    }
+  } catch (err) {
+    next(err);
+  }
+}
+
+// GET /clubs/:clubId/money/lessons/:offerId — 레슨 상세(코치 헤더 + 로스터)
+router.get('/:clubId/money/lessons/:offerId', authenticate, staffOrLessonCoach, async (req: Request, res: Response, next: NextFunction) => {
+  try { res.json(await getLessonDetail(String(req.params.offerId), req.user!.userId)); } catch (err) { next(err); }
+});
+
+// PUT /clubs/:clubId/money/lessons/:offerId/students/:appId — 수강 상태·메모
+router.put('/:clubId/money/lessons/:offerId/students/:appId', authenticate, staffOrLessonCoach, async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const app = await prisma.lessonApplication.findUnique({
+      where: { id: String(req.params.appId) },
+      select: { offerId: true },
+    });
+    if (!app || app.offerId !== String(req.params.offerId)) throw new NotFoundError('수강생');
+    const { enrollState, note } = req.body as { enrollState?: string; note?: string | null };
+    await updateLessonStudent(String(req.params.appId), { enrollState, note });
+    res.json({ ok: true });
+  } catch (err) { next(err); }
+});
+
+// GET /clubs/:clubId/money/lessons/:offerId/attendance?date=YYYY-MM-DD — 그 날짜 출석
+router.get('/:clubId/money/lessons/:offerId/attendance', authenticate, staffOrLessonCoach, async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    res.json(await getLessonAttendance(String(req.params.offerId), String(req.query.date || '')));
+  } catch (err) { next(err); }
+});
+
+// POST /clubs/:clubId/money/lessons/:offerId/attendance {date, entries:[{applicationId,present}]}
+router.post('/:clubId/money/lessons/:offerId/attendance', authenticate, staffOrLessonCoach, async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { date, entries } = req.body as { date?: string; entries?: { applicationId: string; present: boolean }[] };
+    await setLessonAttendance(String(req.params.offerId), String(date || ''), entries ?? []);
     res.json({ ok: true });
   } catch (err) { next(err); }
 });

@@ -50,8 +50,12 @@ services:
     # 유실 → 장애 사후 진단 불가였음.) LOG_DIR 로 winston 출력 경로를 이 볼륨으로 고정.
     environment:
       - LOG_DIR=/app/logs
+      # 업로드 이미지(코치 프로필 사진 등)를 영속 볼륨에 저장 — 배포로 컨테이너가
+      # 재생성돼도 파일 유지 (serverlogs 와 같은 패턴).
+      - UPLOAD_DIR=/app/uploads
     volumes:
       - serverlogs:/app/logs
+      - uploads:/app/uploads
     depends_on:
       postgres:
         condition: service_healthy
@@ -73,3 +77,4 @@ services:
 volumes:
   pgdata:
   serverlogs:
+  uploads:
