@@ -30,15 +30,8 @@ import { transitions } from '../utils/transitions';
 import { lightColors } from '../constants/theme';
 import * as Sentry from '@sentry/react-native';
 
-// 크래시/에러 모니터링 — 네이티브(안드/iOS)에서만 켠다. 웹(운영판 주 사용)은
-// @sentry/react-native가 완전 지원이 아니라 건드리지 않아 안정성 우선. DSN은
-// 공개값이라 임베드 안전. __DEV__(로컬)에선 꺼서 노이즈 방지 → 릴리스에서만 수집.
-if (Platform.OS !== 'web') {
-  Sentry.init({
-    dsn: 'https://2c56521b4279ec7ea9a644510665e40a@o4511765184708608.ingest.us.sentry.io/4511765222129664',
-    enabled: !__DEV__,
-  });
-}
+// 크래시/에러 모니터링(Sentry)은 커스텀 엔트리(index.js)에서 앱의 어떤 모듈보다
+// 먼저 초기화한다 — 부팅 극초반(모듈 평가) 크래시까지 잡기 위함. 여기서 중복 init 금지.
 
 // Web-only patches (must run before any component renders)
 if (Platform.OS === 'web') {
