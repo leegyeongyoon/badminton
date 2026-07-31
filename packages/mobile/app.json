@@ -20,7 +20,7 @@
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "com.gylee.badminton",
-      "buildNumber": "29",
+      "buildNumber": "30",
       "associatedDomains": [
         "applinks:badmintoncourt.store"
       ],
