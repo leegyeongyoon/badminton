@@ -174,6 +174,7 @@ export interface CoachSettlement {
   totalPlatformFee: number;
   totalPayout: number;
   lessons: LessonBilling[];
+  bank: { bankName: string | null; bankAccount: string | null; bankHolder: string | null } | null;
 }
 
 export interface LessonDetail {

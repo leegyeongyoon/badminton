@@ -30,8 +30,8 @@ import {
   setLessonAttendance,
   promoteFromWaitlist,
   getLessonBilling,
-  payLessonFee,
 } from '../lab/lab.service';
+import { payLessonFee, cancelLessonPayment } from '../payment/payment.service';
 import * as guestChat from '../guestChat/guestChat.service';
 import { getMyDues, getMoneyStats } from '../lab/lab.service';
 
@@ -329,8 +329,22 @@ router.post('/:clubId/lessons/:offerId/pay', authenticate, memberGuard, async (r
   try {
     const offer = await prisma.lessonOffer.findUnique({ where: { id: String(req.params.offerId) }, select: { clubId: true } });
     if (!offer || offer.clubId !== String(req.params.clubId)) throw new NotFoundError('레슨');
+    const { period, methodId } = req.body as { period?: string; methodId?: string };
+    res.status(201).json(await payLessonFee(String(req.params.offerId), req.user!.userId, { period, methodId }));
+  } catch (err) { next(err); }
+});
+
+// POST /clubs/:clubId/lessons/:offerId/pay/cancel — 당월 결제 취소(본인)
+router.post('/:clubId/lessons/:offerId/pay/cancel', authenticate, memberGuard, async (req: Request, res: Response, next: NextFunction) => {
+  try {
     const { period } = req.body as { period?: string };
-    res.status(201).json(await payLessonFee(String(req.params.offerId), req.user!.userId, period));
+    const app = await prisma.lessonApplication.findFirst({
+      where: { offerId: String(req.params.offerId), userId: req.user!.userId },
+      select: { id: true },
+    });
+    if (!app) throw new NotFoundError('수강');
+    await cancelLessonPayment(String(req.params.offerId), app.id, String(period || '') || new Date().toISOString().slice(0, 7));
+    res.json({ ok: true });
   } catch (err) { next(err); }
 });
 

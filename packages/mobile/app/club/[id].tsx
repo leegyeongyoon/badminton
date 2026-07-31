@@ -33,6 +33,7 @@ import { memberLessonApi, myDuesApi, type LessonOffer, type MyDuesResponse } fro
 import { staffGuestChatApi } from '../../services/guestChat';
 import { absolutizeUploadUrl } from '../../services/upload';
 import { PAYMENTS_ENABLED } from '../../constants/features';
+import { paymentApi, cardBrandLabel } from '../../services/payment';
 
 interface ClubMember {
   userId: string;
@@ -809,16 +810,31 @@ export default function ClubDetailScreen() {
                       <TouchableOpacity
                         style={styles.lessonPayBtn}
                         activeOpacity={0.85}
-                        onPress={() => {
+                        onPress={async () => {
+                          // 등록 카드 확인 — 없으면 결제 수단 등록으로 유도.
+                          let card: { cardBrand: string; cardLast4: string } | undefined;
+                          try {
+                            const cards = await paymentApi.cards();
+                            card = cards.find((c) => c.isDefault) ?? cards[0];
+                          } catch { /* 게이트 꺼짐 등 — 아래 confirm 에서 서버가 거른다 */ }
+                          if (!card) {
+                            showConfirm(
+                              '결제 카드가 필요해요',
+                              '레슨비 결제를 위해 카드를 먼저 등록해 주세요.',
+                              () => router.push('/payments/methods' as never),
+                              '카드 등록하기',
+                            );
+                            return;
+                          }
                           showConfirm(
-                            '레슨비 결제 (테스트)',
-                            `${o.coachName} 코치 · 이번 달 레슨비 ${o.fee!.toLocaleString()}원을 결제할까요?\n(임시 결제 — 카드 정기결제로 교체 예정)`,
+                            '레슨비 결제',
+                            `${o.coachName} 코치 · 이번 달 레슨비 ${o.fee!.toLocaleString()}원\n결제 카드: ${cardBrandLabel(card.cardBrand)} ****${card.cardLast4}\n(다른 카드는 결제 수단에서 기본 변경)`,
                             async () => {
                               try {
                                 const r = await memberLessonApi.pay(clubId!, o.id);
                                 showSuccess(r.message);
                                 memberLessonApi.list(clubId!).then(setLessons).catch(() => {});
-                              } catch { /* 토스트는 인터셉터 */ }
+                              } catch { /* 실패 사유 토스트는 인터셉터 */ }
                             },
                             '결제하기',
                           );

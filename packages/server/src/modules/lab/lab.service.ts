@@ -1248,13 +1248,18 @@ export interface CoachSettlement {
   totalPlatformFee: number;
   totalPayout: number;
   lessons: LessonBilling[];
+  bank: { bankName: string | null; bankAccount: string | null; bankHolder: string | null } | null;
 }
 
 /** 코치 종합 정산(예상) — 내 프로필이 연결된 모든 레슨의 billing 합산. */
 export async function getCoachSettlement(userId: string): Promise<CoachSettlement> {
-  const profile = await prisma.coachProfile.findUnique({ where: { userId }, select: { id: true } });
-  const empty: CoachSettlement = { feeRate: PLATFORM_FEE_RATE, totalGross: 0, totalPlatformFee: 0, totalPayout: 0, lessons: [] };
+  const profile = await prisma.coachProfile.findUnique({
+    where: { userId },
+    select: { id: true, bankName: true, bankAccount: true, bankHolder: true },
+  });
+  const empty: CoachSettlement = { feeRate: PLATFORM_FEE_RATE, totalGross: 0, totalPlatformFee: 0, totalPayout: 0, lessons: [], bank: null };
   if (!profile) return empty;
+  empty.bank = { bankName: profile.bankName, bankAccount: profile.bankAccount, bankHolder: profile.bankHolder };
   const offers = await prisma.lessonOffer.findMany({
     where: { coachProfileId: profile.id, enabled: true },
     select: { id: true },
@@ -1279,63 +1284,6 @@ export async function getCoachSettlement(userId: string): Promise<CoachSettlemen
 export function currentPeriod(): string {
   const d = new Date();
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
-}
-
-export async function payLessonFee(
-  offerId: string,
-  userId: string,
-  period?: string,
-): Promise<{ paymentId: string; amount: number; period: string; message: string }> {
-  if (process.env.PAYMENTS_MOCK !== '1') {
-    throw new BadRequestError('레슨비 결제는 준비 중이에요. 지금은 운영진 계좌 안내를 이용해 주세요.');
-  }
-  const per = period && /^\d{4}-(0[1-9]|1[0-2])$/.test(period) ? period : currentPeriod();
-
-  const offer = await prisma.lessonOffer.findUnique({ where: { id: offerId }, select: { fee: true, coachName: true } });
-  if (!offer) throw new NotFoundError('레슨');
-  if (!offer.fee || offer.fee <= 0) throw new BadRequestError('이 레슨은 레슨비가 설정돼 있지 않아요.');
-
-  // 확정 수강생 본인만 결제 가능.
-  const app = await prisma.lessonApplication.findFirst({
-    where: { offerId, userId, status: 'CONFIRMED' },
-    select: { id: true, enrollState: true },
-  });
-  if (!app) throw new BadRequestError('확정된 수강생만 결제할 수 있어요.');
-  if (app.enrollState === 'ENDED') throw new BadRequestError('종료된 수강은 결제할 수 없어요.');
-
-  const dup = await prisma.lessonPayment.findUnique({
-    where: { applicationId_period: { applicationId: app.id, period: per } },
-  });
-  if (dup && dup.status === 'PAID') throw new BadRequestError('이번 달 레슨비는 이미 결제됐어요.');
-
-  const feeAmount = Math.round(offer.fee * PLATFORM_FEE_RATE);
-  // (PG 연동 지점) — 여기서 실제 승인 요청/웹훅 확인이 들어간다. MOCK 은 즉시 승인.
-  const payment = dup
-    ? await prisma.lessonPayment.update({
-        where: { id: dup.id },
-        data: { status: 'PAID', amount: offer.fee, feeAmount, payout: offer.fee - feeAmount, paidAt: new Date() },
-      })
-    : await prisma.lessonPayment.create({
-        data: {
-          applicationId: app.id,
-          offerId,
-          period: per,
-          amount: offer.fee,
-          feeAmount,
-          payout: offer.fee - feeAmount,
-          provider: 'MOCK',
-        },
-      });
-
-  // 기존 수납 UI(feePaid)와 동기화 — 운영진 화면·정산 원장이 그대로 반영.
-  await prisma.lessonApplication.update({ where: { id: app.id }, data: { feePaid: true } });
-
-  return {
-    paymentId: payment.id,
-    amount: offer.fee,
-    period: per,
-    message: `${offer.coachName} 코치 레슨비 ${offer.fee.toLocaleString()}원 결제 완료(테스트) — ${per} 수납 처리됐어요.`,
-  };
 }
 
 // ─── 회원용 "내 회비" — 기간별 청구/납부 타임라인 ─────────────

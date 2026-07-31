@@ -1,5 +1,5 @@
 import { useCallback, useState } from 'react';
-import { View, Text, StyleSheet, ScrollView, ActivityIndicator, RefreshControl } from 'react-native';
+import { View, Text, StyleSheet, ScrollView, ActivityIndicator, RefreshControl, TextInput, Pressable, Platform } from 'react-native';
 import { useFocusEffect } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -7,6 +7,8 @@ import { useTheme } from '../../hooks/useTheme';
 import { typography, spacing } from '../../constants/theme';
 import { BackButton } from '../../components/ui/BackButton';
 import { coachApi, type CoachSettlement } from '../../services/coach';
+import { paymentApi, type CoachPayout } from '../../services/payment';
+import { showSuccess, showError } from '../../utils/feedback';
 
 // ─────────────────────────────────────────────────────────────
 // 코치 정산(예상) — 연결된 레슨의 이번 달 총 레슨비 → 플랫폼 수수료 공제 →
@@ -18,19 +20,52 @@ export default function CoachSettlementScreen() {
   const insets = useSafeAreaInsets();
 
   const [data, setData] = useState<CoachSettlement | null>(null);
+  const [payouts, setPayouts] = useState<CoachPayout[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
 
+  // 정산 계좌 등록 폼
+  const [showBank, setShowBank] = useState(false);
+  const [bankName, setBankName] = useState('');
+  const [bankAccount, setBankAccount] = useState('');
+  const [bankHolder, setBankHolder] = useState('');
+  const [savingBank, setSavingBank] = useState(false);
+
   const load = useCallback(async () => {
     try {
-      setData(await coachApi.settlement());
+      const s = await coachApi.settlement();
+      setData(s);
+      // 등록된 계좌를 폼 초기값으로 — 입력 중(폼 열림)에는 덮지 않는다.
+      if (!showBank && s.bank) {
+        setBankName((v) => v || s.bank!.bankName || '');
+        setBankAccount((v) => v || s.bank!.bankAccount || '');
+        setBankHolder((v) => v || s.bank!.bankHolder || '');
+      }
+      paymentApi.myPayouts().then(setPayouts).catch(() => {});
     } catch {
       /* noop */
     } finally {
       setLoading(false);
       setRefreshing(false);
     }
-  }, []);
+  }, [showBank]);
+
+  const saveBank = async () => {
+    if (!bankName.trim() || !bankAccount.trim() || !bankHolder.trim()) {
+      showError('은행·계좌번호·예금주를 모두 입력해 주세요');
+      return;
+    }
+    setSavingBank(true);
+    try {
+      await paymentApi.setBank({ bankName: bankName.trim(), bankAccount: bankAccount.trim(), bankHolder: bankHolder.trim() });
+      showSuccess('정산 계좌를 등록했어요');
+      setShowBank(false);
+    } catch {
+      /* 토스트는 인터셉터 */
+    } finally {
+      setSavingBank(false);
+    }
+  };
   useFocusEffect(useCallback(() => { load(); }, [load]));
 
   const pct = data ? Math.round(data.feeRate * 100) : 10;
@@ -90,6 +125,51 @@ export default function CoachSettlementScreen() {
             ))
           )}
 
+          {/* 정산 계좌 */}
+          <Pressable
+            onPress={() => setShowBank((v) => !v)}
+            style={[styles.bankCard, { backgroundColor: colors.surface, borderColor: colors.border }, shadows.sm]}
+          >
+            <Ionicons name="business-outline" size={17} color={colors.textSecondary} />
+            <Text style={[styles.bankTitle, { color: colors.text }]}>정산 계좌 {showBank ? '접기' : '등록·변경'}</Text>
+            <Ionicons name={showBank ? 'chevron-up' : 'chevron-forward'} size={15} color={colors.textLight} />
+          </Pressable>
+          {showBank && (
+            <View style={[styles.bankForm, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+              <TextInput style={[styles.bankInput, { color: colors.text, backgroundColor: colors.background, borderColor: colors.border }]} value={bankName} onChangeText={setBankName} placeholder="은행 (예: 카카오뱅크)" placeholderTextColor={colors.textLight} maxLength={30} />
+              <TextInput style={[styles.bankInput, { color: colors.text, backgroundColor: colors.background, borderColor: colors.border }]} value={bankAccount} onChangeText={setBankAccount} placeholder="계좌번호" placeholderTextColor={colors.textLight} keyboardType="number-pad" maxLength={40} />
+              <TextInput style={[styles.bankInput, { color: colors.text, backgroundColor: colors.background, borderColor: colors.border }]} value={bankHolder} onChangeText={setBankHolder} placeholder="예금주" placeholderTextColor={colors.textLight} maxLength={20} />
+              <Pressable onPress={saveBank} disabled={savingBank} style={({ pressed }) => [styles.bankSave, { backgroundColor: colors.primary }, (pressed || savingBank) && { opacity: 0.85 }]}>
+                {savingBank ? <ActivityIndicator color="#fff" /> : <Text style={styles.bankSaveText}>계좌 저장</Text>}
+              </Pressable>
+            </View>
+          )}
+
+          {/* 지급 내역(정산 배치) */}
+          {payouts.length > 0 && (
+            <>
+              <Text style={[styles.sectionLabel, { color: colors.textLight }]}>지급 내역</Text>
+              {payouts.map((po) => (
+                <View key={po.id} style={[styles.payoutRow, { backgroundColor: colors.surface, borderColor: colors.border }, shadows.sm]}>
+                  <View style={{ flex: 1, minWidth: 0 }}>
+                    <Text style={[styles.payoutPeriod, { color: colors.text }]}>{po.period.replace('-', '년 ')}월 정산</Text>
+                    <Text style={[styles.payoutMeta, { color: colors.textLight }]} numberOfLines={1}>
+                      결제 {po.paymentCount}건 · 수수료 −{po.feeAmount.toLocaleString()}원{po.bankSnapshot ? ` · ${po.bankSnapshot}` : ''}
+                    </Text>
+                  </View>
+                  <View style={{ alignItems: 'flex-end', gap: 4 }}>
+                    <Text style={[styles.payoutAmount, { color: colors.text }]}>{po.payoutAmount.toLocaleString()}원</Text>
+                    <View style={[styles.payoutState, { backgroundColor: (po.status === 'PAID' ? colors.secondary : colors.warning) + '16' }]}>
+                      <Text style={[styles.payoutStateText, { color: po.status === 'PAID' ? colors.secondary : colors.warning }]}>
+                        {po.status === 'PAID' ? `지급 완료${po.paidAt ? ` · ${new Date(po.paidAt).toLocaleDateString()}` : ''}` : '지급 대기'}
+                      </Text>
+                    </View>
+                  </View>
+                </View>
+              ))}
+            </>
+          )}
+
           <View style={[styles.noticeBox, { backgroundColor: colors.warning + '10', borderColor: colors.warning + '40' }]}>
             <Ionicons name="information-circle-outline" size={15} color={colors.warning} />
             <Text style={[styles.noticeText, { color: colors.textSecondary }]}>
@@ -121,6 +201,19 @@ const styles = StyleSheet.create({
   lessonPayout: { fontSize: 15.5, fontWeight: '900' },
   lessonMeta: { fontSize: 12.5, fontWeight: '700', marginTop: 4 },
   lessonSub: { fontSize: 12, fontWeight: '600', marginTop: 3 },
+  bankCard: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, borderWidth: StyleSheet.hairlineWidth, borderRadius: 14, padding: spacing.lg },
+  bankTitle: { fontSize: 14, fontWeight: '800', flex: 1 },
+  bankForm: { borderWidth: StyleSheet.hairlineWidth, borderRadius: 14, padding: spacing.lg, gap: spacing.sm },
+  bankInput: { fontSize: 13.5, fontWeight: '600', borderWidth: 1, borderRadius: 11, paddingHorizontal: spacing.md, paddingVertical: Platform.OS === 'web' ? 10 : 9 },
+  bankSave: { paddingVertical: 12, borderRadius: 11, alignItems: 'center' },
+  bankSaveText: { color: '#fff', fontSize: 13.5, fontWeight: '800' },
+  sectionLabel: { fontSize: 12, fontWeight: '800', marginTop: spacing.xs, marginLeft: 4 },
+  payoutRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.md, borderRadius: 14, borderWidth: StyleSheet.hairlineWidth, padding: spacing.lg },
+  payoutPeriod: { fontSize: 14, fontWeight: '800' },
+  payoutMeta: { fontSize: 11.5, fontWeight: '600', marginTop: 3 },
+  payoutAmount: { fontSize: 15, fontWeight: '900' },
+  payoutState: { paddingHorizontal: 7, paddingVertical: 2, borderRadius: 8 },
+  payoutStateText: { fontSize: 10.5, fontWeight: '800' },
   noticeBox: { flexDirection: 'row', gap: 6, borderWidth: 1, borderRadius: 12, padding: spacing.md, alignItems: 'flex-start' },
   noticeText: { fontSize: 11.5, fontWeight: '600', lineHeight: 16, flex: 1 },
 });

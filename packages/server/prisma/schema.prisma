@@ -128,6 +128,7 @@ model User {
   clubMessages        ClubMessage[]
   operatorRequests    OperatorRequest[]   @relation("OperatorRequester")
   coachProfile        CoachProfile?
+  paymentMethods      PaymentMethod[]
 }
 
 // 운영자(모임 생성 권한) 신청. PLAYER 가 운영자 권한을 신청하면 SUPER_ADMIN 이
@@ -660,14 +661,58 @@ model LessonPayment {
   feeAmount     Int // 플랫폼 수수료 스냅샷
   payout        Int // 코치 지급 예정액(amount - feeAmount)
   provider      String   @default("MOCK") // MOCK | TOSS | PORTONE ...
-  pgTxId        String? // PG 승인 식별자(연동 후)
-  status        String   @default("PAID") // PAID | CANCELLED
+  pgTxId        String? // PG 승인 식별자
+  paymentMethodId String? // 결제에 쓴 카드(빌링키)
+  orderName     String? // 주문명("7월 ○○ 코치 레슨비")
+  failReason    String? // FAILED 시 거절 사유
+  status        String   @default("PAID") // PAID | FAILED | CANCELLED
   paidAt        DateTime @default(now())
 
-  application LessonApplication @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+  application   LessonApplication @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+  paymentMethod PaymentMethod?    @relation(fields: [paymentMethodId], references: [id], onDelete: SetNull)
 
-  @@unique([applicationId, period]) // 월 1회 결제
+  @@unique([applicationId, period]) // 월 1회 결제(실패 후 재시도는 같은 행 갱신)
   @@index([offerId, period])
+}
+
+// 결제 수단(빌링키 카드) — 카드번호 원문은 저장하지 않는다(실 PG 와 동일 원칙).
+// provider 가 MOCK → TOSS/PORTONE 으로 바뀌어도 이 구조 그대로 사용.
+model PaymentMethod {
+  id        String    @id @default(uuid())
+  userId    String
+  provider  String    @default("MOCK")
+  billingKey String   @unique // PG 빌링키(자동 청구용)
+  cardBrand String // KOOKMIN | SHINHAN | ... | MOCK
+  cardLast4 String
+  cardExpiry String // "MM/YY"
+  isDefault Boolean   @default(false)
+  createdAt DateTime  @default(now())
+  deletedAt DateTime? // soft delete(결제 이력 보존)
+
+  user     User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  payments LessonPayment[]
+
+  @@index([userId, isDefault])
+}
+
+// 코치 정산 배치 — 월 마감 시 코치별 PAID 결제를 합산해 생성, 지급 실행으로 PAID.
+model CoachPayout {
+  id             String    @id @default(uuid())
+  coachProfileId String
+  period         String // "YYYY-MM"
+  totalAmount    Int // 수납 총액
+  feeAmount      Int // 플랫폼 수수료 합
+  payoutAmount   Int // 지급액
+  paymentCount   Int // 포함 결제 건수
+  bankSnapshot   String? // 지급 시점 계좌("카카오뱅크 3333-.. 이경윤"), null=계좌 미등록
+  status         String    @default("PENDING") // PENDING | PAID
+  paidAt         DateTime?
+  createdAt      DateTime  @default(now())
+
+  coachProfile CoachProfile @relation(fields: [coachProfileId], references: [id], onDelete: Cascade)
+
+  @@unique([coachProfileId, period])
+  @@index([status, period])
 }
 
 // 레슨 회차 출석 — 날짜별로 로스터 인원 출석을 체크(운영자 또는 담당 코치).
@@ -741,6 +786,10 @@ model CoachProfile {
   birthYear    Int? // 출생연도(예: 1990)
   playingYears Int? // 구력(년)
   skillLevel   String? // 급수 S~F (앱 공용 급수 체계)
+  // 정산 계좌 — 코치 지급(payout) 대상. 미등록이면 지급 보류.
+  bankName    String?
+  bankAccount String?
+  bankHolder  String?
   certified       Boolean  @default(false)
   active          Boolean  @default(true)
   createdAt       DateTime @default(now())
@@ -750,6 +799,7 @@ model CoachProfile {
   lessonOffers LessonOffer[]
   careerEntries CoachCareerEntry[]
   jobApplications CoachJobApplication[]
+  payouts CoachPayout[]
 
   @@index([active, certified])
 }

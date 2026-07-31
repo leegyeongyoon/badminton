@@ -4,6 +4,7 @@ import { authenticate } from '../../middleware/auth';
 import { roleGuard } from '../../middleware/roleGuard';
 import * as svc from './coach.service';
 import { getCoachSettlement } from '../lab/lab.service';
+import { getMyPayouts, setCoachBank } from '../payment/payment.service';
 
 // ─────────────────────────────────────────────────────────────
 // 코치 마켓 — /coaches/*
@@ -50,6 +51,19 @@ router.get('/me/lessons', authenticate, async (req: Request, res: Response, next
 router.get('/me/settlement', authenticate, async (req: Request, res: Response, next: NextFunction) => {
   try {
     res.json(await getCoachSettlement(req.user!.userId));
+  } catch (err) { next(err); }
+});
+
+router.get('/me/payouts', authenticate, async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    res.json(await getMyPayouts(req.user!.userId));
+  } catch (err) { next(err); }
+});
+
+router.put('/me/bank', authenticate, async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    await setCoachBank(req.user!.userId, req.body ?? {});
+    res.json({ ok: true });
   } catch (err) { next(err); }
 });
 

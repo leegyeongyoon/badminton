@@ -27,6 +27,7 @@ import uploadRouter, { UPLOAD_DIR } from './modules/upload/upload.router';
 import coachRouter from './modules/coach/coach.router';
 import coachChatRouter from './modules/coachChat/coachChat.router';
 import coachJobRouter from './modules/coachJob/coachJob.router';
+import paymentRouter from './modules/payment/payment.router';
 import { noteRequest } from './modules/admin/metrics.service';
 
 const app = express();
@@ -94,6 +95,7 @@ app.use('/api/v1/uploads', uploadRouter);              // 이미지 업로드(�
 app.use('/api/v1/coaches', coachRouter);               // 코치 마켓(목록/상세 공개, me/인증 관리)
 app.use('/api/v1/coach-chat', coachChatRouter);        // 코치 문의 채팅(인증)
 app.use('/api/v1/coach-jobs', coachJobRouter);         // 코치 구인 공고 + 지원 관리(원티드식)
+app.use('/api/v1/payments', paymentRouter);            // 결제 수단·내역·정산(MOCK 게이트)
 // Client crash/error sink. Use a tight body limit so a runtime error report
 // (message + stack) can't carry an oversized payload. Mounted before the
 // errorHandler. The global express.json() above already parsed the body; the

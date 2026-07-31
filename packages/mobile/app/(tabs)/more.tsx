@@ -13,7 +13,7 @@ import api from '../../services/api';
 import { profileApi } from '../../services/profile';
 import { operatorRequestApi } from '../../services/operatorRequest';
 import { coachApi, coachChatApi } from '../../services/coach';
-import { COACH_MARKET_ENABLED } from '../../constants/features';
+import { COACH_MARKET_ENABLED, PAYMENTS_ENABLED } from '../../constants/features';
 import type { OperatorRequestResponse } from '@badminton/shared';
 import { typography, radius, spacing, opacity } from '../../constants/theme';
 import { alpha } from '../../utils/color';
@@ -297,6 +297,14 @@ export default function MoreScreen() {
           </TouchableOpacity>
         )}
 
+        {/* SUPER_ADMIN → 플랫폼 정산 콘솔(결제 게이트). */}
+        {isSuperAdmin && PAYMENTS_ENABLED && (
+          <TouchableOpacity style={styles.menuItem} onPress={() => router.push('/lab/payments' as never)}>
+            <Icon name="stats" size={18} color={colors.primary} />
+            <Text style={[styles.menuItemText, { color: colors.text }]}>플랫폼 정산 콘솔</Text>
+          </TouchableOpacity>
+        )}
+
         {/* SUPER_ADMIN → 실험실(상용 기능 프로토타입, 일반 노출 X). */}
         {isSuperAdmin && (
           <TouchableOpacity style={styles.menuItem} onPress={() => router.push('/lab')}>
@@ -305,6 +313,23 @@ export default function MoreScreen() {
           </TouchableOpacity>
         )}
       </View>
+
+      {/* 결제(테스트 게이트) — 카드·내역 */}
+      {PAYMENTS_ENABLED && (
+        <View style={[styles.section, { backgroundColor: colors.surface }, shadows.sm]}>
+          <Text style={[styles.sectionTitle, { color: colors.text }]}>결제</Text>
+          <TouchableOpacity style={styles.menuItem} onPress={() => router.push('/payments/methods' as never)}>
+            <Icon name="edit" size={18} color={colors.textSecondary} />
+            <Text style={[styles.menuItemText, { color: colors.text }]}>결제 수단</Text>
+            <Icon name="chevronRight" size={18} color={colors.textLight} />
+          </TouchableOpacity>
+          <TouchableOpacity style={styles.menuItem} onPress={() => router.push('/payments/history' as never)}>
+            <Icon name="stats" size={18} color={colors.textSecondary} />
+            <Text style={[styles.menuItemText, { color: colors.text }]}>결제 내역</Text>
+            <Icon name="chevronRight" size={18} color={colors.textLight} />
+          </TouchableOpacity>
+        </View>
+      )}
 
       {/* App settings */}
       <View style={[styles.section, { backgroundColor: colors.surface }, shadows.sm]}>
