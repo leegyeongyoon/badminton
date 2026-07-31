@@ -690,8 +690,10 @@ export interface LabLessonOffer {
   capacity: number | null;
   enabled: boolean;
   summary: string; // "월·수·금 19:00~20:00"
-  applicants: number; // PENDING+CONFIRMED
-  myStatus: string | null; // 조회자 본인의 신청 상태(PENDING/CONFIRMED) — 회원 조회에서만
+  applicants: number; // PENDING+CONFIRMED (정원 게이지 — 대기는 미포함)
+  waitlistCount: number; // 대기 인원
+  myStatus: string | null; // 조회자 본인의 신청 상태(PENDING/CONFIRMED/WAITLIST) — 회원 조회에서만
+  myWaitRank: number | null; // WAITLIST 면 내 대기 순위(1부터)
   myFeePaid: boolean; // 본인 레슨비 입금확인 여부(회원 조회에서만)
 }
 
@@ -730,12 +732,22 @@ export async function getLessonOffers(clubId: string, enabledOnly = false, forUs
     include: {
       coachProfile: { select: { id: true, photoUrl: true, certified: true } },
       _count: { select: { applications: { where: { status: { in: ['PENDING', 'CONFIRMED'] } } } } },
-      ...(forUserId
-        ? { applications: { where: { userId: forUserId, status: { in: ['PENDING', 'CONFIRMED'] } }, select: { status: true, feePaid: true }, take: 1 } }
-        : {}),
+      // 대기열 전체(순번 계산용) + 내 신청 — 한 쿼리에서 뽑는다.
+      applications: {
+        where: forUserId
+          ? { OR: [{ status: 'WAITLIST' }, { userId: forUserId, status: { in: ['PENDING', 'CONFIRMED'] } }] }
+          : { status: 'WAITLIST' },
+        select: { userId: true, status: true, feePaid: true, waitOrder: true },
+        orderBy: { waitOrder: 'asc' },
+      },
     },
   });
-  return offers.map((o) => ({
+  return offers.map((o) => {
+    const rows = (o as unknown as { applications: { userId: string | null; status: string; feePaid: boolean; waitOrder: number | null }[] }).applications;
+    const waitRows = rows.filter((r) => r.status === 'WAITLIST');
+    const mine = forUserId ? rows.find((r) => r.userId === forUserId) ?? null : null;
+    const myWaitRank = mine?.status === 'WAITLIST' ? waitRows.findIndex((r) => r.userId === forUserId) + 1 : null;
+    return ({
     id: o.id,
     coachName: o.coachName,
     coachIntro: o.coachIntro,
@@ -751,9 +763,12 @@ export async function getLessonOffers(clubId: string, enabledOnly = false, forUs
     enabled: o.enabled,
     summary: lessonSummary(o),
     applicants: o._count.applications,
-    myStatus: forUserId ? ((o as unknown as { applications?: { status: string }[] }).applications?.[0]?.status ?? null) : null,
-    myFeePaid: forUserId ? ((o as unknown as { applications?: { feePaid: boolean }[] }).applications?.[0]?.feePaid ?? false) : false,
-  }));
+    waitlistCount: waitRows.length,
+    myStatus: mine?.status ?? null,
+    myWaitRank,
+    myFeePaid: mine?.feePaid ?? false,
+    });
+  });
 }
 
 /** 레슨 상품 생성/수정. id 있으면 수정(소유권은 라우터에서 확인). */
@@ -878,15 +893,26 @@ export async function applyLesson(
   if (!offer || !offer.enabled) throw new BadRequestError('신청할 수 없는 레슨이에요.');
 
   const dup = await prisma.lessonApplication.findFirst({
-    where: { offerId, userId: applicant.userId, status: { in: ['PENDING', 'CONFIRMED'] } },
+    where: { offerId, userId: applicant.userId, status: { in: ['PENDING', 'CONFIRMED', 'WAITLIST'] } },
   });
-  if (dup) throw new BadRequestError('이미 신청한 레슨이에요.');
+  if (dup) throw new BadRequestError(dup.status === 'WAITLIST' ? '이미 대기 중인 레슨이에요.' : '이미 신청한 레슨이에요.');
 
+  // 정원이 가득 차면 거절 대신 대기열(WAITLIST) 등록 — 레슨반장 수기 대기 관리를 대체.
+  let toWaitlist = false;
   if (offer.capacity) {
     const active = await prisma.lessonApplication.count({
       where: { offerId, status: { in: ['PENDING', 'CONFIRMED'] } },
     });
-    if (active >= offer.capacity) throw new BadRequestError('레슨 정원이 가득 찼어요.');
+    toWaitlist = active >= offer.capacity;
+  }
+
+  let waitOrder: number | null = null;
+  if (toWaitlist) {
+    const last = await prisma.lessonApplication.aggregate({
+      where: { offerId, status: 'WAITLIST' },
+      _max: { waitOrder: true },
+    });
+    waitOrder = (last._max.waitOrder ?? 0) + 1;
   }
 
   const app = await prisma.lessonApplication.create({
@@ -896,8 +922,13 @@ export async function applyLesson(
       name: applicant.name.trim().slice(0, 30),
       phone: applicant.phone ? String(applicant.phone).slice(0, 20) : null,
       note: applicant.note ? String(applicant.note).slice(0, 200) : null,
+      ...(toWaitlist ? { status: 'WAITLIST', waitOrder } : {}),
     },
   });
+
+  const waitRank = toWaitlist
+    ? await prisma.lessonApplication.count({ where: { offerId, status: 'WAITLIST', waitOrder: { lte: waitOrder! } } })
+    : null;
 
   // 운영진에게 신청 접수 푸시(실패해도 신청은 성공).
   try {
@@ -907,14 +938,62 @@ export async function applyLesson(
     });
     const { sendPushToUsers } = await import('../notification/notification.service');
     await sendPushToUsers(staff.map((s) => s.userId), {
-      title: '레슨 신청',
-      body: `${app.name}님이 ${offer.coachName} 코치 레슨(${lessonSummary(offer)})을 신청했어요`,
+      title: toWaitlist ? '레슨 대기 등록' : '레슨 신청',
+      body: toWaitlist
+        ? `${app.name}님이 ${offer.coachName} 코치 레슨 대기 ${waitRank}번으로 등록했어요`
+        : `${app.name}님이 ${offer.coachName} 코치 레슨(${lessonSummary(offer)})을 신청했어요`,
     });
   } catch {
     /* 알림 실패 무시 */
   }
 
-  return { id: app.id, message: `${offer.coachName} 코치 레슨 신청이 접수됐어요. 운영진 확정 후 알림을 보내드려요.` };
+  return {
+    id: app.id,
+    message: toWaitlist
+      ? `정원이 가득 차 대기 ${waitRank}번으로 등록됐어요. 자리가 나면 알림을 보내드려요.`
+      : `${offer.coachName} 코치 레슨 신청이 접수됐어요. 운영진 확정 후 알림을 보내드려요.`,
+  };
+}
+
+/** 자리 발생 시 대기 1순위에게 알림(자동 승급은 안 함 — 운영자·코치가 '대기 풀기'). */
+export async function notifyWaitlistSeat(offerId: string): Promise<void> {
+  try {
+    const first = await prisma.lessonApplication.findFirst({
+      where: { offerId, status: 'WAITLIST', userId: { not: null } },
+      orderBy: { waitOrder: 'asc' },
+      include: { offer: { select: { coachName: true } } },
+    });
+    if (!first?.userId) return;
+    await sendPushToUser(first.userId, {
+      title: '레슨 자리가 났어요 🏸',
+      body: `${first.offer.coachName} 코치 레슨에 자리가 생겼어요 — 운영진이 곧 대기를 풀어드릴 거예요`,
+      data: { type: 'lessonWaitlistSeat', offerId },
+    });
+  } catch {
+    /* 알림 실패 무시 */
+  }
+}
+
+/** 대기 풀기(승급) — WAITLIST → PENDING(확정 대기). 이후 확정은 기존 운영자 flow. */
+export async function promoteFromWaitlist(offerId: string, applicationId: string): Promise<void> {
+  const app = await prisma.lessonApplication.findUnique({ where: { id: applicationId } });
+  if (!app || app.offerId !== offerId) throw new NotFoundError('대기자');
+  if (app.status !== 'WAITLIST') throw new BadRequestError('대기 상태가 아니에요.');
+  await prisma.lessonApplication.update({
+    where: { id: applicationId },
+    data: { status: 'PENDING', waitOrder: null },
+  });
+  if (app.userId) {
+    try {
+      await sendPushToUser(app.userId, {
+        title: '대기가 풀렸어요 🎉',
+        body: '레슨 자리가 나서 신청 대기로 올라갔어요 — 운영진 확정 후 알림을 보내드려요',
+        data: { type: 'lessonWaitlistPromoted', offerId },
+      });
+    } catch {
+      /* 알림 실패 무시 */
+    }
+  }
 }
 
 /** 레슨 신청 갱신(운영자) — 상태 변경·레슨비 입금확인. CONFIRMED 전환 시 신청자 푸시. */
@@ -931,6 +1010,8 @@ export async function updateLessonApplication(id: string, patch: { status?: stri
     include: { offer: { include: { club: { select: { name: true } } } } },
   });
   const status = patch.status;
+  // 확정자가 취소되면 자리가 생긴 것 — 대기 1순위에게 알림.
+  if (status === 'CANCELLED') notifyWaitlistSeat(updated.offerId);
   if (updated.userId && status === 'CONFIRMED') {
     try {
       await sendPushToUser(updated.userId, {
@@ -958,10 +1039,20 @@ export interface LessonStudentRow {
   createdAt: string;
 }
 
+export interface LessonWaitRow {
+  id: string;
+  rank: number; // 대기 순위(1부터)
+  name: string;
+  phone: string | null;
+  isAppUser: boolean;
+  createdAt: string;
+}
+
 export interface LessonDetailView {
   offer: LabLessonOffer & { clubId: string; clubName: string };
   isCoach: boolean; // 조회자가 이 레슨의 담당 코치 본인인지
   roster: LessonStudentRow[];
+  waitlist: LessonWaitRow[]; // 대기열(순번순)
 }
 
 /** 이 레슨의 담당 코치 본인인지 — staff 가 아니어도 로스터·출석 접근을 허용하는 가드. */
@@ -986,9 +1077,13 @@ export async function getLessonDetail(offerId: string, viewerUserId?: string): P
   if (!offer) throw new NotFoundError('레슨');
 
   const apps = await prisma.lessonApplication.findMany({
-    where: { offerId, status: { not: 'CANCELLED' } },
+    where: { offerId, status: { notIn: ['CANCELLED', 'WAITLIST'] } },
     orderBy: [{ status: 'asc' }, { createdAt: 'asc' }], // CONFIRMED 먼저(알파벳순 우연 일치)
     include: { _count: { select: { attendance: { where: { present: true } } } } },
+  });
+  const waits = await prisma.lessonApplication.findMany({
+    where: { offerId, status: 'WAITLIST' },
+    orderBy: { waitOrder: 'asc' },
   });
 
   return {
@@ -1010,7 +1105,9 @@ export async function getLessonDetail(offerId: string, viewerUserId?: string): P
       enabled: offer.enabled,
       summary: lessonSummary(offer),
       applicants: offer._count.applications,
+      waitlistCount: waits.length,
       myStatus: null,
+      myWaitRank: null,
       myFeePaid: false,
     },
     isCoach: !!viewerUserId && offer.coachProfile?.userId === viewerUserId,
@@ -1025,6 +1122,14 @@ export async function getLessonDetail(offerId: string, viewerUserId?: string): P
       note: a.note,
       attendCount: a._count.attendance,
       createdAt: a.createdAt.toISOString(),
+    })),
+    waitlist: waits.map((w, i) => ({
+      id: w.id,
+      rank: i + 1,
+      name: w.name,
+      phone: w.phone,
+      isAppUser: !!w.userId,
+      createdAt: w.createdAt.toISOString(),
     })),
   };
 }
@@ -1043,7 +1148,12 @@ export async function updateLessonStudent(
     data.note = patch.note ? String(patch.note).trim().slice(0, 200) || null : null;
   }
   if (Object.keys(data).length === 0) return;
+  const before = await prisma.lessonApplication.findUnique({ where: { id: applicationId }, select: { enrollState: true, offerId: true } });
   await prisma.lessonApplication.update({ where: { id: applicationId }, data });
+  // 수강 종료로 자리가 생기면 대기 1순위에게 알림.
+  if (patch.enrollState === 'ENDED' && before?.enrollState !== 'ENDED' && before) {
+    notifyWaitlistSeat(before.offerId);
+  }
 }
 
 const DATE_YMD = /^\d{4}-\d{2}-\d{2}$/;
@@ -1078,6 +1188,87 @@ export async function setLessonAttendance(
       }),
     );
   await prisma.$transaction(ops);
+}
+
+// ─── 레슨 정산 원장(PG 이전 시뮬레이션) ─────────────────────
+// 월 레슨비 × 수강생(CONFIRMED & 미종료) = 총액 → 플랫폼 수수료 공제 → 코치 지급 예정액.
+// 수납은 아직 feePaid(입금확인) 수동 토글 기준 — PG(빌링키 정기결제) 연동 시
+// 실결제 원장으로 대체하고 이 계산은 검증용으로 남긴다.
+
+export const PLATFORM_FEE_RATE = (() => {
+  const raw = Number(process.env.PLATFORM_FEE_RATE);
+  return Number.isFinite(raw) && raw >= 0 && raw < 1 ? raw : 0.1;
+})();
+
+export interface LessonBilling {
+  offerId: string;
+  clubName: string;
+  coachName: string;
+  summary: string;
+  fee: number | null; // 월 레슨비(null 이면 계산 불가 → gross 0)
+  activeStudents: number; // 청구 대상(CONFIRMED & enrollState!=ENDED)
+  paidCount: number; // 입금확인 수
+  gross: number; // fee × activeStudents
+  feeRate: number; // 플랫폼 수수료율
+  platformFee: number;
+  coachPayout: number;
+}
+
+export async function getLessonBilling(offerId: string): Promise<LessonBilling> {
+  const offer = await prisma.lessonOffer.findUnique({
+    where: { id: offerId },
+    include: { club: { select: { name: true } } },
+  });
+  if (!offer) throw new NotFoundError('레슨');
+  const students = await prisma.lessonApplication.findMany({
+    where: { offerId, status: 'CONFIRMED', enrollState: { not: 'ENDED' } },
+    select: { feePaid: true },
+  });
+  const fee = offer.fee;
+  const gross = (fee ?? 0) * students.length;
+  const platformFee = Math.round(gross * PLATFORM_FEE_RATE);
+  return {
+    offerId,
+    clubName: offer.club.name,
+    coachName: offer.coachName,
+    summary: lessonSummary(offer),
+    fee,
+    activeStudents: students.length,
+    paidCount: students.filter((s) => s.feePaid).length,
+    gross,
+    feeRate: PLATFORM_FEE_RATE,
+    platformFee,
+    coachPayout: gross - platformFee,
+  };
+}
+
+export interface CoachSettlement {
+  feeRate: number;
+  totalGross: number;
+  totalPlatformFee: number;
+  totalPayout: number;
+  lessons: LessonBilling[];
+}
+
+/** 코치 종합 정산(예상) — 내 프로필이 연결된 모든 레슨의 billing 합산. */
+export async function getCoachSettlement(userId: string): Promise<CoachSettlement> {
+  const profile = await prisma.coachProfile.findUnique({ where: { userId }, select: { id: true } });
+  const empty: CoachSettlement = { feeRate: PLATFORM_FEE_RATE, totalGross: 0, totalPlatformFee: 0, totalPayout: 0, lessons: [] };
+  if (!profile) return empty;
+  const offers = await prisma.lessonOffer.findMany({
+    where: { coachProfileId: profile.id, enabled: true },
+    select: { id: true },
+  });
+  const lessons = await Promise.all(offers.map((o) => getLessonBilling(o.id)));
+  return lessons.reduce(
+    (acc, b) => ({
+      ...acc,
+      totalGross: acc.totalGross + b.gross,
+      totalPlatformFee: acc.totalPlatformFee + b.platformFee,
+      totalPayout: acc.totalPayout + b.coachPayout,
+    }),
+    { ...empty, lessons },
+  );
 }
 
 // ─── 회원용 "내 회비" — 기간별 청구/납부 타임라인 ─────────────

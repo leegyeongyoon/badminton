@@ -246,7 +246,19 @@ export default function TabsLayout() {
           ),
         }}
       />
-      {/* Tab 2: My Status (내 현황) */}
+      {/* Tab 2: Coach hub (코치 구인·구직) — 공고 피드 + 코치 찾기 + 이력서·지원 관리 */}
+      <Tabs.Screen
+        name="coach-hub"
+        options={{
+          title: '코치 구인·구직',
+          tabBarLabel: '코치',
+          tabBarAccessibilityLabel: '코치 구인·구직',
+          tabBarIcon: ({ color, focused }) => (
+            <AnimatedTabIcon name="whistle" color={color} focused={focused} activeColor={colors.primary} />
+          ),
+        }}
+      />
+      {/* Tab 3: My Status (내 현황) */}
       <Tabs.Screen
         name="my-status"
         options={{

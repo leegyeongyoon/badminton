@@ -8,11 +8,29 @@ export interface CoachCard {
   displayName: string;
   photoUrl: string | null;
   intro: string | null;
-  regions: string | null;
+  regions: string | null; // 상세 지역 텍스트
+  regionCodes: string[]; // 시/도 복수 선택
   pricePerMonth: number | null;
   pricePerSession: number | null;
   certified: boolean;
   lessonCount: number;
+  // 이력서 기본 정보(원티드식)
+  birthYear: number | null;
+  playingYears: number | null;
+  skillLevel: string | null; // S~F
+  awardCount: number; // 입상 기록 수(신뢰 라인)
+}
+
+export interface CoachCareerEntry {
+  id: string;
+  kind: string; // PLAYER | COACH | EDUCATION | CERT | AWARD
+  title: string;
+  org: string | null;
+  startYm: string | null;
+  endYm: string | null; // null = 현재
+  description: string | null;
+  division: string | null; // 입상 부문
+  result: string | null; // 입상 성적
 }
 
 export interface CoachDetail extends CoachCard {
@@ -20,6 +38,7 @@ export interface CoachDetail extends CoachCard {
   availableTimes: string | null;
   active: boolean;
   createdAt: string;
+  careerEntries: CoachCareerEntry[]; // 구조화 이력서(있으면 career 텍스트보다 우선)
 }
 
 export interface CoachProfileInput {
@@ -32,6 +51,10 @@ export interface CoachProfileInput {
   pricePerSession?: number | null;
   availableTimes?: string | null;
   active?: boolean;
+  regionCodes?: string[] | null;
+  birthYear?: number | null;
+  playingYears?: number | null;
+  skillLevel?: string | null;
 }
 
 export interface MyCoachLessonRow {
@@ -46,12 +69,17 @@ export interface MyCoachLessonRow {
 }
 
 export const coachApi = {
-  list: (params?: { region?: string; q?: string }) =>
-    api.get<CoachCard[]>('/coaches', { params }).then((r) => r.data),
+  list: (params?: { region?: string; q?: string; regions?: string[] }) =>
+    api
+      .get<CoachCard[]>('/coaches', {
+        params: { ...params, regions: params?.regions?.length ? params.regions.join(',') : undefined },
+      })
+      .then((r) => r.data),
   get: (id: string) => api.get<CoachDetail>(`/coaches/${id}`).then((r) => r.data),
   me: () => api.get<CoachDetail | null>('/coaches/me').then((r) => r.data),
   upsertMe: (input: CoachProfileInput) => api.put<CoachDetail>('/coaches/me', input).then((r) => r.data),
   myLessons: () => api.get<MyCoachLessonRow[]>('/coaches/me/lessons').then((r) => r.data),
+  settlement: () => api.get<CoachSettlement>('/coaches/me/settlement').then((r) => r.data),
   setCertified: (id: string, certified: boolean) =>
     api.put<CoachDetail>(`/coaches/${id}/certified`, { certified }).then((r) => r.data),
 };
@@ -117,6 +145,37 @@ export interface LessonStudentRow {
   createdAt: string;
 }
 
+export interface LessonWaitRow {
+  id: string;
+  rank: number;
+  name: string;
+  phone: string | null;
+  isAppUser: boolean;
+  createdAt: string;
+}
+
+export interface LessonBilling {
+  offerId: string;
+  clubName: string;
+  coachName: string;
+  summary: string;
+  fee: number | null;
+  activeStudents: number;
+  paidCount: number;
+  gross: number;
+  feeRate: number;
+  platformFee: number;
+  coachPayout: number;
+}
+
+export interface CoachSettlement {
+  feeRate: number;
+  totalGross: number;
+  totalPlatformFee: number;
+  totalPayout: number;
+  lessons: LessonBilling[];
+}
+
 export interface LessonDetail {
   offer: {
     id: string;
@@ -139,6 +198,7 @@ export interface LessonDetail {
   };
   isCoach: boolean;
   roster: LessonStudentRow[];
+  waitlist: LessonWaitRow[];
 }
 
 export const lessonDetailApi = {
@@ -152,4 +212,8 @@ export const lessonDetailApi = {
       .then((r) => r.data),
   setAttendance: (clubId: string, offerId: string, date: string, entries: { applicationId: string; present: boolean }[]) =>
     api.post(`/clubs/${clubId}/money/lessons/${offerId}/attendance`, { date, entries }).then((r) => r.data),
+  promoteWaitlist: (clubId: string, offerId: string, appId: string) =>
+    api.post(`/clubs/${clubId}/money/lessons/${offerId}/waitlist/${appId}/promote`).then((r) => r.data),
+  billing: (clubId: string, offerId: string) =>
+    api.get<LessonBilling>(`/clubs/${clubId}/money/lessons/${offerId}/billing`).then((r) => r.data),
 };

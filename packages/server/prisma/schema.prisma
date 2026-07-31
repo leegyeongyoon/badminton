@@ -633,7 +633,8 @@ model LessonApplication {
   name      String
   phone     String?
   note      String?
-  status    String   @default("PENDING") // PENDING | CONFIRMED | CANCELLED
+  status    String   @default("PENDING") // PENDING | CONFIRMED | CANCELLED | WAITLIST(대기)
+  waitOrder Int? // 대기 순번(WAITLIST 전용, 등록 순 증가 — 표시는 정렬 순위로)
   feePaid   Boolean  @default(false) // 레슨비 입금확인(운영자 토글)
   // 확정자(CONFIRMED)의 수강 상태 — 로스터에서 운영자·코치가 관리.
   enrollState String @default("ACTIVE") // ACTIVE(수강중) | PAUSED(휴식) | ENDED(종료)
@@ -707,10 +708,15 @@ model CoachProfile {
   photoUrl        String?
   intro           String?  @db.VarChar(200) // 한 줄 소개
   career          String? // 경력(줄바꿈 구분)
-  regions         String? // 활동 지역("서울 송파, 하남" 자유 텍스트)
+  regions         String? // 활동 지역 상세(자유 텍스트 — "송파구, 하남" 등)
+  regionCodes     Json? // 활동 지역 시/도 복수 선택 ["서울","경기"] — 필터 기준
   pricePerMonth   Int? // 월 레슨비(안내용)
   pricePerSession Int? // 회당 레슨비(안내용)
   availableTimes  String? // 레슨 가능 시간(자유 텍스트)
+  // 이력서 기본 정보(원티드식) — 채용 판단의 1차 기준.
+  birthYear    Int? // 출생연도(예: 1990)
+  playingYears Int? // 구력(년)
+  skillLevel   String? // 급수 S~F (앱 공용 급수 체계)
   certified       Boolean  @default(false)
   active          Boolean  @default(true)
   createdAt       DateTime @default(now())
@@ -718,8 +724,84 @@ model CoachProfile {
 
   user         User          @relation(fields: [userId], references: [id], onDelete: Cascade)
   lessonOffers LessonOffer[]
+  careerEntries CoachCareerEntry[]
+  jobApplications CoachJobApplication[]
 
   @@index([active, certified])
+}
+
+// 원티드식 구조화 경력(이력서 항목). CoachProfile.career(자유 텍스트)는 하위호환
+// 폴백이고, 엔트리가 하나라도 있으면 이걸 우선 렌더한다.
+model CoachCareerEntry {
+  id             String   @id @default(uuid())
+  coachProfileId String
+  kind           String // PLAYER(선수) | COACH(지도) | EDUCATION(학력) | CERT(자격증) | AWARD(입상)
+  title          String
+  org            String? // 소속·기관(자격증=발급기관, 입상=주최)
+  startYm        String? // "YYYY-MM" (자격증=취득시기, 입상=대회시기)
+  endYm          String? // null = 현재 진행
+  description    String?
+  // 입상(AWARD) 전용 구조화 필드 — 부문·성적을 뱃지로 렌더.
+  division String? // 남단 | 여단 | 남복 | 여복 | 혼복 | 단체전 (자유 입력 허용)
+  result   String? // 우승 | 준우승 | 3위 | 입상
+  order          Int      @default(0)
+  createdAt      DateTime @default(now())
+
+  coachProfile CoachProfile @relation(fields: [coachProfileId], references: [id], onDelete: Cascade)
+
+  @@index([coachProfileId, order])
+}
+
+// 코치 구인 공고 — 누구나 작성 가능. clubId 있으면 클럽 명의(그 클럽 운영진만),
+// null 이면 개인 명의(개인 레슨 요청).
+model CoachJobPost {
+  id            String   @id @default(uuid())
+  authorUserId  String
+  clubId        String?
+  title         String
+  description   String?
+  days          Json? // 희망 요일 [1,3,5] — null = 협의
+  start         String? // "HH:mm" — null = 협의
+  end           String?
+  payMonthly    Int?
+  paySession    Int?
+  payNegotiable Boolean  @default(false)
+  region        String // 상세 위치(자유 텍스트 — 체육관명 등). 표시는 regionCodes 우선
+  regionCodes   Json? // 시/도 복수 선택 ["서울","경기"] — 필터 기준
+  requirements  String? // 우대·요구 사항
+  photos        Json? // 모집공고 첨부 사진 URL 배열(체육관·코트 등, 최대 5장)
+  status        String   @default("OPEN") // OPEN | CLOSED
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  applications CoachJobApplication[]
+
+  @@index([status, createdAt])
+  @@index([authorUserId])
+  @@index([clubId])
+}
+
+// 공고 지원 — 원티드식 단계 관리 + 오퍼레터.
+// APPLIED(지원) → INTERVIEW(면접) → OFFERED(오퍼레터 발송) → ACCEPTED(코치 수락=채용 확정)
+//                                   | DECLINED(코치가 오퍼 거절) | REJECTED(불합격/오퍼 철회)
+// WITHDRAWN(코치 본인 철회). 역방향 전이 금지(서비스에서 가드).
+model CoachJobApplication {
+  id             String   @id @default(uuid())
+  postId         String
+  coachProfileId String
+  message        String?  @db.VarChar(500)
+  status         String   @default("APPLIED")
+  // 오퍼레터 — 공고측이 제시한 최종 조건(급여·요일·시작 시기·메시지).
+  offerTerms  Json?
+  offerSentAt DateTime?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  post         CoachJobPost @relation(fields: [postId], references: [id], onDelete: Cascade)
+  coachProfile CoachProfile @relation(fields: [coachProfileId], references: [id], onDelete: Cascade)
+
+  @@unique([postId, coachProfileId])
+  @@index([coachProfileId, createdAt])
 }
 
 // 코치 문의 채팅 — 클럽 담당자(또는 회원)와 코치의 1:1 스레드.

@@ -28,6 +28,8 @@ import {
   updateLessonStudent,
   getLessonAttendance,
   setLessonAttendance,
+  promoteFromWaitlist,
+  getLessonBilling,
 } from '../lab/lab.service';
 import * as guestChat from '../guestChat/guestChat.service';
 import { getMyDues, getMoneyStats } from '../lab/lab.service';
@@ -231,6 +233,21 @@ router.put('/:clubId/money/lessons/:offerId/students/:appId', authenticate, staf
     const { enrollState, note } = req.body as { enrollState?: string; note?: string | null };
     await updateLessonStudent(String(req.params.appId), { enrollState, note });
     res.json({ ok: true });
+  } catch (err) { next(err); }
+});
+
+// POST /clubs/:clubId/money/lessons/:offerId/waitlist/:appId/promote — 대기 풀기(승급)
+router.post('/:clubId/money/lessons/:offerId/waitlist/:appId/promote', authenticate, staffOrLessonCoach, async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    await promoteFromWaitlist(String(req.params.offerId), String(req.params.appId));
+    res.json({ ok: true });
+  } catch (err) { next(err); }
+});
+
+// GET /clubs/:clubId/money/lessons/:offerId/billing — 이번 달 정산 요약(수수료·지급 예정)
+router.get('/:clubId/money/lessons/:offerId/billing', authenticate, staffOrLessonCoach, async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    res.json(await getLessonBilling(String(req.params.offerId)));
   } catch (err) { next(err); }
 });
 

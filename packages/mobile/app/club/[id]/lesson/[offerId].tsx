@@ -6,9 +6,11 @@ import { Ionicons } from '@expo/vector-icons';
 import { useTheme } from '../../../../hooks/useTheme';
 import { typography, spacing } from '../../../../constants/theme';
 import { BackButton } from '../../../../components/ui/BackButton';
-import { lessonDetailApi, type LessonDetail, type LessonStudentRow } from '../../../../services/coach';
+import { lessonDetailApi, type LessonDetail, type LessonStudentRow, type LessonBilling } from '../../../../services/coach';
 import { absolutizeUploadUrl } from '../../../../services/upload';
 import { showSuccess } from '../../../../utils/feedback';
+import { COACH_MARKET_ENABLED } from '../../../../constants/features';
+// (대기 풀기·정산 요약도 이 화면에서 처리)
 
 // ─────────────────────────────────────────────────────────────
 // 레슨 상세(운영진 + 담당 코치) — 코치 헤더 · 수강생 로스터 · 회차 출석.
@@ -34,6 +36,7 @@ export default function LessonDetailScreen() {
   const insets = useSafeAreaInsets();
 
   const [detail, setDetail] = useState<LessonDetail | null>(null);
+  const [billing, setBilling] = useState<LessonBilling | null>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [tab, setTab] = useState<'roster' | 'attendance'>('roster');
@@ -51,6 +54,7 @@ export default function LessonDetailScreen() {
     if (!clubId || !offerId) return;
     try {
       setDetail(await lessonDetailApi.get(clubId, offerId));
+      lessonDetailApi.billing(clubId, offerId).then(setBilling).catch(() => {});
     } catch {
       /* noop */
     } finally {
@@ -95,6 +99,17 @@ export default function LessonDetailScreen() {
     }
   };
 
+  const promote = async (appId: string, name: string) => {
+    if (!clubId || !offerId) return;
+    try {
+      await lessonDetailApi.promoteWaitlist(clubId, offerId, appId);
+      showSuccess(`${name}님 대기를 풀었어요 — 확정 대기로 올라갔어요`);
+      await load();
+    } catch {
+      /* 토스트는 인터셉터 */
+    }
+  };
+
   const setEnroll = async (student: LessonStudentRow, enrollState: string) => {
     if (!clubId || !offerId || student.enrollState === enrollState) return;
     setDetail((prev) =>
@@ -102,6 +117,9 @@ export default function LessonDetailScreen() {
     );
     try {
       await lessonDetailApi.updateStudent(clubId, offerId, student.id, { enrollState });
+      if (enrollState === 'ENDED' && (detail?.waitlist.length ?? 0) > 0) {
+        showSuccess('자리가 생겨 대기 1순위에게 알림을 보냈어요');
+      }
     } catch {
       load();
     }
@@ -220,6 +238,18 @@ export default function LessonDetailScreen() {
           {!!offer.coachProfileId && <Ionicons name="chevron-forward" size={18} color={colors.textLight} />}
         </Pressable>
 
+        {/* 이번 달 정산 요약(운영자·코치) — PG 이전 예상치 */}
+        {COACH_MARKET_ENABLED && billing && billing.fee != null && (
+          <View style={[styles.billingStrip, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+            <Text style={[styles.billingText, { color: colors.textSecondary }]}>
+              수강 {billing.activeStudents}명 · 수납 {billing.paidCount}/{billing.activeStudents} · 총 {billing.gross.toLocaleString()}원
+            </Text>
+            <Text style={[styles.billingPayout, { color: colors.text }]}>
+              코치 지급 예정 {billing.coachPayout.toLocaleString()}원
+            </Text>
+          </View>
+        )}
+
         {/* 탭: 수강생 | 출석 */}
         <View style={[styles.segment, { backgroundColor: colors.surface, borderColor: colors.border }]}>
           {([
@@ -305,6 +335,28 @@ export default function LessonDetailScreen() {
                 </View>
               );
             })}
+
+            {(detail.waitlist.length > 0) && (
+              <>
+                <Text style={[styles.pendingLabel, { color: colors.textLight }]}>대기열 {detail.waitlist.length}명 — 자리가 나면 순번대로 풀어주세요</Text>
+                {detail.waitlist.map((w) => (
+                  <View key={w.id} style={[styles.waitCard, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+                    <View style={[styles.waitRank, { backgroundColor: colors.warning + '1A' }]}>
+                      <Text style={[styles.waitRankText, { color: colors.warning }]}>{w.rank}</Text>
+                    </View>
+                    <View style={{ flex: 1, minWidth: 0 }}>
+                      <Text style={[styles.studentName, { color: colors.text }]} numberOfLines={1}>{w.name}</Text>
+                      <Text style={[styles.studentMeta, { color: colors.textLight }]}>
+                        대기 {w.rank}번{w.phone ? ` · ${w.phone}` : ''}
+                      </Text>
+                    </View>
+                    <Pressable onPress={() => promote(w.id, w.name)} style={[styles.promoteBtn, { backgroundColor: colors.primary }]}>
+                      <Text style={styles.promoteBtnText}>대기 풀기</Text>
+                    </Pressable>
+                  </View>
+                ))}
+              </>
+            )}
 
             {pending.length > 0 && (
               <>
@@ -422,6 +474,14 @@ const styles = StyleSheet.create({
   noteSave: { paddingHorizontal: spacing.lg, borderRadius: 10, alignItems: 'center', justifyContent: 'center' },
   noteSaveText: { color: '#fff', fontSize: 13, fontWeight: '800' },
   pendingLabel: { fontSize: 12, fontWeight: '800', marginTop: spacing.md, marginBottom: spacing.sm, marginLeft: 4 },
+  billingStrip: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: spacing.sm, borderWidth: StyleSheet.hairlineWidth, borderRadius: 12, paddingHorizontal: spacing.md, paddingVertical: 10, marginBottom: spacing.md },
+  billingText: { fontSize: 12, fontWeight: '700', flexShrink: 1 },
+  billingPayout: { fontSize: 12.5, fontWeight: '900' },
+  waitCard: { flexDirection: 'row', alignItems: 'center', gap: spacing.md, borderWidth: StyleSheet.hairlineWidth, borderRadius: 14, padding: spacing.md, marginBottom: spacing.sm },
+  waitRank: { width: 30, height: 30, borderRadius: 15, alignItems: 'center', justifyContent: 'center' },
+  waitRankText: { fontSize: 14, fontWeight: '900' },
+  promoteBtn: { paddingHorizontal: spacing.md, paddingVertical: 8, borderRadius: 10 },
+  promoteBtnText: { color: '#fff', fontSize: 12.5, fontWeight: '800' },
   pendingCard: { flexDirection: 'row', alignItems: 'center', padding: spacing.lg, borderWidth: 1, borderRadius: 16 },
   dateBar: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', borderRadius: 14, paddingHorizontal: spacing.md, paddingVertical: spacing.smd, marginBottom: spacing.md },
   dateArrow: { padding: spacing.sm },

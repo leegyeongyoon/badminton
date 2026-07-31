@@ -153,8 +153,10 @@ export interface LessonOffer {
   capacity: number | null;
   enabled: boolean;
   summary: string; // "월·수·금 19:00~20:00"
-  applicants: number;
-  myStatus: string | null; // 내 신청 상태(회원 조회에서만)
+  applicants: number; // 정원 게이지(대기 미포함)
+  waitlistCount: number; // 대기 인원
+  myStatus: string | null; // PENDING | CONFIRMED | WAITLIST(회원 조회에서만)
+  myWaitRank: number | null; // WAITLIST 면 내 대기 순위
   myFeePaid: boolean; // 내 레슨비 입금확인 여부(회원 조회에서만)
 }
 export interface LessonApplicationRow {

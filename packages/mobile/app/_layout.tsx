@@ -296,9 +296,20 @@ function RootLayoutInner() {
           <Stack.Screen name="coaches" options={transitions.slideFromRight} />
           <Stack.Screen name="coach/[id]" options={transitions.slideFromRight} />
           <Stack.Screen name="coach/edit" options={transitions.slideFromRight} />
+          <Stack.Screen name="coach/resume" options={transitions.slideFromRight} />
           <Stack.Screen name="coach/inbox" options={transitions.slideFromRight} />
           <Stack.Screen name="coach/lessons" options={transitions.slideFromRight} />
           <Stack.Screen name="coach-chat/[threadId]" options={transitions.slideFromRight} />
+          <Stack.Screen name="market/job/new" options={transitions.slideFromRight} />
+          <Stack.Screen name="market/job/[id]" options={transitions.slideFromRight} />
+          <Stack.Screen name="market/job/[id]/apply" options={transitions.slideFromRight} />
+          <Stack.Screen name="market/job/[id]/applicants" options={transitions.slideFromRight} />
+          <Stack.Screen name="market/job/[id]/applicant/[appId]" options={transitions.slideFromRight} />
+          <Stack.Screen name="market/my" options={transitions.slideFromRight} />
+          <Stack.Screen name="market/my-jobs" options={transitions.slideFromRight} />
+          <Stack.Screen name="market/applications" options={transitions.slideFromRight} />
+          <Stack.Screen name="coach/resumes" options={transitions.slideFromRight} />
+          <Stack.Screen name="coach/settlement" options={transitions.slideFromRight} />
           <Stack.Screen name="guest-chat" options={transitions.slideFromRight} />
           <Stack.Screen name="map" options={transitions.slideFromRight} />
           <Stack.Screen name="checkin-modal" options={transitions.modalSlideUp} />

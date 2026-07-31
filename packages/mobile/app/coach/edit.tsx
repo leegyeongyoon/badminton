@@ -7,6 +7,7 @@ import { typography, spacing } from '../../constants/theme';
 import { BackButton } from '../../components/ui/BackButton';
 import { Switch } from '../../components/ui/Switch';
 import { PhotoPickerField } from '../../components/ui/PhotoPickerField';
+import { RegionSelect } from '../../components/market/RegionSelect';
 import { coachApi } from '../../services/coach';
 import { showError, showSuccess } from '../../utils/feedback';
 
@@ -29,6 +30,7 @@ export default function CoachEdit() {
   const [intro, setIntro] = useState('');
   const [career, setCareer] = useState('');
   const [regions, setRegions] = useState('');
+  const [regionCodes, setRegionCodes] = useState<string[]>([]);
   const [pricePerMonth, setPricePerMonth] = useState('');
   const [pricePerSession, setPricePerSession] = useState('');
   const [availableTimes, setAvailableTimes] = useState('');
@@ -46,6 +48,7 @@ export default function CoachEdit() {
           setIntro(p.intro ?? '');
           setCareer(p.career ?? '');
           setRegions(p.regions ?? '');
+          setRegionCodes(p.regionCodes ?? []);
           setPricePerMonth(p.pricePerMonth != null ? String(p.pricePerMonth) : '');
           setPricePerSession(p.pricePerSession != null ? String(p.pricePerSession) : '');
           setAvailableTimes(p.availableTimes ?? '');
@@ -69,6 +72,7 @@ export default function CoachEdit() {
         intro: intro.trim() || null,
         career: career.trim() || null,
         regions: regions.trim() || null,
+        regionCodes,
         pricePerMonth: pricePerMonth.trim() ? Number(pricePerMonth.replace(/[^0-9]/g, '')) : null,
         pricePerSession: pricePerSession.trim() ? Number(pricePerSession.replace(/[^0-9]/g, '')) : null,
         availableTimes: availableTimes.trim() || null,
@@ -124,22 +128,36 @@ export default function CoachEdit() {
             <TextInput style={inputStyle} value={intro} onChangeText={setIntro} placeholder="전 실업팀 선수 출신, 15년 경력" placeholderTextColor={colors.textLight} maxLength={200} />
           </View>
 
+          {/* 경력은 원티드식 이력서(구조화 엔트리)에서 관리 — 여기선 진입 링크만. */}
+          <Pressable
+            onPress={() => {
+              if (isNew) {
+                showError('프로필을 먼저 등록하면 이력서를 작성할 수 있어요');
+                return;
+              }
+              router.push('/coach/resume' as never);
+            }}
+            style={({ pressed }) => [styles.resumeLink, { backgroundColor: colors.surface, borderColor: colors.border }, pressed && { opacity: 0.85 }]}
+          >
+            <View style={{ flex: 1 }}>
+              <Text style={[styles.resumeLinkTitle, { color: colors.text }]}>이력서 관리</Text>
+              <Text style={[styles.resumeLinkHint, { color: colors.textLight }]}>
+                {isNew
+                  ? '프로필 등록 후 선수·지도 경력, 자격증을 채울 수 있어요'
+                  : '선수·지도 경력, 학력, 자격증, 수상을 관리해요 — 공고 지원 시 그대로 노출'}
+              </Text>
+            </View>
+            <Text style={[styles.resumeLinkGo, { color: colors.primary }]}>{isNew ? '' : '열기'}</Text>
+          </Pressable>
+
           <View style={styles.field}>
-            <Text style={[styles.label, { color: colors.textSecondary }]}>경력 · 이력</Text>
-            <TextInput
-              style={[...inputStyle, styles.multiline]}
-              value={career}
-              onChangeText={setCareer}
-              placeholder={'한 줄에 하나씩 적어주세요\n예) 2010~2018 ○○실업팀\n생활체육지도자 2급'}
-              placeholderTextColor={colors.textLight}
-              multiline
-              maxLength={2000}
-            />
+            <Text style={[styles.label, { color: colors.textSecondary }]}>활동 지역 <Text style={{ color: colors.textLight }}>(시/도 복수 선택 — 공고·검색 필터 기준)</Text></Text>
+            <RegionSelect value={regionCodes} onChange={setRegionCodes} />
           </View>
 
           <View style={styles.field}>
-            <Text style={[styles.label, { color: colors.textSecondary }]}>활동 지역</Text>
-            <TextInput style={inputStyle} value={regions} onChangeText={setRegions} placeholder="서울 송파, 하남" placeholderTextColor={colors.textLight} maxLength={200} />
+            <Text style={[styles.label, { color: colors.textSecondary }]}>상세 활동 지역 <Text style={{ color: colors.textLight }}>(선택)</Text></Text>
+            <TextInput style={inputStyle} value={regions} onChangeText={setRegions} placeholder="송파구, 하남 미사 등" placeholderTextColor={colors.textLight} maxLength={200} />
           </View>
 
           <View style={styles.rowFields}>
@@ -215,6 +233,10 @@ const styles = StyleSheet.create({
   },
   multiline: { minHeight: 110, textAlignVertical: 'top' },
   multilineShort: { minHeight: 72, textAlignVertical: 'top' },
+  resumeLink: { flexDirection: 'row', alignItems: 'center', gap: spacing.md, borderWidth: 1, borderRadius: 14, padding: spacing.lg },
+  resumeLinkTitle: { fontSize: 15, fontWeight: '800' },
+  resumeLinkHint: { fontSize: 12, fontWeight: '600', marginTop: 3, lineHeight: 17 },
+  resumeLinkGo: { fontSize: 13.5, fontWeight: '800' },
   activeRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.md, borderWidth: 1, borderRadius: 14, padding: spacing.lg },
   activeTitle: { fontSize: 15, fontWeight: '800' },
   activeHint: { fontSize: 12, marginTop: 2 },

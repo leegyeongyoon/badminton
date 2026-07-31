@@ -11,6 +11,8 @@ const ICON_MAP = {
   // Navigation / Tabs
   board: 'clipboard-text-outline',
   activity: 'badminton',
+  whistle: 'whistle-outline', // 코치 허브 탭
+
   settings: 'cog-outline',
 
   // Actions

@@ -3,6 +3,7 @@ import jwt from 'jsonwebtoken';
 import { authenticate } from '../../middleware/auth';
 import { roleGuard } from '../../middleware/roleGuard';
 import * as svc from './coach.service';
+import { getCoachSettlement } from '../lab/lab.service';
 
 // ─────────────────────────────────────────────────────────────
 // 코치 마켓 — /coaches/*
@@ -29,8 +30,8 @@ function optionalUserId(req: Request): string | undefined {
 
 router.get('/', async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const { region, q } = req.query as { region?: string; q?: string };
-    res.json(await svc.listCoaches({ region, q }));
+    const { region, q, regions } = req.query as { region?: string; q?: string; regions?: string };
+    res.json(await svc.listCoaches({ region, q, regions: svc.parseRegionsParam(regions) }));
   } catch (err) { next(err); }
 });
 
@@ -43,6 +44,25 @@ router.get('/me', authenticate, async (req: Request, res: Response, next: NextFu
 router.get('/me/lessons', authenticate, async (req: Request, res: Response, next: NextFunction) => {
   try {
     res.json(await svc.listMyCoachLessons(req.user!.userId));
+  } catch (err) { next(err); }
+});
+
+router.get('/me/settlement', authenticate, async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    res.json(await getCoachSettlement(req.user!.userId));
+  } catch (err) { next(err); }
+});
+
+router.get('/me/career', authenticate, async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    res.json(await svc.getMyCareer(req.user!.userId));
+  } catch (err) { next(err); }
+});
+
+router.put('/me/career', authenticate, async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { entries } = req.body as { entries?: unknown };
+    res.json(await svc.setMyCareer(req.user!.userId, (entries ?? []) as never));
   } catch (err) { next(err); }
 });
 

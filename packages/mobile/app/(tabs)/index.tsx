@@ -15,6 +15,7 @@ import { getSkillMeta } from '../../constants/skill';
 import { typography, spacing, radius, palette } from '../../constants/theme';
 import { Button } from '../../components/ui/Button';
 import { Icon } from '../../components/ui/Icon';
+import { COACH_MARKET_ENABLED } from '../../constants/features';
 import { Skeleton, SkeletonGroup } from '../../components/ui/Skeleton';
 import { EmptyState } from '../../components/ui/EmptyState';
 import { SectionHeader } from '../../components/ui/SectionHeader';
@@ -298,12 +299,14 @@ export default function HomeScreen() {
               </View>
               <Text style={[styles.quickLabel, { color: colors.text }]}>모임 찾기</Text>
             </Pressable>
-            <Pressable onPress={() => router.push('/coaches' as never)} style={({ pressed }) => [styles.quickBtn, { backgroundColor: colors.surface }, pressed && { opacity: 0.85 }]}>
-              <View style={[styles.quickIcon, { backgroundColor: colors.primaryLight }]}>
-                <Icon name="activity" size={18} color={colors.primary} />
-              </View>
-              <Text style={[styles.quickLabel, { color: colors.text }]}>코치 찾기</Text>
-            </Pressable>
+            {COACH_MARKET_ENABLED && (
+              <Pressable onPress={() => router.push('/(tabs)/coach-hub' as never)} style={({ pressed }) => [styles.quickBtn, { backgroundColor: colors.surface }, pressed && { opacity: 0.85 }]}>
+                <View style={[styles.quickIcon, { backgroundColor: colors.primaryLight }]}>
+                  <Icon name="whistle" size={18} color={colors.primary} />
+                </View>
+                <Text style={[styles.quickLabel, { color: colors.text }]}>코치 구인·구직</Text>
+              </Pressable>
+            )}
           </View>
         )}
 

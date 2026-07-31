@@ -141,7 +141,7 @@ export default function ClubDetailScreen() {
     if (!clubId || applyingLesson) return;
     showConfirm(
       '레슨 신청',
-      `${offer.coachName} 코치 · ${offer.summary}${offer.fee != null ? `\n레슨비 ${offer.fee.toLocaleString()}원` : ''}\n신청할까요?`,
+      `${offer.coachName} 코치 · ${offer.summary}${offer.fee != null ? `\n레슨비 ${offer.fee.toLocaleString()}원` : ''}${offer.capacity != null && offer.applicants >= offer.capacity ? '\n정원이 가득 차 대기로 등록돼요.' : ''}\n신청할까요?`,
       async () => {
         setApplyingLesson(offer.id);
         try {
@@ -743,6 +743,7 @@ export default function ClubDetailScreen() {
                 const full = o.capacity != null && o.applicants >= o.capacity;
                 const careerLines = (o.coachCareer ?? '').split('\n').map((l) => l.trim()).filter(Boolean);
                 const applied = o.myStatus === 'PENDING' || o.myStatus === 'CONFIRMED';
+                const waiting = o.myStatus === 'WAITLIST';
                 const ratio = o.capacity ? Math.min(1, o.applicants / o.capacity) : 0;
                 return (
                   <View key={o.id} style={styles.lessonCard}>
@@ -800,9 +801,16 @@ export default function ClubDetailScreen() {
                       </View>
                       <Text style={[styles.lessonGaugeText, full && { color: Colors.warning }]}>
                         {o.capacity != null ? `${o.applicants}/${o.capacity}명${full ? ' 마감' : ''}` : `수강 ${o.applicants}명`}
+                        {o.waitlistCount > 0 ? ` · 대기 ${o.waitlistCount}` : ''}
                       </Text>
                     </View>
-                    {applied ? (
+                    {waiting ? (
+                      <View style={styles.lessonAppliedBadge}>
+                        <Text style={styles.lessonAppliedText}>
+                          ⏳ 대기 {o.myWaitRank ?? '-'}번 — 자리가 나면 알림을 보내드려요
+                        </Text>
+                      </View>
+                    ) : applied ? (
                       <View style={[styles.lessonAppliedBadge, o.myStatus === 'CONFIRMED' && styles.lessonConfirmedBadge]}>
                         <Text style={[styles.lessonAppliedText, o.myStatus === 'CONFIRMED' && styles.lessonConfirmedText]}>
                           {o.myStatus === 'CONFIRMED'
@@ -814,13 +822,15 @@ export default function ClubDetailScreen() {
                       </View>
                     ) : (
                       <TouchableOpacity
-                        style={[styles.lessonApplyBtn, (full || applyingLesson === o.id) && { opacity: 0.5 }]}
+                        style={[styles.lessonApplyBtn, full && styles.lessonWaitBtn, applyingLesson === o.id && { opacity: 0.5 }]}
                         onPress={() => handleApplyLesson(o)}
-                        disabled={full || applyingLesson === o.id}
+                        disabled={applyingLesson === o.id}
                         activeOpacity={0.85}
-                        accessibilityLabel={`${o.coachName} 코치 레슨 신청`}
+                        accessibilityLabel={`${o.coachName} 코치 레슨 ${full ? '대기' : ''} 신청`}
                       >
-                        <Text style={styles.lessonApplyText}>{full ? '정원 마감' : applyingLesson === o.id ? '신청 중…' : '레슨 신청하기'}</Text>
+                        <Text style={styles.lessonApplyText}>
+                          {applyingLesson === o.id ? '신청 중…' : full ? `대기 신청 (현재 ${o.waitlistCount}명 대기)` : '레슨 신청하기'}
+                        </Text>
                       </TouchableOpacity>
                     )}
                   </View>
@@ -1809,6 +1819,7 @@ const styles = StyleSheet.create({
   lessonGaugeTrack: { flex: 1, height: 7, borderRadius: 4, backgroundColor: Colors.background, overflow: 'hidden' },
   lessonGaugeFill: { height: 7, borderRadius: 4, backgroundColor: Colors.primary },
   lessonGaugeText: { fontSize: 11, fontWeight: '800', color: Colors.textSecondary, minWidth: 56, textAlign: 'right' },
+  lessonWaitBtn: { backgroundColor: Colors.warning },
   lessonApplyBtn: {
     backgroundColor: Colors.primary,
     paddingVertical: 12,
