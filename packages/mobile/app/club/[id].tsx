@@ -32,6 +32,7 @@ import { AddFacilityModal } from '../../components/AddFacilityModal';
 import { memberLessonApi, myDuesApi, type LessonOffer, type MyDuesResponse } from '../../services/lab';
 import { staffGuestChatApi } from '../../services/guestChat';
 import { absolutizeUploadUrl } from '../../services/upload';
+import { PAYMENTS_ENABLED } from '../../constants/features';
 
 interface ClubMember {
   userId: string;
@@ -804,6 +805,29 @@ export default function ClubDetailScreen() {
                         {o.waitlistCount > 0 ? ` · 대기 ${o.waitlistCount}` : ''}
                       </Text>
                     </View>
+                    {PAYMENTS_ENABLED && o.myStatus === 'CONFIRMED' && !o.myFeePaid && o.fee != null && (
+                      <TouchableOpacity
+                        style={styles.lessonPayBtn}
+                        activeOpacity={0.85}
+                        onPress={() => {
+                          showConfirm(
+                            '레슨비 결제 (테스트)',
+                            `${o.coachName} 코치 · 이번 달 레슨비 ${o.fee!.toLocaleString()}원을 결제할까요?\n(임시 결제 — 카드 정기결제로 교체 예정)`,
+                            async () => {
+                              try {
+                                const r = await memberLessonApi.pay(clubId!, o.id);
+                                showSuccess(r.message);
+                                memberLessonApi.list(clubId!).then(setLessons).catch(() => {});
+                              } catch { /* 토스트는 인터셉터 */ }
+                            },
+                            '결제하기',
+                          );
+                        }}
+                        accessibilityLabel="레슨비 결제"
+                      >
+                        <Text style={styles.lessonPayText}>이번 달 레슨비 {o.fee.toLocaleString()}원 결제하기</Text>
+                      </TouchableOpacity>
+                    )}
                     {waiting ? (
                       <View style={styles.lessonAppliedBadge}>
                         <Text style={styles.lessonAppliedText}>
@@ -1820,6 +1844,11 @@ const styles = StyleSheet.create({
   lessonGaugeFill: { height: 7, borderRadius: 4, backgroundColor: Colors.primary },
   lessonGaugeText: { fontSize: 11, fontWeight: '800', color: Colors.textSecondary, minWidth: 56, textAlign: 'right' },
   lessonWaitBtn: { backgroundColor: Colors.warning },
+  lessonPayBtn: {
+    backgroundColor: Colors.text, borderRadius: 12, paddingVertical: 13,
+    alignItems: 'center', marginTop: 10,
+  },
+  lessonPayText: { color: '#fff', fontSize: 14, fontWeight: '800' },
   lessonApplyBtn: {
     backgroundColor: Colors.primary,
     paddingVertical: 12,

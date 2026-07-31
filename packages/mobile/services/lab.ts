@@ -205,6 +205,9 @@ export const memberLessonApi = {
   list: async (clubId: string): Promise<LessonOffer[]> => (await api.get(`/clubs/${clubId}/lessons`)).data || [],
   apply: async (clubId: string, offerId: string, note?: string): Promise<{ id: string; message: string }> =>
     (await api.post(`/clubs/${clubId}/lessons/${offerId}/apply`, note ? { note } : {})).data,
+  // 레슨비 결제(임시 MOCK — 서버 env 게이트). PG 연동 시 결제창 호출로 교체.
+  pay: async (clubId: string, offerId: string): Promise<{ paymentId: string; amount: number; period: string; message: string }> =>
+    (await api.post(`/clubs/${clubId}/lessons/${offerId}/pay`, {})).data,
 };
 
 // ─── 내 회비(회원) + 정산 통계(운영자) ───

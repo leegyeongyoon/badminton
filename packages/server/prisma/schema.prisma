@@ -642,8 +642,32 @@ model LessonApplication {
 
   offer      LessonOffer        @relation(fields: [offerId], references: [id], onDelete: Cascade)
   attendance LessonAttendance[]
+  payments   LessonPayment[]
 
   @@index([offerId, createdAt])
+}
+
+// 레슨비 결제 원장 — 월(period) 단위 수납 기록.
+// provider='MOCK' 은 PG 계약 전 임시 결제(테스트 게이트 뒤에서만 생성).
+// PG(토스페이먼츠/포트원) 연동 시 provider·pgTxId 만 실값으로 바뀌고
+// 수수료 스냅샷(feeAmount)·지급액(payout) 구조는 그대로 정산에 쓰인다.
+model LessonPayment {
+  id            String   @id @default(uuid())
+  applicationId String
+  offerId       String
+  period        String // "YYYY-MM" — 청구 월
+  amount        Int // 결제액(=당시 offer.fee)
+  feeAmount     Int // 플랫폼 수수료 스냅샷
+  payout        Int // 코치 지급 예정액(amount - feeAmount)
+  provider      String   @default("MOCK") // MOCK | TOSS | PORTONE ...
+  pgTxId        String? // PG 승인 식별자(연동 후)
+  status        String   @default("PAID") // PAID | CANCELLED
+  paidAt        DateTime @default(now())
+
+  application LessonApplication @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+
+  @@unique([applicationId, period]) // 월 1회 결제
+  @@index([offerId, period])
 }
 
 // 레슨 회차 출석 — 날짜별로 로스터 인원 출석을 체크(운영자 또는 담당 코치).
