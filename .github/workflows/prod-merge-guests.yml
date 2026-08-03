@@ -39,15 +39,9 @@ jobs:
         run: |
           cat > q.sql <<'SQL'
           BEGIN;
-          \echo '===== 진단용 임시 계정 + 터닝포인트 멤버십 생성 ====='
-          INSERT INTO "User" (id, phone, password, name, "isGuest", "createdAt", "updatedAt")
-          VALUES ('diag-tmp-user-0001', '01999999999', '$2a$10$qWtchEB.bIiSjLyosiyOEuV1.FvL1kjubDx3pQ7edg5wbKQVWBsee', '진단계정', false, now(), now())
-          ON CONFLICT (id) DO NOTHING;
-          INSERT INTO "ClubMember" (id, "userId", "clubId", role)
-          SELECT 'diag-tmp-cm-0001', 'diag-tmp-user-0001', c.id, 'MEMBER'::"ClubMemberRole"
-          FROM "Club" c WHERE c.name='터닝포인트'
-          ON CONFLICT DO NOTHING;
-          SELECT 'created';
+          \echo '===== 진단용 임시 계정 제거 ====='
+          DELETE FROM "ClubMember" WHERE id='diag-tmp-cm-0001';
+          DELETE FROM "User" WHERE id='diag-tmp-user-0001';
           COMMIT;
           SQL
 
