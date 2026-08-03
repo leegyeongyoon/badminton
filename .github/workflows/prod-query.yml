@@ -39,36 +39,40 @@ jobs:
           # 단일따옴표 heredoc = 변수/따옴표 확장 없음(안전). 읽기 전용 SELECT 만.
           # 이번 조사: 출석왕 0회로 새는 멤버(오혜영·서건윤 등) — 체크인/게임 기록 분해.
           cat > q.sql <<'SQL'
-          \echo '===== A) 터닝포인트 아닌 클럽의 7월 정모 — 체크인 명단 ====='
-          SELECT c.name AS club, cs."startedAt"::date AS day, u.name, u."isGuest",
-                 EXISTS (SELECT 1 FROM "ClubMember" cm JOIN "Club" tc ON tc.id=cm."clubId"
-                         WHERE cm."userId"=u.id AND tc.name='터닝포인트') AS is_tp_member
-          FROM "CheckIn" ci JOIN "User" u ON u.id=ci."userId"
-          JOIN "ClubSession" cs ON cs.id=ci."clubSessionId" JOIN "Club" c ON c.id=cs."clubId"
-          WHERE c.name<>'터닝포인트' AND cs."startedAt">='2026-07-01' AND cs."startedAt"<'2026-08-01'
-          ORDER BY cs."startedAt", u.name;
+          \echo '===== A) 박정영·서건윤·윤수빈 등 이름의 모든 계정 + 인증수단 + 멤버여부 ====='
+          SELECT u.id, u.name, u."isGuest", u."isManaged",
+                 (u."kakaoId" IS NOT NULL) AS kakao, (u.password IS NOT NULL) AS pw,
+                 EXISTS (SELECT 1 FROM "ClubMember" cm JOIN "Club" c ON c.id=cm."clubId"
+                         WHERE cm."userId"=u.id AND c.name='터닝포인트') AS tp_member,
+                 (SELECT count(*) FROM "CheckIn" ci JOIN "ClubSession" cs ON cs.id=ci."clubSessionId"
+                   JOIN "Club" c2 ON c2.id=cs."clubId"
+                   WHERE ci."userId"=u.id AND c2.name='터닝포인트'
+                     AND cs."startedAt">='2026-07-01' AND cs."startedAt"<'2026-08-01') AS tp_jul_checkins
+          FROM "User" u
+          WHERE replace(u.name,' ','') IN ('박정영','서건윤','윤수빈','이정우','강민','곽도근','김도연','김동환')
+          ORDER BY u.name, u."isGuest";
 
-          \echo '===== B) 그 정모들에서 박정영·서건윤·윤수빈·이정우 있나 ====='
-          SELECT c.name AS club, cs."startedAt"::date AS day, u.name
+          \echo '===== B) 7월 터닝포인트 정모 체크인 유저 중 클럽 멤버가 아닌 정회원 ====='
+          SELECT u.id, u.name, u."isManaged", (u."kakaoId" IS NOT NULL) AS kakao,
+                 count(DISTINCT ci."clubSessionId") AS jul_checkins
           FROM "CheckIn" ci JOIN "User" u ON u.id=ci."userId"
           JOIN "ClubSession" cs ON cs.id=ci."clubSessionId" JOIN "Club" c ON c.id=cs."clubId"
-          WHERE u.name IN ('박정영','서건윤','윤수빈','이정우','오혜영','강민','곽도근')
+          WHERE c.name='터닝포인트' AND NOT u."isGuest"
             AND cs."startedAt">='2026-07-01' AND cs."startedAt"<'2026-08-01'
-          ORDER BY u.name, cs."startedAt";
+            AND NOT EXISTS (SELECT 1 FROM "ClubMember" cm WHERE cm."userId"=u.id AND cm."clubId"=c.id)
+          GROUP BY u.id, u.name, u."isManaged", u."kakaoId" ORDER BY u.name;
 
-          \echo '===== C) 박정영 전체 기록(월·클럽별) ====='
-          SELECT to_char(cs."startedAt",'YYYY-MM') AS month, c.name AS club,
-                 count(DISTINCT ci."clubSessionId") AS sessions
-          FROM "CheckIn" ci JOIN "ClubSession" cs ON cs.id=ci."clubSessionId" JOIN "Club" c ON c.id=cs."clubId"
-          WHERE ci."userId"='f7824de3-8d76-45c7-a497-774f1453dc79'
-          GROUP BY 1,2 ORDER BY 1;
-
-          \echo '===== D) 이경윤/기타 클럽 7월 정모 개요(제목·체크인 수) ====='
-          SELECT c.name AS club, cs.id, cs.title, cs.status, cs."startedAt",
-                 (SELECT count(*) FROM "CheckIn" ci WHERE ci."clubSessionId"=cs.id) AS checkins
-          FROM "ClubSession" cs JOIN "Club" c ON c.id=cs."clubId"
-          WHERE c.name<>'터닝포인트' AND cs."startedAt">='2026-07-01' AND cs."startedAt"<'2026-08-01'
-          ORDER BY cs."startedAt";
+          \echo '===== C) 반대로: 멤버인데 0회인 38명 중 동명(공백무시) 비멤버 정회원 계정이 7월 기록 가진 케이스 ====='
+          SELECT mu.name AS member_name, ou.id AS other_id, ou."isManaged" AS other_managed,
+                 (ou."kakaoId" IS NOT NULL) AS other_kakao,
+                 count(DISTINCT ci."clubSessionId") AS other_jul_checkins
+          FROM "ClubMember" cm JOIN "Club" c ON c.id=cm."clubId" JOIN "User" mu ON mu.id=cm."userId"
+          JOIN "User" ou ON NOT ou."isGuest" AND ou.id<>mu.id AND replace(ou.name,' ','')=replace(mu.name,' ','')
+          JOIN "CheckIn" ci ON ci."userId"=ou.id
+          JOIN "ClubSession" cs ON cs.id=ci."clubSessionId" AND cs."clubId"=c.id
+            AND cs."startedAt">='2026-07-01' AND cs."startedAt"<'2026-08-01'
+          WHERE c.name='터닝포인트' AND NOT mu."isGuest"
+          GROUP BY mu.name, ou.id, ou."isManaged", ou."kakaoId" ORDER BY mu.name;
           SQL
 
           B64=$(base64 -w0 q.sql)
