@@ -288,6 +288,7 @@ function RootLayoutInner() {
           <Stack.Screen name="club/[id]/qr" options={transitions.slideFromRight} />
           <Stack.Screen name="club/[id]/chat" options={transitions.slideFromRight} />
           <Stack.Screen name="club/[id]/manage" options={transitions.slideFromRight} />
+          <Stack.Screen name="club/[id]/guest-merge" options={transitions.slideFromRight} />
           <Stack.Screen name="club/[id]/money" options={transitions.slideFromRight} />
           <Stack.Screen name="club/[id]/operation" options={transitions.slideFromRight} />
           <Stack.Screen name="club/[id]/lessons" options={transitions.slideFromRight} />

@@ -82,6 +82,26 @@ export interface MemberAttendance {
   count: number;
 }
 
+// ─── 게스트 기록 연결 (guest → member merge) ──────────────────────────────
+export interface GuestMergeGuest {
+  id: string;
+  name: string;
+  createdAt: string;
+  checkIns: number;
+  gameSessions: number;
+}
+export interface GuestMergeCandidates {
+  candidates: { member: { userId: string; name: string }; guest: GuestMergeGuest }[];
+  guests: GuestMergeGuest[];
+  members: { userId: string; name: string }[];
+}
+export interface GuestMergeResult {
+  movedCheckIns: number;
+  movedGames: number;
+  droppedDuplicates: number;
+  guestRemoved: boolean;
+}
+
 // ─── 월 회비 (월별 회비 정산) ──────────────────────────────────────────────
 export interface DuesMemberItem {
   userId: string;
@@ -190,6 +210,11 @@ export const clubApi = {
   // 서버 권한: 이 모임 LEADER/STAFF 또는 본인.
   getMemberAttendance: (clubId: string, userId: string) =>
     api.get<MemberAttendance>(`/clubs/${clubId}/members/${userId}/attendance`),
+  // 게스트 기록 연결 — 현장 게스트 참가 기록을 멤버 계정으로 이관(운영진)
+  getGuestMergeCandidates: (clubId: string) =>
+    api.get<GuestMergeCandidates>(`/clubs/${clubId}/guest-merge`),
+  mergeGuest: (clubId: string, guestUserId: string, memberUserId: string) =>
+    api.post<GuestMergeResult>(`/clubs/${clubId}/guest-merge`, { guestUserId, memberUserId }),
 
   // 월 회비 정산 조회 (LEADER/STAFF). period 미지정 시 서버가 이번 달 사용.
   getDues: (clubId: string, period?: string) =>

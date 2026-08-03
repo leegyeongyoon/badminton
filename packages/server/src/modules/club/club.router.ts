@@ -211,6 +211,37 @@ router.delete('/:clubId/members/:userId/attendance', authenticate, async (req: R
   } catch (err) { next(err); }
 });
 
+// GET /api/v1/clubs/:clubId/guest-merge - 게스트 기록 연결 후보(동명 매칭 + 이 클럽
+// 기록 있는 게스트 전체 + 멤버 목록). Auth: LEADER/STAFF(service).
+router.get('/:clubId/guest-merge', authenticate, async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const result = await clubService.getGuestMergeCandidates(
+      req.params.clubId as string,
+      req.user!.userId,
+    );
+    res.json(result);
+  } catch (err) { next(err); }
+});
+
+// POST /api/v1/clubs/:clubId/guest-merge - 게스트 계정 기록을 멤버 계정으로 이관.
+// body: { guestUserId, memberUserId }. Auth: LEADER/STAFF(service).
+router.post('/:clubId/guest-merge', authenticate, async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { guestUserId, memberUserId } = req.body ?? {};
+    if (typeof guestUserId !== 'string' || typeof memberUserId !== 'string') {
+      res.status(400).json({ error: 'guestUserId와 memberUserId가 필요합니다' });
+      return;
+    }
+    const result = await clubService.mergeGuestIntoMember(
+      req.params.clubId as string,
+      guestUserId,
+      memberUserId,
+      req.user!.userId,
+    );
+    res.json(result);
+  } catch (err) { next(err); }
+});
+
 // GET /api/v1/clubs/:clubId/dues?period=YYYY-MM - per-member monthly dues +
 // totals (LEADER/STAFF). Default period = current month (server-side).
 router.get('/:clubId/dues', authenticate, async (req: Request, res: Response, next: NextFunction) => {

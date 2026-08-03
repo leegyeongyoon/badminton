@@ -1222,3 +1222,137 @@ export async function discoverClubs(query?: string): Promise<DiscoverClubRow[]> 
     })),
   }));
 }
+
+// --- 게스트 기록 연결 (guest → member merge) ---
+// 현장에서 앱 없이 게스트로 참가하면 매번 새 게스트 계정이 생겨, 정회원 계정
+// 기준인 출석왕에는 0회로 남는다. 운영진이 게스트 계정의 체크인·게임 기록을
+// 그 사람의 멤버 계정으로 이관해 출석을 살리는 도구.
+
+const normName = (s: string) => s.replace(/\s+/g, '');
+
+export interface GuestMergeGuest {
+  id: string;
+  name: string;
+  createdAt: string;
+  checkIns: number;
+  gameSessions: number;
+}
+
+export interface GuestMergeCandidatesResponse {
+  /** 동명(공백 무시) 멤버가 있는 게스트 — 원클릭 연결 후보. */
+  candidates: { member: { userId: string; name: string }; guest: GuestMergeGuest }[];
+  /** 이 클럽 정모에 기록이 있는 게스트 전체(직접 연결용). */
+  guests: GuestMergeGuest[];
+  /** 연결 대상이 될 수 있는 멤버 목록. */
+  members: { userId: string; name: string }[];
+}
+
+/** 이 클럽 정모에 기록(체크인 or 게임)이 남은 게스트 계정 목록 + 동명 멤버 매칭. */
+export async function getGuestMergeCandidates(
+  clubId: string,
+  requesterId: string,
+): Promise<GuestMergeCandidatesResponse> {
+  await verifyClubStaff(clubId, requesterId);
+
+  const [checkGuests, gameGuests] = await Promise.all([
+    prisma.checkIn.findMany({
+      where: { user: { isGuest: true }, clubSession: { clubId } },
+      select: { userId: true, clubSessionId: true },
+    }),
+    prisma.gamePlayer.findMany({
+      where: {
+        user: { isGuest: true },
+        game: { status: { in: ['IN_PROGRESS', 'COMPLETED'] }, turn: { clubSession: { clubId } } },
+      },
+      select: { userId: true, game: { select: { turn: { select: { clubSessionId: true } } } } },
+    }),
+  ]);
+
+  const checkinCount = new Map<string, number>();
+  for (const c of checkGuests) checkinCount.set(c.userId, (checkinCount.get(c.userId) ?? 0) + 1);
+  const gameSessions = new Map<string, Set<string>>();
+  for (const g of gameGuests) {
+    const sid = g.game.turn?.clubSessionId;
+    if (!sid) continue;
+    let set = gameSessions.get(g.userId);
+    if (!set) gameSessions.set(g.userId, (set = new Set()));
+    set.add(sid);
+  }
+
+  const guestIds = [...new Set([...checkinCount.keys(), ...gameSessions.keys()])];
+  const guestUsers = guestIds.length
+    ? await prisma.user.findMany({ where: { id: { in: guestIds } }, select: { id: true, name: true, createdAt: true } })
+    : [];
+  const guests: GuestMergeGuest[] = guestUsers
+    .map((u) => ({
+      id: u.id,
+      name: u.name,
+      createdAt: u.createdAt.toISOString(),
+      checkIns: checkinCount.get(u.id) ?? 0,
+      gameSessions: gameSessions.get(u.id)?.size ?? 0,
+    }))
+    .sort((a, b) => a.name.localeCompare(b.name));
+
+  const memberRows = await prisma.clubMember.findMany({
+    where: { clubId, user: { isGuest: false } },
+    include: { user: { select: { id: true, name: true } } },
+  });
+  const members = memberRows
+    .map((m) => ({ userId: m.userId, name: m.user.name }))
+    .sort((a, b) => a.name.localeCompare(b.name));
+  const byNorm = new Map(members.map((m) => [normName(m.name), m]));
+
+  const candidates = guests
+    .map((g) => {
+      const member = byNorm.get(normName(g.name));
+      return member ? { member, guest: g } : null;
+    })
+    .filter((x): x is { member: { userId: string; name: string }; guest: GuestMergeGuest } => x != null);
+
+  return { candidates, guests, members };
+}
+
+/**
+ * 게스트 계정의 체크인·게임 기록을 이 클럽 멤버 계정으로 이관하고 게스트 계정을
+ * 정리한다. 같은 게임에 두 계정이 모두 있던 중복 참가는 게스트 쪽을 버린다.
+ * 이관은 계정 전체 기록 대상(같은 사람의 다른 클럽 기록도 함께 살린다).
+ */
+export async function mergeGuestIntoMember(
+  clubId: string,
+  guestUserId: string,
+  memberUserId: string,
+  requesterId: string,
+): Promise<{ movedCheckIns: number; movedGames: number; droppedDuplicates: number; guestRemoved: boolean }> {
+  await verifyClubStaff(clubId, requesterId);
+
+  const guest = await prisma.user.findUnique({ where: { id: guestUserId } });
+  if (!guest || !guest.isGuest) throw new BadRequestError('게스트 계정이 아니에요');
+  const member = await prisma.clubMember.findUnique({
+    where: { userId_clubId: { userId: memberUserId, clubId } },
+    include: { user: { select: { isGuest: true } } },
+  });
+  if (!member || member.user.isGuest) throw new NotFoundError('모임 멤버');
+
+  const result = await prisma.$transaction(async (tx) => {
+    // 같은 게임에 멤버 계정도 이미 참가한 건 → 게스트 쪽 삭제(unique 충돌 방지).
+    const dup = await tx.gamePlayer.findMany({
+      where: { userId: guestUserId, game: { players: { some: { userId: memberUserId } } } },
+      select: { id: true },
+    });
+    if (dup.length) await tx.gamePlayer.deleteMany({ where: { id: { in: dup.map((d) => d.id) } } });
+    const games = await tx.gamePlayer.updateMany({ where: { userId: guestUserId }, data: { userId: memberUserId } });
+    const checkins = await tx.checkIn.updateMany({ where: { userId: guestUserId }, data: { userId: memberUserId } });
+    return { movedCheckIns: checkins.count, movedGames: games.count, droppedDuplicates: dup.length };
+  });
+
+  // 계정 정리는 이관 커밋 후 별도 시도 — 다른 참조(FK) 때문에 실패해도 이관은 유지.
+  let guestRemoved = false;
+  try {
+    await prisma.user.delete({ where: { id: guestUserId } });
+    guestRemoved = true;
+  } catch {
+    /* 잔여 참조가 있으면 계정은 남긴다(기록은 이미 이관됨) */
+  }
+
+  return { ...result, guestRemoved };
+}

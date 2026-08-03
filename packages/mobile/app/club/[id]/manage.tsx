@@ -864,6 +864,23 @@ export default function ClubManageScreen() {
           {/* 출석왕 리더보드 (이번 달/올해/전체) */}
           {clubId && <AttendanceLeaderboard clubId={clubId} maxRows={5} />}
 
+          {/* 게스트 기록 연결 — 현장 게스트 참가 기록을 멤버 계정으로 이관 */}
+          <TouchableOpacity
+            style={[styles.guestMergeBtn, { borderColor: colors.border }]}
+            onPress={() => router.push(`/club/${clubId}/guest-merge`)}
+            activeOpacity={0.7}
+            accessibilityLabel="게스트 기록 연결 열기"
+          >
+            <Icon name="link" size={16} color={colors.primary} />
+            <View style={{ flex: 1 }}>
+              <Text style={[styles.guestMergeTitle, { color: colors.text }]}>게스트 기록 연결</Text>
+              <Text style={[styles.guestMergeHint, { color: colors.textLight }]} numberOfLines={2}>
+                게스트로 참가해 출석왕에 안 잡히는 멤버의 기록을 계정에 합쳐요
+              </Text>
+            </View>
+            <Icon name="chevronRight" size={18} color={colors.textLight} />
+          </TouchableOpacity>
+
           {/* 멤버별 이력 — 멤버를 눌러 그 회원이 참여한 정모 목록을 본다 */}
           <Text style={[styles.fieldLabel, { color: colors.textSecondary, marginTop: spacing.lg }]}>
             멤버별 출석 이력
@@ -1463,6 +1480,19 @@ const styles = StyleSheet.create({
     paddingVertical: spacing.md,
   },
   deleteBtnText: { ...typography.subtitle2 },
+
+  // ── 게스트 기록 연결 진입 ──
+  guestMergeBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+    borderWidth: 1,
+    borderRadius: 12,
+    padding: spacing.md,
+    marginTop: spacing.lg,
+  },
+  guestMergeTitle: { fontSize: 13.5, fontWeight: '800' },
+  guestMergeHint: { fontSize: 11.5, fontWeight: '600', marginTop: 2, lineHeight: 15 },
 
   // ── 멤버·운영진 ──
   memberCount: { ...typography.caption },
