@@ -39,48 +39,16 @@ jobs:
         run: |
           cat > q.sql <<'SQL'
           BEGIN;
-
-          -- 빈(기록·회비 0) 중복 계정 멤버십 후보
-          CREATE TEMP TABLE empty_dups ON COMMIT DROP AS
-          SELECT cm.id AS cm_id, u.id AS user_id, u.name
-          FROM "ClubMember" cm
-          JOIN "Club" c ON c.id = cm."clubId" AND c.name = '터닝포인트'
-          JOIN "User" u ON u.id = cm."userId" AND NOT u."isGuest"
-          WHERE cm.role <> 'LEADER'
-            -- 이 클럽 기록 없음
-            AND NOT EXISTS (SELECT 1 FROM "CheckIn" ci JOIN "ClubSession" cs ON cs.id = ci."clubSessionId"
-                            WHERE ci."userId" = u.id AND cs."clubId" = c.id)
-            AND NOT EXISTS (SELECT 1 FROM "GamePlayer" gp JOIN "Game" g ON g.id = gp."gameId"
-                            JOIN "CourtTurn" ct ON ct.id = g."turnId"
-                            JOIN "ClubSession" cs2 ON cs2.id = ct."clubSessionId"
-                            WHERE gp."userId" = u.id AND cs2."clubId" = c.id)
-            -- 회비 납부 기록 없음
-            AND NOT EXISTS (SELECT 1 FROM "DuesPayment" dp WHERE dp."userId" = u.id AND dp."clubId" = c.id)
-            -- 같은 이름(공백 무시)의 "기록 있는" 멤버 계정이 존재
-            AND EXISTS (
-              SELECT 1 FROM "ClubMember" cm2 JOIN "User" u2 ON u2.id = cm2."userId"
-              WHERE cm2."clubId" = c.id AND cm2."userId" <> u.id AND NOT u2."isGuest"
-                AND replace(u2.name, ' ', '') = replace(u.name, ' ', '')
-                AND (EXISTS (SELECT 1 FROM "CheckIn" x JOIN "ClubSession" xs ON xs.id = x."clubSessionId"
-                             WHERE x."userId" = u2.id AND xs."clubId" = c.id)
-                  OR EXISTS (SELECT 1 FROM "GamePlayer" y JOIN "Game" g2 ON g2.id = y."gameId"
-                             JOIN "CourtTurn" ct2 ON ct2.id = g2."turnId"
-                             JOIN "ClubSession" ys ON ys.id = ct2."clubSessionId"
-                             WHERE y."userId" = u2.id AND ys."clubId" = c.id)));
-
-          \echo '===== 제거 대상(빈 중복 멤버십) ====='
-          SELECT name, user_id FROM empty_dups ORDER BY name;
-
-          \echo '===== 멤버십 제거 ====='
-          DELETE FROM "ClubMember" cm USING empty_dups e WHERE cm.id = e.cm_id;
-
-          \echo '===== 사후: 남은 동명 멤버 그룹(수동 처리 대상) ====='
-          SELECT replace(u.name,' ','') AS norm_name, count(*) AS accounts
-          FROM "ClubMember" cm JOIN "Club" c ON c.id=cm."clubId" AND c.name='터닝포인트'
-          JOIN "User" u ON u.id=cm."userId" AND NOT u."isGuest"
-          GROUP BY 1 HAVING count(*) > 1 ORDER BY 1;
-
-          COMMIT;
+          \echo '===== 진단용 임시 계정 + 터닝포인트 멤버십 생성 ====='
+          INSERT INTO "User" (id, phone, password, name, "isGuest", "createdAt", "updatedAt")
+          VALUES ('diag-tmp-user-0001', '01999999999', '$2a$10$qWtchEB.bIiSjLyosiyOEuV1.FvL1kjubDx3pQ7edg5wbKQVWBsee', '진단계정', false, now(), now())
+          ON CONFLICT (id) DO NOTHING;
+          INSERT INTO "ClubMember" (id, "userId", "clubId", role)
+          SELECT 'diag-tmp-cm-0001', 'diag-tmp-user-0001', c.id, 'MEMBER'::"ClubMemberRole"
+          FROM "Club" c WHERE c.name='터닝포인트'
+          ON CONFLICT DO NOTHING;
+          SELECT 'created';
+          COMMIT;T;
           SQL
 
           B64=$(base64 -w0 q.sql)
