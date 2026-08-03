@@ -1,0 +1,102 @@
+name: Prod Merge Guests
+
+# 일회성: 동명(공백 무시) 확인된 게스트 계정의 체크인·게임 기록을 해당 멤버
+# 계정으로 이관한다(출석왕 0회 복구 — 2026-08-03 진단으로 확정된 9쌍).
+# 게스트 User 행은 삭제하지 않는다(기록이 0이 되면 도구 목록에서 사라짐).
+# 수동 실행(workflow_dispatch) 전용. 실행 후 이 파일은 제거해도 된다.
+on:
+  workflow_dispatch:
+
+concurrency:
+  group: prod-merge-guests
+  cancel-in-progress: false
+
+jobs:
+  merge:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Install cloudflared + sshpass
+        run: |
+          curl -fsSL https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64.deb -o cloudflared.deb
+          sudo dpkg -i cloudflared.deb
+          sudo apt-get update && sudo apt-get install -y sshpass
+
+      - name: Configure SSH over Cloudflare Tunnel
+        run: |
+          mkdir -p ~/.ssh
+          cat >> ~/.ssh/config << SSHCONFIG
+          Host ${{ secrets.SSH_HOST }}
+            ProxyCommand cloudflared access ssh --hostname %h
+            StrictHostKeyChecking no
+            UserKnownHostsFile /dev/null
+          SSHCONFIG
+
+      - name: Merge guest records into member accounts
+        env:
+          SSHPASS: ${{ secrets.SSH_PASSWORD }}
+        run: |
+          cat > q.sql <<'SQL'
+          BEGIN;
+
+          CREATE TEMP TABLE merge_pairs (member_id text, guest_id text) ON COMMIT DROP;
+          INSERT INTO merge_pairs VALUES
+            ('8a46fc79-3c7e-44de-b965-fbbec36ebffb','25e52b35-228e-4698-a7f7-df1e130320ff'),
+            ('8a46fc79-3c7e-44de-b965-fbbec36ebffb','5045b72b-75bd-4566-b100-186ff036d53e'),
+            ('8a46fc79-3c7e-44de-b965-fbbec36ebffb','e56e4b31-8fca-41a7-b5d3-e640243c5781'),
+            ('8a46fc79-3c7e-44de-b965-fbbec36ebffb','d58dd40d-2772-4f05-aaec-bad8715b8a3e'),
+            ('4f6a209b-61a6-4f17-b20f-cd20d220be27','4062cb71-180f-488e-8426-212826539fbf'),
+            ('9fa67f24-9f44-4628-824f-674fc8bbb0c2','a7556a86-1b41-434d-bc18-f58d718f2c8d'),
+            ('ae420b00-4af1-4713-a687-6b62d851903c','a153ec34-b63a-4143-8d26-da2bb551bade'),
+            ('3109545a-6447-41ff-a8c9-ed28b6dc8d0b','a858777c-004c-4288-8922-03a684ca68ad'),
+            ('922b1e8e-851d-41c1-b116-acf068217e74','50fec977-37e5-41c2-96d1-62464b0e9cc3');
+
+          \echo '===== 사전 검증: 쌍이 (정회원, 게스트, 동명) 인지 ====='
+          SELECT mu.name AS member, gu.name AS guest, mu."isGuest" AS m_guest, gu."isGuest" AS g_guest,
+                 replace(mu.name,' ','')=replace(gu.name,' ','') AS same_name
+          FROM merge_pairs p JOIN "User" mu ON mu.id=p.member_id JOIN "User" gu ON gu.id=p.guest_id;
+
+          \echo '===== 사전: 게스트별 이관 대상 수 ====='
+          SELECT gu.name,
+            (SELECT count(*) FROM "CheckIn" ci WHERE ci."userId"=p.guest_id) AS checkins,
+            (SELECT count(*) FROM "GamePlayer" gp WHERE gp."userId"=p.guest_id) AS gameplayers
+          FROM merge_pairs p JOIN "User" gu ON gu.id=p.guest_id ORDER BY gu.name;
+
+          -- 검증 실패 쌍(정회원↔게스트 구성이 아니면) 제거 — 안전핀
+          DELETE FROM merge_pairs p
+          WHERE NOT EXISTS (SELECT 1 FROM "User" mu WHERE mu.id=p.member_id AND NOT mu."isGuest")
+             OR NOT EXISTS (SELECT 1 FROM "User" gu WHERE gu.id=p.guest_id AND gu."isGuest");
+
+          \echo '===== 1) 같은 게임에 멤버도 있는 게스트 중복 참가 삭제 ====='
+          DELETE FROM "GamePlayer" gp USING merge_pairs p
+          WHERE gp."userId"=p.guest_id
+            AND EXISTS (SELECT 1 FROM "GamePlayer" x WHERE x."gameId"=gp."gameId" AND x."userId"=p.member_id);
+
+          \echo '===== 2) GamePlayer 이관 ====='
+          UPDATE "GamePlayer" gp SET "userId"=p.member_id FROM merge_pairs p WHERE gp."userId"=p.guest_id;
+
+          \echo '===== 3) CheckIn 이관 ====='
+          UPDATE "CheckIn" ci SET "userId"=p.member_id FROM merge_pairs p WHERE ci."userId"=p.guest_id;
+
+          \echo '===== 사후: 멤버별 7월 출석(체크인∪게임 정모 수) ====='
+          SELECT mu.name,
+            (SELECT count(DISTINCT x.sid) FROM (
+              SELECT ci."clubSessionId" AS sid FROM "CheckIn" ci
+                JOIN "ClubSession" cs ON cs.id=ci."clubSessionId"
+                WHERE ci."userId"=p.member_id AND cs."startedAt">='2026-07-01' AND cs."startedAt"<'2026-08-01'
+              UNION
+              SELECT ct."clubSessionId" FROM "GamePlayer" gp
+                JOIN "Game" g ON g.id=gp."gameId" JOIN "CourtTurn" ct ON ct.id=g."turnId"
+                JOIN "ClubSession" cs2 ON cs2.id=ct."clubSessionId"
+                WHERE gp."userId"=p.member_id AND g.status IN ('IN_PROGRESS','COMPLETED')
+                  AND cs2."startedAt">='2026-07-01' AND cs2."startedAt"<'2026-08-01'
+            ) x) AS jul_attendance
+          FROM (SELECT DISTINCT member_id FROM merge_pairs) p JOIN "User" mu ON mu.id=p.member_id
+          ORDER BY mu.name;
+
+          COMMIT;
+          SQL
+
+          B64=$(base64 -w0 q.sql)
+          sshpass -e ssh -o ConnectTimeout=25 "${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}" \
+            "echo $B64 | base64 -d | docker exec -i badminton-prod-db psql -U badminton -d badminton -P pager=off -v ON_ERROR_STOP=1 -f -"
