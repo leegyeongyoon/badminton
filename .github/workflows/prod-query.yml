@@ -39,38 +39,36 @@ jobs:
           # 단일따옴표 heredoc = 변수/따옴표 확장 없음(안전). 읽기 전용 SELECT 만.
           # 이번 조사: 출석왕 0회로 새는 멤버(오혜영·서건윤 등) — 체크인/게임 기록 분해.
           cat > q.sql <<'SQL'
-          \echo '===== A) 건윤 포함 계정 전부(게스트 포함) ====='
-          SELECT id, name, "isGuest", "createdAt"::date FROM "User"
-          WHERE replace(name,' ','') LIKE '%건윤%';
-
-          \echo '===== B) 서건윤 정회원 계정 — 월별 체크인·게임 세션 ====='
-          SELECT to_char(cs."startedAt",'YYYY-MM') AS month,
-                 count(DISTINCT ci."clubSessionId") AS checkin_sessions
-          FROM "CheckIn" ci JOIN "ClubSession" cs ON cs.id=ci."clubSessionId"
-          WHERE ci."userId"='8004d492-422b-4b27-84da-589e0e1559c7' GROUP BY 1 ORDER BY 1;
-          SELECT to_char(cs."startedAt",'YYYY-MM') AS month,
-                 count(DISTINCT ct."clubSessionId") AS game_sessions
-          FROM "GamePlayer" gp JOIN "Game" g ON g.id=gp."gameId"
-          JOIN "CourtTurn" ct ON ct.id=g."turnId" JOIN "ClubSession" cs ON cs.id=ct."clubSessionId"
-          WHERE gp."userId"='8004d492-422b-4b27-84da-589e0e1559c7' GROUP BY 1 ORDER BY 1;
-
-          \echo '===== C) 7월 터닝포인트 정모에서 게임 뛴 게스트 명단(운영자 식별용) ====='
-          SELECT u.name, count(DISTINCT ct."clubSessionId") AS sessions, count(*) AS games,
-                 min(cs."startedAt"::date) AS first_day, max(cs."startedAt"::date) AS last_day
-          FROM "GamePlayer" gp JOIN "User" u ON u.id=gp."userId"
-          JOIN "Game" g ON g.id=gp."gameId" JOIN "CourtTurn" ct ON ct.id=g."turnId"
-          JOIN "ClubSession" cs ON cs.id=ct."clubSessionId" JOIN "Club" c ON c.id=cs."clubId"
-          WHERE u."isGuest" AND c.name='터닝포인트' AND g.status IN ('IN_PROGRESS','COMPLETED')
-            AND cs."startedAt">='2026-07-01' AND cs."startedAt"<'2026-08-01'
-          GROUP BY u.name ORDER BY u.name;
-
-          \echo '===== D) 7월 터닝포인트 정모 체크인만 있는(게임 무관) 게스트 명단 ====='
-          SELECT u.name, count(DISTINCT ci."clubSessionId") AS checkin_sessions
+          \echo '===== A) 터닝포인트 아닌 클럽의 7월 정모 — 체크인 명단 ====='
+          SELECT c.name AS club, cs."startedAt"::date AS day, u.name, u."isGuest",
+                 EXISTS (SELECT 1 FROM "ClubMember" cm JOIN "Club" tc ON tc.id=cm."clubId"
+                         WHERE cm."userId"=u.id AND tc.name='터닝포인트') AS is_tp_member
           FROM "CheckIn" ci JOIN "User" u ON u.id=ci."userId"
           JOIN "ClubSession" cs ON cs.id=ci."clubSessionId" JOIN "Club" c ON c.id=cs."clubId"
-          WHERE u."isGuest" AND c.name='터닝포인트'
+          WHERE c.name<>'터닝포인트' AND cs."startedAt">='2026-07-01' AND cs."startedAt"<'2026-08-01'
+          ORDER BY cs."startedAt", u.name;
+
+          \echo '===== B) 그 정모들에서 박정영·서건윤·윤수빈·이정우 있나 ====='
+          SELECT c.name AS club, cs."startedAt"::date AS day, u.name
+          FROM "CheckIn" ci JOIN "User" u ON u.id=ci."userId"
+          JOIN "ClubSession" cs ON cs.id=ci."clubSessionId" JOIN "Club" c ON c.id=cs."clubId"
+          WHERE u.name IN ('박정영','서건윤','윤수빈','이정우','오혜영','강민','곽도근')
             AND cs."startedAt">='2026-07-01' AND cs."startedAt"<'2026-08-01'
-          GROUP BY u.name ORDER BY u.name;
+          ORDER BY u.name, cs."startedAt";
+
+          \echo '===== C) 박정영 전체 기록(월·클럽별) ====='
+          SELECT to_char(cs."startedAt",'YYYY-MM') AS month, c.name AS club,
+                 count(DISTINCT ci."clubSessionId") AS sessions
+          FROM "CheckIn" ci JOIN "ClubSession" cs ON cs.id=ci."clubSessionId" JOIN "Club" c ON c.id=cs."clubId"
+          WHERE ci."userId"='f7824de3-8d76-45c7-a497-774f1453dc79'
+          GROUP BY 1,2 ORDER BY 1;
+
+          \echo '===== D) 이경윤/기타 클럽 7월 정모 개요(제목·체크인 수) ====='
+          SELECT c.name AS club, cs.id, cs.title, cs.status, cs."startedAt",
+                 (SELECT count(*) FROM "CheckIn" ci WHERE ci."clubSessionId"=cs.id) AS checkins
+          FROM "ClubSession" cs JOIN "Club" c ON c.id=cs."clubId"
+          WHERE c.name<>'터닝포인트' AND cs."startedAt">='2026-07-01' AND cs."startedAt"<'2026-08-01'
+          ORDER BY cs."startedAt";
           SQL
 
           B64=$(base64 -w0 q.sql)
