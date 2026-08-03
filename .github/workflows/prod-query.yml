@@ -37,65 +37,60 @@ jobs:
           SSHPASS: ${{ secrets.SSH_PASSWORD }}
         run: |
           # 단일따옴표 heredoc = 변수/따옴표 확장 없음(안전). 읽기 전용 SELECT 만.
+          # 이번 조사: 출석왕 0회로 새는 멤버(오혜영·서건윤 등) — 체크인/게임 기록 분해.
           cat > q.sql <<'SQL'
-          \echo '===== 1) 사용자 대분류 ====='
-          SELECT count(*) FILTER (WHERE "isGuest") AS guest,
-                 count(*) FILTER (WHERE NOT "isGuest" AND "isManaged") AS managed,
-                 count(*) FILTER (WHERE NOT "isGuest" AND (password IS NOT NULL OR "kakaoId" IS NOT NULL OR "googleId" IS NOT NULL)) AS signed_up,
-                 count(*) FILTER (WHERE NOT "isGuest" AND "isManaged" IS NOT TRUE AND password IS NULL AND "kakaoId" IS NULL AND "googleId" IS NULL) AS nologin_other,
-                 count(*) AS total
-          FROM "User";
+          \echo '===== A) 해당 유저 상태 ====='
+          SELECT id, name, "isGuest", "isManaged" FROM "User" WHERE name IN ('오혜영','서건윤');
 
-          \echo '===== 2) 가입 회원 인증수단 분포(중복가능) ====='
-          SELECT count(*) FILTER (WHERE password IS NOT NULL) AS has_pw,
-                 count(*) FILTER (WHERE "kakaoId" IS NOT NULL) AS has_kakao,
-                 count(*) FILTER (WHERE "googleId" IS NOT NULL) AS has_google
-          FROM "User" WHERE NOT "isGuest" AND (password IS NOT NULL OR "kakaoId" IS NOT NULL OR "googleId" IS NOT NULL);
+          \echo '===== B) 해당 유저 체크인 — 정모 연결 여부 ====='
+          SELECT u.name, ci."clubSessionId" IS NOT NULL AS linked, ci."checkedInAt", cs."startedAt" AS session_start
+          FROM "CheckIn" ci JOIN "User" u ON u.id=ci."userId"
+          LEFT JOIN "ClubSession" cs ON cs.id=ci."clubSessionId"
+          WHERE u.name IN ('오혜영','서건윤') ORDER BY u.name, ci."checkedInAt";
 
-          \echo '===== 3) 가입 회원 월별 생성 추이 ====='
-          SELECT to_char("createdAt",'YYYY-MM') AS month, count(*)
-          FROM "User" WHERE NOT "isGuest" AND (password IS NOT NULL OR "kakaoId" IS NOT NULL OR "googleId" IS NOT NULL)
+          \echo '===== C) 해당 유저 게임 참여 — 상태별 ====='
+          SELECT u.name, g.status, ct."clubSessionId" IS NOT NULL AS turn_linked, count(*)
+          FROM "GamePlayer" gp JOIN "User" u ON u.id=gp."userId"
+          JOIN "Game" g ON g.id=gp."gameId" JOIN "CourtTurn" ct ON ct.id=g."turnId"
+          WHERE u.name IN ('오혜영','서건윤') GROUP BY 1,2,3 ORDER BY 1;
+
+          \echo '===== D) 7월 정모 목록 ====='
+          SELECT cs.id, c.name AS club, cs.status, cs."startedAt"
+          FROM "ClubSession" cs JOIN "Club" c ON c.id=cs."clubId"
+          WHERE cs."startedAt" >= '2026-07-01' AND cs."startedAt" < '2026-08-01' ORDER BY cs."startedAt";
+
+          \echo '===== E) 7월 정모별 — 연결 체크인 수 vs 게임 참여자 수 ====='
+          SELECT cs."startedAt"::date AS day, c.name AS club,
+            (SELECT count(DISTINCT ci."userId") FROM "CheckIn" ci WHERE ci."clubSessionId"=cs.id) AS linked_checkins,
+            (SELECT count(DISTINCT gp."userId") FROM "GamePlayer" gp
+              JOIN "Game" g ON g.id=gp."gameId" JOIN "CourtTurn" ct ON ct.id=g."turnId"
+              WHERE ct."clubSessionId"=cs.id AND g.status IN ('IN_PROGRESS','COMPLETED')) AS game_players
+          FROM "ClubSession" cs JOIN "Club" c ON c.id=cs."clubId"
+          WHERE cs."startedAt" >= '2026-07-01' AND cs."startedAt" < '2026-08-01' ORDER BY cs."startedAt";
+
+          \echo '===== F) 7월 정모 미연결 체크인(clubSessionId null) — 날짜별 ====='
+          SELECT ci."checkedInAt"::date AS day, count(*) AS unlinked_checkins, count(DISTINCT ci."userId") AS users
+          FROM "CheckIn" ci
+          WHERE ci."clubSessionId" IS NULL AND ci."checkedInAt" >= '2026-07-01' AND ci."checkedInAt" < '2026-08-01'
           GROUP BY 1 ORDER BY 1;
 
-          \echo '===== 4) 모임별 소속 회원 수(게스트 제외) ====='
-          SELECT c.name, count(DISTINCT cm."userId") AS members
-          FROM "ClubMember" cm JOIN "Club" c ON c.id=cm."clubId" JOIN "User" u ON u.id=cm."userId"
-          WHERE NOT u."isGuest" GROUP BY c.name ORDER BY members DESC;
+          \echo '===== G) 7월 게임 status 분포 ====='
+          SELECT g.status, count(*) FROM "Game" g
+          JOIN "CourtTurn" ct ON ct.id=g."turnId" JOIN "ClubSession" cs ON cs.id=ct."clubSessionId"
+          WHERE cs."startedAt" >= '2026-07-01' AND cs."startedAt" < '2026-08-01' GROUP BY 1;
 
-          \echo '===== 5) 가입했지만 어느 모임에도 소속 안 된 회원 수 ====='
-          SELECT count(*) FROM "User" u
-          WHERE NOT u."isGuest" AND (u.password IS NOT NULL OR u."kakaoId" IS NOT NULL OR u."googleId" IS NOT NULL)
-            AND NOT EXISTS (SELECT 1 FROM "ClubMember" cm WHERE cm."userId"=u.id);
-
-          \echo '===== 6) 전체 모임/정모 수 ====='
-          SELECT (SELECT count(*) FROM "Club") AS clubs,
-                 (SELECT count(*) FROM "ClubSession") AS sessions_total,
-                 (SELECT count(*) FROM "ClubSession" WHERE status='ACTIVE') AS sessions_active;
-
-          \echo '===== 7) 새 정의(가입 회원) = 카카오+구글+(전화는 관리자만) ====='
-          SELECT count(*) AS new_members FROM "User"
-          WHERE NOT "isGuest" AND "isManaged" IS NOT TRUE
-            AND ("kakaoId" IS NOT NULL OR "googleId" IS NOT NULL
-                 OR (password IS NOT NULL AND role IN ('SUPER_ADMIN','FACILITY_ADMIN','CLUB_LEADER')));
-
-          \echo '===== 8) 제외되는 일반(PLAYER) 전화 계정 수 ====='
-          SELECT count(*) AS player_phone FROM "User"
-          WHERE NOT "isGuest" AND "isManaged" IS NOT TRUE AND password IS NOT NULL
-            AND "kakaoId" IS NULL AND "googleId" IS NULL AND role='PLAYER';
-
-          \echo '===== 9) 미퇴장 체크인(지금 체크인) — 세션 상태별 분해 ====='
-          SELECT COALESCE(cs.status::text, '(clubSession 없음)') AS session_status, count(*) AS open_checkins
-          FROM "CheckIn" ci LEFT JOIN "ClubSession" cs ON cs.id = ci."clubSessionId"
-          WHERE ci."checkedOutAt" IS NULL GROUP BY 1 ORDER BY 2 DESC;
-
-          \echo '===== 10) 미퇴장 체크인 총계 vs ACTIVE 세션 소속만 ====='
-          SELECT
-            (SELECT count(*) FROM "CheckIn" WHERE "checkedOutAt" IS NULL) AS all_open,
-            (SELECT count(*) FROM "CheckIn" ci JOIN "ClubSession" cs ON cs.id=ci."clubSessionId"
-               WHERE ci."checkedOutAt" IS NULL AND cs.status='ACTIVE') AS active_open;
-
-          \echo '===== 11) ACTIVE 정모 목록 ====='
-          SELECT id, title, status, "startedAt" FROM "ClubSession" WHERE status='ACTIVE' ORDER BY "startedAt" DESC;
+          \echo '===== H) 7월 정모에서 게임은 뛰었지만 CANCELLED 만 있는 유저 수 ====='
+          SELECT count(DISTINCT gp."userId") FROM "GamePlayer" gp
+          JOIN "Game" g ON g.id=gp."gameId" JOIN "CourtTurn" ct ON ct.id=g."turnId"
+          JOIN "ClubSession" cs ON cs.id=ct."clubSessionId"
+          WHERE cs."startedAt" >= '2026-07-01' AND cs."startedAt" < '2026-08-01'
+            AND NOT EXISTS (
+              SELECT 1 FROM "GamePlayer" gp2 JOIN "Game" g2 ON g2.id=gp2."gameId"
+              JOIN "CourtTurn" ct2 ON ct2.id=g2."turnId"
+              WHERE gp2."userId"=gp."userId" AND ct2."clubSessionId"=ct."clubSessionId"
+                AND g2.status IN ('IN_PROGRESS','COMPLETED'))
+            AND NOT EXISTS (
+              SELECT 1 FROM "CheckIn" ci WHERE ci."userId"=gp."userId" AND ci."clubSessionId"=ct."clubSessionId");
           SQL
 
           B64=$(base64 -w0 q.sql)
