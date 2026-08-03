@@ -242,6 +242,25 @@ router.post('/:clubId/guest-merge', authenticate, async (req: Request, res: Resp
   } catch (err) { next(err); }
 });
 
+// POST /api/v1/clubs/:clubId/member-merge - 동명 중복 멤버 계정 정리: from 의
+// 기록을 to 로 이관 + from 멤버십 제거(계정 유지). Auth: LEADER/STAFF(service).
+router.post('/:clubId/member-merge', authenticate, async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { fromUserId, toUserId } = req.body ?? {};
+    if (typeof fromUserId !== 'string' || typeof toUserId !== 'string') {
+      res.status(400).json({ error: 'fromUserId와 toUserId가 필요합니다' });
+      return;
+    }
+    const result = await clubService.mergeMemberRecords(
+      req.params.clubId as string,
+      fromUserId,
+      toUserId,
+      req.user!.userId,
+    );
+    res.json(result);
+  } catch (err) { next(err); }
+});
+
 // GET /api/v1/clubs/:clubId/dues?period=YYYY-MM - per-member monthly dues +
 // totals (LEADER/STAFF). Default period = current month (server-side).
 router.get('/:clubId/dues', authenticate, async (req: Request, res: Response, next: NextFunction) => {

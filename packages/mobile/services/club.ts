@@ -90,10 +90,19 @@ export interface GuestMergeGuest {
   checkIns: number;
   gameSessions: number;
 }
+export interface DuplicateMemberAccount {
+  userId: string;
+  name: string;
+  hasLogin: boolean;
+  isManaged: boolean;
+  checkIns: number;
+  gameSessions: number;
+}
 export interface GuestMergeCandidates {
   candidates: { member: { userId: string; name: string }; guest: GuestMergeGuest }[];
   guests: GuestMergeGuest[];
   members: { userId: string; name: string }[];
+  duplicateMembers: DuplicateMemberAccount[][];
 }
 export interface GuestMergeResult {
   movedCheckIns: number;
@@ -215,6 +224,8 @@ export const clubApi = {
     api.get<GuestMergeCandidates>(`/clubs/${clubId}/guest-merge`),
   mergeGuest: (clubId: string, guestUserId: string, memberUserId: string) =>
     api.post<GuestMergeResult>(`/clubs/${clubId}/guest-merge`, { guestUserId, memberUserId }),
+  mergeMember: (clubId: string, fromUserId: string, toUserId: string) =>
+    api.post<GuestMergeResult & { membershipRemoved: boolean }>(`/clubs/${clubId}/member-merge`, { fromUserId, toUserId }),
 
   // 월 회비 정산 조회 (LEADER/STAFF). period 미지정 시 서버가 이번 달 사용.
   getDues: (clubId: string, period?: string) =>

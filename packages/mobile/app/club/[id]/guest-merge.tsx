@@ -6,7 +6,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useTheme } from '../../../hooks/useTheme';
 import { typography, spacing } from '../../../constants/theme';
 import { BackButton } from '../../../components/ui/BackButton';
-import { clubApi, type GuestMergeCandidates, type GuestMergeGuest } from '../../../services/club';
+import { clubApi, type GuestMergeCandidates, type GuestMergeGuest, type DuplicateMemberAccount } from '../../../services/club';
 import { showSuccess } from '../../../utils/feedback';
 import { showConfirm } from '../../../utils/alert';
 
@@ -66,9 +66,38 @@ export default function GuestMerge() {
     [clubId, busy, load],
   );
 
+  // 중복 멤버 계정 — keep(남길 계정)을 고르면 나머지 계정 기록을 keep 으로 이관.
+  const mergeMembers = useCallback(
+    (group: DuplicateMemberAccount[], keep: DuplicateMemberAccount) => {
+      if (!clubId || busy) return;
+      const others = group.filter((a) => a.userId !== keep.userId);
+      const label = (a: DuplicateMemberAccount) =>
+        `${a.name}(${a.hasLogin ? '로그인 계정' : a.isManaged ? '명부' : '전화'} · 체크인 ${a.checkIns})`;
+      showConfirm(
+        '중복 계정 정리',
+        `${others.map(label).join(', ')}의 기록을\n${label(keep)} 계정으로 옮기고 멤버 목록에서 정리할까요?\n(되돌릴 수 없어요)`,
+        async () => {
+          setBusy(true);
+          try {
+            for (const o of others) {
+              await clubApi.mergeMember(clubId, o.userId, keep.userId);
+            }
+            showSuccess(`${keep.name}님 계정으로 정리 완료`);
+            await load();
+          } catch { /* noop */ } finally {
+            setBusy(false);
+          }
+        },
+        '정리하기',
+      );
+    },
+    [clubId, busy, load],
+  );
+
   const candidates = data?.candidates ?? [];
   const candidateGuestIds = new Set(candidates.map((c) => c.guest.id));
   const otherGuests = (data?.guests ?? []).filter((g) => !candidateGuestIds.has(g.id));
+  const dupGroups = data?.duplicateMembers ?? [];
 
   const guestMeta = (g: GuestMergeGuest) =>
     `체크인 ${g.checkIns} · 게임 정모 ${g.gameSessions} · ${new Date(g.createdAt).toLocaleDateString()} 생성`;
@@ -92,8 +121,43 @@ export default function GuestMerge() {
             아래에서 게스트 기록을 그 사람의 멤버 계정으로 옮겨 주세요.
           </Text>
 
+          {/* 중복 멤버 계정 — 같은 이름의 멤버 계정 2개(명부+로그인) 정리 */}
+          {dupGroups.length > 0 && (
+            <>
+              <Text style={[styles.sectionLabel, { color: colors.textSecondary }]}>중복 멤버 계정 (같은 이름 2개)</Text>
+              <Text style={[styles.dupHint, { color: colors.textLight }]}>
+                남길 계정을 누르면 나머지 계정의 기록을 옮기고 멤버 목록에서 정리해요
+              </Text>
+              {dupGroups.map((group) => (
+                <View key={group.map((a) => a.userId).join('-')} style={[styles.dupCard, { backgroundColor: colors.surface, borderColor: colors.border }, shadows.sm]}>
+                  {group.map((a) => (
+                    <Pressable
+                      key={a.userId}
+                      onPress={() => mergeMembers(group, a)}
+                      disabled={busy}
+                      style={({ pressed }) => [styles.dupRow, { borderColor: colors.border }, pressed && { opacity: 0.7 }]}
+                    >
+                      <View style={{ flex: 1, minWidth: 0 }}>
+                        <Text style={[styles.rowName, { color: colors.text }]} numberOfLines={1}>
+                          {a.name}
+                          <Text style={[styles.dupTag, { color: a.hasLogin ? colors.primary : colors.textLight }]}>
+                            {'  '}{a.hasLogin ? '로그인 계정' : a.isManaged ? '명부 계정' : '전화 계정'}
+                          </Text>
+                        </Text>
+                        <Text style={[styles.rowMeta, { color: colors.textLight }]} numberOfLines={1}>
+                          체크인 {a.checkIns} · 게임 정모 {a.gameSessions}
+                        </Text>
+                      </View>
+                      <Text style={[styles.dupKeep, { color: colors.primary }]}>이 계정 남기기</Text>
+                    </Pressable>
+                  ))}
+                </View>
+              ))}
+            </>
+          )}
+
           {/* 동명 후보 — 원클릭 */}
-          <Text style={[styles.sectionLabel, { color: colors.textSecondary }]}>동명 멤버 자동 매칭</Text>
+          <Text style={[styles.sectionLabel, { color: colors.textSecondary, marginTop: dupGroups.length ? spacing.xl : 0 }]}>동명 멤버 자동 매칭 (게스트)</Text>
           {candidates.length === 0 ? (
             <Text style={[styles.empty, { color: colors.textLight }]}>동명 매칭되는 게스트가 없어요</Text>
           ) : (
@@ -177,6 +241,11 @@ const styles = StyleSheet.create({
   center: { flex: 1, alignItems: 'center', justifyContent: 'center' },
   pageHint: { ...typography.caption, lineHeight: 18, marginBottom: spacing.lg },
   sectionLabel: { fontSize: 12.5, fontWeight: '800', marginBottom: spacing.sm },
+  dupHint: { ...typography.caption, marginBottom: spacing.sm },
+  dupCard: { borderRadius: 14, borderWidth: StyleSheet.hairlineWidth, paddingHorizontal: spacing.lg, marginBottom: spacing.sm },
+  dupRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.md, paddingVertical: spacing.md, borderBottomWidth: StyleSheet.hairlineWidth },
+  dupTag: { fontSize: 11, fontWeight: '800' },
+  dupKeep: { fontSize: 12.5, fontWeight: '800' },
   empty: { ...typography.caption, paddingVertical: spacing.md },
   row: { flexDirection: 'row', alignItems: 'center', gap: spacing.md, borderRadius: 14, borderWidth: StyleSheet.hairlineWidth, padding: spacing.lg, marginBottom: spacing.sm },
   rowName: { fontSize: 14.5, fontWeight: '800' },

@@ -1238,6 +1238,17 @@ export interface GuestMergeGuest {
   gameSessions: number;
 }
 
+export interface DuplicateMemberAccount {
+  userId: string;
+  name: string;
+  /** 카카오·구글·비밀번호 중 하나라도 있으면 실사용(로그인 가능) 계정. */
+  hasLogin: boolean;
+  isManaged: boolean;
+  /** 이 클럽 정모 기준 전 기간 기록 수. */
+  checkIns: number;
+  gameSessions: number;
+}
+
 export interface GuestMergeCandidatesResponse {
   /** 동명(공백 무시) 멤버가 있는 게스트 — 원클릭 연결 후보. */
   candidates: { member: { userId: string; name: string }; guest: GuestMergeGuest }[];
@@ -1245,6 +1256,8 @@ export interface GuestMergeCandidatesResponse {
   guests: GuestMergeGuest[];
   /** 연결 대상이 될 수 있는 멤버 목록. */
   members: { userId: string; name: string }[];
+  /** 같은 이름의 멤버 계정이 2개 이상인 그룹 — 기록 합치기 후보. */
+  duplicateMembers: DuplicateMemberAccount[][];
 }
 
 /** 이 클럽 정모에 기록(체크인 or 게임)이 남은 게스트 계정 목록 + 동명 멤버 매칭. */
@@ -1295,7 +1308,11 @@ export async function getGuestMergeCandidates(
 
   const memberRows = await prisma.clubMember.findMany({
     where: { clubId, user: { isGuest: false } },
-    include: { user: { select: { id: true, name: true } } },
+    include: {
+      user: {
+        select: { id: true, name: true, isManaged: true, kakaoId: true, googleId: true, password: true },
+      },
+    },
   });
   const members = memberRows
     .map((m) => ({ userId: m.userId, name: m.user.name }))
@@ -1309,7 +1326,100 @@ export async function getGuestMergeCandidates(
     })
     .filter((x): x is { member: { userId: string; name: string }; guest: GuestMergeGuest } => x != null);
 
-  return { candidates, guests, members };
+  // 같은 이름(공백 무시)의 멤버 계정이 2개 이상 — 명부 계정 + 카카오 가입 계정이
+  // 따로 클럽에 들어와 출석왕에 두 줄(한쪽 0회)로 보이는 케이스. 기록 수를 붙여
+  // 운영자가 "기록 합치기"로 정리할 수 있게 그룹으로 내려준다.
+  const groups = new Map<string, typeof memberRows>();
+  for (const m of memberRows) {
+    const key = normName(m.user.name);
+    let arr = groups.get(key);
+    if (!arr) groups.set(key, (arr = []));
+    arr.push(m);
+  }
+  const dupGroups = [...groups.values()].filter((g) => g.length > 1);
+  let duplicateMembers: DuplicateMemberAccount[][] = [];
+  if (dupGroups.length) {
+    const dupIds = dupGroups.flat().map((m) => m.userId);
+    const [dupCheckins, dupGames] = await Promise.all([
+      prisma.checkIn.findMany({
+        where: { userId: { in: dupIds }, clubSession: { clubId } },
+        select: { userId: true },
+      }),
+      prisma.gamePlayer.findMany({
+        where: {
+          userId: { in: dupIds },
+          game: { status: { in: ['IN_PROGRESS', 'COMPLETED'] }, turn: { clubSession: { clubId } } },
+        },
+        select: { userId: true, game: { select: { turn: { select: { clubSessionId: true } } } } },
+      }),
+    ]);
+    const dupCheckinCount = new Map<string, number>();
+    for (const c of dupCheckins) dupCheckinCount.set(c.userId, (dupCheckinCount.get(c.userId) ?? 0) + 1);
+    const dupGameSessions = new Map<string, Set<string>>();
+    for (const g of dupGames) {
+      const sid = g.game.turn?.clubSessionId;
+      if (!sid) continue;
+      let set = dupGameSessions.get(g.userId);
+      if (!set) dupGameSessions.set(g.userId, (set = new Set()));
+      set.add(sid);
+    }
+    duplicateMembers = dupGroups.map((group) =>
+      group
+        .map((m) => ({
+          userId: m.userId,
+          name: m.user.name,
+          hasLogin: m.user.kakaoId != null || m.user.googleId != null || m.user.password != null,
+          isManaged: m.user.isManaged,
+          checkIns: dupCheckinCount.get(m.userId) ?? 0,
+          gameSessions: dupGameSessions.get(m.userId)?.size ?? 0,
+        }))
+        .sort((a, b) => (b.checkIns + b.gameSessions) - (a.checkIns + a.gameSessions)),
+    );
+  }
+
+  return { candidates, guests, members, duplicateMembers };
+}
+
+/**
+ * 동명 중복 멤버 계정 정리 — from 계정의 체크인·게임 기록을 to 계정으로 이관하고
+ * from 의 이 클럽 멤버십을 제거한다(계정 자체는 삭제하지 않음 — 로그인 계정일 수
+ * 있다). 출석왕에 같은 사람이 두 줄(한쪽 0회)로 보이던 문제를 해소한다.
+ */
+export async function mergeMemberRecords(
+  clubId: string,
+  fromUserId: string,
+  toUserId: string,
+  requesterId: string,
+): Promise<{ movedCheckIns: number; movedGames: number; droppedDuplicates: number; membershipRemoved: boolean }> {
+  await verifyClubStaff(clubId, requesterId);
+  if (fromUserId === toUserId) throw new BadRequestError('같은 계정이에요');
+
+  const [from, to] = await Promise.all([
+    prisma.clubMember.findUnique({
+      where: { userId_clubId: { userId: fromUserId, clubId } },
+      include: { user: { select: { isGuest: true } } },
+    }),
+    prisma.clubMember.findUnique({
+      where: { userId_clubId: { userId: toUserId, clubId } },
+      include: { user: { select: { isGuest: true } } },
+    }),
+  ]);
+  if (!from || from.user.isGuest || !to || to.user.isGuest) throw new NotFoundError('모임 멤버');
+  if (from.role === 'LEADER') throw new BadRequestError('대표 계정은 정리할 수 없어요. 남길 계정을 반대로 선택해 주세요');
+
+  const result = await prisma.$transaction(async (tx) => {
+    const dup = await tx.gamePlayer.findMany({
+      where: { userId: fromUserId, game: { players: { some: { userId: toUserId } } } },
+      select: { id: true },
+    });
+    if (dup.length) await tx.gamePlayer.deleteMany({ where: { id: { in: dup.map((d) => d.id) } } });
+    const games = await tx.gamePlayer.updateMany({ where: { userId: fromUserId }, data: { userId: toUserId } });
+    const checkins = await tx.checkIn.updateMany({ where: { userId: fromUserId }, data: { userId: toUserId } });
+    await tx.clubMember.delete({ where: { userId_clubId: { userId: fromUserId, clubId } } });
+    return { movedCheckIns: checkins.count, movedGames: games.count, droppedDuplicates: dup.length };
+  });
+
+  return { ...result, membershipRemoved: true };
 }
 
 /**
