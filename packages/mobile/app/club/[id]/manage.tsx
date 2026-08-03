@@ -1243,6 +1243,7 @@ export default function ClubManageScreen() {
                       </Text>
                       <Text style={[styles.historyDate, { color: colors.textSecondary }]}>
                         {formatSessionDate(s.startedAt)}
+                        {s.checkedInAt ? ` · ${formatCheckInTime(s.checkedInAt)} 체크인` : ''}
                       </Text>
                     </View>
                   </View>
@@ -1269,6 +1270,16 @@ function formatSessionDate(iso: string): string {
   const d = new Date(iso);
   const days = ['일', '월', '화', '수', '목', '금', '토'];
   return `${d.getFullYear()}. ${d.getMonth() + 1}. ${d.getDate()}. (${days[d.getDay()]})`;
+}
+
+// 체크인 시각 포맷 ("오후 7:23").
+function formatCheckInTime(iso: string): string {
+  const d = new Date(iso);
+  const h = d.getHours();
+  const m = String(d.getMinutes()).padStart(2, '0');
+  const ampm = h < 12 ? '오전' : '오후';
+  const h12 = h % 12 === 0 ? 12 : h % 12;
+  return `${ampm} ${h12}:${m}`;
 }
 
 // 역할 배지 (대표/운영진/회원).

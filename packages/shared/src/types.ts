@@ -555,6 +555,8 @@ export interface MemberAttendanceSession {
   sessionId: string;
   title: string | null;
   startedAt: string;
+  /** 그 정모에 처음 체크인한 시각. */
+  checkedInAt: string;
 }
 
 /** GET /clubs/:clubId/members/:userId/attendance — the 정모s a member attended

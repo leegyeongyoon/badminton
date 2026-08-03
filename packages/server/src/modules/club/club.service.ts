@@ -765,8 +765,6 @@ function periodRange(period: AttendancePeriod): { start: Date | null; end: Date 
   return { start: null, end: null };
 }
 
-const LEADERBOARD_LIMIT = 50;
-
 export async function getAttendanceLeaderboard(
   clubId: string,
   period: AttendancePeriod,
@@ -843,9 +841,8 @@ export async function getAttendanceLeaderboard(
   });
 
   const me = ranked.find((r) => r.userId === userId) ?? null;
-  const entries = ranked.slice(0, LEADERBOARD_LIMIT);
 
-  return { period, entries, me };
+  return { period, entries: ranked, me };
 }
 
 export async function getMyAttendance(
@@ -892,7 +889,8 @@ export async function getMemberAttendance(
   if (!target) throw new NotFoundError('모임 멤버');
 
   // All check-ins of this member into THIS club's 정모s. Pull the session so we
-  // can return title/startedAt; dedupe by clubSessionId (one row per 정모).
+  // can return title/startedAt; dedupe by clubSessionId (one row per 정모),
+  // keeping the EARLIEST checkedInAt as "그 정모에 도착한 시각".
   const checkIns = await prisma.checkIn.findMany({
     where: {
       userId: targetUserId,
@@ -901,18 +899,24 @@ export async function getMemberAttendance(
     },
     select: {
       clubSessionId: true,
+      checkedInAt: true,
       clubSession: { select: { title: true, startedAt: true } },
     },
   });
 
-  const seen = new Map<string, { sessionId: string; title: string | null; startedAt: Date }>();
+  const seen = new Map<string, { sessionId: string; title: string | null; startedAt: Date; checkedInAt: Date }>();
   for (const c of checkIns) {
     if (!c.clubSessionId || !c.clubSession) continue;
-    if (seen.has(c.clubSessionId)) continue;
+    const prev = seen.get(c.clubSessionId);
+    if (prev) {
+      if (c.checkedInAt < prev.checkedInAt) prev.checkedInAt = c.checkedInAt;
+      continue;
+    }
     seen.set(c.clubSessionId, {
       sessionId: c.clubSessionId,
       title: c.clubSession.title ?? null,
       startedAt: c.clubSession.startedAt,
+      checkedInAt: c.checkedInAt,
     });
   }
 
@@ -923,6 +927,7 @@ export async function getMemberAttendance(
       sessionId: s.sessionId,
       title: s.title,
       startedAt: s.startedAt.toISOString(),
+      checkedInAt: s.checkedInAt.toISOString(),
     }));
 
   return { sessions, count: sessions.length };
