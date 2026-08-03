@@ -663,6 +663,8 @@ export interface MatchupPartner {
 export interface PlayerMatchupsResponse {
   userId: string;
   totalGames: number; // games the target user played in this 정모
+  /** 이 정모에 처음 체크인한 시각 (체크인 기록이 없으면 null). */
+  checkedInAt: string | null;
   partners: MatchupPartner[]; // everyone who shared a game, sorted by count desc
 }
 

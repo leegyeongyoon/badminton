@@ -5148,6 +5148,16 @@ function SwapPlayerModal({
 // Fetches the player's matchups (who they played WITH this 정모, sorted by
 // count desc) on open. Read-only, calm. Shows "기록 없음" when no partners yet.
 // ─────────────────────────────────────────────────────────
+// 체크인 시각 포맷 ("오후 7:23") — 게임 수 대비 도착 시각 판단용.
+function formatCheckInClock(iso: string): string {
+  const d = new Date(iso);
+  const h = d.getHours();
+  const m = String(d.getMinutes()).padStart(2, '0');
+  const ampm = h < 12 ? '오전' : '오후';
+  const h12 = h % 12 === 0 ? 12 : h % 12;
+  return `${ampm} ${h12}:${m}`;
+}
+
 function MatchupModal({
   colors, clubSessionId, userId, name, skillLevel, isGuest, isInLesson, onToggleLesson, onCheckout, onSaved, onClose,
 }: {
@@ -5234,6 +5244,7 @@ function MatchupModal({
               </View>
               <Text style={[modalStyles.matchupSub, { color: colors.textSecondary }]}>
                 오늘 함께 친 사람{data != null ? ` · 오늘 ${data.totalGames}게임` : ''}
+                {data?.checkedInAt ? ` · ${formatCheckInClock(data.checkedInAt)} 체크인` : ''}
               </Text>
             </View>
             <TouchableOpacity onPress={onClose} hitSlop={10}>

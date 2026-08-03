@@ -33,6 +33,8 @@ export interface PlayerMatchups {
   userId: string;
   /** 이 정모에서 플레이한 총 게임 수. */
   totalGames: number;
+  /** 이 정모에 처음 체크인한 시각 (기록 없으면 null). */
+  checkedInAt: string | null;
   /** 함께 친 파트너 목록 (count 내림차순). */
   partners: MatchupPartner[];
 }

@@ -1121,7 +1121,20 @@ export async function getPlayerMatchups(
     })
     .sort((a, b) => b.count - a.count || a.name.localeCompare(b.name));
 
-  return { userId: targetUserId, totalGames, partners };
+  // 이 정모에 처음 체크인한 시각 — 게임 수가 적은 이유(늦은 도착)를 운영자가
+  // 판단할 수 있게 매치업 모달에 함께 보여준다. 수동 등록 등 기록이 없으면 null.
+  const firstCheckIn = await prisma.checkIn.findFirst({
+    where: { clubSessionId: sessionId, userId: targetUserId },
+    orderBy: { checkedInAt: 'asc' },
+    select: { checkedInAt: true },
+  });
+
+  return {
+    userId: targetUserId,
+    totalGames,
+    checkedInAt: firstCheckIn?.checkedInAt.toISOString() ?? null,
+    partners,
+  };
 }
 
 // --- B2: 정모 종료 요약 리포트 (Club session summary) ---
