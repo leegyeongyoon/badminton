@@ -74,8 +74,8 @@ export interface MemberAttendanceSession {
   sessionId: string;
   title: string | null;
   startedAt: string;
-  /** 그 정모에 처음 체크인한 시각. */
-  checkedInAt: string;
+  /** 그 정모에 처음 체크인한 시각 (체크인 없이 게임만 뛴 세션은 null). */
+  checkedInAt: string | null;
 }
 export interface MemberAttendance {
   sessions: MemberAttendanceSession[];

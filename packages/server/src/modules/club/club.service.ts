@@ -797,17 +797,40 @@ export async function getAttendanceLeaderboard(
     select: { userId: true, clubSessionId: true },
   });
 
+  // 출석 = 체크인 OR 그 정모에서 게임 참여. QR 스캔 없이 운영자가 게임판에
+  // 올린 멤버도 실제로 뛰었으면 출석으로 집계한다(체크인만 세면 0회로 새는 케이스).
+  // 게임 쪽 기간 필터는 세션 시작 시각(startedAt) 기준.
+  const gamePlays = await prisma.gamePlayer.findMany({
+    where: {
+      userId: { in: memberIds },
+      game: {
+        status: { in: ['IN_PROGRESS', 'COMPLETED'] },
+        turn: {
+          clubSession: {
+            clubId,
+            ...(start || end
+              ? { startedAt: { ...(start ? { gte: start } : {}), ...(end ? { lt: end } : {}) } }
+              : {}),
+          },
+        },
+      },
+    },
+    select: { userId: true, game: { select: { turn: { select: { clubSessionId: true } } } } },
+  });
+
   // Count DISTINCT clubSessionId per user.
   const distinctSessions = new Map<string, Set<string>>();
-  for (const c of checkIns) {
-    if (!c.clubSessionId) continue;
-    let set = distinctSessions.get(c.userId);
+  const addSession = (uid: string, sid: string | null | undefined) => {
+    if (!sid) return;
+    let set = distinctSessions.get(uid);
     if (!set) {
       set = new Set<string>();
-      distinctSessions.set(c.userId, set);
+      distinctSessions.set(uid, set);
     }
-    set.add(c.clubSessionId);
-  }
+    set.add(sid);
+  };
+  for (const c of checkIns) addSession(c.userId, c.clubSessionId);
+  for (const g of gamePlays) addSession(g.userId, g.game.turn?.clubSessionId);
 
   // Build per-member rows (members with 0 attendance still appear with count 0).
   // Effective PER-CLUB 급수: the operator-set ClubMember override wins, else the
@@ -904,12 +927,12 @@ export async function getMemberAttendance(
     },
   });
 
-  const seen = new Map<string, { sessionId: string; title: string | null; startedAt: Date; checkedInAt: Date }>();
+  const seen = new Map<string, { sessionId: string; title: string | null; startedAt: Date; checkedInAt: Date | null }>();
   for (const c of checkIns) {
     if (!c.clubSessionId || !c.clubSession) continue;
     const prev = seen.get(c.clubSessionId);
     if (prev) {
-      if (c.checkedInAt < prev.checkedInAt) prev.checkedInAt = c.checkedInAt;
+      if (prev.checkedInAt == null || c.checkedInAt < prev.checkedInAt) prev.checkedInAt = c.checkedInAt;
       continue;
     }
     seen.set(c.clubSessionId, {
@@ -920,6 +943,40 @@ export async function getMemberAttendance(
     });
   }
 
+  // 체크인 기록 없이 게임만 뛴 정모도 출석 이력에 포함(리더보드와 같은 기준).
+  // 이런 세션은 체크인 시각이 없으므로 checkedInAt = null.
+  const gamePlays = await prisma.gamePlayer.findMany({
+    where: {
+      userId: targetUserId,
+      game: {
+        status: { in: ['IN_PROGRESS', 'COMPLETED'] },
+        turn: { clubSession: { clubId } },
+      },
+    },
+    select: {
+      game: {
+        select: {
+          turn: {
+            select: {
+              clubSessionId: true,
+              clubSession: { select: { title: true, startedAt: true } },
+            },
+          },
+        },
+      },
+    },
+  });
+  for (const g of gamePlays) {
+    const t = g.game.turn;
+    if (!t?.clubSessionId || !t.clubSession || seen.has(t.clubSessionId)) continue;
+    seen.set(t.clubSessionId, {
+      sessionId: t.clubSessionId,
+      title: t.clubSession.title ?? null,
+      startedAt: t.clubSession.startedAt,
+      checkedInAt: null,
+    });
+  }
+
   // Most-recent first.
   const sessions = [...seen.values()]
     .sort((a, b) => b.startedAt.getTime() - a.startedAt.getTime())
@@ -927,7 +984,7 @@ export async function getMemberAttendance(
       sessionId: s.sessionId,
       title: s.title,
       startedAt: s.startedAt.toISOString(),
-      checkedInAt: s.checkedInAt.toISOString(),
+      checkedInAt: s.checkedInAt?.toISOString() ?? null,
     }));
 
   return { sessions, count: sessions.length };
