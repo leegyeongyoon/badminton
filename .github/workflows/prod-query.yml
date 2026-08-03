@@ -39,58 +39,38 @@ jobs:
           # 단일따옴표 heredoc = 변수/따옴표 확장 없음(안전). 읽기 전용 SELECT 만.
           # 이번 조사: 출석왕 0회로 새는 멤버(오혜영·서건윤 등) — 체크인/게임 기록 분해.
           cat > q.sql <<'SQL'
-          \echo '===== 1) 터닝포인트 클럽 ID/멤버 중 해당 이름 ====='
-          SELECT c.id AS club_id, u.id AS user_id, u.name, u."isGuest"
-          FROM "ClubMember" cm JOIN "Club" c ON c.id=cm."clubId" JOIN "User" u ON u.id=cm."userId"
-          WHERE c.name='터닝포인트' AND (u.name LIKE '%오혜영%' OR u.name LIKE '%서건윤%');
-
-          \echo '===== 2) 이름 유사 계정 전부(공백 포함) ====='
+          \echo '===== A) 건윤 포함 계정 전부(게스트 포함) ====='
           SELECT id, name, "isGuest", "createdAt"::date FROM "User"
-          WHERE replace(name,' ','') LIKE '%오혜영%' OR replace(name,' ','') LIKE '%서건윤%';
+          WHERE replace(name,' ','') LIKE '%건윤%';
 
-          \echo '===== 3) 계정별 7월 기록(체크인/게임) — 위 이름 유사 계정 전체 ====='
-          SELECT u.id, u.name, u."isGuest",
-            (SELECT count(*) FROM "CheckIn" ci JOIN "ClubSession" cs ON cs.id=ci."clubSessionId"
-              WHERE ci."userId"=u.id AND cs."startedAt">='2026-07-01' AND cs."startedAt"<'2026-08-01') AS jul_checkins,
-            (SELECT count(DISTINCT ct."clubSessionId") FROM "GamePlayer" gp
-              JOIN "Game" g ON g.id=gp."gameId" JOIN "CourtTurn" ct ON ct.id=g."turnId"
-              JOIN "ClubSession" cs ON cs.id=ct."clubSessionId"
-              WHERE gp."userId"=u.id AND g.status IN ('IN_PROGRESS','COMPLETED')
-                AND cs."startedAt">='2026-07-01' AND cs."startedAt"<'2026-08-01') AS jul_game_sessions
-          FROM "User" u
-          WHERE replace(u.name,' ','') LIKE '%오혜영%' OR replace(u.name,' ','') LIKE '%서건윤%';
+          \echo '===== B) 서건윤 정회원 계정 — 월별 체크인·게임 세션 ====='
+          SELECT to_char(cs."startedAt",'YYYY-MM') AS month,
+                 count(DISTINCT ci."clubSessionId") AS checkin_sessions
+          FROM "CheckIn" ci JOIN "ClubSession" cs ON cs.id=ci."clubSessionId"
+          WHERE ci."userId"='8004d492-422b-4b27-84da-589e0e1559c7' GROUP BY 1 ORDER BY 1;
+          SELECT to_char(cs."startedAt",'YYYY-MM') AS month,
+                 count(DISTINCT ct."clubSessionId") AS game_sessions
+          FROM "GamePlayer" gp JOIN "Game" g ON g.id=gp."gameId"
+          JOIN "CourtTurn" ct ON ct.id=g."turnId" JOIN "ClubSession" cs ON cs.id=ct."clubSessionId"
+          WHERE gp."userId"='8004d492-422b-4b27-84da-589e0e1559c7' GROUP BY 1 ORDER BY 1;
 
-          \echo '===== 4) 터닝포인트 멤버 중 7월 출석 0회(체크인+게임 기준) 목록 ====='
-          SELECT u.name, u.id
-          FROM "ClubMember" cm JOIN "Club" c ON c.id=cm."clubId" JOIN "User" u ON u.id=cm."userId"
-          WHERE c.name='터닝포인트' AND NOT u."isGuest"
-            AND NOT EXISTS (SELECT 1 FROM "CheckIn" ci JOIN "ClubSession" cs ON cs.id=ci."clubSessionId"
-              WHERE ci."userId"=u.id AND cs."clubId"=c.id AND cs."startedAt">='2026-07-01' AND cs."startedAt"<'2026-08-01')
-            AND NOT EXISTS (SELECT 1 FROM "GamePlayer" gp
-              JOIN "Game" g ON g.id=gp."gameId" JOIN "CourtTurn" ct ON ct.id=g."turnId"
-              JOIN "ClubSession" cs ON cs.id=ct."clubSessionId"
-              WHERE gp."userId"=u.id AND g.status IN ('IN_PROGRESS','COMPLETED')
-                AND cs."clubId"=c.id AND cs."startedAt">='2026-07-01' AND cs."startedAt"<'2026-08-01')
-          ORDER BY u.name;
+          \echo '===== C) 7월 터닝포인트 정모에서 게임 뛴 게스트 명단(운영자 식별용) ====='
+          SELECT u.name, count(DISTINCT ct."clubSessionId") AS sessions, count(*) AS games,
+                 min(cs."startedAt"::date) AS first_day, max(cs."startedAt"::date) AS last_day
+          FROM "GamePlayer" gp JOIN "User" u ON u.id=gp."userId"
+          JOIN "Game" g ON g.id=gp."gameId" JOIN "CourtTurn" ct ON ct.id=g."turnId"
+          JOIN "ClubSession" cs ON cs.id=ct."clubSessionId" JOIN "Club" c ON c.id=cs."clubId"
+          WHERE u."isGuest" AND c.name='터닝포인트' AND g.status IN ('IN_PROGRESS','COMPLETED')
+            AND cs."startedAt">='2026-07-01' AND cs."startedAt"<'2026-08-01'
+          GROUP BY u.name ORDER BY u.name;
 
-          \echo '===== 5) 위 0회 멤버와 동명(공백 무시)의 게스트 계정이 7월 기록을 가진 케이스 ====='
-          SELECT u.name AS member_name, gu.id AS guest_id, gu.name AS guest_name,
-            (SELECT count(DISTINCT ct."clubSessionId") FROM "GamePlayer" gp
-              JOIN "Game" g ON g.id=gp."gameId" JOIN "CourtTurn" ct ON ct.id=g."turnId"
-              JOIN "ClubSession" cs ON cs.id=ct."clubSessionId"
-              WHERE gp."userId"=gu.id AND g.status IN ('IN_PROGRESS','COMPLETED')
-                AND cs."startedAt">='2026-07-01' AND cs."startedAt"<'2026-08-01') AS guest_jul_sessions
-          FROM "ClubMember" cm JOIN "Club" c ON c.id=cm."clubId" JOIN "User" u ON u.id=cm."userId"
-          JOIN "User" gu ON gu."isGuest" AND replace(gu.name,' ','')=replace(u.name,' ','')
-          WHERE c.name='터닝포인트' AND NOT u."isGuest"
-            AND NOT EXISTS (SELECT 1 FROM "CheckIn" ci JOIN "ClubSession" cs ON cs.id=ci."clubSessionId"
-              WHERE ci."userId"=u.id AND cs."clubId"=c.id AND cs."startedAt">='2026-07-01' AND cs."startedAt"<'2026-08-01')
-            AND NOT EXISTS (SELECT 1 FROM "GamePlayer" gp
-              JOIN "Game" g ON g.id=gp."gameId" JOIN "CourtTurn" ct ON ct.id=g."turnId"
-              JOIN "ClubSession" cs ON cs.id=ct."clubSessionId"
-              WHERE gp."userId"=u.id AND g.status IN ('IN_PROGRESS','COMPLETED')
-                AND cs."clubId"=c.id AND cs."startedAt">='2026-07-01' AND cs."startedAt"<'2026-08-01')
-          ORDER BY u.name;
+          \echo '===== D) 7월 터닝포인트 정모 체크인만 있는(게임 무관) 게스트 명단 ====='
+          SELECT u.name, count(DISTINCT ci."clubSessionId") AS checkin_sessions
+          FROM "CheckIn" ci JOIN "User" u ON u.id=ci."userId"
+          JOIN "ClubSession" cs ON cs.id=ci."clubSessionId" JOIN "Club" c ON c.id=cs."clubId"
+          WHERE u."isGuest" AND c.name='터닝포인트'
+            AND cs."startedAt">='2026-07-01' AND cs."startedAt"<'2026-08-01'
+          GROUP BY u.name ORDER BY u.name;
           SQL
 
           B64=$(base64 -w0 q.sql)
