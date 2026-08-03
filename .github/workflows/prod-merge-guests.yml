@@ -48,7 +48,7 @@ jobs:
           FROM "Club" c WHERE c.name='터닝포인트'
           ON CONFLICT DO NOTHING;
           SELECT 'created';
-          COMMIT;T;
+          COMMIT;
           SQL
 
           B64=$(base64 -w0 q.sql)
