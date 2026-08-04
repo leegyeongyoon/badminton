@@ -1,10 +1,7 @@
-name: Prod Merge Guests
+name: Prod Maintenance
 
-# 2차 일회성: 터닝포인트 동명(공백 무시) 중복 멤버 계정 정리.
-# 같은 이름의 멤버 계정이 2개(명부/전화 + 카카오 로그인)라 출석왕에 두 줄
-# (한쪽 0회)로 보이던 문제 — 기록·회비가 전혀 없는 빈 계정의 멤버십만 제거한다.
-# 계정 자체와 기록은 건드리지 않는다. 대표(LEADER)는 제외.
-# 수동 실행(workflow_dispatch) 전용.
+# Pi 유지보수(수동 실행 전용) — 현재: docker buildkit 캐시 손상으로 Deploy 가
+# 반복 실패("parent snapshot does not exist")할 때 빌더 캐시를 정리한다.
 on:
   workflow_dispatch:
 
@@ -33,18 +30,9 @@ jobs:
             UserKnownHostsFile /dev/null
           SSHCONFIG
 
-      - name: Remove empty duplicate memberships
+      - name: Prune docker builder cache (fix corrupted snapshots)
         env:
           SSHPASS: ${{ secrets.SSH_PASSWORD }}
         run: |
-          cat > q.sql <<'SQL'
-          BEGIN;
-          \echo '===== 진단용 임시 계정 제거 ====='
-          DELETE FROM "ClubMember" WHERE id='diag-tmp-cm-0001';
-          DELETE FROM "User" WHERE id='diag-tmp-user-0001';
-          COMMIT;
-          SQL
-
-          B64=$(base64 -w0 q.sql)
           sshpass -e ssh -o ConnectTimeout=25 "${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}" \
-            "echo $B64 | base64 -d | docker exec -i badminton-prod-db psql -U badminton -d badminton -P pager=off -v ON_ERROR_STOP=1 -f -"
+            "docker builder prune -af && docker image prune -f && df -h / | tail -1"
