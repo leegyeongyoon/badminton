@@ -1,0 +1,29 @@
+<!doctype html><meta charset="utf-8"><link rel="stylesheet" href="/ig-base.css">
+<div class="card">
+  <div class="deco" style="top:600px; right:-90px; transform:rotate(24deg);">🏆</div>
+  <div class="top">
+    <div class="eyebrow">이번 달 우리 클럽 출석왕은?</div>
+    <div class="headline">출석도 게임 수도<br>자동으로 쌓여요</div>
+  </div>
+  <div class="phone-wrap"><div class="phone"><div class="island"></div><div class="screen">
+    <iframe id="app" src="/club/cc2112ad-3e60-45e3-9b3d-a2307359d7c6"></iframe>
+  </div></div></div>
+  <script>
+    // 로드 후 iframe 내부 '출석왕' 탭 클릭(same-origin)
+    setTimeout(() => {
+      try {
+        const doc = document.getElementById('app').contentDocument;
+        const el = [...doc.querySelectorAll('div,span')].find(n => n.textContent.trim() === '출석왕' && n.children.length === 0);
+        if (el) el.click();
+      } catch (e) {}
+    }, 5000);
+    // 로컬 데이터가 6월이라 '전체' 기간으로 전환해 순위를 보여준다.
+    setTimeout(() => {
+      try {
+        const doc = document.getElementById('app').contentDocument;
+        const el = [...doc.querySelectorAll('div,span')].find(n => n.textContent.trim() === '전체' && n.children.length === 0);
+        if (el) el.click();
+      } catch (e) {}
+    }, 7500);
+  </script>
+</div>

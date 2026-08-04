@@ -1,0 +1,26 @@
+<!doctype html><meta charset="utf-8"><link rel="stylesheet" href="/ig-base.css">
+<div class="card">
+  <div class="deco" style="top:-40px; right:-70px;">🏸</div>
+<script>
+  // 미공개 기능(코치 구인·구직) 카드는 홍보 이미지에서 숨긴다(same-origin).
+  const hide = () => {
+    try {
+      const doc = document.getElementById('app').contentDocument;
+      [...doc.querySelectorAll('div')].forEach((n) => {
+        if (n.textContent.trim() === '코치 구인·구직' && n.children.length === 0) {
+          let p = n.parentElement && n.parentElement.parentElement ? n.parentElement.parentElement : n;
+          p.style.visibility = 'hidden';
+        }
+      });
+    } catch (e) {}
+  };
+  setTimeout(hide, 3500); setTimeout(hide, 6000);
+</script>
+  <div class="top">
+    <div class="eyebrow">체육관 도착하면</div>
+    <div class="headline">출석 체크는<br>QR 스캔 3초면 끝</div>
+  </div>
+  <div class="phone-wrap"><div class="phone"><div class="island"></div><div class="screen">
+    <iframe id="app" src="/"></iframe>
+  </div></div></div>
+</div>
