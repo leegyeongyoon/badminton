@@ -88,6 +88,11 @@ export interface JobApplicantRow {
   status: string;
   offerTerms: OfferTerms | null;
   offerSentAt: string | null;
+  // 면접 안내(코치에게도 노출) + 공고측 전용 운영 메모.
+  interviewWhen: string | null;
+  interviewPlace: string | null;
+  interviewNote: string | null;
+  managerNote: string | null;
   createdAt: string;
 }
 
@@ -104,7 +109,11 @@ export interface JobPostDetail extends JobPostCard {
   authorUserId: string;
   authorName: string;
   canManage: boolean; // 작성자 또는 그 클럽 운영진
-  myApplication: { id: string; status: string; message: string | null; offerTerms: OfferTerms | null; offerSentAt: string | null } | null; // 코치 시점
+  myApplication: {
+    id: string; status: string; message: string | null;
+    offerTerms: OfferTerms | null; offerSentAt: string | null;
+    interviewWhen: string | null; interviewPlace: string | null; interviewNote: string | null;
+  } | null; // 코치 시점(managerNote 는 비노출)
   applications: JobApplicantRow[] | null; // canManage 일 때만
 }
 
@@ -294,6 +303,10 @@ export async function getJob(id: string, viewerUserId?: string): Promise<JobPost
       status: a.status,
       offerTerms: (a.offerTerms as OfferTerms | null) ?? null,
       offerSentAt: a.offerSentAt?.toISOString() ?? null,
+      interviewWhen: a.interviewWhen,
+      interviewPlace: a.interviewPlace,
+      interviewNote: a.interviewNote,
+      managerNote: a.managerNote,
       createdAt: a.createdAt.toISOString(),
     }));
   }
@@ -304,7 +317,10 @@ export async function getJob(id: string, viewerUserId?: string): Promise<JobPost
     if (myProfile) {
       const app = await prisma.coachJobApplication.findUnique({
         where: { postId_coachProfileId: { postId: id, coachProfileId: myProfile.id } },
-        select: { id: true, status: true, message: true, offerTerms: true, offerSentAt: true },
+        select: {
+          id: true, status: true, message: true, offerTerms: true, offerSentAt: true,
+          interviewWhen: true, interviewPlace: true, interviewNote: true,
+        },
       });
       if (app && app.status !== 'WITHDRAWN') {
         myApplication = {
@@ -313,6 +329,9 @@ export async function getJob(id: string, viewerUserId?: string): Promise<JobPost
           message: app.message,
           offerTerms: (app.offerTerms as OfferTerms | null) ?? null,
           offerSentAt: app.offerSentAt?.toISOString() ?? null,
+          interviewWhen: app.interviewWhen,
+          interviewPlace: app.interviewPlace,
+          interviewNote: app.interviewNote,
         };
       }
     }
@@ -490,6 +509,7 @@ export async function updateApplicationStatus(
   requesterId: string,
   status: string,
   offer?: unknown,
+  interview?: { when?: unknown; place?: unknown; note?: unknown } | null,
 ): Promise<{ threadId?: string }> {
   if (!['INTERVIEW', 'OFFERED', 'ACCEPTED', 'REJECTED', 'DECLINED', 'WITHDRAWN'].includes(status)) {
     throw new BadRequestError('잘못된 상태예요');
@@ -514,8 +534,20 @@ export async function updateApplicationStatus(
   // 오퍼레터 발송 — 조건 명시 필수.
   const offerData =
     status === 'OFFERED' ? { offerTerms: sanitizeOffer(offer) as never, offerSentAt: new Date() } : {};
+  // 면접 전환 시 면접 안내(일시·장소·메모, 전부 선택) 함께 저장.
+  const interviewData =
+    status === 'INTERVIEW' && interview
+      ? {
+          interviewWhen: clamp(interview.when, 80),
+          interviewPlace: clamp(interview.place, 120),
+          interviewNote: clamp(interview.note, 300),
+        }
+      : {};
 
-  await prisma.coachJobApplication.update({ where: { id: applicationId }, data: { status, ...offerData } });
+  await prisma.coachJobApplication.update({
+    where: { id: applicationId },
+    data: { status, ...offerData, ...interviewData },
+  });
 
   let threadId: string | undefined;
   if (status === 'INTERVIEW' || status === 'OFFERED') {
@@ -536,8 +568,15 @@ export async function updateApplicationStatus(
         data: { type: 'coachJobOfferReply', postId, status },
       });
     } else if (status !== 'WITHDRAWN') {
+      // 면접 안내가 있으면 일시·장소를 푸시 본문에 바로 담아준다.
+      const iv = status === 'INTERVIEW' && interview ? [clamp(interview.when, 80), clamp(interview.place, 120)].filter(Boolean).join(' · ') : '';
       const pushMap: Record<string, { title: string; body: string }> = {
-        INTERVIEW: { title: '면접 제안이 왔어요 💬', body: `"${app.post.title}" 공고에서 면접(채팅)을 제안했어요` },
+        INTERVIEW: {
+          title: '면접 제안이 왔어요 💬',
+          body: iv
+            ? `"${app.post.title}" 면접 안내: ${iv} — 채팅에서 조율하세요`
+            : `"${app.post.title}" 공고에서 면접(채팅)을 제안했어요`,
+        },
         OFFERED: { title: '오퍼레터가 도착했어요 📄', body: `"${app.post.title}" 공고에서 채용 조건을 제시했어요 — 확인 후 회신해 주세요` },
         REJECTED: { title: '지원 결과 안내', body: `"${app.post.title}" 공고 지원이 아쉽게도 불합격 처리됐어요` },
       };
@@ -580,6 +619,10 @@ export interface MyApplicationRow {
   message: string | null;
   createdAt: string;
   post: JobPostCard;
+  // 면접 안내(공고측이 입력) — 코치 지원 현황 카드에 표시.
+  interviewWhen: string | null;
+  interviewPlace: string | null;
+  interviewNote: string | null;
 }
 
 /** 내(코치)가 지원한 공고 + 상태. */
@@ -599,5 +642,61 @@ export async function listMyApplications(userId: string): Promise<MyApplicationR
     message: r.message,
     createdAt: r.createdAt.toISOString(),
     post: toCard(r.post, clubMap),
+    interviewWhen: r.interviewWhen,
+    interviewPlace: r.interviewPlace,
+    interviewNote: r.interviewNote,
   }));
+}
+
+/**
+ * 면접 안내 수정 — INTERVIEW 상태의 지원에 대해 공고측이 일시·장소·메모를
+ * 다시 잡을 때. 변경 시 코치에게 갱신 푸시.
+ */
+export async function setApplicationInterview(
+  postId: string,
+  applicationId: string,
+  requesterId: string,
+  interview: { when?: unknown; place?: unknown; note?: unknown },
+): Promise<void> {
+  const app = await prisma.coachJobApplication.findUnique({
+    where: { id: applicationId },
+    include: { post: true, coachProfile: { select: { userId: true } } },
+  });
+  if (!app || app.postId !== postId) throw new NotFoundError('지원');
+  if (!(await canManagePost(app.post, requesterId))) throw new ForbiddenError();
+  if (app.status !== 'INTERVIEW') throw new BadRequestError('면접 단계의 지원만 안내를 수정할 수 있어요');
+
+  const when = clamp(interview.when, 80);
+  const place = clamp(interview.place, 120);
+  await prisma.coachJobApplication.update({
+    where: { id: applicationId },
+    data: { interviewWhen: when, interviewPlace: place, interviewNote: clamp(interview.note, 300) },
+  });
+  try {
+    const iv = [when, place].filter(Boolean).join(' · ');
+    await sendPushToUser(app.coachProfile.userId, {
+      title: '면접 안내가 변경됐어요 📅',
+      body: iv ? `"${app.post.title}" 면접: ${iv}` : `"${app.post.title}" 면접 안내를 확인해 주세요`,
+      data: { type: 'coachJobInterview', postId },
+    });
+  } catch { /* 알림 실패 무시 */ }
+}
+
+/** 지원자 운영 메모(공고측 전용) — 코치에게 노출되지 않는다. */
+export async function setApplicationNote(
+  postId: string,
+  applicationId: string,
+  requesterId: string,
+  note: unknown,
+): Promise<void> {
+  const app = await prisma.coachJobApplication.findUnique({
+    where: { id: applicationId },
+    include: { post: true },
+  });
+  if (!app || app.postId !== postId) throw new NotFoundError('지원');
+  if (!(await canManagePost(app.post, requesterId))) throw new ForbiddenError();
+  await prisma.coachJobApplication.update({
+    where: { id: applicationId },
+    data: { managerNote: clamp(note, 1000) },
+  });
 }

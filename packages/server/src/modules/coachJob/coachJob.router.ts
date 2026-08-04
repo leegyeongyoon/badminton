@@ -89,7 +89,10 @@ router.post('/:id/apply', authenticate, applyLimiter, async (req: Request, res: 
 
 router.put('/:id/applications/:appId', authenticate, async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const { status, offer } = req.body as { status?: string; offer?: unknown };
+    const { status, offer, interview } = req.body as {
+      status?: string; offer?: unknown;
+      interview?: { when?: unknown; place?: unknown; note?: unknown } | null;
+    };
     res.json(
       await svc.updateApplicationStatus(
         String(req.params.id),
@@ -97,8 +100,35 @@ router.put('/:id/applications/:appId', authenticate, async (req: Request, res: R
         req.user!.userId,
         String(status ?? ''),
         offer,
+        interview,
       ),
     );
+  } catch (err) { next(err); }
+});
+
+// PUT /coach-jobs/:id/applications/:appId/interview — 면접 안내 수정(공고측, INTERVIEW 단계)
+router.put('/:id/applications/:appId/interview', authenticate, async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    await svc.setApplicationInterview(
+      String(req.params.id),
+      String(req.params.appId),
+      req.user!.userId,
+      (req.body ?? {}) as { when?: unknown; place?: unknown; note?: unknown },
+    );
+    res.json({ ok: true });
+  } catch (err) { next(err); }
+});
+
+// PUT /coach-jobs/:id/applications/:appId/note — 지원자 운영 메모(공고측 전용)
+router.put('/:id/applications/:appId/note', authenticate, async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    await svc.setApplicationNote(
+      String(req.params.id),
+      String(req.params.appId),
+      req.user!.userId,
+      (req.body as { note?: unknown } | undefined)?.note,
+    );
+    res.json({ ok: true });
   } catch (err) { next(err); }
 });
 

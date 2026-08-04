@@ -35,6 +35,10 @@ export interface JobApplicantRow {
   status: string; // APPLIED | INTERVIEW | OFFERED | ACCEPTED | DECLINED | REJECTED
   offerTerms: OfferTerms | null;
   offerSentAt: string | null;
+  interviewWhen: string | null;
+  interviewPlace: string | null;
+  interviewNote: string | null;
+  managerNote: string | null;
   createdAt: string;
 }
 
@@ -61,7 +65,11 @@ export interface JobPostDetail extends JobPostCard {
   authorUserId: string;
   authorName: string;
   canManage: boolean;
-  myApplication: { id: string; status: string; message: string | null; offerTerms: OfferTerms | null; offerSentAt: string | null } | null;
+  myApplication: {
+    id: string; status: string; message: string | null;
+    offerTerms: OfferTerms | null; offerSentAt: string | null;
+    interviewWhen: string | null; interviewPlace: string | null; interviewNote: string | null;
+  } | null;
   applications: JobApplicantRow[] | null;
 }
 
@@ -92,6 +100,15 @@ export interface MyApplicationRow {
   message: string | null;
   createdAt: string;
   post: JobPostCard;
+  interviewWhen: string | null;
+  interviewPlace: string | null;
+  interviewNote: string | null;
+}
+
+export interface InterviewInfo {
+  when?: string | null;
+  place?: string | null;
+  note?: string | null;
 }
 
 export const APPLICATION_STATUS_LABEL: Record<string, string> = {
@@ -117,8 +134,12 @@ export const coachJobApi = {
   remove: (id: string) => api.delete(`/coach-jobs/${id}`).then((r) => r.data),
   apply: (id: string, message?: string) =>
     api.post<{ id: string }>(`/coach-jobs/${id}/apply`, { message }).then((r) => r.data),
-  setApplicationStatus: (postId: string, appId: string, status: string, offer?: OfferTerms) =>
-    api.put<{ threadId?: string }>(`/coach-jobs/${postId}/applications/${appId}`, { status, offer }).then((r) => r.data),
+  setApplicationStatus: (postId: string, appId: string, status: string, offer?: OfferTerms, interview?: InterviewInfo) =>
+    api.put<{ threadId?: string }>(`/coach-jobs/${postId}/applications/${appId}`, { status, offer, interview }).then((r) => r.data),
+  setInterview: (postId: string, appId: string, interview: InterviewInfo) =>
+    api.put(`/coach-jobs/${postId}/applications/${appId}/interview`, interview).then((r) => r.data),
+  setNote: (postId: string, appId: string, note: string | null) =>
+    api.put(`/coach-jobs/${postId}/applications/${appId}/note`, { note }).then((r) => r.data),
   mine: () => api.get<MyJobRow[]>('/coach-jobs/mine').then((r) => r.data),
   applied: () => api.get<MyApplicationRow[]>('/coach-jobs/applied').then((r) => r.data),
 };

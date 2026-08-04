@@ -875,6 +875,12 @@ model CoachJobApplication {
   // 오퍼레터 — 공고측이 제시한 최종 조건(급여·요일·시작 시기·메시지).
   offerTerms  Json?
   offerSentAt DateTime?
+  // 면접 안내 — 자유 텍스트(일시는 "협의 후 확정"도 흔해서 구조화하지 않음).
+  interviewWhen  String? @db.VarChar(80)
+  interviewPlace String? @db.VarChar(120)
+  interviewNote  String? @db.VarChar(300)
+  // 공고측 전용 운영 메모(면접 평가 등) — 코치에게는 노출하지 않는다.
+  managerNote String? @db.VarChar(1000)
   createdAt      DateTime @default(now())
   updatedAt      DateTime @updatedAt
 

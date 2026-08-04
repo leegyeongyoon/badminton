@@ -243,6 +243,12 @@ export default function JobPostDetailScreen() {
                 {my.status === 'DECLINED' && '오퍼를 거절했어요'}
                 {my.status === 'REJECTED' && '아쉽지만 다음 기회를 노려봐요'}
               </Text>
+              {my.status === 'INTERVIEW' && (my.interviewWhen || my.interviewPlace || my.interviewNote) && (
+                <Text style={[styles.myStatusHint, { color: colors.text, fontWeight: '800', marginTop: 4 }]}>
+                  📅 {[my.interviewWhen, my.interviewPlace].filter(Boolean).join(' · ') || '일정 협의 중'}
+                  {my.interviewNote ? `\n${my.interviewNote}` : ''}
+                </Text>
+              )}
             </View>
             {(my.status === 'INTERVIEW' || my.status === 'ACCEPTED' || my.status === 'OFFERED') && (
               <Pressable onPress={() => router.push('/coach/inbox' as never)} style={[styles.smallBtn, { backgroundColor: colors.primary }]}>

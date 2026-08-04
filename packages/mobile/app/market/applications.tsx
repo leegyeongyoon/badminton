@@ -156,6 +156,21 @@ export default function MyApplications() {
                       );
                     })}
                   </View>
+
+                  {/* 면접 안내 — 공고측이 잡은 일시·장소 */}
+                  {r.status === 'INTERVIEW' && (r.interviewWhen || r.interviewPlace || r.interviewNote) && (
+                    <View style={[styles.interviewBox, { backgroundColor: colors.warning + '0E', borderColor: colors.warning + '40' }]}>
+                      <Ionicons name="calendar-outline" size={13} color={colors.warning} />
+                      <View style={{ flex: 1, minWidth: 0 }}>
+                        <Text style={[styles.interviewText, { color: colors.text }]} numberOfLines={1}>
+                          면접 {[r.interviewWhen, r.interviewPlace].filter(Boolean).join(' · ') || '일정 협의 중'}
+                        </Text>
+                        {!!r.interviewNote && (
+                          <Text style={[styles.interviewNote, { color: colors.textSecondary }]} numberOfLines={1}>{r.interviewNote}</Text>
+                        )}
+                      </View>
+                    </View>
+                  )}
                 </Pressable>
               );
             })
@@ -173,6 +188,9 @@ const styles = StyleSheet.create({
   tabItem: { flexDirection: 'row', alignItems: 'center', gap: 5, paddingVertical: 12, paddingHorizontal: spacing.md, borderBottomWidth: 2, borderBottomColor: 'transparent' },
   tabLabel: { fontSize: 14, fontWeight: '800' },
   tabCount: { fontSize: 13, fontWeight: '900' },
+  interviewBox: { flexDirection: 'row', alignItems: 'center', gap: 7, borderWidth: 1, borderRadius: 10, paddingHorizontal: 10, paddingVertical: 8, marginTop: 10 },
+  interviewText: { fontSize: 12.5, fontWeight: '800' },
+  interviewNote: { fontSize: 11.5, fontWeight: '600', marginTop: 2 },
   center: { flex: 1, alignItems: 'center', justifyContent: 'center' },
   emptyBox: { alignItems: 'center', gap: spacing.sm, paddingVertical: spacing.xxxl },
   emptyTitle: { ...typography.subtitle1 },
