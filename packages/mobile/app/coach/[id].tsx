@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { View, Text, StyleSheet, ScrollView, Pressable, Image, ActivityIndicator } from 'react-native';
+import { View, Text, StyleSheet, ScrollView, Pressable, Image, ActivityIndicator, Modal, TextInput, TouchableOpacity } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -8,6 +8,8 @@ import { typography, spacing } from '../../constants/theme';
 import { BackButton } from '../../components/ui/BackButton';
 import { ResumeDocument } from '../../components/market/ResumeDocument';
 import { coachApi, coachChatApi, type CoachDetail } from '../../services/coach';
+import { coachJobApi, type MyJobRow } from '../../services/coachJob';
+import { showSuccess } from '../../utils/feedback';
 import { absolutizeUploadUrl } from '../../services/upload';
 import { useAuthStore } from '../../store/authStore';
 
@@ -25,6 +27,12 @@ export default function CoachProfileScreen() {
   const [coach, setCoach] = useState<CoachDetail | null>(null);
   const [loading, setLoading] = useState(true);
   const [starting, setStarting] = useState(false);
+  // 스카웃 — 내가 관리하는 OPEN 공고가 있으면 [내 공고로 제안] 노출
+  const [myJobs, setMyJobs] = useState<MyJobRow[]>([]);
+  const [showInvite, setShowInvite] = useState(false);
+  const [invitePostId, setInvitePostId] = useState<string | null>(null);
+  const [inviteMsg, setInviteMsg] = useState('');
+  const [inviting, setInviting] = useState(false);
 
   useEffect(() => {
     if (!id) return;
@@ -33,6 +41,7 @@ export default function CoachProfileScreen() {
       .then(setCoach)
       .catch(() => {})
       .finally(() => setLoading(false));
+    coachJobApi.mine().then((r) => setMyJobs(r.filter((j) => j.status === 'OPEN'))).catch(() => {});
   }, [id]);
 
   const isMe = !!coach && coach.userId === myUserId;
@@ -47,6 +56,20 @@ export default function CoachProfileScreen() {
       /* 토스트는 인터셉터 */
     } finally {
       setStarting(false);
+    }
+  };
+
+  const sendInvite = async () => {
+    if (!coach || !invitePostId || inviting) return;
+    setInviting(true);
+    try {
+      await coachJobApi.invite(invitePostId, coach.id, inviteMsg.trim() || undefined);
+      showSuccess(`${coach.displayName} 코치에게 제안을 보냈어요`);
+      setShowInvite(false);
+      setInvitePostId(null);
+      setInviteMsg('');
+    } catch { /* noop */ } finally {
+      setInviting(false);
     }
   };
 
@@ -77,7 +100,7 @@ export default function CoachProfileScreen() {
         <BackButton />
         <Text style={[styles.topTitle, { color: colors.text }]} numberOfLines={1}>{coach.displayName} 코치</Text>
         {isMe && (
-          <Pressable onPress={() => router.push('/coach/edit' as never)} hitSlop={8}>
+          <Pressable onPress={() => router.push('/coach/resume' as never)} hitSlop={8}>
             <Text style={[styles.editLink, { color: colors.primary }]}>프로필 수정</Text>
           </Pressable>
         )}
@@ -131,11 +154,20 @@ export default function CoachProfileScreen() {
       </ScrollView>
 
       {!isMe && (
-        <View style={[styles.bottomBar, { backgroundColor: colors.background, borderTopColor: colors.border, paddingBottom: Math.max(insets.bottom, spacing.md) }]}>
+        <View style={[styles.bottomBar, { backgroundColor: colors.background, borderTopColor: colors.border, paddingBottom: Math.max(insets.bottom, spacing.md), flexDirection: 'row', gap: spacing.sm }]}>
+          {myJobs.length > 0 && (
+            <Pressable
+              onPress={() => { setInvitePostId(myJobs[0]?.id ?? null); setShowInvite(true); }}
+              style={({ pressed }) => [styles.inviteBtn, { borderColor: colors.primary }, pressed && { opacity: 0.85 }]}
+            >
+              <Ionicons name="megaphone-outline" size={16} color={colors.primary} />
+              <Text style={[styles.inviteText, { color: colors.primary }]}>내 공고로 제안</Text>
+            </Pressable>
+          )}
           <Pressable
             onPress={startChat}
             disabled={starting}
-            style={({ pressed }) => [styles.chatBtn, { backgroundColor: colors.primary }, (pressed || starting) && { opacity: 0.85 }]}
+            style={({ pressed }) => [styles.chatBtn, { backgroundColor: colors.primary, flex: 1.4 }, (pressed || starting) && { opacity: 0.85 }]}
           >
             {starting ? <ActivityIndicator color="#fff" /> : (
               <>
@@ -146,11 +178,68 @@ export default function CoachProfileScreen() {
           </Pressable>
         </View>
       )}
+
+      {/* 스카웃 — 내 공고 선택 + 메시지 */}
+      <Modal visible={showInvite} transparent animationType="fade" onRequestClose={() => setShowInvite(false)}>
+        <TouchableOpacity style={styles.sheetOverlay} activeOpacity={1} onPress={() => setShowInvite(false)}>
+          <TouchableOpacity activeOpacity={1} style={[styles.sheet, { backgroundColor: colors.surface }]} onPress={() => {}}>
+            <Text style={[styles.sheetTitle, { color: colors.text }]}>어떤 공고로 제안할까요?</Text>
+            <ScrollView style={{ maxHeight: 220 }} showsVerticalScrollIndicator={false}>
+              {myJobs.map((j) => {
+                const on = invitePostId === j.id;
+                return (
+                  <Pressable
+                    key={j.id}
+                    onPress={() => setInvitePostId(j.id)}
+                    style={[styles.jobPick, { borderColor: on ? colors.primary : colors.border, backgroundColor: on ? colors.primary + '0C' : 'transparent' }]}
+                  >
+                    <Ionicons name={on ? 'radio-button-on' : 'radio-button-off'} size={16} color={on ? colors.primary : colors.textLight} />
+                    <View style={{ flex: 1, minWidth: 0 }}>
+                      <Text style={[styles.jobPickTitle, { color: colors.text }]} numberOfLines={1}>{j.title}</Text>
+                      <Text style={[styles.jobPickMeta, { color: colors.textLight }]} numberOfLines={1}>{j.payLabel} · 지원 {j.applicants}명</Text>
+                    </View>
+                  </Pressable>
+                );
+              })}
+            </ScrollView>
+            <TextInput
+              style={[styles.inviteInput, { color: colors.text, backgroundColor: colors.background, borderColor: colors.border }]}
+              value={inviteMsg}
+              onChangeText={setInviteMsg}
+              placeholder="한마디 (선택 — 예: 프로필 보고 연락드려요, 주말 레슨 가능하실까요?)"
+              placeholderTextColor={colors.textLight}
+              multiline
+              maxLength={300}
+            />
+            <View style={{ flexDirection: 'row', gap: spacing.sm }}>
+              <Pressable onPress={() => setShowInvite(false)} style={[styles.sheetGhost, { borderColor: colors.border }]}>
+                <Text style={[styles.sheetGhostText, { color: colors.textSecondary }]}>취소</Text>
+              </Pressable>
+              <Pressable onPress={sendInvite} disabled={inviting || !invitePostId} style={({ pressed }) => [styles.sheetPrimary, { backgroundColor: colors.primary }, (pressed || inviting || !invitePostId) && { opacity: 0.7 }]}>
+                {inviting ? <ActivityIndicator color="#fff" /> : <Text style={styles.sheetPrimaryText}>제안 보내기</Text>}
+              </Pressable>
+            </View>
+          </TouchableOpacity>
+        </TouchableOpacity>
+      </Modal>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
+  inviteBtn: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 5, borderWidth: 1.5, borderRadius: 14, paddingVertical: 14 },
+  inviteText: { fontSize: 14, fontWeight: '800' },
+  sheetOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.45)', justifyContent: 'center', padding: spacing.xl },
+  sheet: { borderRadius: 18, padding: spacing.lg, maxWidth: 480, width: '100%', alignSelf: 'center', gap: spacing.md },
+  sheetTitle: { ...typography.subtitle1 },
+  jobPick: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, borderWidth: 1, borderRadius: 12, padding: spacing.md, marginBottom: spacing.sm },
+  jobPickTitle: { fontSize: 14, fontWeight: '800' },
+  jobPickMeta: { fontSize: 11.5, fontWeight: '600', marginTop: 2 },
+  inviteInput: { fontSize: 13.5, fontWeight: '600', borderWidth: 1, borderRadius: 12, padding: spacing.md, minHeight: 64, textAlignVertical: 'top' },
+  sheetGhost: { flex: 1, alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderRadius: 12, paddingVertical: 13 },
+  sheetGhostText: { fontSize: 14, fontWeight: '800' },
+  sheetPrimary: { flex: 2, alignItems: 'center', justifyContent: 'center', borderRadius: 12, paddingVertical: 13 },
+  sheetPrimaryText: { color: '#fff', fontSize: 14, fontWeight: '800' },
   topBar: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, paddingHorizontal: spacing.md, paddingBottom: spacing.sm, borderBottomWidth: StyleSheet.hairlineWidth },
   topBarFloating: { flexDirection: 'row', paddingHorizontal: spacing.md, paddingVertical: spacing.sm },
   topTitle: { ...typography.subtitle1, flex: 1 },

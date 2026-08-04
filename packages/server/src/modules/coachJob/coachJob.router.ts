@@ -47,6 +47,33 @@ router.get('/mine', authenticate, async (req: Request, res: Response, next: Next
   } catch (err) { next(err); }
 });
 
+// GET /coach-jobs/invites — 내(코치)가 받은 공고 제안 목록
+router.get('/invites', authenticate, async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    res.json(await svc.listMyInvites(req.user!.userId));
+  } catch (err) { next(err); }
+});
+
+// PUT /coach-jobs/invites/:inviteId/decline — 제안 거절(코치 본인)
+router.put('/invites/:inviteId/decline', authenticate, async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    await svc.declineInvite(String(req.params.inviteId), req.user!.userId);
+    res.json({ ok: true });
+  } catch (err) { next(err); }
+});
+
+// POST /coach-jobs/:id/invite — 공고 제안 보내기(공고 관리자 → 코치)
+router.post('/:id/invite', authenticate, async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { coachProfileId, message } = req.body as { coachProfileId?: string; message?: unknown };
+    if (typeof coachProfileId !== 'string') {
+      res.status(400).json({ error: 'coachProfileId가 필요합니다' });
+      return;
+    }
+    res.json(await svc.inviteCoach(String(req.params.id), req.user!.userId, coachProfileId, message));
+  } catch (err) { next(err); }
+});
+
 router.get('/applied', authenticate, async (req: Request, res: Response, next: NextFunction) => {
   try {
     res.json(await svc.listMyApplications(req.user!.userId));

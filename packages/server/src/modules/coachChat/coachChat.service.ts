@@ -35,6 +35,8 @@ export interface CoachThreadRow {
   counterpartPhotoUrl: string | null;
   certified: boolean; // 상대(코치 측 표시용)
   clubName: string | null;
+  kind: string; // LESSON | RECRUIT
+  jobTitle: string | null; // RECRUIT 스레드가 시작된 공고 제목
   lastText: string | null;
   lastMessageAt: string;
   unread: number; // 내 기준 안 읽음
@@ -63,24 +65,40 @@ async function clubNameOf(clubId: string | null): Promise<string | null> {
   return c?.name ?? null;
 }
 
-/** 스레드 시작(find-or-create) — 코치 프로필 기준. 본인에게는 문의 불가. */
-export async function startThread(requesterId: string, coachProfileId: string, clubId?: string | null): Promise<CoachThreadView> {
+/**
+ * 스레드 시작(find-or-create) — 코치 프로필 기준. 본인에게는 문의 불가.
+ * kind: LESSON(레슨 문의, 기본) | RECRUIT(채용 — 면접·오퍼, jobPostId 연결).
+ * RECRUIT 는 채용 진행 중 코치가 프로필을 비공개해도 열려야 하므로 active 를 안 본다.
+ */
+export async function startThread(
+  requesterId: string,
+  coachProfileId: string,
+  clubId?: string | null,
+  kind: 'LESSON' | 'RECRUIT' = 'LESSON',
+  jobPostId?: string | null,
+): Promise<CoachThreadView> {
   const profile = await prisma.coachProfile.findUnique({
     where: { id: coachProfileId },
     select: { userId: true, active: true },
   });
-  if (!profile || !profile.active) throw new NotFoundError('코치');
+  if (!profile || (kind === 'LESSON' && !profile.active)) throw new NotFoundError('코치');
   if (profile.userId === requesterId) throw new BadRequestError('내 프로필에는 문의할 수 없습니다');
 
   let thread = await prisma.coachThread.findUnique({
-    where: { coachUserId_userId: { coachUserId: profile.userId, userId: requesterId } },
+    where: { coachUserId_userId_kind: { coachUserId: profile.userId, userId: requesterId, kind } },
   });
   if (!thread) {
     thread = await prisma.coachThread.create({
-      data: { coachUserId: profile.userId, userId: requesterId, clubId: clubId ?? null },
+      data: { coachUserId: profile.userId, userId: requesterId, clubId: clubId ?? null, kind, jobPostId: jobPostId ?? null },
     });
-  } else if (clubId && !thread.clubId) {
-    thread = await prisma.coachThread.update({ where: { id: thread.id }, data: { clubId } });
+  } else {
+    const patch: { clubId?: string; jobPostId?: string } = {};
+    if (clubId && !thread.clubId) patch.clubId = clubId;
+    // 같은 상대와 새 공고로 다시 대화가 시작되면 최신 공고 맥락으로 갱신.
+    if (jobPostId && thread.jobPostId !== jobPostId) patch.jobPostId = jobPostId;
+    if (Object.keys(patch).length) {
+      thread = await prisma.coachThread.update({ where: { id: thread.id }, data: patch });
+    }
   }
   return loadThread(thread.id, requesterId);
 }
@@ -173,22 +191,27 @@ export async function listMyThreads(userId: string): Promise<{ asUser: CoachThre
     }),
   ]);
 
-  // 상대 표시 정보를 한 번에 로드(코치 프로필 / 유저 이름).
+  // 상대 표시 정보를 한 번에 로드(코치 프로필 / 유저 이름 / 공고 제목).
   const coachIds = [...new Set(asUserRows.map((t) => t.coachUserId))];
   const userIds = [...new Set(asCoachRows.map((t) => t.userId))];
   const clubIds = [...new Set([...asUserRows, ...asCoachRows].map((t) => t.clubId).filter(Boolean))] as string[];
+  const jobIds = [...new Set([...asUserRows, ...asCoachRows].map((t) => t.jobPostId).filter(Boolean))] as string[];
 
-  const [profiles, users, clubs] = await Promise.all([
+  const [profiles, users, clubs, jobs] = await Promise.all([
     prisma.coachProfile.findMany({
       where: { userId: { in: coachIds } },
       select: { userId: true, displayName: true, photoUrl: true, certified: true },
     }),
     prisma.user.findMany({ where: { id: { in: userIds } }, select: { id: true, name: true } }),
     prisma.club.findMany({ where: { id: { in: clubIds } }, select: { id: true, name: true } }),
+    jobIds.length
+      ? prisma.coachJobPost.findMany({ where: { id: { in: jobIds } }, select: { id: true, title: true } })
+      : Promise.resolve([] as { id: string; title: string }[]),
   ]);
   const profileMap = new Map(profiles.map((p) => [p.userId, p]));
   const userMap = new Map(users.map((u) => [u.id, u.name]));
   const clubMap = new Map(clubs.map((c) => [c.id, c.name]));
+  const jobMap = new Map(jobs.map((j) => [j.id, j.title]));
 
   return {
     asUser: asUserRows.map((t) => {
@@ -200,6 +223,8 @@ export async function listMyThreads(userId: string): Promise<{ asUser: CoachThre
         counterpartPhotoUrl: p?.photoUrl ?? null,
         certified: p?.certified ?? false,
         clubName: t.clubId ? clubMap.get(t.clubId) ?? null : null,
+        kind: t.kind,
+        jobTitle: t.jobPostId ? jobMap.get(t.jobPostId) ?? null : null,
         lastText: t.lastText,
         lastMessageAt: t.lastMessageAt.toISOString(),
         unread: t.userUnread,
@@ -212,6 +237,8 @@ export async function listMyThreads(userId: string): Promise<{ asUser: CoachThre
       counterpartPhotoUrl: null,
       certified: false,
       clubName: t.clubId ? clubMap.get(t.clubId) ?? null : null,
+      kind: t.kind,
+      jobTitle: t.jobPostId ? jobMap.get(t.jobPostId) ?? null : null,
       lastText: t.lastText,
       lastMessageAt: t.lastMessageAt.toISOString(),
       unread: t.coachUnread,

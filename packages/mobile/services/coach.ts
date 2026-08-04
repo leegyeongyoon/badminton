@@ -107,6 +107,8 @@ export interface CoachChatThread {
 }
 
 export interface CoachThreadRow {
+  kind: string; // LESSON | RECRUIT
+  jobTitle: string | null;
   threadId: string;
   mineIsCoach: boolean;
   counterpartName: string;

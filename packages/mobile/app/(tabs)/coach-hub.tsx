@@ -1,4 +1,4 @@
-import { useCallback, useState } from 'react';
+import { useCallback, useRef, useState } from 'react';
 import { View, Text, StyleSheet, ScrollView, Pressable, ActivityIndicator, RefreshControl, Image } from 'react-native';
 import { useRouter, useFocusEffect } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
@@ -48,7 +48,11 @@ function CoachHubInner() {
   const [myJobCount, setMyJobCount] = useState(0);
   const [myAppCount, setMyAppCount] = useState(0);
   const [chatUnread, setChatUnread] = useState(0);
-  const [hasProfile, setHasProfile] = useState(false);
+  const [hasProfile, setHasProfile] = useState<boolean | null>(null);
+  const [inviteCount, setInviteCount] = useState(0);
+  // 역할 기반 기본 탭은 최초 1회만 — 사용자가 탭을 만지면 유지.
+  const tabTouched = useRef(false);
+  const defaultApplied = useRef(false);
 
   const load = useCallback(async () => {
     try {
@@ -63,7 +67,20 @@ function CoachHubInner() {
     coachJobApi.mine().then((r) => setMyJobCount(r.length)).catch(() => {});
     coachJobApi.applied().then((r) => setMyAppCount(r.length)).catch(() => {});
     coachChatApi.unreadCount().then(setChatUnread).catch(() => {});
-    coachApi.me().then((p) => setHasProfile(!!p)).catch(() => {});
+    coachApi.me().then((p) => {
+      const isCoach = !!p;
+      setHasProfile(isCoach);
+      // 코치는 '구인 공고'(지원할 것), 그 외엔 '코치 찾기'(모집할 것)가 첫 화면.
+      if (!defaultApplied.current && !tabTouched.current) {
+        defaultApplied.current = true;
+        setTab(isCoach ? 'jobs' : 'coaches');
+      }
+      if (isCoach) {
+        coachJobApi.invites()
+          .then((r) => setInviteCount(r.filter((i) => i.status === 'SENT' && !i.applied).length))
+          .catch(() => {});
+      }
+    }).catch(() => {});
   }, [regionFilter]);
 
   useFocusEffect(useCallback(() => { load(); }, [load]));
@@ -82,19 +99,27 @@ function CoachHubInner() {
           ] as const).map((t) => {
             const on = tab === t.key;
             return (
-              <Pressable key={t.key} onPress={() => setTab(t.key)} style={[styles.segmentBtn, on && { backgroundColor: colors.primary }]}>
+              <Pressable key={t.key} onPress={() => { tabTouched.current = true; setTab(t.key); }} style={[styles.segmentBtn, on && { backgroundColor: colors.primary }]}>
                 <Text style={[styles.segmentText, { color: on ? '#fff' : colors.textSecondary }]}>{t.label}</Text>
               </Pressable>
             );
           })}
         </View>
-        {tab === 'jobs' && (
+        {tab === 'jobs' && !hasProfile && (
           <Pressable
             onPress={() => router.push('/market/job/new' as never)}
             style={({ pressed }) => [styles.newBtn, { backgroundColor: colors.primary }, pressed && { opacity: 0.85 }]}
           >
             <Ionicons name="add" size={16} color="#fff" />
             <Text style={styles.newBtnText}>공고 올리기</Text>
+          </Pressable>
+        )}
+        {tab === 'jobs' && hasProfile && myAppCount > 0 && (
+          <Pressable
+            onPress={() => router.push('/market/applications' as never)}
+            style={({ pressed }) => [styles.newBtn, { backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border }, pressed && { opacity: 0.85 }]}
+          >
+            <Text style={[styles.newBtnText, { color: colors.text }]}>내 지원 {myAppCount}</Text>
           </Pressable>
         )}
         <Pressable
@@ -110,6 +135,26 @@ function CoachHubInner() {
           )}
         </Pressable>
       </View>
+
+      {/* 역할 배너 — 비코치: 코치 온보딩 / 코치: 받은 제안 */}
+      {hasProfile === false && (
+        <Pressable
+          onPress={() => router.push('/coach/resume' as never)}
+          style={({ pressed }) => [styles.roleBanner, { backgroundColor: colors.primary + '10', borderColor: colors.primary + '35' }, pressed && { opacity: 0.85 }]}
+        >
+          <Text style={[styles.roleBannerText, { color: colors.primary }]}>🏸 코치로 활동하시나요? 프로필 하나로 공고 지원까지 시작해 보세요</Text>
+          <Ionicons name="chevron-forward" size={15} color={colors.primary} />
+        </Pressable>
+      )}
+      {hasProfile === true && inviteCount > 0 && (
+        <Pressable
+          onPress={() => router.push('/market/invites' as never)}
+          style={({ pressed }) => [styles.roleBanner, { backgroundColor: colors.warning + '12', borderColor: colors.warning + '45' }, pressed && { opacity: 0.85 }]}
+        >
+          <Text style={[styles.roleBannerText, { color: colors.warning }]}>🤝 함께하자는 제안이 {inviteCount}건 와 있어요</Text>
+          <Ionicons name="chevron-forward" size={15} color={colors.warning} />
+        </Pressable>
+      )}
 
       {/* 지역 필터(시/도 복수 선택) — 공고 피드 */}
       {tab === 'jobs' && (
@@ -206,6 +251,8 @@ function CoachHubInner() {
 }
 
 const styles = StyleSheet.create({
+  roleBanner: { flexDirection: 'row', alignItems: 'center', gap: 6, marginHorizontal: spacing.lg, marginBottom: spacing.sm, borderWidth: 1, borderRadius: 12, paddingHorizontal: spacing.md, paddingVertical: 10 },
+  roleBannerText: { flex: 1, fontSize: 12.5, fontWeight: '800', lineHeight: 17 },
   myBtn: { flexDirection: 'row', alignItems: 'center', gap: 4, borderWidth: 1, borderRadius: 12, paddingHorizontal: spacing.md, paddingVertical: 9 },
   regionBar: { paddingBottom: spacing.sm },
   regionChip: { paddingHorizontal: 12, paddingVertical: 7, borderRadius: 16, borderWidth: 1 },

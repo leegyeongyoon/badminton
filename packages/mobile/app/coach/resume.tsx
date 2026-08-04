@@ -7,18 +7,21 @@ import { useTheme } from '../../hooks/useTheme';
 import { typography, spacing } from '../../constants/theme';
 import { SKILL_LEVELS, getSkillMeta } from '../../constants/skill';
 import { BackButton } from '../../components/ui/BackButton';
+import { Switch } from '../../components/ui/Switch';
+import { PhotoPickerField } from '../../components/ui/PhotoPickerField';
+import { RegionSelect } from '../../components/market/RegionSelect';
 import {
   careerApi, CAREER_KIND_LABEL, CERT_PRESETS, AWARD_DIVISIONS, AWARD_RESULTS, type CareerEntry,
 } from '../../services/coachJob';
-import { coachApi, type CoachDetail } from '../../services/coach';
+import { coachApi } from '../../services/coach';
 import { showError, showSuccess } from '../../utils/feedback';
 
 // ─────────────────────────────────────────────────────────────
-// 내 이력서(원티드식) — 완성도 게이지 + 기본 정보(출생연도·구력·급수) +
-// 섹션별 경력(선수/지도/학력/자격증/입상). 유형마다 맞는 입력 필드를 준다:
-//  · 자격증: 공인 스포츠지도사 프리셋 + 발급기관 + 취득연월
-//  · 입상: 대회명 + 시기 + 부문(남단~혼복) + 성적(우승~입상) 칩
-// 공고 지원 시 이 이력서가 공고 측에 그대로 노출된다.
+// 코치 프로필(통합 문서) — 프로필(사진·소개·지역·비용)과 경력(선수/지도/학력/
+// 자격증/입상)을 한 화면에서 관리한다. 문서는 코치당 1개이고, 이 문서가
+//  · '코치 찾기' 카드·상세로 공개되고
+//  · 공고 지원 시 그대로 첨부된다.
+// 신규(프로필 없음)도 이 화면에서 바로 등록(코치로 활동 시작).
 // ─────────────────────────────────────────────────────────────
 
 const YM = /^\d{4}-(0[1-9]|1[0-2])$/;
@@ -53,8 +56,21 @@ export default function CoachResume() {
 
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
-  const [profile, setProfile] = useState<CoachDetail | null>(null);
+  const [isNew, setIsNew] = useState(true);
+  const [profileId, setProfileId] = useState<string | null>(null);
+  const [certified, setCertified] = useState(false);
   const [entries, setEntries] = useState<Draft[]>([]);
+
+  // 프로필(공개 카드)
+  const [photoUrl, setPhotoUrl] = useState<string | null>(null);
+  const [displayName, setDisplayName] = useState('');
+  const [intro, setIntro] = useState('');
+  const [regions, setRegions] = useState('');
+  const [regionCodes, setRegionCodes] = useState<string[]>([]);
+  const [pricePerMonth, setPricePerMonth] = useState('');
+  const [pricePerSession, setPricePerSession] = useState('');
+  const [availableTimes, setAvailableTimes] = useState('');
+  const [active, setActive] = useState(true);
 
   // 기본 정보
   const [birthYear, setBirthYear] = useState('');
@@ -67,8 +83,19 @@ export default function CoachResume() {
   useEffect(() => {
     Promise.all([coachApi.me().catch(() => null), careerApi.get().catch(() => [])])
       .then(([p, career]) => {
-        setProfile(p);
         if (p) {
+          setIsNew(false);
+          setProfileId(p.id);
+          setCertified(p.certified);
+          setPhotoUrl(p.photoUrl);
+          setDisplayName(p.displayName);
+          setIntro(p.intro ?? '');
+          setRegions(p.regions ?? '');
+          setRegionCodes(p.regionCodes ?? []);
+          setPricePerMonth(p.pricePerMonth != null ? String(p.pricePerMonth) : '');
+          setPricePerSession(p.pricePerSession != null ? String(p.pricePerSession) : '');
+          setAvailableTimes(p.availableTimes ?? '');
+          setActive(p.active);
           setBirthYear(p.birthYear != null ? String(p.birthYear) : '');
           setPlayingYears(p.playingYears != null ? String(p.playingYears) : '');
           setSkillLevel(p.skillLevel);
@@ -83,11 +110,12 @@ export default function CoachResume() {
   const remove = (key: string) => setEntries((prev) => prev.filter((e) => e._key !== key));
   const addEntry = (kind: string) => setEntries((prev) => [...prev, newDraft(kind)]);
 
-  // 원티드식 완성도 — 채용 판단에 필요한 항목 체크리스트.
+  // 완성도 — 채용 판단에 필요한 항목 체크리스트(전부 이 화면에서 채운다).
   const completion = useMemo(() => {
     const items: { label: string; done: boolean }[] = [
-      { label: '사진', done: !!profile?.photoUrl },
-      { label: '한 줄 소개', done: !!profile?.intro },
+      { label: '사진', done: !!photoUrl },
+      { label: '한 줄 소개', done: !!intro.trim() },
+      { label: '활동 지역', done: regionCodes.length > 0 },
       { label: '출생연도', done: !!birthYear.trim() },
       { label: '구력', done: !!playingYears.trim() },
       { label: '급수', done: !!skillLevel },
@@ -97,9 +125,10 @@ export default function CoachResume() {
     ];
     const done = items.filter((i) => i.done).length;
     return { items, pct: Math.round((done / items.length) * 100) };
-  }, [profile, birthYear, playingYears, skillLevel, entries]);
+  }, [photoUrl, intro, regionCodes, birthYear, playingYears, skillLevel, entries]);
 
   const save = async () => {
+    if (!displayName.trim()) { showError('코치 이름을 입력해 주세요'); return; }
     if (birthYear.trim() && !/^(19|20)\d{2}$/.test(birthYear.trim())) { showError('출생연도는 4자리로 입력해 주세요 (예: 1990)'); return; }
     for (const e of entries) {
       if (!e.title.trim()) { showError(`${CAREER_KIND_LABEL[e.kind]}에 제목이 비어 있어요`); return; }
@@ -108,14 +137,27 @@ export default function CoachResume() {
     }
     setSaving(true);
     try {
-      await coachApi.upsertMe({
+      const saved = await coachApi.upsertMe({
+        displayName: displayName.trim(),
+        photoUrl,
+        intro: intro.trim() || null,
+        regions: regions.trim() || null,
+        regionCodes,
+        pricePerMonth: pricePerMonth.trim() ? Number(pricePerMonth.replace(/[^0-9]/g, '')) : null,
+        pricePerSession: pricePerSession.trim() ? Number(pricePerSession.replace(/[^0-9]/g, '')) : null,
+        availableTimes: availableTimes.trim() || null,
+        active,
         birthYear: birthYear.trim() ? Number(birthYear.trim()) : null,
         playingYears: playingYears.trim() ? Number(playingYears.trim()) : null,
         skillLevel,
       });
-      const saved = await careerApi.set(entries.map(({ _key, ...e }) => ({ ...e, title: e.title.trim() })));
-      setEntries(saved.map((e) => ({ ...e, _key: `s${++keySeq}` })));
-      showSuccess('이력서를 저장했어요');
+      const savedEntries = await careerApi.set(entries.map(({ _key, ...e }) => ({ ...e, title: e.title.trim() })));
+      setEntries(savedEntries.map((e) => ({ ...e, _key: `s${++keySeq}` })));
+      if (isNew) {
+        setIsNew(false);
+        if (saved?.id) setProfileId(saved.id);
+      }
+      showSuccess(isNew ? '코치 프로필이 등록됐어요 — 코치 찾기에 노출돼요' : '코치 프로필을 저장했어요');
     } catch {
       /* 토스트는 인터셉터 */
     } finally {
@@ -127,24 +169,6 @@ export default function CoachResume() {
 
   if (loading) {
     return <View style={[styles.center, { backgroundColor: colors.background }]}><ActivityIndicator size="large" color={colors.primary} /></View>;
-  }
-
-  if (!profile) {
-    return (
-      <View style={{ flex: 1, backgroundColor: colors.background, paddingTop: insets.top }}>
-        <View style={{ flexDirection: 'row', padding: spacing.md }}><BackButton /></View>
-        <View style={[styles.center, { gap: spacing.md }]}>
-          <Ionicons name="document-text-outline" size={40} color={colors.textLight} />
-          <Text style={{ ...typography.subtitle1, color: colors.text }}>먼저 코치 프로필을 등록해 주세요</Text>
-          <Text style={{ ...typography.caption, color: colors.textLight, textAlign: 'center' }}>
-            이름·사진·활동지역 프로필을 만들면{'\n'}이력서를 붙일 수 있어요
-          </Text>
-          <Pressable onPress={() => router.replace('/coach/edit' as never)} style={[styles.primaryBtn, { backgroundColor: colors.primary }]}>
-            <Text style={styles.primaryBtnText}>코치 프로필 만들기</Text>
-          </Pressable>
-        </View>
-      </View>
-    );
   }
 
   const renderEntry = (e: Draft) => {
@@ -266,20 +290,33 @@ export default function CoachResume() {
     <View style={{ flex: 1, backgroundColor: colors.background }}>
       <View style={[styles.topBar, { backgroundColor: colors.surface, borderBottomColor: colors.border, paddingTop: insets.top + spacing.sm }]}>
         <BackButton />
-        <Text style={[styles.title, { color: colors.text }]}>내 이력서</Text>
-        <Pressable onPress={() => router.push(`/coach/${profile.id}` as never)} hitSlop={8}>
-          <Text style={[styles.previewLink, { color: colors.primary }]}>미리보기</Text>
-        </Pressable>
+        <Text style={[styles.title, { color: colors.text }]}>{isNew ? '코치로 활동 시작' : '코치 프로필'}</Text>
+        {certified && (
+          <View style={[styles.certBadge, { backgroundColor: colors.primary + '18' }]}>
+            <Text style={[styles.certText, { color: colors.primary }]}>인증 코치</Text>
+          </View>
+        )}
+        {!isNew && profileId && (
+          <Pressable onPress={() => router.push(`/coach/${profileId}` as never)} hitSlop={8}>
+            <Text style={[styles.previewLink, { color: colors.primary }]}>미리보기</Text>
+          </Pressable>
+        )}
       </View>
 
       <ScrollView
         contentContainerStyle={{ padding: spacing.xl, paddingBottom: insets.bottom + 120, maxWidth: 560, width: '100%' as const, alignSelf: 'center' as const, gap: spacing.lg }}
         keyboardShouldPersistTaps="handled"
       >
-        {/* 완성도 게이지 — 원티드식 */}
+        {isNew && (
+          <Text style={[styles.introHint, { color: colors.textSecondary }]}>
+            프로필 하나로 끝나요 — 등록하면 '코치 찾기'에 노출되고,{'\n'}공고 지원 시 이 문서가 그대로 첨부돼요
+          </Text>
+        )}
+
+        {/* 완성도 게이지 */}
         <View style={[styles.card, { backgroundColor: colors.surface }, shadows.md]}>
           <View style={styles.gaugeHead}>
-            <Text style={[styles.gaugeTitle, { color: colors.text }]}>이력서 완성도</Text>
+            <Text style={[styles.gaugeTitle, { color: colors.text }]}>프로필 완성도</Text>
             <Text style={[styles.gaugePct, { color: completion.pct >= 80 ? colors.secondary : colors.primary }]}>{completion.pct}%</Text>
           </View>
           <View style={[styles.gaugeTrack, { backgroundColor: colors.background }]}>
@@ -293,7 +330,32 @@ export default function CoachResume() {
               </View>
             ))}
           </View>
-          <Text style={[styles.gaugeHint, { color: colors.textLight }]}>완성도가 높을수록 공고 합격률이 올라가요. 사진·소개는 프로필에서 수정해요.</Text>
+          <Text style={[styles.gaugeHint, { color: colors.textLight }]}>완성도가 높을수록 문의와 공고 합격률이 올라가요.</Text>
+        </View>
+
+        {/* 프로필(공개 카드) */}
+        <View style={[styles.card, { backgroundColor: colors.surface }, shadows.md]}>
+          <Text style={[styles.sectionTitle, { color: colors.text }]}>프로필</Text>
+          <View style={{ alignItems: 'center', marginBottom: spacing.md }}>
+            <PhotoPickerField value={photoUrl} onChange={setPhotoUrl} size={110} label="프로필 사진" />
+          </View>
+          <View style={styles.field}>
+            <Text style={[styles.label, { color: colors.textSecondary }]}>이름 *</Text>
+            <TextInput style={inputStyle} value={displayName} onChangeText={setDisplayName} placeholder="레슨에서 쓸 이름" placeholderTextColor={colors.textLight} maxLength={30} />
+          </View>
+          <View style={styles.field}>
+            <Text style={[styles.label, { color: colors.textSecondary }]}>한 줄 소개</Text>
+            <TextInput style={inputStyle} value={intro} onChangeText={setIntro} placeholder="전 실업팀 선수 출신, 15년 경력" placeholderTextColor={colors.textLight} maxLength={200} />
+          </View>
+          {!isNew && (
+            <View style={[styles.activeRow, { backgroundColor: colors.background, borderColor: colors.border }]}>
+              <View style={{ flex: 1 }}>
+                <Text style={[styles.activeTitle, { color: colors.text }]}>프로필 공개</Text>
+                <Text style={[styles.activeHint, { color: colors.textLight }]}>끄면 '코치 찾기'에서 숨겨져요</Text>
+              </View>
+              <Switch value={active} onValueChange={setActive} />
+            </View>
+          )}
         </View>
 
         {/* 기본 정보 */}
@@ -332,6 +394,41 @@ export default function CoachResume() {
           </View>
         </View>
 
+        {/* 활동 지역·레슨 정보 */}
+        <View style={[styles.card, { backgroundColor: colors.surface }, shadows.md]}>
+          <Text style={[styles.sectionTitle, { color: colors.text }]}>활동 지역 · 레슨</Text>
+          <View style={styles.field}>
+            <Text style={[styles.label, { color: colors.textSecondary }]}>활동 지역 <Text style={{ color: colors.textLight }}>(시/도 복수 선택 — 공고·검색 필터 기준)</Text></Text>
+            <RegionSelect value={regionCodes} onChange={setRegionCodes} />
+          </View>
+          <View style={[styles.field, { marginTop: spacing.md }]}>
+            <Text style={[styles.label, { color: colors.textSecondary }]}>상세 활동 지역 <Text style={{ color: colors.textLight }}>(선택)</Text></Text>
+            <TextInput style={inputStyle} value={regions} onChangeText={setRegions} placeholder="송파구, 하남 미사 등" placeholderTextColor={colors.textLight} maxLength={200} />
+          </View>
+          <View style={[styles.basicRow, { marginTop: spacing.md, marginBottom: 0 }]}>
+            <View style={[styles.field, styles.flex1]}>
+              <Text style={[styles.label, { color: colors.textSecondary }]}>월 레슨비(원)</Text>
+              <TextInput style={inputStyle} value={pricePerMonth} onChangeText={setPricePerMonth} placeholder="200000" placeholderTextColor={colors.textLight} keyboardType="number-pad" maxLength={9} />
+            </View>
+            <View style={[styles.field, styles.flex1]}>
+              <Text style={[styles.label, { color: colors.textSecondary }]}>회당 레슨비(원)</Text>
+              <TextInput style={inputStyle} value={pricePerSession} onChangeText={setPricePerSession} placeholder="50000" placeholderTextColor={colors.textLight} keyboardType="number-pad" maxLength={9} />
+            </View>
+          </View>
+          <View style={[styles.field, { marginTop: spacing.md }]}>
+            <Text style={[styles.label, { color: colors.textSecondary }]}>레슨 가능 시간</Text>
+            <TextInput
+              style={[...inputStyle, styles.multilineShort]}
+              value={availableTimes}
+              onChangeText={setAvailableTimes}
+              placeholder={'평일 저녁 7시 이후\n주말 오전'}
+              placeholderTextColor={colors.textLight}
+              multiline
+              maxLength={500}
+            />
+          </View>
+        </View>
+
         {/* 섹션별 경력 */}
         {SECTIONS.map((kind) => {
           const ui = SECTION_UI[kind];
@@ -361,7 +458,7 @@ export default function CoachResume() {
 
       <View style={[styles.bottomBar, { backgroundColor: colors.background, borderTopColor: colors.border, paddingBottom: Math.max(insets.bottom, spacing.md) }]}>
         <Pressable onPress={save} disabled={saving} style={({ pressed }) => [styles.primaryBtn, { backgroundColor: colors.primary, width: '100%', maxWidth: 560, alignSelf: 'center' }, (pressed || saving) && { opacity: 0.85 }]}>
-          {saving ? <ActivityIndicator color="#fff" /> : <Text style={styles.primaryBtnText}>이력서 저장</Text>}
+          {saving ? <ActivityIndicator color="#fff" /> : <Text style={styles.primaryBtnText}>{isNew ? '코치 프로필 등록' : '코치 프로필 저장'}</Text>}
         </Pressable>
       </View>
     </View>
@@ -373,6 +470,9 @@ const styles = StyleSheet.create({
   topBar: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, paddingHorizontal: spacing.md, paddingBottom: spacing.sm, borderBottomWidth: StyleSheet.hairlineWidth },
   title: { ...typography.subtitle1, flex: 1 },
   previewLink: { fontSize: 14, fontWeight: '800' },
+  certBadge: { paddingHorizontal: 8, paddingVertical: 4, borderRadius: 8 },
+  certText: { fontSize: 11, fontWeight: '800' },
+  introHint: { ...typography.body2, lineHeight: 20, textAlign: 'center' },
   card: { borderRadius: 18, padding: spacing.lg },
   gaugeHead: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
   gaugeTitle: { fontSize: 15.5, fontWeight: '800' },
@@ -410,6 +510,7 @@ const styles = StyleSheet.create({
     paddingVertical: Platform.OS === 'web' ? 10 : 9,
   },
   multiline: { minHeight: 60, textAlignVertical: 'top' },
+  multilineShort: { minHeight: 72, textAlignVertical: 'top' },
   periodRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
   nowChip: { paddingHorizontal: 10, paddingVertical: 8, borderRadius: 10, borderWidth: 1 },
   chipRow: { flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', gap: 5 },
@@ -420,6 +521,9 @@ const styles = StyleSheet.create({
   presetWrap: { flexDirection: 'row', flexWrap: 'wrap', gap: 6 },
   presetChip: { paddingHorizontal: 10, paddingVertical: 7, borderRadius: 10, borderWidth: 1 },
   presetChipText: { fontSize: 11.5, fontWeight: '700' },
+  activeRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.md, borderWidth: 1, borderRadius: 14, padding: spacing.md, marginTop: spacing.sm },
+  activeTitle: { fontSize: 14.5, fontWeight: '800' },
+  activeHint: { fontSize: 12, marginTop: 2 },
   bottomBar: { paddingHorizontal: spacing.xl, paddingTop: spacing.md, borderTopWidth: StyleSheet.hairlineWidth },
   primaryBtn: { paddingVertical: 15, borderRadius: 14, alignItems: 'center', paddingHorizontal: spacing.xl },
   primaryBtnText: { fontSize: 15.5, fontWeight: '800', color: '#fff' },

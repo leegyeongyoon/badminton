@@ -10,7 +10,9 @@ import { coachChatApi, type CoachThreadRow } from '../../services/coach';
 import { absolutizeUploadUrl } from '../../services/upload';
 
 // ─────────────────────────────────────────────────────────────
-// 레슨 문의함 — 코치로 받은 문의(asCoach)와 내가 보낸 문의(asUser)를 한 화면에.
+// 코치 채팅 — 용도별 탭으로 분리: [레슨 문의] 코치↔회원 레슨 대화,
+// [채용] 공고 면접·오퍼 대화(스레드에 공고명 태그). 각 탭 안에서
+// 받은(코치)/보낸(문의자) 섹션 구분은 유지.
 // ─────────────────────────────────────────────────────────────
 
 function relTime(iso: string): string {
@@ -32,6 +34,7 @@ export default function CoachInbox() {
   const [asCoach, setAsCoach] = useState<CoachThreadRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [tab, setTab] = useState<'LESSON' | 'RECRUIT'>('LESSON');
 
   const load = useCallback(async () => {
     try {
@@ -72,7 +75,10 @@ export default function CoachInbox() {
           <View style={styles.head}>
             <Text style={[styles.name, { color: colors.text }]} numberOfLines={1}>{t.counterpartName}</Text>
             {t.certified && <Ionicons name="checkmark-circle" size={13} color={colors.primary} />}
-            {!!t.clubName && (
+            {t.kind === 'RECRUIT' && !!t.jobTitle && (
+              <Text style={[styles.jobTag, { color: colors.info }]} numberOfLines={1}>📄 {t.jobTitle}</Text>
+            )}
+            {t.kind !== 'RECRUIT' && !!t.clubName && (
               <Text style={[styles.clubTag, { color: colors.textLight }]} numberOfLines={1}>{t.clubName}</Text>
             )}
             <View style={{ flex: 1 }} />
@@ -93,13 +99,37 @@ export default function CoachInbox() {
     );
   };
 
-  const empty = asUser.length === 0 && asCoach.length === 0;
+  const fAsUser = asUser.filter((t) => (t.kind === 'RECRUIT') === (tab === 'RECRUIT'));
+  const fAsCoach = asCoach.filter((t) => (t.kind === 'RECRUIT') === (tab === 'RECRUIT'));
+  const recruitUnread = [...asUser, ...asCoach].filter((t) => t.kind === 'RECRUIT').reduce((s2, t) => s2 + t.unread, 0);
+  const lessonUnread = [...asUser, ...asCoach].filter((t) => t.kind !== 'RECRUIT').reduce((s2, t) => s2 + t.unread, 0);
+  const empty = fAsUser.length === 0 && fAsCoach.length === 0;
 
   return (
     <View style={{ flex: 1, backgroundColor: colors.background }}>
       <View style={[styles.topBar, { backgroundColor: colors.surface, borderBottomColor: colors.border, paddingTop: insets.top + spacing.sm }]}>
         <BackButton />
-        <Text style={[styles.title, { color: colors.text }]}>레슨 문의함</Text>
+        <Text style={[styles.title, { color: colors.text }]}>코치 채팅</Text>
+      </View>
+
+      {/* 용도별 탭 — 레슨 문의 / 채용 */}
+      <View style={[styles.tabBar, { borderBottomColor: colors.border, backgroundColor: colors.surface }]}>
+        {([
+          { key: 'LESSON', label: '레슨 문의', unread: lessonUnread },
+          { key: 'RECRUIT', label: '채용', unread: recruitUnread },
+        ] as const).map((t) => {
+          const on = tab === t.key;
+          return (
+            <Pressable key={t.key} onPress={() => setTab(t.key)} style={[styles.tabItem, on && { borderBottomColor: colors.primary }]}>
+              <Text style={[styles.tabLabel, { color: on ? colors.primary : colors.textSecondary }]}>{t.label}</Text>
+              {t.unread > 0 && (
+                <View style={[styles.tabBadge, { backgroundColor: colors.danger }]}>
+                  <Text style={styles.tabBadgeText}>{t.unread}</Text>
+                </View>
+              )}
+            </Pressable>
+          );
+        })}
       </View>
 
       {loading ? (
@@ -112,28 +142,29 @@ export default function CoachInbox() {
           {empty ? (
             <View style={styles.emptyBox}>
               <Ionicons name="chatbubbles-outline" size={34} color={colors.textLight} />
-              <Text style={[styles.emptyTitle, { color: colors.text }]}>아직 레슨 문의가 없어요</Text>
-              <Text style={[styles.emptyHint, { color: colors.textLight }]}>
-                코치 찾기에서 코치에게 문의하거나,{'\n'}코치 프로필을 등록해 문의를 받아보세요
+              <Text style={[styles.emptyTitle, { color: colors.text }]}>
+                {tab === 'LESSON' ? '아직 레슨 문의가 없어요' : '아직 채용 대화가 없어요'}
               </Text>
-              <Pressable onPress={() => router.push('/coaches' as never)} style={[styles.emptyBtn, { backgroundColor: colors.primary }]}>
-                <Text style={styles.emptyBtnText}>코치 찾기</Text>
-              </Pressable>
+              <Text style={[styles.emptyHint, { color: colors.textLight }]}>
+                {tab === 'LESSON'
+                  ? '코치 찾기에서 코치에게 문의하거나,\n코치 프로필을 등록해 문의를 받아보세요'
+                  : '공고 지원이 면접 단계로 넘어가면\n여기서 공고 측과 대화하게 돼요'}
+              </Text>
             </View>
           ) : (
             <>
-              {asCoach.length > 0 && (
+              {fAsCoach.length > 0 && (
                 <>
-                  <Text style={[styles.sectionLabel, { color: colors.textLight }]}>받은 문의 (코치)</Text>
-                  {asCoach.map(renderRow)}
+                  <Text style={[styles.sectionLabel, { color: colors.textLight }]}>{tab === 'LESSON' ? '받은 문의 (코치)' : '받은 대화 (코치)'}</Text>
+                  {fAsCoach.map(renderRow)}
                 </>
               )}
-              {asUser.length > 0 && (
+              {fAsUser.length > 0 && (
                 <>
-                  <Text style={[styles.sectionLabel, { color: colors.textLight, marginTop: asCoach.length > 0 ? spacing.lg : 0 }]}>
-                    보낸 문의
+                  <Text style={[styles.sectionLabel, { color: colors.textLight, marginTop: fAsCoach.length > 0 ? spacing.lg : 0 }]}>
+                    {tab === 'LESSON' ? '보낸 문의' : '보낸 대화 (공고 측)'}
                   </Text>
-                  {asUser.map(renderRow)}
+                  {fAsUser.map(renderRow)}
                 </>
               )}
             </>
@@ -156,6 +187,12 @@ const styles = StyleSheet.create({
   head: { flexDirection: 'row', alignItems: 'center', gap: 5 },
   name: { ...typography.subtitle2, fontWeight: '800', flexShrink: 1 },
   clubTag: { fontSize: 11, fontWeight: '700', flexShrink: 1 },
+  jobTag: { fontSize: 11, fontWeight: '800', flexShrink: 1 },
+  tabBar: { flexDirection: 'row', borderBottomWidth: StyleSheet.hairlineWidth, paddingHorizontal: spacing.lg },
+  tabItem: { flexDirection: 'row', alignItems: 'center', gap: 5, paddingVertical: 12, paddingHorizontal: spacing.md, borderBottomWidth: 2, borderBottomColor: 'transparent' },
+  tabLabel: { fontSize: 14, fontWeight: '800' },
+  tabBadge: { minWidth: 17, height: 17, borderRadius: 9, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 4 },
+  tabBadgeText: { color: '#fff', fontSize: 10, fontWeight: '900' },
   time: { ...typography.caption },
   previewRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, marginTop: 2 },
   preview: { ...typography.body2, flex: 1 },

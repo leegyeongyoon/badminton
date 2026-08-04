@@ -97,7 +97,7 @@ export default function JobApply() {
         </View>
 
         {/* 첨부 이력서 */}
-        <Text style={[styles.sectionLabel, { color: colors.textLight }]}>첨부되는 이력서</Text>
+        <Text style={[styles.sectionLabel, { color: colors.textLight }]}>첨부되는 코치 프로필</Text>
         {me ? (
           <View style={[styles.resumeCard, { backgroundColor: colors.surface, borderColor: colors.border }, shadows.sm]}>
             <View style={[styles.resumeIcon, { backgroundColor: colors.primary + '10' }]}>
@@ -105,7 +105,7 @@ export default function JobApply() {
             </View>
             <View style={{ flex: 1, minWidth: 0 }}>
               <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5 }}>
-                <Text style={[styles.resumeTitle, { color: colors.text }]} numberOfLines={1}>{me.displayName}의 기본 이력서</Text>
+                <Text style={[styles.resumeTitle, { color: colors.text }]} numberOfLines={1}>{me.displayName}의 코치 프로필</Text>
                 {!!me.skillLevel && (
                   <View style={[styles.skillBadge, { backgroundColor: getSkillMeta(me.skillLevel).color }]}>
                     <Text style={styles.skillBadgeText}>{me.skillLevel}</Text>
@@ -122,7 +122,7 @@ export default function JobApply() {
           </View>
         ) : (
           <Pressable
-            onPress={() => router.push('/coach/edit' as never)}
+            onPress={() => router.push('/coach/resume' as never)}
             style={[styles.resumeCard, { backgroundColor: colors.surface, borderColor: colors.warning }, shadows.sm]}
           >
             <Ionicons name="alert-circle-outline" size={20} color={colors.warning} />

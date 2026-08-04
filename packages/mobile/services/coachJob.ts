@@ -70,6 +70,7 @@ export interface JobPostDetail extends JobPostCard {
     offerTerms: OfferTerms | null; offerSentAt: string | null;
     interviewWhen: string | null; interviewPlace: string | null; interviewNote: string | null;
   } | null;
+  invited: boolean;
   applications: JobApplicantRow[] | null;
 }
 
@@ -103,6 +104,15 @@ export interface MyApplicationRow {
   interviewWhen: string | null;
   interviewPlace: string | null;
   interviewNote: string | null;
+}
+
+export interface JobInviteRow {
+  id: string;
+  message: string | null;
+  status: string; // SENT | DECLINED
+  createdAt: string;
+  post: JobPostCard;
+  applied: boolean;
 }
 
 export interface InterviewInfo {
@@ -141,6 +151,10 @@ export const coachJobApi = {
   setNote: (postId: string, appId: string, note: string | null) =>
     api.put(`/coach-jobs/${postId}/applications/${appId}/note`, { note }).then((r) => r.data),
   mine: () => api.get<MyJobRow[]>('/coach-jobs/mine').then((r) => r.data),
+  invites: () => api.get<JobInviteRow[]>('/coach-jobs/invites').then((r) => r.data),
+  declineInvite: (inviteId: string) => api.put(`/coach-jobs/invites/${inviteId}/decline`).then((r) => r.data),
+  invite: (postId: string, coachProfileId: string, message?: string) =>
+    api.post<{ id: string }>(`/coach-jobs/${postId}/invite`, { coachProfileId, message }).then((r) => r.data),
   applied: () => api.get<MyApplicationRow[]>('/coach-jobs/applied').then((r) => r.data),
 };
 

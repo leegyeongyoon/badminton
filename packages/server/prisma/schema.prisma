@@ -809,6 +809,7 @@ model CoachProfile {
   payouts CoachPayout[]
 
   @@index([active, certified])
+  jobInvites CoachJobInvite[]
 }
 
 // 원티드식 구조화 경력(이력서 항목). CoachProfile.career(자유 텍스트)는 하위호환
@@ -856,6 +857,7 @@ model CoachJobPost {
   updatedAt     DateTime @updatedAt
 
   applications CoachJobApplication[]
+  invites      CoachJobInvite[]
 
   @@index([status, createdAt])
   @@index([authorUserId])
@@ -866,6 +868,24 @@ model CoachJobPost {
 // APPLIED(지원) → INTERVIEW(면접) → OFFERED(오퍼레터 발송) → ACCEPTED(코치 수락=채용 확정)
 //                                   | DECLINED(코치가 오퍼 거절) | REJECTED(불합격/오퍼 철회)
 // WITHDRAWN(코치 본인 철회). 역방향 전이 금지(서비스에서 가드).
+// 스카웃(공고 제안) — 공고 관리자가 '코치 찾기'에서 발견한 코치에게 자기 공고를
+// 제안. 코치는 받은 제안 목록에서 공고를 보고 지원하거나 거절한다.
+model CoachJobInvite {
+  id             String   @id @default(uuid())
+  postId         String
+  coachProfileId String
+  senderUserId   String
+  message        String?  @db.VarChar(300)
+  status         String   @default("SENT") // SENT | DECLINED
+  createdAt      DateTime @default(now())
+
+  post         CoachJobPost @relation(fields: [postId], references: [id], onDelete: Cascade)
+  coachProfile CoachProfile @relation(fields: [coachProfileId], references: [id], onDelete: Cascade)
+
+  @@unique([postId, coachProfileId])
+  @@index([coachProfileId, createdAt])
+}
+
 model CoachJobApplication {
   id             String   @id @default(uuid())
   postId         String
@@ -891,13 +911,16 @@ model CoachJobApplication {
   @@index([coachProfileId, createdAt])
 }
 
-// 코치 문의 채팅 — 클럽 담당자(또는 회원)와 코치의 1:1 스레드.
-// 양쪽 다 로그인 유저라 익명 토큰이 필요 없고 (coachUserId, userId)로 find-or-create.
+// 코치 채팅 — 클럽 담당자(또는 회원)와 코치의 1:1 스레드.
+// 양쪽 다 로그인 유저라 익명 토큰이 필요 없고 (coachUserId, userId, kind)로 find-or-create.
+// kind: LESSON(레슨 문의) | RECRUIT(채용 — 면접·오퍼 채팅, jobPostId 연결).
 model CoachThread {
   id            String   @id @default(uuid())
   coachUserId   String // 코치(프로필 소유자) userId
   userId        String // 문의자 userId
   clubId        String? // 특정 모임 맥락에서 시작한 문의면 그 모임
+  kind          String   @default("LESSON") // LESSON | RECRUIT
+  jobPostId     String? // RECRUIT 스레드가 시작된 공고
   lastMessageAt DateTime @default(now())
   lastText      String?  @db.VarChar(200)
   coachUnread   Int      @default(0)
@@ -906,7 +929,7 @@ model CoachThread {
 
   messages CoachMessage[]
 
-  @@unique([coachUserId, userId])
+  @@unique([coachUserId, userId, kind])
   @@index([coachUserId, lastMessageAt])
   @@index([userId, lastMessageAt])
 }

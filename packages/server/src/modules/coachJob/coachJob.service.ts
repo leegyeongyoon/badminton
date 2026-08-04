@@ -114,6 +114,8 @@ export interface JobPostDetail extends JobPostCard {
     offerTerms: OfferTerms | null; offerSentAt: string | null;
     interviewWhen: string | null; interviewPlace: string | null; interviewNote: string | null;
   } | null; // 코치 시점(managerNote 는 비노출)
+  /** 코치 시점 — 이 공고에서 나에게 제안(스카웃)을 보냈는지. */
+  invited: boolean;
   applications: JobApplicantRow[] | null; // canManage 일 때만
 }
 
@@ -312,9 +314,15 @@ export async function getJob(id: string, viewerUserId?: string): Promise<JobPost
   }
 
   let myApplication: JobPostDetail['myApplication'] = null;
+  let invited = false;
   if (viewerUserId && !canManage) {
     const myProfile = await prisma.coachProfile.findUnique({ where: { userId: viewerUserId }, select: { id: true } });
     if (myProfile) {
+      const inv = await prisma.coachJobInvite.findUnique({
+        where: { postId_coachProfileId: { postId: id, coachProfileId: myProfile.id } },
+        select: { status: true },
+      });
+      invited = inv?.status === 'SENT';
       const app = await prisma.coachJobApplication.findUnique({
         where: { postId_coachProfileId: { postId: id, coachProfileId: myProfile.id } },
         select: {
@@ -353,6 +361,7 @@ export async function getJob(id: string, viewerUserId?: string): Promise<JobPost
     authorName: author?.name || '작성자',
     canManage,
     myApplication,
+    invited,
     applications,
   };
 }
@@ -551,8 +560,8 @@ export async function updateApplicationStatus(
 
   let threadId: string | undefined;
   if (status === 'INTERVIEW' || status === 'OFFERED') {
-    // 면접·오퍼 → 공고 담당자 ↔ 코치 1:1 채팅 자동 생성(있으면 재사용).
-    const view = await coachChat.startThread(requesterId, app.coachProfile.id, app.post.clubId);
+    // 면접·오퍼 → 공고 담당자 ↔ 코치 1:1 채용 채팅 자동 생성(있으면 재사용).
+    const view = await coachChat.startThread(requesterId, app.coachProfile.id, app.post.clubId, 'RECRUIT', postId);
     threadId = view.threadId;
   }
 
@@ -699,4 +708,91 @@ export async function setApplicationNote(
     where: { id: applicationId },
     data: { managerNote: clamp(note, 1000) },
   });
+}
+
+// ─── 스카웃(공고 제안) ────────────────────────────────────────
+// 공고 관리자가 '코치 찾기'에서 발견한 코치에게 자기 공고를 제안한다.
+// 코치는 받은 제안 목록에서 공고를 확인하고 지원하거나 거절한다.
+
+export interface JobInviteRow {
+  id: string;
+  message: string | null;
+  status: string; // SENT | DECLINED
+  createdAt: string;
+  post: JobPostCard;
+  /** 이 공고에 이미 지원했는지(지원했으면 제안 카드에서 '지원함' 표시). */
+  applied: boolean;
+}
+
+/** 공고 제안 보내기 — 공고 관리자만, OPEN 공고만. 같은 코치에겐 1회(재전송 시 메시지 갱신). */
+export async function inviteCoach(
+  postId: string,
+  requesterId: string,
+  coachProfileId: string,
+  message?: unknown,
+): Promise<{ id: string }> {
+  const post = await prisma.coachJobPost.findUnique({ where: { id: postId } });
+  if (!post) throw new NotFoundError('공고');
+  if (!(await canManagePost(post, requesterId))) throw new ForbiddenError();
+  if (post.status !== 'OPEN') throw new BadRequestError('마감된 공고에는 제안할 수 없어요');
+
+  const profile = await prisma.coachProfile.findUnique({
+    where: { id: coachProfileId },
+    select: { id: true, userId: true, displayName: true },
+  });
+  if (!profile) throw new NotFoundError('코치');
+  if (profile.userId === requesterId) throw new BadRequestError('본인에게는 제안할 수 없어요');
+
+  const msg = clamp(message, 300);
+  const invite = await prisma.coachJobInvite.upsert({
+    where: { postId_coachProfileId: { postId, coachProfileId } },
+    create: { postId, coachProfileId, senderUserId: requesterId, message: msg },
+    update: { message: msg ?? undefined, status: 'SENT' },
+  });
+
+  try {
+    await sendPushToUser(profile.userId, {
+      title: '함께하자는 제안이 왔어요 🤝',
+      body: `"${post.title}" 공고에서 ${profile.displayName} 코치님께 제안을 보냈어요 — 공고를 확인해 보세요`,
+      data: { type: 'coachJobInvite', postId },
+    });
+  } catch { /* 알림 실패 무시 */ }
+  return { id: invite.id };
+}
+
+/** 내(코치)가 받은 제안 목록 — 최신순, 지원 여부 포함. */
+export async function listMyInvites(userId: string): Promise<JobInviteRow[]> {
+  const profile = await prisma.coachProfile.findUnique({ where: { userId }, select: { id: true } });
+  if (!profile) return [];
+  const rows = await prisma.coachJobInvite.findMany({
+    where: { coachProfileId: profile.id },
+    orderBy: { createdAt: 'desc' },
+    take: 100,
+    include: { post: { include: activeAppCount } },
+  });
+  const apps = await prisma.coachJobApplication.findMany({
+    where: { coachProfileId: profile.id, postId: { in: rows.map((r) => r.postId) }, status: { not: 'WITHDRAWN' } },
+    select: { postId: true },
+  });
+  const appliedSet = new Set(apps.map((a) => a.postId));
+  const clubMap = await clubNames(rows.map((r) => r.post.clubId));
+  return rows.map((r) => ({
+    id: r.id,
+    message: r.message,
+    status: r.status,
+    createdAt: r.createdAt.toISOString(),
+    post: toCard(r.post, clubMap),
+    applied: appliedSet.has(r.postId),
+  }));
+}
+
+/** 제안 거절(코치 본인). */
+export async function declineInvite(inviteId: string, userId: string): Promise<void> {
+  const invite = await prisma.coachJobInvite.findUnique({
+    where: { id: inviteId },
+    include: { coachProfile: { select: { userId: true } } },
+  });
+  if (!invite) throw new NotFoundError('제안');
+  if (invite.coachProfile.userId !== userId) throw new ForbiddenError();
+  await prisma.coachJobInvite.update({ where: { id: inviteId }, data: { status: 'DECLINED' } });
 }

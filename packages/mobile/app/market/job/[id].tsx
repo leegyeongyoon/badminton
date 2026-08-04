@@ -161,6 +161,13 @@ export default function JobPostDetailScreen() {
           </View>
         )}
 
+        {/* 스카웃 — 이 공고에서 나에게 제안을 보냈으면 표시 */}
+        {job.invited && !job.myApplication && (
+          <View style={[styles.closedBanner, { backgroundColor: colors.primary + '14' }]}>
+            <Text style={[styles.closedText, { color: colors.primary }]}>🤝 이 공고에서 나에게 함께하자는 제안을 보냈어요</Text>
+          </View>
+        )}
+
         <Text style={[styles.jobTitle, { color: colors.text }]}>{job.title}</Text>
         <Text style={[styles.author, { color: colors.textLight }]}>
           {job.clubName ? `${job.clubName} · ${job.authorName}` : `${job.authorName} (개인)`} · 지원 {job.applicants}명
