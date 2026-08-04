@@ -42,6 +42,11 @@ export default function ClubOperation() {
   const [deadlineHours, setDeadlineHours] = useState('');
   const [maxGuests, setMaxGuests] = useState('');
   const [contactInfo, setContactInfo] = useState('');
+  // 정모 자동 개설
+  const [autoEnabled, setAutoEnabled] = useState(false);
+  const [autoOpenMin, setAutoOpenMin] = useState(60);
+  const [autoCourts, setAutoCourts] = useState('4');
+  const [homeFacilityId, setHomeFacilityId] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     if (!clubId) return;
@@ -57,6 +62,10 @@ export default function ClubOperation() {
       setDeadlineHours(c.guestApplyDeadlineHours != null ? String(c.guestApplyDeadlineHours) : '');
       setMaxGuests(c.maxGuestsPerDay != null ? String(c.maxGuestsPerDay) : '');
       setContactInfo(c.contactInfo ?? '');
+      setAutoEnabled(c.autoSessionEnabled);
+      setAutoOpenMin(c.autoSessionOpenMinutes);
+      setAutoCourts(String(c.autoSessionCourtCount));
+      setHomeFacilityId(c.homeFacilityId);
     } catch {
       /* noop */
     } finally {
@@ -80,6 +89,9 @@ export default function ClubOperation() {
         guestApplyDeadlineHours: num(deadlineHours),
         maxGuestsPerDay: num(maxGuests),
         contactInfo: contactInfo.trim() || null,
+        autoSessionEnabled: autoEnabled,
+        autoSessionOpenMinutes: autoOpenMin,
+        autoSessionCourtCount: num(autoCourts) ?? 4,
       });
       showSuccess('저장했어요');
       await load();
@@ -163,6 +175,66 @@ export default function ClubOperation() {
             ))}
             {Object.keys(slots).length === 0 && (
               <Text style={[styles.warn, { color: colors.textLight }]}>* 요일 미선택 = 일정 안내 없음, 게스트 신청은 아무 날짜나 가능</Text>
+            )}
+          </View>
+
+          {/* 정모 자동 개설 */}
+          <View style={[styles.card, { backgroundColor: colors.surface }, shadows.md]}>
+            <View style={styles.toggleRow}>
+              <View style={[styles.cardIcon, { backgroundColor: colors.primary + '15' }]}>
+                <Ionicons name="alarm-outline" size={16} color={colors.primary} />
+              </View>
+              <View style={{ flex: 1, minWidth: 0 }}>
+                <Text style={[styles.cardTitle, { color: colors.text }]}>정모 자동 열기</Text>
+                <Text style={[styles.cardHint, { color: colors.textLight }]}>
+                  {autoEnabled ? '정기 일정에 맞춰 자동으로 열리고 멤버에게 알림이 가요' : '꺼짐 — 운영진이 직접 정모를 시작해요'}
+                </Text>
+              </View>
+              <Switch
+                value={autoEnabled}
+                onValueChange={setAutoEnabled}
+                trackColor={{ false: colors.border, true: colors.primary }}
+                thumbColor={colors.surface}
+              />
+            </View>
+            {autoEnabled && (
+              <>
+                {!homeFacilityId && (
+                  <Text style={[styles.warn, { color: colors.danger ?? '#DC2626', marginTop: spacing.sm }]}>
+                    * 홈 시설이 없어서 자동으로 열 수 없어요 — 모임 관리에서 홈 시설을 먼저 설정해 주세요
+                  </Text>
+                )}
+                {Object.keys(slots).length === 0 && (
+                  <Text style={[styles.warn, { color: colors.textLight, marginTop: spacing.sm }]}>
+                    * 위에서 정기 운동 요일·시간을 먼저 선택해 주세요
+                  </Text>
+                )}
+                <Text style={[styles.fieldLabel, { color: colors.textSecondary, marginTop: spacing.md }]}>여는 시점</Text>
+                <View style={styles.dayRow}>
+                  {[{ v: 0, l: '정각에' }, { v: 30, l: '30분 전' }, { v: 60, l: '1시간 전' }, { v: 120, l: '2시간 전' }].map((o) => (
+                    <Pressable
+                      key={o.v}
+                      onPress={() => setAutoOpenMin(o.v)}
+                      style={[styles.openChip, {
+                        backgroundColor: autoOpenMin === o.v ? colors.primary : colors.background,
+                        borderColor: autoOpenMin === o.v ? colors.primary : colors.border,
+                      }]}
+                    >
+                      <Text style={[styles.openChipText, { color: autoOpenMin === o.v ? '#fff' : colors.textSecondary }]}>{o.l}</Text>
+                    </Pressable>
+                  ))}
+                </View>
+                <Text style={[styles.fieldLabel, { color: colors.textSecondary }]}>코트 수</Text>
+                <TextInput
+                  style={[styles.input, { color: colors.text, backgroundColor: colors.background }]}
+                  value={autoCourts}
+                  onChangeText={setAutoCourts}
+                  placeholder="4"
+                  placeholderTextColor={colors.textLight}
+                  keyboardType="number-pad"
+                  maxLength={2}
+                />
+              </>
             )}
           </View>
 
@@ -252,6 +324,8 @@ const styles = StyleSheet.create({
   fieldLabel: { ...typography.caption, fontWeight: '700', marginBottom: spacing.xs },
   input: { ...typography.body1, borderRadius: 14, paddingHorizontal: spacing.lg, paddingVertical: 13, fontWeight: '700' },
   toggleRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.md },
+  openChip: { paddingHorizontal: spacing.md, paddingVertical: 9, borderRadius: radius.pill, borderWidth: 1 },
+  openChipText: { fontSize: 13, fontWeight: '800' },
   saveBtn: { paddingVertical: 16, borderRadius: 16, alignItems: 'center', marginBottom: spacing.sm },
   saveText: { ...typography.button, color: '#fff', fontSize: 16, fontWeight: '900' },
   warn: { ...typography.caption, lineHeight: 16, marginBottom: spacing.sm },

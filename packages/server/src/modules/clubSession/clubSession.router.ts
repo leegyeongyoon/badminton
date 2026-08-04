@@ -13,8 +13,17 @@ import { validate } from '../../middleware/validate';
 import * as clubSessionService from './clubSession.service';
 import { registerTurn } from '../turn/turn.service';
 import { operatorCheckOut, attendViaQr, memberCheckIn, memberCheckInAll } from '../checkin/checkin.service';
+import { runAutoSessionTick } from './autoSession.service';
+import { roleGuard } from '../../middleware/roleGuard';
 
 const router = Router();
+
+// POST /api/v1/club-sessions/auto/run - 자동 개설·종료 틱 수동 실행(SUPER_ADMIN, 데모·테스트용)
+router.post('/auto/run', authenticate, roleGuard('SUPER_ADMIN'), async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    res.json(await runAutoSessionTick());
+  } catch (err) { next(err); }
+});
 
 // POST /api/v1/clubs/:clubId/sessions - start a club session
 router.post(

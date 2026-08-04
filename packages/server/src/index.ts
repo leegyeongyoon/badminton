@@ -9,6 +9,7 @@ validateConfig();
 
 import app from './app';
 import { startBillingLoop } from './modules/payment/payment.service';
+import { startAutoSessionLoop } from './modules/clubSession/autoSession.service';
 import { initSocketIO } from './socket';
 import { prisma } from './utils/prisma';
 import { initScheduler, stopScheduler } from './modules/scheduler/scheduler.service';
@@ -79,3 +80,6 @@ process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
 
 // Mock 정기결제 루프(1시간 틱, PAYMENTS_MOCK=1 일 때만 동작).
 startBillingLoop();
+
+// 정모 자동 개설·방치 세션 자동 종료 루프(1분 틱, 멱등).
+startAutoSessionLoop();

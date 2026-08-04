@@ -519,6 +519,11 @@ export interface LabOperationConfig {
   guestApplyDeadlineHours: number | null;
   maxGuestsPerDay: number | null;
   contactInfo: string | null; // 운영진 문의 채널(오픈채팅 링크·전화)
+  // 정모 자동 개설 — weeklySchedule 슬롯 시작 N분 전에 자동 오픈(홈 시설 필요).
+  autoSessionEnabled: boolean;
+  autoSessionOpenMinutes: number;
+  autoSessionCourtCount: number;
+  homeFacilityId: string | null;
 }
 
 const HHMM = /^([01][0-9]|2[0-3]):[0-5][0-9]$/;
@@ -542,7 +547,12 @@ export function sanitizeWeeklySchedule(input: unknown): WeeklySlot[] {
 export async function getOperationConfig(clubId: string): Promise<LabOperationConfig> {
   const c = await prisma.club.findUnique({
     where: { id: clubId },
-    select: { id: true, name: true, weeklySchedule: true, guestApplyEnabled: true, guestApplyDeadlineHours: true, maxGuestsPerDay: true, contactInfo: true },
+    select: {
+      id: true, name: true, weeklySchedule: true, guestApplyEnabled: true,
+      guestApplyDeadlineHours: true, maxGuestsPerDay: true, contactInfo: true,
+      autoSessionEnabled: true, autoSessionOpenMinutes: true, autoSessionCourtCount: true,
+      homeFacilityId: true,
+    },
   });
   if (!c) throw new Error('Club not found');
   return {
@@ -553,15 +563,33 @@ export async function getOperationConfig(clubId: string): Promise<LabOperationCo
     guestApplyDeadlineHours: c.guestApplyDeadlineHours,
     maxGuestsPerDay: c.maxGuestsPerDay,
     contactInfo: c.contactInfo,
+    autoSessionEnabled: c.autoSessionEnabled,
+    autoSessionOpenMinutes: c.autoSessionOpenMinutes,
+    autoSessionCourtCount: c.autoSessionCourtCount,
+    homeFacilityId: c.homeFacilityId,
   };
 }
 
 export async function setOperationConfig(
   clubId: string,
-  cfg: Partial<{ weeklySchedule: unknown; guestApplyEnabled: boolean; guestApplyDeadlineHours: number | null; maxGuestsPerDay: number | null; contactInfo: string | null }>,
+  cfg: Partial<{
+    weeklySchedule: unknown; guestApplyEnabled: boolean; guestApplyDeadlineHours: number | null;
+    maxGuestsPerDay: number | null; contactInfo: string | null;
+    autoSessionEnabled: boolean; autoSessionOpenMinutes: number; autoSessionCourtCount: number;
+  }>,
 ): Promise<void> {
   const data: Record<string, unknown> = {};
   if (cfg.weeklySchedule !== undefined) data.weeklySchedule = sanitizeWeeklySchedule(cfg.weeklySchedule);
+  if (cfg.autoSessionEnabled !== undefined) data.autoSessionEnabled = !!cfg.autoSessionEnabled;
+  if (cfg.autoSessionOpenMinutes !== undefined) {
+    const n = Number(cfg.autoSessionOpenMinutes);
+    // 0(정각)~240분 전 오픈만 허용, 이상값은 기본 60.
+    data.autoSessionOpenMinutes = Number.isInteger(n) && n >= 0 && n <= 240 ? n : 60;
+  }
+  if (cfg.autoSessionCourtCount !== undefined) {
+    const n = Number(cfg.autoSessionCourtCount);
+    data.autoSessionCourtCount = Number.isInteger(n) && n >= 1 && n <= 20 ? n : 4;
+  }
   if (cfg.guestApplyEnabled !== undefined) data.guestApplyEnabled = !!cfg.guestApplyEnabled;
   if (cfg.guestApplyDeadlineHours !== undefined) {
     // 범위 밖 값을 조용히 null(마감 없음)로 바꾸면 운영자 의도와 반대가 되므로 168h(7일)로 클램프.

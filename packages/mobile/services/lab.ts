@@ -122,6 +122,11 @@ export interface OperationConfig {
   guestApplyDeadlineHours: number | null;
   maxGuestsPerDay: number | null;
   contactInfo: string | null; // 운영진 문의 채널(오픈채팅 링크·전화)
+  // 정모 자동 개설 — 정기 일정 시작 N분 전 자동 오픈(홈 시설 필요)
+  autoSessionEnabled: boolean;
+  autoSessionOpenMinutes: number;
+  autoSessionCourtCount: number;
+  homeFacilityId: string | null;
 }
 
 /** 운영진용 운영 정보 설정 — /clubs/:id/money/operation-config (staff 가드). */
@@ -130,7 +135,11 @@ export const clubOperationApi = {
     (await api.get(`/clubs/${clubId}/money/operation-config`)).data,
   set: async (
     clubId: string,
-    cfg: Partial<{ weeklySchedule: WeeklySlot[]; guestApplyEnabled: boolean; guestApplyDeadlineHours: number | null; maxGuestsPerDay: number | null; contactInfo: string | null }>,
+    cfg: Partial<{
+      weeklySchedule: WeeklySlot[]; guestApplyEnabled: boolean; guestApplyDeadlineHours: number | null;
+      maxGuestsPerDay: number | null; contactInfo: string | null;
+      autoSessionEnabled: boolean; autoSessionOpenMinutes: number; autoSessionCourtCount: number;
+    }>,
   ): Promise<void> => {
     await api.put(`/clubs/${clubId}/money/operation-config`, cfg);
   },
