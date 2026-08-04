@@ -52,6 +52,8 @@ export interface OfferTerms {
   message?: string | null;
 }
 
+export interface JobAttachment { url: string; name: string }
+
 export interface JobPostDetail extends JobPostCard {
   description: string | null;
   days: number[] | null;
@@ -62,6 +64,8 @@ export interface JobPostDetail extends JobPostCard {
   payNegotiable: boolean;
   requirements: string | null;
   photos: string[];
+  attachments: JobAttachment[];
+  externalUrl: string | null;
   authorUserId: string;
   authorName: string;
   canManage: boolean;
@@ -88,6 +92,8 @@ export interface JobPostInput {
   payNegotiable?: boolean;
   requirements?: string | null;
   region?: string | null;
+  attachments?: JobAttachment[] | null;
+  externalUrl?: string | null;
   status?: string;
 }
 
@@ -153,6 +159,8 @@ export const coachJobApi = {
   mine: () => api.get<MyJobRow[]>('/coach-jobs/mine').then((r) => r.data),
   invites: () => api.get<JobInviteRow[]>('/coach-jobs/invites').then((r) => r.data),
   declineInvite: (inviteId: string) => api.put(`/coach-jobs/invites/${inviteId}/decline`).then((r) => r.data),
+  scrape: (url: string) =>
+    api.post<{ title: string | null; description: string | null }>('/coach-jobs/scrape', { url }).then((r) => r.data),
   invite: (postId: string, coachProfileId: string, message?: string) =>
     api.post<{ id: string }>(`/coach-jobs/${postId}/invite`, { coachProfileId, message }).then((r) => r.data),
   applied: () => api.get<MyApplicationRow[]>('/coach-jobs/applied').then((r) => r.data),

@@ -106,6 +106,8 @@ export interface JobPostDetail extends JobPostCard {
   payNegotiable: boolean;
   requirements: string | null;
   photos: string[]; // 모집공고 첨부 사진(체육관·코트 등)
+  attachments: JobAttachment[]; // 모집 요강 등 첨부 문서
+  externalUrl: string | null; // 원문 공고 링크
   authorUserId: string;
   authorName: string;
   canManage: boolean; // 작성자 또는 그 클럽 운영진
@@ -133,6 +135,8 @@ export interface JobPostInput {
   payNegotiable?: boolean;
   region?: string;
   requirements?: string | null;
+  attachments?: { url: string; name: string }[] | null;
+  externalUrl?: string | null;
   status?: string;
 }
 
@@ -157,6 +161,32 @@ function sanitizePhotos(raw: unknown): string[] | null {
     .filter((v) => /^\/uploads\/[A-Za-z0-9._-]+$/.test(v))
     .slice(0, 5);
   return out.length > 0 ? out : null;
+}
+
+// 첨부 문서 [{url, name}] — 우리 업로드 문서 경로만, 최대 3개.
+export interface JobAttachment { url: string; name: string }
+function sanitizeAttachments(raw: unknown): JobAttachment[] | null {
+  if (!Array.isArray(raw)) return null;
+  const out: JobAttachment[] = [];
+  for (const item of raw.slice(0, 3)) {
+    const url = String((item as JobAttachment)?.url ?? '').trim();
+    const name = String((item as JobAttachment)?.name ?? '').trim().slice(0, 120) || '첨부파일';
+    if (/^\/uploads\/[A-Za-z0-9._-]+\.(pdf|hwp|hwpx|doc|docx)$/.test(url)) out.push({ url, name });
+  }
+  return out.length > 0 ? out : null;
+}
+
+// 원문 공고 링크 — http(s)만, 500자.
+function sanitizeExternalUrl(raw: unknown): string | null {
+  const v = clamp(raw, 500);
+  if (!v) return null;
+  try {
+    const u = new URL(v);
+    if (u.protocol !== 'http:' && u.protocol !== 'https:') return null;
+    return v;
+  } catch {
+    return null;
+  }
 }
 
 function sanitizeDays(raw: unknown): number[] | null {
@@ -357,6 +387,8 @@ export async function getJob(id: string, viewerUserId?: string): Promise<JobPost
     payNegotiable: post.payNegotiable,
     requirements: post.requirements,
     photos: sanitizePhotos(post.photos) ?? [],
+    attachments: sanitizeAttachments(post.attachments) ?? [],
+    externalUrl: post.externalUrl,
     authorUserId: post.authorUserId,
     authorName: author?.name || '작성자',
     canManage,
@@ -396,6 +428,8 @@ export async function createJob(userId: string, input: JobPostInput): Promise<st
       regionCodes,
       requirements: clamp(input.requirements, 500),
       photos: sanitizePhotos(input.photos) ?? undefined,
+      attachments: (sanitizeAttachments(input.attachments) ?? undefined) as never,
+      externalUrl: sanitizeExternalUrl(input.externalUrl),
     },
   });
   return created.id;
@@ -428,6 +462,8 @@ export async function updateJob(id: string, userId: string, patch: JobPostInput)
   }
   if (patch.requirements !== undefined) data.requirements = clamp(patch.requirements, 500);
   if (patch.photos !== undefined) data.photos = sanitizePhotos(patch.photos) ?? [];
+  if (patch.attachments !== undefined) data.attachments = (sanitizeAttachments(patch.attachments) ?? []) as never;
+  if (patch.externalUrl !== undefined) data.externalUrl = sanitizeExternalUrl(patch.externalUrl);
   if (patch.status !== undefined) {
     if (!['OPEN', 'CLOSED'].includes(String(patch.status))) throw new BadRequestError('잘못된 상태예요');
     data.status = patch.status;
@@ -795,4 +831,101 @@ export async function declineInvite(inviteId: string, userId: string): Promise<v
   if (!invite) throw new NotFoundError('제안');
   if (invite.coachProfile.userId !== userId) throw new ForbiddenError();
   await prisma.coachJobInvite.update({ where: { id: inviteId }, data: { status: 'DECLINED' } });
+}
+
+// ─── 원문 공고 스크랩 ─────────────────────────────────────────
+// 학교·체육센터 홈페이지의 채용 게시글 URL을 붙여넣으면 제목·요약을 가져와
+// 공고 작성 폼을 채워준다. 임의 URL fetch 이므로 SSRF 가드(사설망 차단) 필수.
+
+import { lookup as dnsLookup } from 'dns/promises';
+
+function isPrivateIp(ip: string): boolean {
+  if (ip === '::1' || ip.startsWith('fe80:') || ip.startsWith('fc') || ip.startsWith('fd')) return true;
+  const m = ip.match(/^(\d+)\.(\d+)\.(\d+)\.(\d+)$/);
+  if (!m) return false;
+  const [a, b] = [Number(m[1]), Number(m[2])];
+  return (
+    a === 10 || a === 127 || a === 0 ||
+    (a === 172 && b >= 16 && b <= 31) ||
+    (a === 192 && b === 168) ||
+    (a === 169 && b === 254)
+  );
+}
+
+function decodeEntities(s: string): string {
+  return s
+    .replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"').replace(/&#0?39;/g, "'").replace(/&nbsp;/g, ' ')
+    .trim();
+}
+
+/** URL 에서 제목·요약 스크랩(OG 태그 우선, 폴백 <title>). */
+export async function scrapeJobUrl(rawUrl: unknown): Promise<{ title: string | null; description: string | null }> {
+  const urlStr = clamp(rawUrl, 500);
+  if (!urlStr) throw new BadRequestError('주소를 입력해 주세요');
+  let url: URL;
+  try {
+    url = new URL(urlStr);
+  } catch {
+    throw new BadRequestError('올바른 주소가 아니에요 (https://... 형태)');
+  }
+  if (url.protocol !== 'http:' && url.protocol !== 'https:') {
+    throw new BadRequestError('http/https 주소만 가져올 수 있어요');
+  }
+  // SSRF 가드 — 호스트가 사설망으로 풀리면 거절.
+  try {
+    const { address } = await dnsLookup(url.hostname);
+    if (isPrivateIp(address)) throw new Error('private');
+  } catch {
+    throw new BadRequestError('이 주소는 가져올 수 없어요');
+  }
+
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 8000);
+  let html = '';
+  try {
+    const resp = await fetch(url.toString(), {
+      signal: controller.signal,
+      redirect: 'follow',
+      headers: { 'User-Agent': 'Mozilla/5.0 (compatible; KokgoBot/1.0)' },
+    });
+    if (!resp.ok) throw new Error(`status ${resp.status}`);
+    // 최대 512KB 만 읽는다(대용량 방어).
+    const reader = resp.body?.getReader();
+    if (reader) {
+      let received = 0;
+      const chunks: Uint8Array[] = [];
+      for (;;) {
+        const { done, value } = await reader.read();
+        if (done || !value) break;
+        chunks.push(value);
+        received += value.length;
+        if (received > 512 * 1024) { controller.abort(); break; }
+      }
+      html = Buffer.concat(chunks).toString('utf8');
+    } else {
+      html = await resp.text();
+    }
+  } catch {
+    throw new BadRequestError('페이지를 불러오지 못했어요 — 주소를 확인해 주세요');
+  } finally {
+    clearTimeout(timer);
+  }
+
+  const pick = (re: RegExp): string | null => {
+    const m = html.match(re);
+    return m ? decodeEntities(m[1]).slice(0, 300) || null : null;
+  };
+  const title =
+    pick(/<meta[^>]+property=["']og:title["'][^>]+content=["']([^"']+)["']/i) ??
+    pick(/<meta[^>]+content=["']([^"']+)["'][^>]+property=["']og:title["']/i) ??
+    pick(/<title[^>]*>([^<]+)<\/title>/i);
+  const description =
+    pick(/<meta[^>]+property=["']og:description["'][^>]+content=["']([^"']+)["']/i) ??
+    pick(/<meta[^>]+name=["']description["'][^>]+content=["']([^"']+)["']/i);
+
+  if (!title && !description) {
+    throw new BadRequestError('이 페이지에서는 내용을 읽어오지 못했어요 — 직접 입력해 주세요');
+  }
+  return { title, description };
 }

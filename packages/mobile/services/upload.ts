@@ -35,3 +35,29 @@ export async function uploadImage(uri: string): Promise<string> {
   });
   return data.url;
 }
+
+/**
+ * 문서 업로드(모집 요강 PDF·한글·워드) — { url, name } 반환.
+ * expo-document-picker 의 asset(uri·name·mimeType)을 그대로 받는다.
+ */
+export async function uploadDoc(asset: { uri: string; name?: string | null; mimeType?: string | null }): Promise<{ url: string; name: string }> {
+  const form = new FormData();
+  const fileName = asset.name || 'document.pdf';
+
+  if (Platform.OS === 'web') {
+    const blob = await (await fetch(asset.uri)).blob();
+    form.append('file', blob, fileName);
+  } else {
+    form.append('file', {
+      uri: asset.uri,
+      name: fileName,
+      type: asset.mimeType || 'application/octet-stream',
+    } as unknown as Blob);
+  }
+
+  const { data } = await api.post<{ url: string; name: string }>('/uploads/doc', form, {
+    headers: { 'Content-Type': 'multipart/form-data' },
+    timeout: 60000, // 요강 PDF 는 수 MB 일 수 있음
+  });
+  return data;
+}

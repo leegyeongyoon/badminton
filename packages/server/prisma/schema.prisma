@@ -852,6 +852,10 @@ model CoachJobPost {
   regionCodes   Json? // 시/도 복수 선택 ["서울","경기"] — 필터 기준
   requirements  String? // 우대·요구 사항
   photos        Json? // 모집공고 첨부 사진 URL 배열(체육관·코트 등, 최대 5장)
+  // 모집 요강 등 첨부 문서 [{url, name}] — 학교·센터 채용의 요강 PDF/한글 파일(최대 3개).
+  attachments   Json?
+  // 원문 공고 링크(학교·센터 홈페이지 게시글 등) — 상세에서 바로 이동.
+  externalUrl   String?  @db.VarChar(500)
   status        String   @default("OPEN") // OPEN | CLOSED
   createdAt     DateTime @default(now())
   updatedAt     DateTime @updatedAt

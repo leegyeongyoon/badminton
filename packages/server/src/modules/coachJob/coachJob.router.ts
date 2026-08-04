@@ -47,6 +47,13 @@ router.get('/mine', authenticate, async (req: Request, res: Response, next: Next
   } catch (err) { next(err); }
 });
 
+// POST /coach-jobs/scrape — 외부 공고 URL 에서 제목·요약 가져오기(작성 폼 자동 채움)
+router.post('/scrape', authenticate, postLimiter, async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    res.json(await svc.scrapeJobUrl((req.body as { url?: unknown } | undefined)?.url));
+  } catch (err) { next(err); }
+});
+
 // GET /coach-jobs/invites — 내(코치)가 받은 공고 제안 목록
 router.get('/invites', authenticate, async (req: Request, res: Response, next: NextFunction) => {
   try {

@@ -71,11 +71,47 @@ router.post(
   },
 );
 
+// ── 문서 업로드(모집 요강 등) ────────────────────────────────
+// 이미지와 달리 재인코딩이 없으므로 확장자 화이트리스트로만 받는다(HTML/JS 등
+// 실행 가능 파일 차단). 저장 파일명은 uuid + 검증된 확장자 — 원본명은 응답으로만.
+const DOC_EXT = new Set(['.pdf', '.hwp', '.hwpx', '.doc', '.docx']);
+const docUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 15 * 1024 * 1024 }, // 15MB — 요강 PDF 기준
+});
+const docLimiter = rateLimit({ windowMs: 60 * 1000, max: 10, keyPrefix: 'upload:doc' });
+
+router.post(
+  '/doc',
+  authenticate,
+  docLimiter,
+  docUpload.single('file'),
+  async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      if (!req.file?.buffer?.length) {
+        throw new BadRequestError('문서 파일이 필요합니다 (form field: file)');
+      }
+      // multer 는 filename 을 latin-1 로 해석 — 한글 파일명 복원.
+      const originalName = Buffer.from(String(req.file.originalname || '문서'), 'latin1').toString('utf8');
+      const ext = path.extname(originalName).toLowerCase();
+      if (!DOC_EXT.has(ext)) {
+        throw new BadRequestError('PDF·한글(hwp)·워드(doc/docx) 파일만 올릴 수 있어요');
+      }
+      const name = `${randomUUID()}${ext}`;
+      fs.writeFileSync(path.join(UPLOAD_DIR, name), req.file.buffer);
+      logger.info('doc_uploaded', { userId: req.user?.userId, file: name, bytes: req.file.size });
+      res.status(201).json({ url: `/uploads/${name}`, name: originalName.slice(0, 120) });
+    } catch (err) {
+      next(err);
+    }
+  },
+);
+
 // multer 자체 에러(용량 초과 등)를 400으로 변환 — 기본은 500으로 새는 문제 방지.
 router.use((err: unknown, _req: Request, _res: Response, next: NextFunction) => {
   if (err instanceof multer.MulterError) {
     const msg =
-      err.code === 'LIMIT_FILE_SIZE' ? '이미지는 5MB 이하여야 합니다' : `업로드 오류: ${err.code}`;
+      err.code === 'LIMIT_FILE_SIZE' ? '파일 용량 제한을 넘었어요 (이미지 5MB · 문서 15MB)' : `업로드 오류: ${err.code}`;
     return next(new BadRequestError(msg));
   }
   next(err as Error);

@@ -8,9 +8,10 @@ import { typography, spacing } from '../../../constants/theme';
 import { BackButton } from '../../../components/ui/BackButton';
 import { Switch } from '../../../components/ui/Switch';
 import { Ionicons } from '@expo/vector-icons';
-import { coachJobApi } from '../../../services/coachJob';
+import { coachJobApi, type JobAttachment } from '../../../services/coachJob';
 import { RegionSelect } from '../../../components/market/RegionSelect';
-import { uploadImage, absolutizeUploadUrl } from '../../../services/upload';
+import { uploadImage, uploadDoc, absolutizeUploadUrl } from '../../../services/upload';
+import * as DocumentPicker from 'expo-document-picker';
 import { useClubStore } from '../../../store/clubStore';
 import { showError, showSuccess } from '../../../utils/feedback';
 
@@ -61,6 +62,11 @@ export default function JobPostForm() {
   const [description, setDescription] = useState('');
   const [photos, setPhotos] = useState<string[]>([]);
   const [uploading, setUploading] = useState(false);
+  // 모집 요강 첨부(PDF·한글·워드, 최대 3개) + 원문 링크(학교·센터 게시글)
+  const [attachments, setAttachments] = useState<JobAttachment[]>([]);
+  const [docUploading, setDocUploading] = useState(false);
+  const [externalUrl, setExternalUrl] = useState('');
+  const [scraping, setScraping] = useState(false);
 
   useEffect(() => {
     if (!editId) return;
@@ -85,6 +91,8 @@ export default function JobPostForm() {
         setRequirements(j.requirements ?? '');
         setDescription(j.description ?? '');
         setPhotos(j.photos ?? []);
+        setAttachments(j.attachments ?? []);
+        setExternalUrl(j.externalUrl ?? '');
       })
       .catch(() => {})
       .finally(() => setLoading(false));
@@ -106,6 +114,42 @@ export default function JobPostForm() {
       /* 토스트는 인터셉터 */
     } finally {
       setUploading(false);
+    }
+  };
+
+  const addDoc = async () => {
+    if (docUploading || attachments.length >= 3) return;
+    try {
+      const result = await DocumentPicker.getDocumentAsync({
+        type: ['application/pdf', 'application/msword', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', 'application/x-hwp', 'application/haansofthwp', '*/*'],
+        copyToCacheDirectory: true,
+      });
+      if (result.canceled || !result.assets?.length) return;
+      setDocUploading(true);
+      const doc = await uploadDoc(result.assets[0]);
+      setAttachments((prev) => [...prev, doc].slice(0, 3));
+    } catch {
+      /* 토스트는 인터셉터 */
+    } finally {
+      setDocUploading(false);
+    }
+  };
+
+  // 원문 링크에서 제목·설명 가져오기 — 빈 필드만 채운다(입력한 내용은 안 덮음).
+  const scrapeFromUrl = async () => {
+    const url = externalUrl.trim();
+    if (!url || scraping) return;
+    setScraping(true);
+    try {
+      const r = await coachJobApi.scrape(url);
+      let filled = false;
+      if (r.title && !title.trim()) { setTitle(r.title.slice(0, 60)); filled = true; }
+      if (r.description && !description.trim()) { setDescription(r.description); filled = true; }
+      showSuccess(filled ? '원문에서 내용을 가져왔어요 — 확인 후 다듬어 주세요' : '가져올 새 내용이 없어요 (이미 입력됨)');
+    } catch {
+      /* 토스트는 인터셉터 */
+    } finally {
+      setScraping(false);
     }
   };
 
@@ -132,6 +176,8 @@ export default function JobPostForm() {
         requirements: requirements.trim() || null,
         description: description.trim() || null,
         photos,
+        attachments,
+        externalUrl: externalUrl.trim() || null,
       };
       if (editId) {
         await coachJobApi.update(editId, input);
@@ -288,6 +334,48 @@ export default function JobPostForm() {
             </ScrollView>
           </View>
 
+          {/* 모집 요강 첨부 — 학교·센터 채용의 요강 PDF·한글 파일 */}
+          <View style={styles.field}>
+            <Text style={[styles.label, { color: colors.textSecondary }]}>모집 요강 첨부 <Text style={{ color: colors.textLight }}>(PDF·한글·워드, 최대 3개)</Text></Text>
+            {attachments.map((a, i) => (
+              <View key={a.url} style={[styles.docRow, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+                <Ionicons name="document-attach-outline" size={16} color={colors.primary} />
+                <Text style={[styles.docName, { color: colors.text }]} numberOfLines={1}>{a.name}</Text>
+                <Pressable onPress={() => setAttachments((prev) => prev.filter((_, idx) => idx !== i))} hitSlop={8}>
+                  <Ionicons name="close" size={15} color={colors.danger} />
+                </Pressable>
+              </View>
+            ))}
+            {attachments.length < 3 && (
+              <Pressable onPress={addDoc} disabled={docUploading} style={[styles.docAdd, { borderColor: colors.border, backgroundColor: colors.surface }]}>
+                {docUploading ? <ActivityIndicator size="small" color={colors.primary} /> : (
+                  <Text style={[styles.docAddText, { color: colors.textSecondary }]}>+ 요강 파일 추가</Text>
+                )}
+              </Pressable>
+            )}
+          </View>
+
+          {/* 원문 링크 — 학교·센터 홈페이지 게시글, 제목·내용 가져오기 */}
+          <View style={styles.field}>
+            <Text style={[styles.label, { color: colors.textSecondary }]}>원문 공고 링크 <Text style={{ color: colors.textLight }}>(선택 — 학교·센터 게시글)</Text></Text>
+            <View style={styles.rowFields}>
+              <TextInput
+                style={[...inputStyle, styles.flex1]}
+                value={externalUrl}
+                onChangeText={setExternalUrl}
+                placeholder="https://..."
+                placeholderTextColor={colors.textLight}
+                autoCapitalize="none"
+                keyboardType="url"
+                maxLength={500}
+              />
+              <Pressable onPress={scrapeFromUrl} disabled={scraping || !externalUrl.trim()} style={[styles.scrapeBtn, { backgroundColor: externalUrl.trim() ? colors.primary : colors.border }]}>
+                {scraping ? <ActivityIndicator size="small" color="#fff" /> : <Text style={styles.scrapeBtnText}>가져오기</Text>}
+              </Pressable>
+            </View>
+            <Text style={[styles.docHint, { color: colors.textLight }]}>* 링크를 넣고 가져오기를 누르면 게시글 제목·내용으로 빈 칸을 채워드려요</Text>
+          </View>
+
           <View style={styles.field}>
             <Text style={[styles.label, { color: colors.textSecondary }]}>상세 설명</Text>
             <TextInput style={[...inputStyle, styles.multiline]} value={description} onChangeText={setDescription} placeholder={'모임 소개, 수강 인원, 코트 상황, 원하는 수업 방식 등'} placeholderTextColor={colors.textLight} multiline maxLength={2000} />
@@ -307,6 +395,13 @@ export default function JobPostForm() {
 }
 
 const styles = StyleSheet.create({
+  docRow: { flexDirection: 'row', alignItems: 'center', gap: 8, borderWidth: 1, borderRadius: 12, paddingHorizontal: spacing.md, paddingVertical: 11, marginBottom: 6 },
+  docName: { flex: 1, fontSize: 13.5, fontWeight: '700' },
+  docAdd: { borderWidth: 1, borderStyle: 'dashed', borderRadius: 12, paddingVertical: 12, alignItems: 'center' },
+  docAddText: { fontSize: 13, fontWeight: '700' },
+  scrapeBtn: { paddingHorizontal: 16, borderRadius: 12, alignItems: 'center', justifyContent: 'center' },
+  scrapeBtnText: { color: '#fff', fontSize: 13, fontWeight: '800' },
+  docHint: { fontSize: 11, fontWeight: '600', marginTop: 4, lineHeight: 15 },
   topBar: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, paddingHorizontal: spacing.md, paddingBottom: spacing.sm, borderBottomWidth: StyleSheet.hairlineWidth },
   title: { ...typography.subtitle1, flex: 1 },
   center: { flex: 1, alignItems: 'center', justifyContent: 'center' },

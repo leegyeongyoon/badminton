@@ -1,5 +1,5 @@
 import { useCallback, useMemo, useState } from 'react';
-import { View, Text, StyleSheet, ScrollView, Pressable, ActivityIndicator, Platform, Alert, Image } from 'react-native';
+import { View, Text, StyleSheet, ScrollView, Pressable, ActivityIndicator, Platform, Alert, Image, Linking } from 'react-native';
 import { useLocalSearchParams, useRouter, useFocusEffect } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -182,6 +182,35 @@ export default function JobPostDetailScreen() {
           </ScrollView>
         )}
 
+        {/* 모집 요강 첨부 문서 */}
+        {job.attachments.length > 0 && (
+          <View style={{ marginBottom: spacing.md, gap: 6 }}>
+            {job.attachments.map((a) => (
+              <Pressable
+                key={a.url}
+                onPress={() => Linking.openURL(absolutizeUploadUrl(a.url)!)}
+                style={({ pressed }) => [styles.attachRow, { backgroundColor: colors.surface, borderColor: colors.border }, pressed && { opacity: 0.8 }]}
+              >
+                <Ionicons name="document-attach-outline" size={17} color={colors.primary} />
+                <Text style={[styles.attachName, { color: colors.text }]} numberOfLines={1}>{a.name}</Text>
+                <Ionicons name="download-outline" size={15} color={colors.textLight} />
+              </Pressable>
+            ))}
+          </View>
+        )}
+
+        {/* 원문 공고 링크 */}
+        {!!job.externalUrl && (
+          <Pressable
+            onPress={() => Linking.openURL(job.externalUrl!)}
+            style={({ pressed }) => [styles.attachRow, { backgroundColor: colors.info + '0C', borderColor: colors.info + '40', marginBottom: spacing.md }, pressed && { opacity: 0.8 }]}
+          >
+            <Ionicons name="link-outline" size={16} color={colors.info} />
+            <Text style={[styles.attachName, { color: colors.info }]} numberOfLines={1}>원문 공고 보기</Text>
+            <Ionicons name="open-outline" size={14} color={colors.info} />
+          </Pressable>
+        )}
+
         {/* ── 작성자: 지원자 관리 대시보드 진입(원티드) ── */}
         {job.canManage && (
           <Pressable
@@ -319,6 +348,8 @@ export default function JobPostDetailScreen() {
 }
 
 const styles = StyleSheet.create({
+  attachRow: { flexDirection: 'row', alignItems: 'center', gap: 8, borderWidth: 1, borderRadius: 12, paddingHorizontal: spacing.md, paddingVertical: 12 },
+  attachName: { flex: 1, fontSize: 13.5, fontWeight: '800' },
   center: { flex: 1, alignItems: 'center', justifyContent: 'center' },
   topBar: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, paddingHorizontal: spacing.md, paddingBottom: spacing.sm, borderBottomWidth: StyleSheet.hairlineWidth },
   topTitle: { ...typography.subtitle1, flex: 1 },
