@@ -6,6 +6,7 @@ import {
   KeyboardAvoidingView,
   Platform,
   Pressable,
+  Linking,
 } from 'react-native';
 import { Link, useRouter } from 'expo-router';
 import { useAuthStore, KakaoNotConfiguredError, GoogleNotConfiguredError } from '../../store/authStore';
@@ -31,6 +32,9 @@ const GOOGLE_WHITE = '#FFFFFF';
 const GOOGLE_LABEL = '#1F1F1F';
 const GOOGLE_BORDER = '#DADCE0';
 const GOOGLE_BLUE = '#4285F4';
+
+// 콕고 간편 가이드 — badmintoncourt.store 에 배포되는 정적 페이지(로그인 불필요).
+const GUIDE_URL = 'https://badmintoncourt.store/guide.html';
 
 export default function LoginScreen() {
   const [loading, setLoading] = useState(false);
@@ -265,6 +269,17 @@ export default function LoginScreen() {
             </Pressable>
           </Link>
         </View>
+
+        {/* 콕고 간편 가이드 — 참가자·운영자 사용법(로그인 없이 볼 수 있는 웹 페이지). */}
+        <Pressable
+          onPress={() => Linking.openURL(GUIDE_URL)}
+          hitSlop={8}
+          accessibilityRole="link"
+          accessibilityLabel="콕고 간편 가이드 열기"
+          style={styles.guideRow}
+        >
+          <Text style={[styles.guideLink, { color: colors.textSecondary }]}>📖 콕고 간편 가이드</Text>
+        </Pressable>
       </View>
       </ScreenContainer>
     </KeyboardAvoidingView>
@@ -372,6 +387,15 @@ const styles = StyleSheet.create({
   operatorSignupLink: {
     ...typography.body2,
     fontWeight: '700',
+  },
+  guideRow: {
+    alignSelf: 'center',
+    marginTop: spacing.lg,
+  },
+  guideLink: {
+    ...typography.body2,
+    fontWeight: '600',
+    textDecorationLine: 'underline',
   },
   guestButton: {
     marginTop: spacing.xl,
