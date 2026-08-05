@@ -371,6 +371,37 @@ export default function OperateScreen() {
   useEffect(() => { autoTuningRef.current = autoTuning; }, [autoTuning]);
   const autoFillLockRef = useRef(false);
   const runAutoFillRef = useRef<null | (() => void)>(null);
+  // 게임 주기(분) — '몇 분 남음' 추정 + 시간 인지 준비의 기준(게임 ~11~13분). 정모별 저장.
+  const [gameCycleMin, setGameCycleMin] = useState(13);
+  const gameCycleKey = clubSessionId ? `operate_gamecycle_${clubSessionId}` : null;
+  const gameCycleLoadedRef = useRef(false);
+  useEffect(() => {
+    if (!gameCycleKey) return;
+    let alive = true;
+    getItem(gameCycleKey)
+      .then((raw) => { const n = raw ? parseInt(raw, 10) : NaN; if (alive && [11, 13, 15].includes(n)) setGameCycleMin(n); })
+      .catch(() => {})
+      .finally(() => { gameCycleLoadedRef.current = true; });
+    return () => { alive = false; };
+  }, [gameCycleKey]);
+  useEffect(() => {
+    if (!gameCycleKey || !gameCycleLoadedRef.current) return;
+    setItem(gameCycleKey, String(gameCycleMin)).catch(() => {});
+  }, [gameCycleMin, gameCycleKey]);
+  const gameCycleRef = useRef(13);
+  useEffect(() => { gameCycleRef.current = gameCycleMin; }, [gameCycleMin]);
+  // '자동 편성 중' 느낌의 펄스 애니메이션(ON일 때만 은은하게).
+  const autoPulse = useRef(new RNAnimated.Value(1)).current;
+  useEffect(() => {
+    if (!autoPilot) { autoPulse.setValue(1); return; }
+    const useNative = Platform.OS !== 'web';
+    const loop = RNAnimated.loop(RNAnimated.sequence([
+      RNAnimated.timing(autoPulse, { toValue: 0.4, duration: 850, useNativeDriver: useNative }),
+      RNAnimated.timing(autoPulse, { toValue: 1, duration: 850, useNativeDriver: useNative }),
+    ]));
+    loop.start();
+    return () => loop.stop();
+  }, [autoPilot, autoPulse]);
 
   // ─── 2분할(편성 ↔ 코트·큐) 크기 조절 ───
   // divider를 드래그해 왼쪽(선수 편성/풀) 폭을 px로 조정. null=기존 38% 기본.
@@ -1035,6 +1066,26 @@ export default function OperateScreen() {
     [courts, playingByCourtId],
   );
 
+  // ─── 코트별 남은 시간 추정(시간 인지 준비 + 라이브 UI용) ───
+  // 진행 중 코트의 경과시간(now − startedAt) vs 게임 주기 → 남은 시간 추정. '곧 끝남'은
+  // 남은 2분 이하. nowTs(30초 틱)로 계속 갱신. 정확한 종료 시각은 알 수 없어 '추정'이다.
+  const AUTO_FINISH_SOON_MIN = 2;
+  const courtTiming = useMemo(() => {
+    const list: { id: string; name: string; elapsedMin: number; remainMin: number; aboutToFinish: boolean }[] = [];
+    for (const c of courts) {
+      const startedAt = c.currentTurn?.startedAt;
+      if (c.status !== 'IN_USE' || !startedAt) continue;
+      const startMs = new Date(startedAt).getTime();
+      if (!Number.isFinite(startMs)) continue;
+      const elapsedMin = Math.max(0, (nowTs - startMs) / 60000);
+      const remainMin = Math.max(0, gameCycleMin - elapsedMin);
+      list.push({ id: c.id, name: c.name, elapsedMin, remainMin, aboutToFinish: remainMin <= AUTO_FINISH_SOON_MIN });
+    }
+    return list.sort((a, b) => a.remainMin - b.remainMin);
+  }, [courts, nowTs, gameCycleMin]);
+  const soonestCourt = courtTiming[0] ?? null;
+  const aboutToFinishCount = courtTiming.filter((c) => c.aboutToFinish).length;
+
   // ─── Composition flags (SOFT, calm — same tone as the conflict dot) ───
   // Surfaced from the board: a set of already-played/queued 4-player foursome
   // keys, and per-pair shared-game counts this 정모.
@@ -1568,7 +1619,8 @@ export default function OperateScreen() {
   const runAutoFillPass = useCallback(async () => {
     if (!autoPilotRef.current || autoFillLockRef.current || !board) return;
     const readyCount = queuedEntries.filter((e) => e.playerIds.length >= 4).length;
-    const target = emptyCourts.length + 1;   // 빈 코트마다 준비 + 버퍼 1
+    // 시간 인지 — 빈 코트 + '곧 끝날' 코트만큼 미리 준비(+버퍼 1). 코트 수+1로 상한.
+    const target = Math.min(courts.length + 1, emptyCourts.length + aboutToFinishCount + 1);
     const need = target - readyCount;
     if (need <= 0) return;                    // 이미 충분히 준비됨
     autoFillLockRef.current = true;
@@ -1600,7 +1652,7 @@ export default function OperateScreen() {
         loadBoard(); loadPool();
       }
     }
-  }, [board, emptyCourts.length, queuedEntries, suggestNext, createQueueGame, getPlayer, loadBoard, loadPool]);
+  }, [board, emptyCourts.length, courts.length, aboutToFinishCount, queuedEntries, suggestNext, createQueueGame, getPlayer, loadBoard, loadPool]);
   useEffect(() => { runAutoFillRef.current = runAutoFillPass; }, [runAutoFillPass]);
 
   // 자동 편성이 반응할 준비량 지표(완성된 4인 대기 게임 수).
@@ -1611,7 +1663,7 @@ export default function OperateScreen() {
     if (!autoPilot) return;
     const t = setTimeout(() => runAutoFillRef.current?.(), 800);
     return () => clearTimeout(t);
-  }, [autoPilot, emptyCourts.length, readyQueuedCount, uniquePlayers.length]);
+  }, [autoPilot, emptyCourts.length, aboutToFinishCount, readyQueuedCount, uniquePlayers.length]);
 
   // 트리거 ② — 안전망 주기 타이머(게임 ~11~13분 주기·휴식 복귀·지각 체크인 대비). 15초마다 점검.
   useEffect(() => {
@@ -4260,12 +4312,14 @@ export default function OperateScreen() {
       {autoPilot && (
         <View style={[styles.autoStrip, { backgroundColor: colors.secondaryBg, borderColor: colors.secondary }]}>
           <View style={styles.autoStripTop}>
+            <RNAnimated.Text style={[styles.autoBolt, { opacity: autoPulse }]}>⚡</RNAnimated.Text>
             <Text style={[styles.autoStripText, { color: colors.secondary }]} numberOfLines={1}>
+              {'자동 편성 · '}
               {autoComposing
-                ? '⚡ 자동 편성 · 편성 중…'
+                ? '편성 중… · 급수·겹침 확인'
                 : readyQueuedCount === 0
-                  ? '⚡ 자동 편성 · 대기 인원 부족 — 4명 모이면 자동 편성해요'
-                  : `⚡ 자동 편성 · 다음 게임 ${readyQueuedCount}개 준비됨`}
+                  ? '대기 인원 부족 — 4명 모이면 자동 편성'
+                  : `다음 게임 ${readyQueuedCount}개 준비${soonestCourt ? ` · ${soonestCourt.name} 약 ${Math.max(1, Math.ceil(soonestCourt.remainMin))}분 남음` : ''}`}
             </Text>
             {autoComposing && <ActivityIndicator size="small" color={colors.secondary} />}
           </View>
@@ -4322,6 +4376,27 @@ export default function OperateScreen() {
                   </View>
                 </View>
               ))}
+              {/* 게임 주기 — '몇 분 남음' 추정 + 시간 인지 준비의 기준. */}
+              <View style={styles.tuningRow}>
+                <Text style={[styles.tuningRowLabel, { color: colors.textSecondary }]}>게임 주기</Text>
+                <View style={styles.tuningSeg}>
+                  {[11, 13, 15].map((v) => {
+                    const on = gameCycleMin === v;
+                    return (
+                      <TouchableOpacity
+                        key={v}
+                        style={[styles.tuningSegItem, { borderColor: on ? colors.secondary : colors.border, backgroundColor: on ? colors.secondary : 'transparent' }]}
+                        onPress={() => setGameCycleMin(v)}
+                        accessibilityRole="button"
+                        accessibilityState={{ selected: on }}
+                        accessibilityLabel={`게임 주기 ${v}분`}
+                      >
+                        <Text style={[styles.tuningSegText, { color: on ? '#fff' : colors.textSecondary }]}>{v}분</Text>
+                      </TouchableOpacity>
+                    );
+                  })}
+                </View>
+              </View>
             </View>
           )}
         </View>
@@ -6274,6 +6349,7 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1, gap: 6,
   },
   autoStripTop: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
+  autoBolt: { fontSize: 14, marginRight: 2 },
   autoStripText: { ...typography.caption, fontWeight: '800', flexShrink: 1 },
   autoStripSub: { ...typography.caption },
   autoStripChips: { flexDirection: 'row', flexWrap: 'wrap', gap: 6 },
