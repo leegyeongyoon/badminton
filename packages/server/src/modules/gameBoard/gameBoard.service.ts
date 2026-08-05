@@ -8,6 +8,7 @@ import {
   SUGGEST_TUNABLES,
   type SuggestMode,
   type ModePlayer,
+  type SuggestTuning,
 } from './suggest.algorithm';
 
 // Map a SkillLevel enum (S strongest … F weakest; null=미설정) to a number used
@@ -477,7 +478,7 @@ export async function pushAllEntries(boardId: string, userId: string) {
 // Does NOT mutate any state.
 export async function suggestNextFoursome(
   clubSessionId: string,
-  opts: { courtId?: string; count?: number; mode?: SuggestMode; exclude?: string[] },
+  opts: { courtId?: string; count?: number; mode?: SuggestMode; exclude?: string[]; tuning?: Partial<SuggestTuning> },
   userId: string,
 ) {
   const clubSession = await prisma.clubSession.findUnique({
@@ -576,16 +577,46 @@ export async function suggestNextFoursome(
     },
   });
 
+  // 과거 게임 타입(혼복/동성복) 분류를 위해 '이번 정모에서 게임한 모든 참가자'의 성별을
+  // 모은다(풀 밖 상대까지 포함해야 그 게임이 혼복이었는지 판정 가능).
+  const gameUserIds = Array.from(new Set(sessionGames.flatMap((g) => g.players.map((p) => p.userId))));
+  const gameProfiles = gameUserIds.length
+    ? await prisma.playerProfile.findMany({
+        where: { userId: { in: gameUserIds } },
+        select: { userId: true, gender: true },
+      })
+    : [];
+  const genderOf = new Map(
+    gameProfiles.map((p) => [p.userId, p.gender === 'M' || p.gender === 'F' ? p.gender : null] as const),
+  );
+
   const initialGamesCount: Record<string, number> = {};
-  for (const pid of poolIds) initialGamesCount[pid] = 0;
+  const mixedGamesCount: Record<string, number> = {}; // 풀 유저의 혼복 횟수
+  const sameGamesCount: Record<string, number> = {}; // 풀 유저의 동성복(남복/여복) 횟수
+  for (const pid of poolIds) {
+    initialGamesCount[pid] = 0;
+    mixedGamesCount[pid] = 0;
+    sameGamesCount[pid] = 0;
+  }
   // lastGameAt: most recent game time per pool user (ms epoch), 0 if none.
   const lastGameAtMs: Record<string, number> = {};
   for (const g of sessionGames) {
     const t = (g.turn?.completedAt ?? g.turn?.startedAt ?? g.updatedAt ?? g.createdAt);
     const tMs = t ? new Date(t).getTime() : 0;
+    // 이 게임이 혼복이었는지(남녀 각 1명 이상) 참가자 성별로 판정.
+    let gm = 0;
+    let gf = 0;
+    for (const gp of g.players) {
+      const gg = genderOf.get(gp.userId);
+      if (gg === 'M') gm++;
+      else if (gg === 'F') gf++;
+    }
+    const isMixed = gm >= 1 && gf >= 1;
     for (const gp of g.players) {
       if (!(gp.userId in initialGamesCount)) continue; // only pool users
       initialGamesCount[gp.userId] = (initialGamesCount[gp.userId] ?? 0) + 1;
+      if (isMixed) mixedGamesCount[gp.userId] = (mixedGamesCount[gp.userId] ?? 0) + 1;
+      else sameGamesCount[gp.userId] = (sameGamesCount[gp.userId] ?? 0) + 1;
       if (tMs > (lastGameAtMs[gp.userId] ?? 0)) lastGameAtMs[gp.userId] = tMs;
     }
   }
@@ -634,6 +665,9 @@ export async function suggestNextFoursome(
       games: initialGamesCount[id] ?? 0,
       gender: g === 'M' || g === 'F' ? g : null,
       waitSeconds: waitSecondsFor(id),
+      timePresentSeconds: Math.max(0, (nowMs - (checkedInAtMs[id] ?? nowMs)) / 1000),
+      mixedGames: mixedGamesCount[id] ?? 0,
+      sameGames: sameGamesCount[id] ?? 0,
     };
   });
   const poolById = new Map(modePool.map((p) => [p.id, p]));
@@ -682,7 +716,7 @@ export async function suggestNextFoursome(
     const available = modePool.filter((p) => !usedThisCall.has(p.id));
     if (available.length < 4) break;
 
-    const picked = selectFoursomeByMode(available, mode, pairWeight, 4);
+    const picked = selectFoursomeByMode(available, mode, pairWeight, 4, undefined, opts.tuning);
     if (picked.playerIds.length < 4) break;
 
     slotPlayerIds.push(picked.playerIds);
@@ -690,11 +724,22 @@ export async function suggestNextFoursome(
     // Feed this foursome back so subsequent slots rotate + rebalance.
     for (const id of picked.playerIds) usedThisCall.add(id);
     addPairWeight(picked.playerIds, nowMs);
+    // 이번에 뽑은 판의 타입(혼복/동성복)을 계산해 다음 슬롯이 타입도 순환하게 반영.
+    let pm = 0;
+    let pf = 0;
+    for (const id of picked.playerIds) {
+      const mp = poolById.get(id);
+      if (mp?.gender === 'M') pm++;
+      else if (mp?.gender === 'F') pf++;
+    }
+    const pickedMixed = pm >= 1 && pf >= 1;
     for (const id of picked.playerIds) {
       const mp = poolById.get(id);
       if (mp) {
         mp.games += 1;
         mp.waitSeconds = 0; // they just got a game
+        if (pickedMixed) mp.mixedGames += 1;
+        else mp.sameGames += 1;
       }
     }
   }

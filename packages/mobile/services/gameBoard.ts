@@ -9,6 +9,13 @@ export type SuggestMode =
   | 'competitive'
   | 'fresh';
 
+// 운영자 조율값 (서버 suggestFoursomeSchema.tuning 와 1:1). 미지정 항목은 서버 기본값.
+export type SuggestTuning = {
+  genderOffsetFemale?: number; // 여자 급수 보정폭(−2~0, 0=끔)
+  sameGenderWeight?: number;   // 동성 복식 선호 강도(0~2, 0=끔)
+  typeVarietyWeight?: number;  // 타입 순환 강도(0~2, 0=끔)
+};
+
 export const gameBoardApi = {
   create: (clubSessionId: string) =>
     api.post(`/club-sessions/${clubSessionId}/game-board`),
@@ -38,7 +45,7 @@ export const gameBoardApi = {
   // exclude: 이미 트레이에 올려둔/큐에 편성된 인원 → 풀에서 제외 (연속 편성 시 새 인원)
   suggest: (
     clubSessionId: string,
-    body?: { courtId?: string; count?: number; mode?: SuggestMode; exclude?: string[] },
+    body?: { courtId?: string; count?: number; mode?: SuggestMode; exclude?: string[]; tuning?: SuggestTuning },
   ) => api.post(`/club-sessions/${clubSessionId}/suggest`, body ?? {}),
 
   // ─── 전체 "다음 게임" 큐 (코트 없는 QUEUED 게임) ───

@@ -429,6 +429,17 @@ export const suggestFoursomeSchema = z.object({
   // sends the players it has STAGED in the next-game tray plus those already in
   // QUEUED upcoming games, so building game-after-game keeps using fresh people.
   exclude: z.array(z.string().uuid()).optional(),
+  // 운영자 조율값 — 운영판에서 강도를 바꾼다. 미지정 항목은 서버 기본값. 모두 optional.
+  //   genderOffsetFemale: 여자 급수 보정폭(−2~0, 0=끔)
+  //   sameGenderWeight:   동성 복식 선호 강도(0~2, 0=끔)
+  //   typeVarietyWeight:  타입 순환 강도(0~2, 0=끔)
+  tuning: z
+    .object({
+      genderOffsetFemale: z.number().min(-2).max(0).optional(),
+      sameGenderWeight: z.number().min(0).max(2).optional(),
+      typeVarietyWeight: z.number().min(0).max(2).optional(),
+    })
+    .optional(),
 });
 
 // Game Board QUEUE (미리 짜두는 다음 게임 큐)

@@ -150,6 +150,16 @@ export interface ModePlayer {
   gender: 'M' | 'F' | null;
   /** Seconds the player has been waiting = now − max(checkedInAt, lastGameAt). */
   waitSeconds: number;
+  /**
+   * 체류 시간(초) = now − 체크인 시각. '적게 친'을 체크인 시간 대비로 판단하기 위한 값:
+   * 기대 게임수 = timePresentSeconds / GAME_CYCLE_SECONDS, 결손 = 기대 − 실제. 방금 온
+   * 사람이 게임 수 적은 건 당연(결손 0)하고, 오래 있었는데 못 친 사람이 최우선이 된다.
+   */
+  timePresentSeconds: number;
+  /** 이번 정모에서 이 사람이 친 '혼복' 게임 수(성별 순환 anti-fixation용). */
+  mixedGames: number;
+  /** 이번 정모에서 이 사람이 친 '동성복(남복/여복)' 게임 수. */
+  sameGames: number;
 }
 
 export interface ModeResult {
@@ -168,6 +178,25 @@ export interface ModeResult {
 const WAIT_REF_SECONDS = 15 * 60;
 // Recency-decay half-life for pair history (older shared games count less).
 const PAIR_RECENCY_HALFLIFE_SECONDS = 45 * 60;
+
+// 성별 보정(실효 급수) — 같은 letter라도 실제 전력이 다르다. 배드민턴 관례상 여자 급수는
+// 남자보다 후한(높은) 편이라, 매칭 균형을 맞추려면 여자 급수를 남자 기준으로 몇 단계 낮춰
+// '실효 급수'로 환산해 비교한다. 예) 오프셋 1 → 여자 B(5)=남자 C(4), 여자 A(6)=남자 B(5);
+// 오프셋 2 → 여자 B=남자 D. 등급이 올라가도 같은 폭으로 함께 올라간다(선형). 여기 한 값만
+// 바꾸면 전 등급에 반영된다. (M/미설정은 보정 없음, F만 하향 환산.)
+const GENDER_SKILL_OFFSET_FEMALE = -1;
+
+// 공평 결손 — 기대 게임 1판당 걸리는 주기(초). 체류 시간을 '기대 게임 수'로 환산할 때 쓴다
+// (게임 ~11~13분). 체류시간/주기 = 기대 게임 수, 결손 = 기대 − 실제.
+const GAME_CYCLE_SECONDS = 13 * 60;
+// 결손이 무한정 커지지 않게 상한(아주 오래 있었는데 못 친 경우도 이 이상은 안 튐).
+const FAIRSHARE_CAP = 8;
+// 마지막 게임 이후 유휴 시간 보너스 상한(결손이 주 신호, 유휴는 동급 결손자 사이 tie-breaker).
+const WAIT_BONUS_CAP = 1;
+
+// 타입 편중 방지 — 잘/못 치는 사람 누구도 혼복/동성복 한쪽에 갇히지 않게, 부족한 타입을
+// 주는 그룹을 선호(soft). 급수·공평엔 양보한다.
+const TYPE_VARIETY_WEIGHT = 0.6;
 
 // ── Controlled tie-breaking randomness (anti-determinism) ────────────────────
 // The unified scoring is otherwise fully deterministic, so when many players are
@@ -237,15 +266,20 @@ function pairKey(a: string, b: string): string {
 
 /**
  * Per-player priority COST (lower = higher priority = picked first).
- * cost = gamesPlayedToday − waitWorth, where waitWorth grows with wait time
- * (capped). So fewer games ⇒ lower cost, AND longer wait ⇒ lower cost. A player
- * who just finished a game has waitSeconds≈0 ⇒ no wait credit ⇒ higher cost.
+ *
+ *   cost = games − fairShare − waitBonus
+ *
+ * - fairShare = min(FAIRSHARE_CAP, 체류시간/게임주기) = "지금까지 있었으면 이 정도는
+ *   쳤어야 하는" 기대 게임 수. games − fairShare = 결손(음수일수록 더 owed). 이렇게 해서
+ *   '적게 친'을 체크인 시간 대비로 본다: 방금 온 0게임(fairShare≈0)은 안 튀고, 오래 있었는데
+ *   0게임(fairShare 큼)은 최우선. 방금 친 사람은 games가 fairShare에 근접/초과 → 후순위.
+ * - waitBonus = min(WAIT_BONUS_CAP, 유휴시간/WAIT_REF): 마지막 게임 이후 오래 쉰 사람을
+ *   동급 결손자 사이에서 살짝 앞세우는 tie-breaker(막 끝낸 사람은 0).
  */
 export function priorityCost(p: ModePlayer): number {
-  // waitWorth is in the same unit as "games": capped at ~2 games of credit so a
-  // very long wait can offset up to two extra games played, but not run away.
-  const waitWorth = Math.min(2, p.waitSeconds / WAIT_REF_SECONDS);
-  return p.games - waitWorth;
+  const fairShare = Math.min(FAIRSHARE_CAP, p.timePresentSeconds / GAME_CYCLE_SECONDS);
+  const waitBonus = Math.min(WAIT_BONUS_CAP, p.waitSeconds / WAIT_REF_SECONDS);
+  return p.games - fairShare - waitBonus;
 }
 
 // fairness(group): sum of per-player JITTERED priorityCost. Lower ⇒ the four are
@@ -273,10 +307,16 @@ function varietyCost(group: ModePlayer[], pairWeight: Record<string, number>): n
   return c;
 }
 
+// 성별 보정 실효 급수 — 여자는 genderOffsetFemale 만큼 낮춰 남자와 같은 척도로.
+// 급수 밸런싱(비슷한/균형/빡센)은 이 실효 급수로 비교해 남녀 섞인 게임도 실제 전력이 맞도록 한다.
+function effectiveSkill(p: ModePlayer, genderOffsetFemale: number): number {
+  return p.skill + (p.gender === 'F' ? genderOffsetFemale : 0);
+}
+
 // modeTerm(group, mode): the mode-specific flavor cost (lower = better). The
 // fairness + variety baseline is added by scoreGroup, NOT here.
-function modeTerm(group: ModePlayer[], mode: SuggestMode): number {
-  const skills = group.map((p) => p.skill);
+function modeTerm(group: ModePlayer[], mode: SuggestMode, genderOffsetFemale: number): number {
+  const skills = group.map((p) => effectiveSkill(p, genderOffsetFemale));
   switch (mode) {
     case 'similar': {
       // Prefer a tight skill spread.
@@ -309,6 +349,58 @@ function modeTerm(group: ModePlayer[], mode: SuggestMode): number {
   }
 }
 
+// 소프트 동성 우선(유두리) — 남복(4남)/여복(4여)을 '살짝' 선호하되 급수·공평에 양보.
+// genderMixCost: 순수 동성=0, 섞일수록 min(남수,여수)만큼 비용(3:1→1, 2:2→2). 성별 미설정은
+// 어느 쪽으로도 안 세어 관대하게 둔다. 가중치(SAME_GENDER_WEIGHT)가 작아, 급수/공평 차가
+// 조금만 있어도 바로 혼복으로 양보한다 → 남복/여복 성향 + 혼복도 충분히 섞임.
+const SAME_GENDER_WEIGHT = 0.5;
+function genderMixCost(group: ModePlayer[]): number {
+  let m = 0;
+  let f = 0;
+  for (const p of group) {
+    if (p.gender === 'M') m++;
+    else if (p.gender === 'F') f++;
+  }
+  return Math.min(m, f);
+}
+
+// 그룹 타입 — 남녀 각각 1명 이상이면 '혼복', 아니면 '동성복(남복/여복)'.
+function groupType(group: ModePlayer[]): 'mixed' | 'same' {
+  let m = 0;
+  let f = 0;
+  for (const p of group) {
+    if (p.gender === 'M') m++;
+    else if (p.gender === 'F') f++;
+  }
+  return m >= 1 && f >= 1 ? 'mixed' : 'same';
+}
+
+// 타입 편중 비용 — 이 그룹의 타입(혼복/동성복)을 '이미 많이 친' 사람이 많을수록 비용↑,
+// 그 타입이 '부족한' 사람이 많을수록 비용↓(음수). 부족한 타입을 주도록 유도해 잘/못 치는
+// 사람 누구도 한 타입에 갇히지 않게 한다(강자·약자 모두 혼복 순환에 포함). w_type로 soft.
+function typeVarietyCost(group: ModePlayer[]): number {
+  const t = groupType(group);
+  let c = 0;
+  for (const p of group) {
+    c += t === 'mixed' ? p.mixedGames - p.sameGames : p.sameGames - p.mixedGames;
+  }
+  return c;
+}
+
+// 운영자 조율값 — 운영판에서 강도를 바꿀 수 있는 값들. 미지정 항목은 모듈 기본 상수 사용.
+export interface SuggestTuning {
+  genderOffsetFemale: number; // 여자 급수 보정폭(음수·0). 0=보정끔
+  sameGenderWeight: number;   // 동성 복식(남복/여복) 선호 강도(0=끔)
+  typeVarietyWeight: number;  // 타입 순환(혼복 포함) 강도(0=끔)
+}
+export function resolveTuning(t?: Partial<SuggestTuning>): SuggestTuning {
+  return {
+    genderOffsetFemale: t?.genderOffsetFemale ?? GENDER_SKILL_OFFSET_FEMALE,
+    sameGenderWeight: t?.sameGenderWeight ?? SAME_GENDER_WEIGHT,
+    typeVarietyWeight: t?.typeVarietyWeight ?? TYPE_VARIETY_WEIGHT,
+  };
+}
+
 // Unified score for a group of 4 (lower = better). `jitterById` carries the
 // per-player jittered fairness cost (priorityCost + sub-one-game jitter) so the
 // combo search rotates equally-owed players across calls without breaking a real
@@ -319,12 +411,17 @@ function scoreGroup(
   mode: SuggestMode,
   pairWeight: Record<string, number>,
   jitterById: Map<string, number>,
+  tuning: SuggestTuning,
 ): number {
   const w = MODE_WEIGHTS[mode];
   return (
     w.wFair * fairnessCost(group, jitterById) +
     w.wVariety * varietyCost(group, pairWeight) +
-    w.wMode * modeTerm(group, mode)
+    w.wMode * modeTerm(group, mode, tuning.genderOffsetFemale) +
+    // 타입 순환 — 부족한 타입(혼복/동성복)을 주도록 유도(아무도 한 타입에 갇히지 않게).
+    tuning.typeVarietyWeight * typeVarietyCost(group) +
+    // 소프트 동성 우선 — 모든 모드에 얹는 약한 성향(급수/공평이 우선, 혼복 유두리 유지).
+    tuning.sameGenderWeight * genderMixCost(group)
   );
 }
 
@@ -353,7 +450,9 @@ export function selectFoursomeByMode(
   pairWeight: Record<string, number>,
   size = 4,
   topN = 20,
+  tuning?: Partial<SuggestTuning>,
 ): ModeResult {
+  const tune = resolveTuning(tuning);
   if (pool.length <= size) {
     // Whole pool plays.
     return { playerIds: pool.map((p) => p.id) };
@@ -400,7 +499,7 @@ export function selectFoursomeByMode(
         for (let c = b + 1; c < n; c++)
           for (let d = c + 1; d < n; d++) {
             const group = [candidates[a], candidates[b], candidates[c], candidates[d]];
-            const s = scoreGroup(group, mode, pairWeight, jitterById);
+            const s = scoreGroup(group, mode, pairWeight, jitterById, tune);
             if (s < bestScore) {
               bestScore = s;
               best = group;
@@ -507,4 +606,10 @@ function formGroups(
 export const SUGGEST_TUNABLES = {
   WAIT_REF_SECONDS,
   PAIR_RECENCY_HALFLIFE_SECONDS,
+  GENDER_SKILL_OFFSET_FEMALE,
+  SAME_GENDER_WEIGHT,
+  GAME_CYCLE_SECONDS,
+  FAIRSHARE_CAP,
+  WAIT_BONUS_CAP,
+  TYPE_VARIETY_WEIGHT,
 };

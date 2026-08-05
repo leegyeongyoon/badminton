@@ -6,7 +6,7 @@ import {
 } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useGameBoard, GameBoardEntry } from '../../../hooks/useGameBoard';
-import { gameBoardApi, type SuggestMode } from '../../../services/gameBoard';
+import { gameBoardApi, type SuggestMode, type SuggestTuning } from '../../../services/gameBoard';
 import { useTheme } from '../../../hooks/useTheme';
 import { useResponsiveLayout, courtColumnsFor, poolColumnsFor } from '../../../hooks/useResponsiveLayout';
 import type { LayoutChangeEvent } from 'react-native';
@@ -81,6 +81,25 @@ const SUGGEST_MODES: {
   { mode: 'balanced', emoji: '🤝', label: '균형 접전', hint: '2:2 실력이 팽팽하게 · 중간 격차', note: '균형 접전으로 추천했어요' },
   { mode: 'competitive', emoji: '🔥', label: '빡센 게임', hint: '2강 2약 · 실력 격차 큰 도전', note: '빡센 게임으로 추천했어요' },
   { mode: 'fresh', emoji: '✨', label: '새 조합', hint: '안 친 사람들끼리', note: '새 조합으로 추천했어요' },
+];
+
+// ─── 자동 편성 조율(운영자 튜닝) — 서버 suggest tuning 과 1:1 ───
+// 기본값은 서버 기본과 동일(바꾸기 전엔 동작 변화 없음). 정모별 저장.
+const AUTO_TUNING_DEFAULT: Required<SuggestTuning> = {
+  genderOffsetFemale: -1, // 여B≈남C
+  sameGenderWeight: 0.5,
+  typeVarietyWeight: 0.6,
+};
+// 각 조율 항목의 세그먼트 선택지 [표시라벨, 값].
+const TUNING_OPTIONS: Record<keyof SuggestTuning, readonly (readonly [string, number])[]> = {
+  genderOffsetFemale: [['끔', 0], ['1단계', -1], ['2단계', -2]],
+  sameGenderWeight: [['끔', 0], ['약', 0.35], ['중', 0.5], ['강', 0.9]],
+  typeVarietyWeight: [['끔', 0], ['약', 0.4], ['중', 0.6], ['강', 1.0]],
+};
+const TUNING_ROWS: { key: keyof SuggestTuning; label: string; hint: string }[] = [
+  { key: 'genderOffsetFemale', label: '성별 보정', hint: '여자 급수를 남자 기준 몇 단계 낮춰볼지 (남D=여B는 2단계)' },
+  { key: 'sameGenderWeight', label: '동성 우선', hint: '남복/여복 선호 강도 (강할수록 동성끼리)' },
+  { key: 'typeVarietyWeight', label: '타입 순환', hint: '혼복/동성복 골고루 (강할수록 한 타입에 안 갇힘)' },
 ];
 
 // ─── Drag-to-compose registry ───────────────────────────────
@@ -269,6 +288,89 @@ export default function OperateScreen() {
     setModeChooserOpen(false);
     setCourtDrafts({});
   }, [boardMode]);
+
+  // ─── 자동 편성(오토파일럿, 반자동) ─────────────────────────────────────────
+  // ON이면 다음 게임을 자동으로 편성해 '다음 게임' 대기줄에 미리 준비해 둔다.
+  //  • 앱: '누구랑 할지'만 자동(공평·비슷한 급수). 코트에는 넣지 않는다.
+  //  • 운영자: 게임이 끝나면 '게임 종료', 빈 코트를 탭해 준비된 게임을 직접 투입.
+  //  • 트리거: 코트 비움·큐 소진·체크인 등으로 준비분이 줄면 + 15초 안전망 타이머.
+  //  • 목표량: (빈 코트 수 + 1)개를 항상 준비. 자격 4인 미달이면 편성 멈추고 대기(무한X).
+  // 서버 보드 상태를 그대로 공유하므로 다른 운영진 화면과도 자동 sync. 기본 OFF(수동). 정모별 저장.
+  const [autoPilot, setAutoPilot] = useState(false);
+  const autoPilotKey = clubSessionId ? `operate_autopilot_${clubSessionId}` : null;
+  const autoPilotLoadedRef = useRef(false);
+  useEffect(() => {
+    if (!autoPilotKey) return;
+    let alive = true;
+    getItem(autoPilotKey)
+      .then((raw) => { if (alive && raw === '1') setAutoPilot(true); })
+      .catch(() => {})
+      .finally(() => { autoPilotLoadedRef.current = true; });
+    return () => { alive = false; };
+  }, [autoPilotKey]);
+  useEffect(() => {
+    if (!autoPilotKey || !autoPilotLoadedRef.current) return;
+    setItem(autoPilotKey, autoPilot ? '1' : '0').catch(() => {});
+  }, [autoPilot, autoPilotKey]);
+  // 자동 편성 매칭 모드(기본 '비슷한 급수'). 정모별 저장.
+  const [autoMode, setAutoMode] = useState<SuggestMode>('similar');
+  const autoModeKey = clubSessionId ? `operate_automode_${clubSessionId}` : null;
+  const autoModeLoadedRef = useRef(false);
+  useEffect(() => {
+    if (!autoModeKey) return;
+    let alive = true;
+    getItem(autoModeKey)
+      .then((raw) => {
+        if (alive && raw && SUGGEST_MODES.some((m) => m.mode === raw)) setAutoMode(raw as SuggestMode);
+      })
+      .catch(() => {})
+      .finally(() => { autoModeLoadedRef.current = true; });
+    return () => { alive = false; };
+  }, [autoModeKey]);
+  useEffect(() => {
+    if (!autoModeKey || !autoModeLoadedRef.current) return;
+    setItem(autoModeKey, autoMode).catch(() => {});
+  }, [autoMode, autoModeKey]);
+  // 상태 스트립 표시용 — 편성 진행 중 여부 + 마지막 편성 안내.
+  const [autoComposing, setAutoComposing] = useState(false);
+  const [autoLastNote, setAutoLastNote] = useState<string | null>(null);
+  // 자동 편성 조율값(성별 보정폭·동성 강도·타입 순환) — 자동+수동 suggest에 전달. 정모별 저장.
+  const [autoTuning, setAutoTuning] = useState<Required<SuggestTuning>>(AUTO_TUNING_DEFAULT);
+  const [tuningOpen, setTuningOpen] = useState(false);
+  const autoTuningKey = clubSessionId ? `operate_autotuning_${clubSessionId}` : null;
+  const autoTuningLoadedRef = useRef(false);
+  useEffect(() => {
+    if (!autoTuningKey) return;
+    let alive = true;
+    getItem(autoTuningKey)
+      .then((raw) => {
+        if (!alive || !raw) return;
+        try {
+          const p = JSON.parse(raw);
+          setAutoTuning({
+            genderOffsetFemale: typeof p?.genderOffsetFemale === 'number' ? p.genderOffsetFemale : AUTO_TUNING_DEFAULT.genderOffsetFemale,
+            sameGenderWeight: typeof p?.sameGenderWeight === 'number' ? p.sameGenderWeight : AUTO_TUNING_DEFAULT.sameGenderWeight,
+            typeVarietyWeight: typeof p?.typeVarietyWeight === 'number' ? p.typeVarietyWeight : AUTO_TUNING_DEFAULT.typeVarietyWeight,
+          });
+        } catch { /* 손상된 값 무시 */ }
+      })
+      .catch(() => {})
+      .finally(() => { autoTuningLoadedRef.current = true; });
+    return () => { alive = false; };
+  }, [autoTuningKey]);
+  useEffect(() => {
+    if (!autoTuningKey || !autoTuningLoadedRef.current) return;
+    setItem(autoTuningKey, JSON.stringify(autoTuning)).catch(() => {});
+  }, [autoTuning, autoTuningKey]);
+  // 비동기 패스에서 최신 값을 읽는 미러 ref + 동시 실행 방지 락 + 최신 패스 fn ref.
+  const autoPilotRef = useRef(false);
+  useEffect(() => { autoPilotRef.current = autoPilot; }, [autoPilot]);
+  const autoModeRef = useRef<SuggestMode>('similar');
+  useEffect(() => { autoModeRef.current = autoMode; }, [autoMode]);
+  const autoTuningRef = useRef<Required<SuggestTuning>>(AUTO_TUNING_DEFAULT);
+  useEffect(() => { autoTuningRef.current = autoTuning; }, [autoTuning]);
+  const autoFillLockRef = useRef(false);
+  const runAutoFillRef = useRef<null | (() => void)>(null);
 
   // ─── 2분할(편성 ↔ 코트·큐) 크기 조절 ───
   // divider를 드래그해 왼쪽(선수 편성/풀) 폭을 px로 조정. null=기존 38% 기본.
@@ -1068,7 +1170,7 @@ export default function OperateScreen() {
       // Exclude players already STAGED in the tray + those already placed in a
       // QUEUED upcoming game, so building game-after-game uses fresh people.
       const exclude = Array.from(new Set([...staged, ...queuedPlayerIds]));
-      const { playerIds, effectiveMode, note } = await suggestNext({ mode, exclude });
+      const { playerIds, effectiveMode, note } = await suggestNext({ mode, exclude, tuning: autoTuning });
       if (!playerIds || playerIds.length < 4) {
         setSuggestNote('추천할 수 있는 인원이 부족해요 (최소 4명)');
         return;
@@ -1086,7 +1188,7 @@ export default function OperateScreen() {
         setSuggestNote(err?.response?.data?.error || '추천에 실패했어요');
       }
     }
-  }, [suggestNext, prefillStaged, staged, queuedPlayerIds]);
+  }, [suggestNext, prefillStaged, staged, queuedPlayerIds, autoTuning]);
 
   // ─── 다음 게임 추가 (큐에 등록) ───
   const handleAddToQueue = useCallback(async () => {
@@ -1460,6 +1562,63 @@ export default function OperateScreen() {
       showAlert('오류', err?.response?.data?.error || '게임 시작에 실패했어요');
     }
   }, [courts, createQueueGame, assignEntry, loadBoard, loadCourts, loadPool]);
+
+  // 자동 편성 1회 패스 — '다음 게임' 대기줄을 목표량(빈 코트 수 + 1)까지 채운다.
+  // 코트에는 넣지 않는다(투입은 운영자 몫). 락으로 중복 실행 방지 + 목표량 기반이라 무한 루프 없음.
+  const runAutoFillPass = useCallback(async () => {
+    if (!autoPilotRef.current || autoFillLockRef.current || !board) return;
+    const readyCount = queuedEntries.filter((e) => e.playerIds.length >= 4).length;
+    const target = emptyCourts.length + 1;   // 빈 코트마다 준비 + 버퍼 1
+    const need = target - readyCount;
+    if (need <= 0) return;                    // 이미 충분히 준비됨
+    autoFillLockRef.current = true;
+    setAutoComposing(true);
+    const placed: string[] = [];             // 이번 패스에서 편성한 사람(중복 방지)
+    let lastFour: string[] | null = null;
+    try {
+      for (let i = 0; i < need; i++) {
+        if (!autoPilotRef.current) break;     // 도중에 OFF 되면 중단
+        // 다음 4인 자동 추천(공평·급수 모드). 이번 패스에서 이미 뽑은 사람은 제외.
+        let ids: string[] = [];
+        try { ids = (await suggestNext({ mode: autoModeRef.current, exclude: placed, tuning: autoTuningRef.current })).playerIds ?? []; }
+        catch { ids = []; }
+        if (ids.length < 4) break;            // 자격 인원 4명 미달 → 대기(무한X)
+        // 코트 없는 '다음 게임'으로 큐에 준비만 해둔다(투입 X).
+        try {
+          const entry = await createQueueGame(ids);
+          if (entry?.id) { placed.push(...ids); lastFour = ids; }
+        } catch { break; /* 경합/오류 — 이번 패스 종료 */ }
+      }
+    } finally {
+      autoFillLockRef.current = false;
+      setAutoComposing(false);
+      if (placed.length > 0) {
+        if (lastFour) {
+          const rep = getPlayer(lastFour[0])?.userName || '선수';
+          setAutoLastNote(`방금 편성: ${rep} 외 ${lastFour.length - 1}명`);
+        }
+        loadBoard(); loadPool();
+      }
+    }
+  }, [board, emptyCourts.length, queuedEntries, suggestNext, createQueueGame, getPlayer, loadBoard, loadPool]);
+  useEffect(() => { runAutoFillRef.current = runAutoFillPass; }, [runAutoFillPass]);
+
+  // 자동 편성이 반응할 준비량 지표(완성된 4인 대기 게임 수).
+  const readyQueuedCount = queuedEntries.filter((e) => e.playerIds.length >= 4).length;
+
+  // 트리거 ① — 준비량/빈 코트/대기 인원이 바뀌면(실시간 재조회 반영 후) 잠시 뒤 자동 패스.
+  useEffect(() => {
+    if (!autoPilot) return;
+    const t = setTimeout(() => runAutoFillRef.current?.(), 800);
+    return () => clearTimeout(t);
+  }, [autoPilot, emptyCourts.length, readyQueuedCount, uniquePlayers.length]);
+
+  // 트리거 ② — 안전망 주기 타이머(게임 ~11~13분 주기·휴식 복귀·지각 체크인 대비). 15초마다 점검.
+  useEffect(() => {
+    if (!autoPilot) return;
+    const iv = setInterval(() => runAutoFillRef.current?.(), 15000);
+    return () => clearInterval(iv);
+  }, [autoPilot]);
 
   // 게임 중 코트의 선수 1명을 교체(서버 replacePlayer). 성공 시 풀/보드/코트 갱신.
   const handleReplaceRunning = useCallback(async (replacementId: string) => {
@@ -3719,6 +3878,37 @@ export default function OperateScreen() {
 
   const headerActions = (
     <>
+      {/* 자동 편성 토글 — ON이면 다음 게임을 자동으로 짜서 '다음 게임' 대기줄에 준비해 둔다.
+          코트 투입·게임 종료는 운영자가 직접(반자동). */}
+      <TouchableOpacity
+        style={[
+          styles.headerLink, headerLinkTouch,
+          autoPilot
+            ? { backgroundColor: colors.secondary, borderColor: colors.secondary }
+            : { borderColor: colors.border },
+        ]}
+        onPress={() => {
+          const next = !autoPilot;
+          setAutoPilot(next);
+          if (next) {
+            setSuggestNote(null);
+            setAutoLastNote(null);
+            showSuccess('자동 편성 ON — 다음 게임을 미리 짜둡니다 (코트 투입은 직접)');
+            setTimeout(() => runAutoFillRef.current?.(), 300);
+          } else {
+            showSuccess('자동 편성 OFF — 수동 편성');
+          }
+        }}
+        activeOpacity={0.8}
+        accessibilityRole="switch"
+        accessibilityState={{ checked: autoPilot }}
+        accessibilityLabel="자동 편성"
+      >
+        <Text style={{ fontSize: 15 }}>{autoPilot ? '⚡' : '🤖'}</Text>
+        <Text style={[styles.headerLinkText, { color: autoPilot ? '#fff' : colors.primary, fontWeight: '700' }]}>
+          {autoPilot ? '자동 편성 ON' : '자동 편성'}
+        </Text>
+      </TouchableOpacity>
       <TouchableOpacity
         style={[styles.headerLink, headerLinkTouch, { borderColor: colors.border }]}
         onPress={() => setCourtModal(true)}
@@ -4042,29 +4232,101 @@ export default function OperateScreen() {
   // ─── 운영판 모드 전환 탭(모드 1 | 모드 2) ───
   // 헤더 바로 아래 공통 위치. 풀 보기 탭과 같은 세그먼트 스타일을 재사용한다.
   const ModeTabs = (
-    <View style={[styles.modeTabsRow, { borderBottomColor: colors.border }]}>
-      <Text style={[styles.modeTabsLabel, { color: colors.textSecondary }]}>운영 모드</Text>
-      <View style={[styles.modeTabs, { backgroundColor: colors.surfaceSecondary, borderColor: colors.border }]}>
-        {/* 모드 2(게임판)를 메인으로 앞(왼쪽)에 둔다 — 운영진 주 사용 모드. */}
-        {([[2, '게임판'], [1, '기본']] as const).map(([key, label]) => {
-          const active = boardMode === key;
-          return (
-            <TouchableOpacity
-              key={key}
-              style={[styles.modeTab, active && { backgroundColor: colors.primary }]}
-              onPress={() => setBoardMode(key)}
-              accessibilityRole="tab"
-              accessibilityState={{ selected: active }}
-              accessibilityLabel={`모드 ${key}로 전환`}
-            >
-              <Text style={[styles.modeTabText, { color: active ? '#fff' : colors.textSecondary }]}>
-                모드 {key} · {label}
-              </Text>
-            </TouchableOpacity>
-          );
-        })}
+    <>
+      <View style={[styles.modeTabsRow, { borderBottomColor: colors.border }]}>
+        <Text style={[styles.modeTabsLabel, { color: colors.textSecondary }]}>운영 모드</Text>
+        <View style={[styles.modeTabs, { backgroundColor: colors.surfaceSecondary, borderColor: colors.border }]}>
+          {/* 모드 2(게임판)를 메인으로 앞(왼쪽)에 둔다 — 운영진 주 사용 모드. */}
+          {([[2, '게임판'], [1, '기본']] as const).map(([key, label]) => {
+            const active = boardMode === key;
+            return (
+              <TouchableOpacity
+                key={key}
+                style={[styles.modeTab, active && { backgroundColor: colors.primary }]}
+                onPress={() => setBoardMode(key)}
+                accessibilityRole="tab"
+                accessibilityState={{ selected: active }}
+                accessibilityLabel={`모드 ${key}로 전환`}
+              >
+                <Text style={[styles.modeTabText, { color: active ? '#fff' : colors.textSecondary }]}>
+                  모드 {key} · {label}
+                </Text>
+              </TouchableOpacity>
+            );
+          })}
+        </View>
       </View>
-    </View>
+      {/* 자동 편성 상태 스트립 — ON일 때만. 준비 상황 안내 + 편성 모드 칩. */}
+      {autoPilot && (
+        <View style={[styles.autoStrip, { backgroundColor: colors.secondaryBg, borderColor: colors.secondary }]}>
+          <View style={styles.autoStripTop}>
+            <Text style={[styles.autoStripText, { color: colors.secondary }]} numberOfLines={1}>
+              {autoComposing
+                ? '⚡ 자동 편성 · 편성 중…'
+                : readyQueuedCount === 0
+                  ? '⚡ 자동 편성 · 대기 인원 부족 — 4명 모이면 자동 편성해요'
+                  : `⚡ 자동 편성 · 다음 게임 ${readyQueuedCount}개 준비됨`}
+            </Text>
+            {autoComposing && <ActivityIndicator size="small" color={colors.secondary} />}
+          </View>
+          {!autoComposing && !!autoLastNote && readyQueuedCount > 0 && (
+            <Text style={[styles.autoStripSub, { color: colors.textSecondary }]} numberOfLines={1}>{autoLastNote}</Text>
+          )}
+          <View style={styles.autoStripChips}>
+            {SUGGEST_MODES.map((m) => {
+              const on = autoMode === m.mode;
+              return (
+                <TouchableOpacity
+                  key={m.mode}
+                  style={[styles.autoChip, { borderColor: on ? colors.secondary : colors.border, backgroundColor: on ? colors.secondary : 'transparent' }]}
+                  onPress={() => setAutoMode(m.mode)}
+                  accessibilityRole="button"
+                  accessibilityState={{ selected: on }}
+                  accessibilityLabel={`자동 편성 모드 ${m.label}`}
+                >
+                  <Text style={[styles.autoChipText, { color: on ? '#fff' : colors.textSecondary }]}>{m.emoji} {m.label}</Text>
+                </TouchableOpacity>
+              );
+            })}
+          </View>
+          {/* 조율 토글 + 패널 — 성별 보정폭·동성 강도·타입 순환 (자동+수동 편성에 적용). */}
+          <TouchableOpacity
+            onPress={() => setTuningOpen((o) => !o)}
+            style={styles.tuningToggle}
+            accessibilityRole="button"
+            accessibilityLabel="자동 편성 조율"
+          >
+            <Text style={[styles.autoChipText, { color: colors.secondary, fontWeight: '700' }]}>⚙︎ 조율 {tuningOpen ? '▲' : '▼'}</Text>
+          </TouchableOpacity>
+          {tuningOpen && (
+            <View style={styles.tuningPanel}>
+              {TUNING_ROWS.map((row) => (
+                <View key={row.key} style={styles.tuningRow}>
+                  <Text style={[styles.tuningRowLabel, { color: colors.textSecondary }]}>{row.label}</Text>
+                  <View style={styles.tuningSeg}>
+                    {TUNING_OPTIONS[row.key].map(([lbl, val]) => {
+                      const on = autoTuning[row.key] === val;
+                      return (
+                        <TouchableOpacity
+                          key={lbl}
+                          style={[styles.tuningSegItem, { borderColor: on ? colors.secondary : colors.border, backgroundColor: on ? colors.secondary : 'transparent' }]}
+                          onPress={() => setAutoTuning((t) => ({ ...t, [row.key]: val }))}
+                          accessibilityRole="button"
+                          accessibilityState={{ selected: on }}
+                          accessibilityLabel={`${row.label} ${lbl}`}
+                        >
+                          <Text style={[styles.tuningSegText, { color: on ? '#fff' : colors.textSecondary }]}>{lbl}</Text>
+                        </TouchableOpacity>
+                      );
+                    })}
+                  </View>
+                </View>
+              ))}
+            </View>
+          )}
+        </View>
+      )}
+    </>
   );
 
   // 2분할 크기 조절 막대 — leftPane↔rightPane 사이. 드래그로 왼쪽 폭 조정(웹: col-resize).
@@ -6005,6 +6267,32 @@ const styles = StyleSheet.create({
     alignItems: 'center', justifyContent: 'center', minWidth: 96,
   },
   modeTabText: { ...typography.buttonSm, fontWeight: '700' },
+
+  // 자동 편성 상태 스트립(운영 모드 탭 바로 아래, ON일 때만).
+  autoStrip: {
+    paddingHorizontal: spacing.smd, paddingVertical: spacing.sm,
+    borderBottomWidth: 1, gap: 6,
+  },
+  autoStripTop: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
+  autoStripText: { ...typography.caption, fontWeight: '800', flexShrink: 1 },
+  autoStripSub: { ...typography.caption },
+  autoStripChips: { flexDirection: 'row', flexWrap: 'wrap', gap: 6 },
+  autoChip: {
+    paddingHorizontal: spacing.sm, paddingVertical: 4,
+    borderRadius: radius.md, borderWidth: 1,
+  },
+  autoChipText: { ...typography.caption, fontWeight: '700' },
+  // 자동 편성 조율 패널.
+  tuningToggle: { paddingVertical: 2, alignSelf: 'flex-start' },
+  tuningPanel: { gap: 6, paddingTop: 2 },
+  tuningRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, flexWrap: 'wrap' },
+  tuningRowLabel: { ...typography.caption, fontWeight: '700', minWidth: 56 },
+  tuningSeg: { flexDirection: 'row', flexWrap: 'wrap', gap: 4 },
+  tuningSegItem: {
+    paddingHorizontal: spacing.sm, paddingVertical: 3,
+    borderRadius: radius.md, borderWidth: 1,
+  },
+  tuningSegText: { ...typography.caption, fontWeight: '700' },
 
   // 모드 2 선택 바 — 게임판 선택 인원 요약 + 액션.
   mode2SelectBar: {
