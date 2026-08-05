@@ -34,7 +34,8 @@ const GOOGLE_BORDER = '#DADCE0';
 const GOOGLE_BLUE = '#4285F4';
 
 // 콕고 간편 가이드 — badmintoncourt.store 에 배포되는 정적 페이지(로그인 불필요).
-const GUIDE_URL = 'https://badmintoncourt.store/guide.html';
+// 앱 라우트 /guide 와 겹치지 않게 /help 로 서빙.
+const GUIDE_URL = 'https://badmintoncourt.store/help';
 
 export default function LoginScreen() {
   const [loading, setLoading] = useState(false);

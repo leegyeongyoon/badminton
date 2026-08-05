@@ -68,9 +68,10 @@ jobs:
           # _redirects, so these resolve to the real JSON (not index.html).
           mkdir -p dist/.well-known
           cp public/.well-known/apple-app-site-association public/.well-known/assetlinks.json dist/.well-known/
-          # 정적 가이드 페이지를 배포에 포함(정적 파일이 SPA _redirects보다 우선)
-          #   → https://badmintoncourt.store/guide.html (로그인 불필요)
-          cp public/guide.html dist/guide.html
+          # 정적 가이드 페이지를 배포에 포함(정적 파일이 SPA _redirects보다 우선).
+          # 앱 라우트 /guide(app/guide.tsx)와 겹치지 않게 /help 로 서빙.
+          #   → https://badmintoncourt.store/help (로그인 불필요)
+          cp public/help.html dist/help.html
           # AASA has no file extension → force application/json for iOS.
           printf '/.well-known/apple-app-site-association\n  Content-Type: application/json\n' > dist/_headers
 
