@@ -21,7 +21,7 @@ import api from '../../../services/api';
 import { clubApi } from '../../../services/club';
 import { clubSessionApi, GuestFeeSettlement, PlayerMatchups, SessionCourt } from '../../../services/clubSession';
 import { courtApi } from '../../../services/court';
-import { showAlert, showConfirm } from '../../../utils/alert';
+import { showAlert, showConfirm, showModalConfirm } from '../../../utils/alert';
 import { showSuccess, showError } from '../../../utils/feedback';
 import { copyToClipboard } from '../../../utils/clipboard';
 import { getItem, setItem } from '../../../services/storage';
@@ -3897,7 +3897,6 @@ export default function OperateScreen() {
           occupiedCourtIds={new Set([...playingByCourtId.keys()])}
           onClose={() => setCourtModal(false)}
           onChanged={loadCourts}
-          onEndSession={handleEndSession}
         />
       )}
       {swapTarget && (
@@ -5403,7 +5402,7 @@ function MatchupModal({
 // Court-management modal — list / add / rename / availability
 // ─────────────────────────────────────────────────────────
 function CourtManageModal({
-  facilityId, sessionId, colors, occupiedCourtIds, onClose, onChanged, onEndSession,
+  facilityId, sessionId, colors, occupiedCourtIds, onClose, onChanged,
 }: {
   facilityId: string;
   sessionId: string;
@@ -5411,7 +5410,6 @@ function CourtManageModal({
   occupiedCourtIds: Set<string>;
   onClose: () => void;
   onChanged: () => Promise<any> | void;
-  onEndSession: () => void;
 }) {
   const [adding, setAdding] = useState(false);
   const [renamingId, setRenamingId] = useState<string | null>(null);
@@ -5488,7 +5486,7 @@ function CourtManageModal({
       showAlert('알림', '게임이 진행 중인 코트는 삭제할 수 없어요. 먼저 게임을 종료하세요.');
       return;
     }
-    showConfirm(
+    showModalConfirm(
       '코트 삭제',
       `'${court.name}'을(를) 삭제할까요?`,
       async () => {
@@ -5618,22 +5616,7 @@ function CourtManageModal({
               })
             )}
           </ScrollView>
-
-          {/* ─── Destructive: 정모 종료 (end the whole session) ─── */}
-          <View style={[modalStyles.dangerZone, { borderTopColor: colors.divider }]}>
-            <Text style={[modalStyles.dangerZoneLabel, { color: colors.textSecondary }]}>정모 운영</Text>
-            <TouchableOpacity
-              style={[modalStyles.endSessionBtn, { backgroundColor: colors.dangerBg, borderColor: colors.danger }]}
-              onPress={onEndSession}
-              activeOpacity={0.85}
-            >
-              <Icon name="stop" size={16} color={colors.danger} />
-              <Text style={[modalStyles.endSessionText, { color: colors.danger }]}>정모 종료</Text>
-            </TouchableOpacity>
-            <Text style={[modalStyles.dangerZoneHint, { color: colors.textLight }]}>
-              종료하면 모든 대기/게임이 정리돼요.
-            </Text>
-          </View>
+          {/* 정모 종료 버튼은 운영판 헤더로 일원화(모달 위 확인창 겹침 → iOS 먹통 회피). */}
         </View>
       </KeyboardAvoidingView>
     </Modal>
