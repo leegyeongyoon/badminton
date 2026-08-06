@@ -98,6 +98,21 @@ jobs:
           ssh_pi "cd /opt/badminton && touch .env.prod && sed -i '/^SLACK_WEBHOOK_URL=/d' .env.prod && echo 'SLACK_WEBHOOK_URL=$SLACK_URL' >> .env.prod && echo 'SLACK webhook injected'" \
             || echo "주입 실패(무시) — 가입 신청 알림은 웹훅 설정 전까지 비활성"
 
+      - name: Inject SOLAPI(문자) 키 into .env.prod (Pi)
+        env:
+          SSHPASS: ${{ secrets.SSH_PASSWORD }}
+          SOLAPI_KEY: ${{ secrets.SOLAPI_API_KEY }}
+          SOLAPI_SECRET: ${{ secrets.SOLAPI_API_SECRET }}
+          SOLAPI_FROM: ${{ secrets.SOLAPI_SENDER }}
+        run: |
+          if [ -z "$SOLAPI_KEY" ] || [ -z "$SOLAPI_SECRET" ] || [ -z "$SOLAPI_FROM" ]; then
+            echo "SOLAPI 시크릿 미설정 — 건너뜀(문자 알림 비활성, 푸시는 정상 동작)"; exit 0;
+          fi
+          ssh_pi() { sshpass -e ssh -o ConnectTimeout=25 "${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}" "$1"; }
+          # .env.prod 에 SOLAPI_* 3개만 idempotent 하게 갱신 (운영진 승급 문자 알림용).
+          ssh_pi "cd /opt/badminton && touch .env.prod && sed -i '/^SOLAPI_API_KEY=/d; /^SOLAPI_API_SECRET=/d; /^SOLAPI_SENDER=/d' .env.prod && printf 'SOLAPI_API_KEY=%s\nSOLAPI_API_SECRET=%s\nSOLAPI_SENDER=%s\n' '$SOLAPI_KEY' '$SOLAPI_SECRET' '$SOLAPI_FROM' >> .env.prod && echo 'SOLAPI keys injected'" \
+            || echo "SOLAPI 주입 실패(무시) — 문자 알림은 키 설정 전까지 비활성"
+
       - name: Inject JWT 만료 정책 into .env.prod (Pi)
         env:
           SSHPASS: ${{ secrets.SSH_PASSWORD }}

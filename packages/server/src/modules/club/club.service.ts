@@ -5,6 +5,8 @@ import { NotFoundError, ConflictError, ForbiddenError, BadRequestError } from '.
 import { verifyClubStaff, deleteSessionCascade, isSuperAdmin } from '../clubSession/clubSession.service';
 import { cleanupTurnsOnCheckout } from '../checkin/checkin.service';
 import { getIO } from '../../socket';
+import { logger } from '../../utils/logger';
+import { notifyStaffPromoted } from '../notification/notification.service';
 import type {
   CreateClubInput,
   UpdateClubInput,
@@ -421,10 +423,21 @@ export async function updateMemberRole(
   });
   if (!target) throw new NotFoundError('모임 멤버');
 
+  const prevRole = target.role;
+
   await prisma.clubMember.update({
     where: { userId_clubId: { userId: targetUserId, clubId } },
     data: { role },
   });
+
+  // 운영진(STAFF)으로 '새로' 승급된 경우에만 축하/안내 알림 — 강등·리더·중복 승급은 제외.
+  // 알림 실패가 역할 변경 응답을 막지 않도록 fire-and-forget(에러는 삼킨다).
+  if (role === 'STAFF' && prevRole !== 'STAFF') {
+    prisma.club
+      .findUnique({ where: { id: clubId }, select: { name: true } })
+      .then((club) => notifyStaffPromoted(targetUserId, club?.name ?? '모임'))
+      .catch((err) => logger.error('운영진 승급 알림 실패(무시)', { err }));
+  }
 
   return { success: true };
 }

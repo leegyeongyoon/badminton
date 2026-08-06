@@ -1,6 +1,7 @@
 import { Expo, ExpoPushMessage } from 'expo-server-sdk';
 import { prisma } from '../../utils/prisma';
 import { logger } from '../../utils/logger';
+import { sendSms } from './sms.service';
 
 const expo = new Expo();
 
@@ -107,4 +108,31 @@ export async function notifyGameBoardTurn(userId: string, courtName: string) {
     body: `${courtName}에서 곧 시작합니다`,
     data: { type: 'gameBoardTurn', courtName },
   });
+}
+
+/**
+ * 운영진 승급 알림 — 인앱/푸시(무료·항상) + 문자(SOLAPI 설정 시에만, best-effort).
+ * clubMember.role 이 STAFF 로 '처음' 바뀔 때 호출한다(중복 승급·강등은 호출부에서 걸러짐).
+ * 문자 발송 실패는 삼켜서 상위 로직(역할 변경)에 영향을 주지 않는다.
+ */
+export async function notifyStaffPromoted(userId: string, clubName: string) {
+  // 1) 인앱 알림함 + 푸시 (앱 설치·알림 허용자에게). 무료·즉시.
+  await sendPushToUser(userId, {
+    title: '운영진이 되셨어요 🎉',
+    body: `'${clubName}' 모임의 운영진으로 임명되었어요. 이제 정모 운영·순번 관리를 할 수 있어요.`,
+    data: { type: 'staffPromoted' },
+  });
+
+  // 2) 문자 (SOLAPI 설정된 경우에만). 앱을 안 깔았거나 알림을 꺼둔 사람에게도 확실히 도달.
+  try {
+    const user = await prisma.user.findUnique({ where: { id: userId }, select: { phone: true } });
+    if (user?.phone) {
+      await sendSms(
+        user.phone,
+        `[콕고] '${clubName}' 모임의 운영진으로 임명되었어요. 앱에서 정모 운영·순번 관리를 시작해 보세요.`,
+      );
+    }
+  } catch (err) {
+    logger.error('notifyStaffPromoted 문자 단계 실패(무시)', { err });
+  }
 }
