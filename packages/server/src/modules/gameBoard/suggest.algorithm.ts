@@ -194,6 +194,16 @@ const FAIRSHARE_CAP = 8;
 // 마지막 게임 이후 유휴 시간 보너스 상한(결손이 주 신호, 유휴는 동급 결손자 사이 tie-breaker).
 const WAIT_BONUS_CAP = 1;
 
+// ── Aging(굶음 방지) — "점점 땡겨주는" 유동 편성 ──────────────────────────────
+// 문제: 모두가 비슷하게 대기 중이면 상대적 결손 차가 작아 급수(skill) 매칭이 결정권을 쥐고,
+// 급수 아웃라이어(혼자 세거나 약한 사람)가 계속 밀려 '굶는다'(오래 못 침). 해결: 개인 대기
+// 시간이 길어질수록 우선순위를 '가속'시켜, 아무리 급수가 안 맞아도 결국 반드시 편성한다.
+// AGING_START_RATIO(WAIT_REF 배수) 이전까진 급수 매칭 우선(어느정도는 기다릴 수 있음),
+// 이후 (대기−시작점)² 에 비례해 커진다 → 처음엔 살짝 땡기다 점점 강하게 → 결국 강제 편성.
+const AGING_START_RATIO = 1.5; // 1.5 × WAIT_REF(15분) ≈ 22분부터 가속 시작
+const AGING_WEIGHT = 1.5;      // 가속 강도(게임 등가). 45분≈+3, 60분≈+9 만큼 우선순위 당김
+const AGING_CAP = 12;          // 상한 — 최악의 급수 페널티(≈9)도 확실히 넘어서도록
+
 // 타입 편중 방지 — 잘/못 치는 사람 누구도 혼복/동성복 한쪽에 갇히지 않게, 부족한 타입을
 // 주는 그룹을 선호(soft). 급수·공평엔 양보한다.
 const TYPE_VARIETY_WEIGHT = 0.6;
@@ -278,8 +288,15 @@ function pairKey(a: string, b: string): string {
  */
 export function priorityCost(p: ModePlayer): number {
   const fairShare = Math.min(FAIRSHARE_CAP, p.timePresentSeconds / GAME_CYCLE_SECONDS);
-  const waitBonus = Math.min(WAIT_BONUS_CAP, p.waitSeconds / WAIT_REF_SECONDS);
-  return p.games - fairShare - waitBonus;
+  const waitRatio = p.waitSeconds / WAIT_REF_SECONDS;
+  const waitBonus = Math.min(WAIT_BONUS_CAP, waitRatio);
+  // Aging: 대기가 AGING_START_RATIO(≈22분)를 넘으면 초과분의 제곱에 비례해 우선순위를
+  // 가속(상한 AGING_CAP)한다. 이렇게 하면 급수가 안 맞아도 오래 기다린 사람이 결국
+  // 편성된다(no starvation) — '점점 땡기면서 사람이 짠 것처럼'. 22분 이내면 aging=0 이라
+  // 평소(짧은 대기)엔 급수 매칭이 그대로 우선.
+  const agingExcess = Math.max(0, waitRatio - AGING_START_RATIO);
+  const aging = Math.min(AGING_CAP, AGING_WEIGHT * agingExcess * agingExcess);
+  return p.games - fairShare - waitBonus - aging;
 }
 
 // fairness(group): sum of per-player JITTERED priorityCost. Lower ⇒ the four are

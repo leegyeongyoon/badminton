@@ -1619,8 +1619,15 @@ export default function OperateScreen() {
   const runAutoFillPass = useCallback(async () => {
     if (!autoPilotRef.current || autoFillLockRef.current || !board) return;
     const readyCount = queuedEntries.filter((e) => e.playerIds.length >= 4).length;
-    // 시간 인지 — 빈 코트 + '곧 끝날' 코트만큼 미리 준비(+버퍼 1). 코트 수+1로 상한.
-    const target = Math.min(courts.length + 1, emptyCourts.length + aboutToFinishCount + 1);
+    // 시간 인지 — 빈 코트 + '곧 끝날' 코트에 더해 다음 게임을 AHEAD개 앞서 준비(대기 인원이
+    // 봐도 '내 다음 게임'이 보이게). 단, 큐에 준비하면 그 4명에게 '편성됨' 알림이 나가므로
+    // 너무 깊게는 안 한다(과도한 사전 알림 방지). 공평성은 서버 aging(오래 기다린 사람 자동
+    // 우선)이 담당하므로 미리 짜둬도 순서가 뒤틀리지 않는다. 코트 수+AHEAD 로 상한.
+    const AUTO_QUEUE_AHEAD = 3;
+    const target = Math.min(
+      courts.length + AUTO_QUEUE_AHEAD,
+      emptyCourts.length + aboutToFinishCount + AUTO_QUEUE_AHEAD,
+    );
     const need = target - readyCount;
     if (need <= 0) return;                    // 이미 충분히 준비됨
     autoFillLockRef.current = true;
