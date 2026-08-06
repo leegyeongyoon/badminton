@@ -49,7 +49,10 @@ export default function MoreScreen() {
   const [operatorRequest, setOperatorRequest] = useState<OperatorRequestResponse | null>(null);
   const [showOperatorModal, setShowOperatorModal] = useState(false);
   const [operatorReason, setOperatorReason] = useState('');
+  const [operatorPhone, setOperatorPhone] = useState('');
   const [submittingOperator, setSubmittingOperator] = useState(false);
+  // 번호 없는 계정(카카오/구글 로그인)은 운영자 신청 시 연락처를 필수로 받는다(승급·공지 문자용).
+  const needsPhone = !user?.phone;
 
   const isSuperAdmin = user?.role === 'SUPER_ADMIN';
   const isPlayer = user?.role === 'PLAYER';
@@ -96,12 +99,22 @@ export default function MoreScreen() {
   };
 
   const handleSubmitOperatorRequest = async () => {
+    // 번호 없는 계정은 연락처 필수 — 승급·공지 문자를 받기 위함.
+    const trimmedPhone = operatorPhone.trim();
+    if (needsPhone && !/^01[0-9]{8,9}$/.test(trimmedPhone)) {
+      showAlert('연락처 확인', '문자 알림을 받을 휴대폰 번호를 정확히 입력해 주세요 (예: 01012345678)');
+      return;
+    }
     setSubmittingOperator(true);
     try {
-      const { data } = await operatorRequestApi.create(operatorReason.trim() || undefined);
+      const { data } = await operatorRequestApi.create(
+        operatorReason.trim() || undefined,
+        needsPhone ? trimmedPhone : undefined,
+      );
       setOperatorRequest(data);
       setShowOperatorModal(false);
       setOperatorReason('');
+      setOperatorPhone('');
       showSuccess('운영자 신청이 접수되었어요');
     } catch (err: any) {
       showAlert(Strings.common.error, err?.response?.data?.error || '운영자 신청에 실패했습니다');
@@ -378,13 +391,13 @@ export default function MoreScreen() {
       {/* 운영자 신청 모달 (사유 선택) */}
       <Modal
         visible={showOperatorModal}
-        onClose={() => { setShowOperatorModal(false); setOperatorReason(''); }}
+        onClose={() => { setShowOperatorModal(false); setOperatorReason(''); setOperatorPhone(''); }}
         title="운영자 신청"
         actions={
           <View style={styles.modalActions}>
             <Button
               title={Strings.common.cancel}
-              onPress={() => { setShowOperatorModal(false); setOperatorReason(''); }}
+              onPress={() => { setShowOperatorModal(false); setOperatorReason(''); setOperatorPhone(''); }}
               variant="outline"
               size="md"
             />
@@ -401,6 +414,21 @@ export default function MoreScreen() {
         <Text style={[styles.modalDesc, { color: colors.textSecondary }]}>
           운영자가 되면 모임을 만들고 운영할 수 있어요. 최고관리자 승인 후 권한이 부여됩니다.
         </Text>
+        {needsPhone && (
+          <>
+            <Input
+              label="연락처 (필수)"
+              placeholder="01012345678"
+              value={operatorPhone}
+              onChangeText={setOperatorPhone}
+              keyboardType="phone-pad"
+              maxLength={11}
+            />
+            <Text style={[styles.modalDesc, { color: colors.textSecondary, marginTop: -spacing.xs }]}>
+              승급·공지 문자를 받을 휴대폰 번호예요.
+            </Text>
+          </>
+        )}
         <Input
           label="신청 사유 (선택)"
           placeholder="예: 우리 동호회 모임을 운영하고 싶어요"

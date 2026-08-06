@@ -346,6 +346,10 @@ export const openSessionSchema = z.object({
 // PLAYER 가 운영자(모임 생성 권한)를 신청. 사유(message)는 선택.
 export const operatorRequestCreateSchema = z.object({
   message: z.string().max(300).optional(),
+  // 운영자는 승급·공지 문자 발송을 위해 연락처가 필요하다. 이미 번호가 있는(전화 가입)
+  // 계정은 보낼 필요 없어 optional 이지만, 번호가 없는(카카오/구글 로그인) 계정은 서버가
+  // 이 값을 필수로 요구한다(createRequest 에서 조건부 강제).
+  phone: z.string().regex(/^01[0-9]{8,9}$/, '올바른 전화번호를 입력하세요').optional(),
 });
 
 // SUPER_ADMIN 의 승인/거절. note 는 선택(거절 사유 등).

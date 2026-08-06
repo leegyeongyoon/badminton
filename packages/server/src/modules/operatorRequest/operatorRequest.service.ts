@@ -52,6 +52,21 @@ export async function createRequest(userId: string, input: OperatorRequestCreate
     throw new ConflictError('이미 신청이 접수되어 검토 중이에요');
   }
 
+  // 운영자는 승급·공지 문자를 받아야 하므로 연락처가 반드시 있어야 한다.
+  // 전화 가입자는 이미 번호가 있어 그대로 두고, 카카오/구글 로그인 등 번호가 없는 계정은
+  // 신청 시 입력한 번호를 검증(형식·중복)해 User.phone 에 저장한다.
+  if (!user.phone) {
+    const phone = input.phone?.trim();
+    if (!phone) {
+      throw new BadRequestError('운영자 신청에는 연락처(휴대폰 번호)가 필요해요');
+    }
+    const clash = await prisma.user.findUnique({ where: { phone } });
+    if (clash && clash.id !== userId) {
+      throw new ConflictError('이미 다른 계정에서 사용 중인 번호예요');
+    }
+    await prisma.user.update({ where: { id: userId }, data: { phone } });
+  }
+
   const created = await prisma.operatorRequest.create({
     data: { userId, message: input.message ?? null },
   });

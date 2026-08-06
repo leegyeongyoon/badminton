@@ -6,9 +6,9 @@ import type {
 } from '@badminton/shared';
 
 export const operatorRequestApi = {
-  // PLAYER → 운영자 신청 생성 (사유 선택)
-  create: (message?: string) =>
-    api.post<OperatorRequestResponse>('/operator-requests', { message }),
+  // PLAYER → 운영자 신청 생성 (사유 선택). phone 은 번호 없는 계정(카카오/구글 로그인)만 전송.
+  create: (message?: string, phone?: string) =>
+    api.post<OperatorRequestResponse>('/operator-requests', { message, phone }),
 
   // 본인의 최신 신청 + 현재 권한
   me: () => api.get<OperatorRequestMeResponse>('/operator-requests/me'),
