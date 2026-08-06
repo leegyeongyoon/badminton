@@ -7,9 +7,9 @@ import { useTheme } from '../../hooks/useTheme';
 import { typography, spacing } from '../../constants/theme';
 import { BackButton } from '../../components/ui/BackButton';
 import { ResumeDocument } from '../../components/market/ResumeDocument';
-import { coachApi, coachChatApi, type CoachDetail } from '../../services/coach';
+import { coachApi, coachChatApi, type CoachDetail, type CoachReviews } from '../../services/coach';
 import { coachJobApi, type MyJobRow } from '../../services/coachJob';
-import { showSuccess } from '../../utils/feedback';
+import { showSuccess, showError } from '../../utils/feedback';
 import { absolutizeUploadUrl } from '../../services/upload';
 import { useAuthStore } from '../../store/authStore';
 
@@ -33,6 +33,18 @@ export default function CoachProfileScreen() {
   const [invitePostId, setInvitePostId] = useState<string | null>(null);
   const [inviteMsg, setInviteMsg] = useState('');
   const [inviting, setInviting] = useState(false);
+  // 후기 — 평균·목록·자격(레슨 수강 or 채용 이력)·내 후기
+  const [reviews, setReviews] = useState<CoachReviews | null>(null);
+  const [myRating, setMyRating] = useState(0);
+  const [myText, setMyText] = useState('');
+  const [savingReview, setSavingReview] = useState(false);
+
+  const loadReviews = (coachId: string) => {
+    coachApi.reviews(coachId).then((r) => {
+      setReviews(r);
+      if (r.myReview) { setMyRating(r.myReview.rating); setMyText(r.myReview.text ?? ''); }
+    }).catch(() => {});
+  };
 
   useEffect(() => {
     if (!id) return;
@@ -42,7 +54,31 @@ export default function CoachProfileScreen() {
       .catch(() => {})
       .finally(() => setLoading(false));
     coachJobApi.mine().then((r) => setMyJobs(r.filter((j) => j.status === 'OPEN'))).catch(() => {});
+    loadReviews(id);
   }, [id]);
+
+  const saveReview = async () => {
+    if (!id || savingReview) return;
+    if (myRating < 1) { showError('별점을 선택해 주세요'); return; }
+    setSavingReview(true);
+    try {
+      await coachApi.upsertReview(id, myRating, myText.trim() || null);
+      showSuccess(reviews?.myReview ? '후기를 수정했어요' : '후기를 남겼어요');
+      loadReviews(id);
+    } catch { /* 토스트는 인터셉터 */ } finally {
+      setSavingReview(false);
+    }
+  };
+
+  const removeReview = async () => {
+    if (!id) return;
+    try {
+      await coachApi.deleteReview(id);
+      setMyRating(0); setMyText('');
+      showSuccess('후기를 삭제했어요');
+      loadReviews(id);
+    } catch { /* noop */ }
+  };
 
   const isMe = !!coach && coach.userId === myUserId;
 
@@ -99,6 +135,18 @@ export default function CoachProfileScreen() {
       <View style={[styles.topBar, { backgroundColor: colors.surface, borderBottomColor: colors.border, paddingTop: insets.top + spacing.sm }]}>
         <BackButton />
         <Text style={[styles.topTitle, { color: colors.text }]} numberOfLines={1}>{coach.displayName} 코치</Text>
+        {!isMe && (
+          <Pressable
+            onPress={() => {
+              const next = !coach.bookmarked;
+              setCoach((prev) => (prev ? { ...prev, bookmarked: next } : prev));
+              coachApi.setBookmark(coach.id, next).catch(() => setCoach((prev) => (prev ? { ...prev, bookmarked: !next } : prev)));
+            }}
+            hitSlop={8}
+          >
+            <Ionicons name={coach.bookmarked ? 'heart' : 'heart-outline'} size={21} color={coach.bookmarked ? colors.danger : colors.textLight} />
+          </Pressable>
+        )}
         {isMe && (
           <Pressable onPress={() => router.push('/coach/resume' as never)} hitSlop={8}>
             <Text style={[styles.editLink, { color: colors.primary }]}>프로필 수정</Text>
@@ -133,6 +181,14 @@ export default function CoachProfileScreen() {
                 <Text style={[styles.regionText, { color: colors.textLight }]} numberOfLines={1}>{coach.regions}</Text>
               </View>
             )}
+            {reviews != null && reviews.count > 0 && reviews.avg != null && (
+              <View style={styles.regionRow}>
+                <Ionicons name="star" size={12} color="#F5A623" />
+                <Text style={[styles.regionText, { color: colors.textSecondary, fontWeight: '800' }]}>
+                  {reviews.avg.toFixed(1)} · 후기 {reviews.count}개
+                </Text>
+              </View>
+            )}
             {!coach.active && (
               <Text style={[styles.inactive, { color: colors.textLight }]}>지금은 비공개 상태예요 (본인에게만 보임)</Text>
             )}
@@ -140,6 +196,75 @@ export default function CoachProfileScreen() {
         </View>
 
         <ResumeDocument coach={coach} isMe={isMe} />
+
+        {/* 후기 — 레슨 수강·채용 이력이 있는 사람만 남길 수 있어요 */}
+        <View style={[styles.howCard, { borderColor: colors.border, marginTop: spacing.lg }]}>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+            <Text style={[styles.howTitle, { color: colors.text, marginBottom: 0 }]}>후기</Text>
+            {reviews != null && reviews.count > 0 && reviews.avg != null && (
+              <Text style={{ fontSize: 13, fontWeight: '800', color: '#F5A623' }}>★ {reviews.avg.toFixed(1)} ({reviews.count})</Text>
+            )}
+          </View>
+
+          {reviews == null ? (
+            <ActivityIndicator size="small" color={colors.primary} style={{ marginVertical: spacing.md }} />
+          ) : reviews.reviews.length === 0 ? (
+            <Text style={[styles.howText, { color: colors.textLight, marginTop: 6 }]}>
+              아직 후기가 없어요. 레슨을 들었거나 함께 일한 분이 첫 후기를 남길 수 있어요.
+            </Text>
+          ) : (
+            <View style={{ marginTop: spacing.sm, gap: spacing.sm }}>
+              {reviews.reviews.map((rv) => (
+                <View key={rv.id} style={[styles.reviewRow, { borderColor: colors.border }]}>
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                    <Text style={[styles.reviewAuthor, { color: colors.text }]}>{rv.authorName}</Text>
+                    <Text style={{ fontSize: 12, fontWeight: '800', color: '#F5A623' }}>{'★'.repeat(rv.rating)}</Text>
+                    {rv.mine && <Text style={[styles.reviewMine, { color: colors.primary }]}>내 후기</Text>}
+                    <View style={{ flex: 1 }} />
+                    <Text style={{ fontSize: 11, fontWeight: '600', color: colors.textLight }}>{new Date(rv.createdAt).toLocaleDateString('ko-KR')}</Text>
+                  </View>
+                  {!!rv.text && <Text style={[styles.reviewText, { color: colors.textSecondary }]}>{rv.text}</Text>}
+                </View>
+              ))}
+            </View>
+          )}
+
+          {reviews?.eligible && !isMe && (
+            <View style={[styles.reviewForm, { borderTopColor: colors.border }]}>
+              <Text style={[styles.reviewFormTitle, { color: colors.textSecondary }]}>
+                {reviews.myReview ? '내 후기 수정' : '후기 남기기'}
+              </Text>
+              <View style={{ flexDirection: 'row', gap: 4, marginTop: 6 }}>
+                {[1, 2, 3, 4, 5].map((n) => (
+                  <Pressable key={n} onPress={() => setMyRating(n)} hitSlop={4}>
+                    <Ionicons name={n <= myRating ? 'star' : 'star-outline'} size={26} color="#F5A623" />
+                  </Pressable>
+                ))}
+              </View>
+              <TextInput
+                style={[styles.inviteInput, { color: colors.text, backgroundColor: colors.background, borderColor: colors.border, marginTop: spacing.sm }]}
+                value={myText}
+                onChangeText={setMyText}
+                placeholder="레슨은 어땠나요? (선택, 500자)"
+                placeholderTextColor={colors.textLight}
+                multiline
+                maxLength={500}
+              />
+              <View style={{ flexDirection: 'row', gap: spacing.sm, marginTop: spacing.sm }}>
+                {reviews.myReview && (
+                  <Pressable onPress={removeReview} style={[styles.sheetGhost, { borderColor: colors.border, flex: 1 }]}>
+                    <Text style={[styles.sheetGhostText, { color: colors.danger }]}>삭제</Text>
+                  </Pressable>
+                )}
+                <Pressable onPress={saveReview} disabled={savingReview} style={({ pressed }) => [styles.sheetPrimary, { backgroundColor: colors.primary }, (pressed || savingReview) && { opacity: 0.8 }]}>
+                  {savingReview ? <ActivityIndicator color="#fff" /> : (
+                    <Text style={styles.sheetPrimaryText}>{reviews.myReview ? '수정 저장' : '후기 등록'}</Text>
+                  )}
+                </Pressable>
+              </View>
+            </View>
+          )}
+        </View>
 
         {!isMe && (
           <View style={[styles.howCard, { borderColor: colors.border }]}>
@@ -257,6 +382,12 @@ const styles = StyleSheet.create({
   regionText: { fontSize: 12, fontWeight: '600', flexShrink: 1 },
   inactive: { fontSize: 12, fontWeight: '700', marginTop: spacing.sm },
   howCard: { borderWidth: 1, borderRadius: 16, padding: spacing.lg, marginTop: spacing.xs },
+  reviewRow: { borderWidth: StyleSheet.hairlineWidth, borderRadius: 12, padding: spacing.md },
+  reviewAuthor: { fontSize: 13, fontWeight: '800' },
+  reviewMine: { fontSize: 10.5, fontWeight: '900' },
+  reviewText: { fontSize: 13, fontWeight: '600', lineHeight: 19, marginTop: 5 },
+  reviewForm: { borderTopWidth: StyleSheet.hairlineWidth, marginTop: spacing.md, paddingTop: spacing.md },
+  reviewFormTitle: { fontSize: 12.5, fontWeight: '800' },
   howTitle: { fontSize: 14, fontWeight: '800', marginBottom: 6 },
   howText: { fontSize: 13, fontWeight: '600', lineHeight: 21 },
   bottomBar: { paddingHorizontal: spacing.xl, paddingTop: spacing.md, borderTopWidth: StyleSheet.hairlineWidth },

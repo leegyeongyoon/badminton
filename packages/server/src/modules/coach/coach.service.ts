@@ -1,5 +1,5 @@
 import { prisma } from '../../utils/prisma';
-import { NotFoundError, BadRequestError } from '../../utils/errors';
+import { NotFoundError, BadRequestError, ForbiddenError } from '../../utils/errors';
 
 // ─────────────────────────────────────────────────────────────
 // 코치 마켓(숨고식) — 코치가 앱 계정으로 직접 등록·관리하는 프로필.
@@ -42,6 +42,10 @@ export interface CoachCardDTO {
   playingYears: number | null;
   skillLevel: string | null; // S~F
   awardCount: number; // 입상 기록 수(신뢰 라인)
+  // 후기 평점·찜 — 카드 신뢰 라인·하트 토글용.
+  ratingAvg: number | null; // 소수 1자리, 후기 없으면 null
+  ratingCount: number;
+  bookmarked: boolean; // 로그인 시 내가 찜했는지
 }
 
 export interface CareerEntryDTO {
@@ -121,7 +125,40 @@ function toCard(c: CoachRow): CoachCardDTO {
     playingYears: c.playingYears,
     skillLevel: c.skillLevel,
     awardCount: c._count?.careerEntries ?? 0,
+    ratingAvg: null,
+    ratingCount: 0,
+    bookmarked: false,
   };
+}
+
+/** 카드 목록에 평점(평균·개수)과 내 찜 여부를 주입. */
+async function decorateCards(cards: CoachCardDTO[], viewerUserId?: string): Promise<void> {
+  if (cards.length === 0) return;
+  const ids = cards.map((c) => c.id);
+  const [ratings, marks] = await Promise.all([
+    prisma.coachReview.groupBy({
+      by: ['coachProfileId'],
+      where: { coachProfileId: { in: ids } },
+      _avg: { rating: true },
+      _count: { _all: true },
+    }),
+    viewerUserId
+      ? prisma.coachBookmark.findMany({
+          where: { userId: viewerUserId, coachProfileId: { in: ids } },
+          select: { coachProfileId: true },
+        })
+      : Promise.resolve([] as { coachProfileId: string }[]),
+  ]);
+  const rMap = new Map(ratings.map((r) => [r.coachProfileId, r]));
+  const bSet = new Set(marks.map((m) => m.coachProfileId));
+  cards.forEach((c) => {
+    const r = rMap.get(c.id);
+    if (r) {
+      c.ratingAvg = r._avg.rating != null ? Math.round(r._avg.rating * 10) / 10 : null;
+      c.ratingCount = r._count._all;
+    }
+    c.bookmarked = bSet.has(c.id);
+  });
 }
 
 function toDetail(c: CoachRow): CoachDetailDTO {
@@ -150,11 +187,19 @@ const detailInclude = {
   careerEntries: { orderBy: [{ order: 'asc' as const }, { startYm: 'desc' as const }] },
 };
 
-/** 공개 코치 목록 — 인증 코치 우선, 최근 갱신 순. region/q 는 부분 일치 필터. */
-export async function listCoaches(filter: { region?: string; q?: string; regions?: string[] | null }): Promise<CoachCardDTO[]> {
+/** 공개 코치 목록 — 인증 코치 우선, 최근 갱신 순. region/q/급수/인증/가격 필터. */
+export async function listCoaches(
+  filter: {
+    region?: string; q?: string; regions?: string[] | null;
+    skillLevels?: string[] | null; certifiedOnly?: boolean; maxPriceMonth?: number | null;
+  },
+  viewerUserId?: string,
+): Promise<CoachCardDTO[]> {
   const region = filter.region?.trim();
   const q = filter.q?.trim();
   const codes = filter.regions ?? null;
+  const skills = (filter.skillLevels ?? []).filter((v) => ['S', 'A', 'B', 'C', 'D', 'E', 'F'].includes(v));
+  const maxPrice = Number.isFinite(Number(filter.maxPriceMonth)) && Number(filter.maxPriceMonth) > 0 ? Number(filter.maxPriceMonth) : null;
   const rows = await prisma.coachProfile.findMany({
     where: {
       active: true,
@@ -162,6 +207,10 @@ export async function listCoaches(filter: { region?: string; q?: string; regions
       ...(codes && codes.length > 0
         ? { OR: codes.map((c) => ({ regionCodes: { array_contains: c } })) }
         : {}),
+      ...(skills.length > 0 ? { skillLevel: { in: skills } } : {}),
+      ...(filter.certifiedOnly ? { certified: true } : {}),
+      // 가격대: 월 레슨비 기준 이하(미기재 코치는 제외하지 않음 — 협의 가능성).
+      ...(maxPrice ? { OR: [{ pricePerMonth: { lte: maxPrice } }, { pricePerMonth: null }] } : {}),
       ...(region ? { regions: { contains: region, mode: 'insensitive' } } : {}),
       ...(q
         ? {
@@ -178,14 +227,18 @@ export async function listCoaches(filter: { region?: string; q?: string; regions
     take: 100,
     include: offerCount,
   });
-  return rows.map(toCard);
+  const cards = rows.map(toCard);
+  await decorateCards(cards, viewerUserId);
+  return cards;
 }
 
 /** 공개 코치 상세. 비활성 프로필은 본인만 볼 수 있다. */
 export async function getCoach(id: string, viewerUserId?: string): Promise<CoachDetailDTO> {
   const c = await prisma.coachProfile.findUnique({ where: { id }, include: detailInclude });
   if (!c || (!c.active && c.userId !== viewerUserId)) throw new NotFoundError('코치');
-  return toDetail(c);
+  const detail = toDetail(c);
+  await decorateCards([detail], viewerUserId);
+  return detail;
 }
 
 /** 내 코치 프로필(없으면 null — 아직 코치로 등록 안 한 상태). */
@@ -373,4 +426,122 @@ export async function setCoachCertified(id: string, certified: boolean): Promise
   if (!existing) throw new NotFoundError('코치');
   const c = await prisma.coachProfile.update({ where: { id }, data: { certified }, include: offerCount });
   return toDetail(c);
+}
+
+// ─── 코치 찜 ─────────────────────────────────────────────────
+export async function setCoachBookmark(userId: string, coachProfileId: string, on: boolean): Promise<void> {
+  const c = await prisma.coachProfile.findUnique({ where: { id: coachProfileId }, select: { id: true, userId: true } });
+  if (!c) throw new NotFoundError('코치');
+  if (c.userId === userId) throw new BadRequestError('내 프로필은 찜할 수 없어요');
+  if (on) {
+    await prisma.coachBookmark.upsert({
+      where: { userId_coachProfileId: { userId, coachProfileId } },
+      create: { userId, coachProfileId },
+      update: {},
+    });
+  } else {
+    await prisma.coachBookmark.deleteMany({ where: { userId, coachProfileId } });
+  }
+}
+
+/** 내가 찜한 코치(최신 찜 순, 비공개 프로필 포함 — 찜 목록에선 상태 표시). */
+export async function listCoachBookmarks(userId: string): Promise<CoachCardDTO[]> {
+  const marks = await prisma.coachBookmark.findMany({
+    where: { userId },
+    orderBy: { createdAt: 'desc' },
+    take: 100,
+    include: { coachProfile: { include: offerCount } },
+  });
+  const cards = marks.map((m) => ({ ...toCard(m.coachProfile), bookmarked: true }));
+  await decorateCards(cards, undefined); // 평점만(찜은 위에서 true 고정)
+  cards.forEach((c) => { c.bookmarked = true; });
+  return cards;
+}
+
+// ─── 코치 후기·평점 ──────────────────────────────────────────
+// 자격: 그 코치의 레슨(coachProfileId 연결 offer)에 CONFIRMED 수강 이력이 있는
+// 유저, 또는 그 코치를 채용 확정(ACCEPTED)한 공고 작성자. 본인 프로필 불가.
+
+export interface CoachReviewDTO {
+  id: string;
+  authorName: string;
+  rating: number;
+  text: string | null;
+  mine: boolean;
+  createdAt: string;
+}
+
+export interface CoachReviewsResponse {
+  avg: number | null;
+  count: number;
+  eligible: boolean; // 뷰어가 작성 자격이 있는지(폼 노출용)
+  myReview: { rating: number; text: string | null } | null;
+  reviews: CoachReviewDTO[];
+}
+
+async function reviewEligible(coachProfileId: string, userId: string): Promise<boolean> {
+  const c = await prisma.coachProfile.findUnique({ where: { id: coachProfileId }, select: { userId: true } });
+  if (!c || c.userId === userId) return false;
+  const lesson = await prisma.lessonApplication.findFirst({
+    where: { userId, status: 'CONFIRMED', offer: { coachProfileId } },
+    select: { id: true },
+  });
+  if (lesson) return true;
+  const hired = await prisma.coachJobApplication.findFirst({
+    where: { coachProfileId, status: 'ACCEPTED', post: { authorUserId: userId } },
+    select: { id: true },
+  });
+  return !!hired;
+}
+
+export async function listCoachReviews(coachProfileId: string, viewerUserId?: string): Promise<CoachReviewsResponse> {
+  const rows = await prisma.coachReview.findMany({
+    where: { coachProfileId },
+    orderBy: { createdAt: 'desc' },
+    take: 100,
+  });
+  const authors = await prisma.user.findMany({
+    where: { id: { in: rows.map((r) => r.authorUserId) } },
+    select: { id: true, name: true },
+  });
+  const nameMap = new Map(authors.map((a) => [a.id, a.name]));
+  const avg = rows.length ? Math.round((rows.reduce((sum, r) => sum + r.rating, 0) / rows.length) * 10) / 10 : null;
+  const my = viewerUserId ? rows.find((r) => r.authorUserId === viewerUserId) : undefined;
+  return {
+    avg,
+    count: rows.length,
+    eligible: viewerUserId ? await reviewEligible(coachProfileId, viewerUserId) : false,
+    myReview: my ? { rating: my.rating, text: my.text } : null,
+    reviews: rows.map((r) => ({
+      id: r.id,
+      authorName: (nameMap.get(r.authorUserId) || '회원').replace(/(?<=^.)./g, '*'), // 이름 마스킹(첫 글자만)
+      rating: r.rating,
+      text: r.text,
+      mine: r.authorUserId === viewerUserId,
+      createdAt: r.createdAt.toISOString(),
+    })),
+  };
+}
+
+/** 후기 작성/수정(1인 1개 upsert). */
+export async function upsertCoachReview(
+  coachProfileId: string,
+  userId: string,
+  input: { rating?: unknown; text?: unknown },
+): Promise<void> {
+  const rating = Number(input.rating);
+  if (!Number.isInteger(rating) || rating < 1 || rating > 5) throw new BadRequestError('별점은 1~5점이에요');
+  if (!(await reviewEligible(coachProfileId, userId))) {
+    throw new ForbiddenError('이 코치의 레슨을 수강했거나 채용한 경우에만 후기를 남길 수 있어요');
+  }
+  const text = clamp(input.text, 500);
+  await prisma.coachReview.upsert({
+    where: { coachProfileId_authorUserId: { coachProfileId, authorUserId: userId } },
+    create: { coachProfileId, authorUserId: userId, rating, text },
+    update: { rating, text },
+  });
+}
+
+export async function deleteCoachReview(coachProfileId: string, userId: string): Promise<void> {
+  await prisma.coachReview.deleteMany({ where: { coachProfileId, authorUserId: userId } });
 }

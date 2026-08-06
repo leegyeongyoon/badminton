@@ -1,5 +1,5 @@
-import { useCallback, useRef, useState } from 'react';
-import { View, Text, StyleSheet, ScrollView, Pressable, ActivityIndicator, RefreshControl, Image } from 'react-native';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { View, Text, StyleSheet, ScrollView, Pressable, ActivityIndicator, RefreshControl, Image, TextInput, Platform } from 'react-native';
 import { useRouter, useFocusEffect } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { useTheme } from '../../hooks/useTheme';
@@ -7,7 +7,7 @@ import { typography, spacing } from '../../constants/theme';
 import { CoachList } from '../../components/market/CoachList';
 import { ComingSoon } from '../../components/market/ComingSoon';
 import { COACH_MARKET_ENABLED } from '../../constants/features';
-import { coachJobApi, type JobPostCard } from '../../services/coachJob';
+import { coachJobApi, type JobPostCard, AUDIENCE_LABEL, EMPLOYMENT_LABEL, ddayLabel } from '../../services/coachJob';
 import { coachChatApi, coachApi } from '../../services/coach';
 import { absolutizeUploadUrl } from '../../services/upload';
 import { REGIONS } from '../../constants/regions';
@@ -18,6 +18,12 @@ import { REGIONS } from '../../constants/regions';
 //  [코치 찾기] 등록 코치 탐색(기존 목록 재사용)
 //  상단 내 활동 바: 내 공고 · 내 지원 · 문의함(미읽음) · 내 이력서
 // ─────────────────────────────────────────────────────────────
+
+const SORTS = [
+  { key: 'latest', label: '최신순' },
+  { key: 'pay', label: '급여순' },
+  { key: 'deadline', label: '마감임박' },
+] as const;
 
 function relTime(iso: string): string {
   const diff = Date.now() - new Date(iso).getTime();
@@ -41,6 +47,8 @@ function CoachHubInner() {
 
   const [tab, setTab] = useState<'jobs' | 'coaches'>('jobs');
   const [regionFilter, setRegionFilter] = useState<string[]>([]);
+  const [q, setQ] = useState('');
+  const [sort, setSort] = useState<'latest' | 'pay' | 'deadline'>('latest');
   const [jobs, setJobs] = useState<JobPostCard[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -56,7 +64,7 @@ function CoachHubInner() {
 
   const load = useCallback(async () => {
     try {
-      setJobs(await coachJobApi.list({ regions: regionFilter }));
+      setJobs(await coachJobApi.list({ regions: regionFilter, q: q.trim() || undefined, sort }));
     } catch {
       /* noop */
     } finally {
@@ -81,9 +89,26 @@ function CoachHubInner() {
           .catch(() => {});
       }
     }).catch(() => {});
-  }, [regionFilter]);
+  }, [regionFilter, q, sort]);
 
   useFocusEffect(useCallback(() => { load(); }, [load]));
+
+  // 검색어 디바운스 — 타이핑 멈추면 350ms 뒤 재조회(useFocusEffect 는 q 변경만으로 재실행 안 됨).
+  const qFirst = useRef(true);
+  useEffect(() => {
+    if (qFirst.current) { qFirst.current = false; return; }
+    const t = setTimeout(load, 350);
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [q, sort, regionFilter]);
+
+  // 카드 하트 토글(옵티미스틱).
+  const toggleBookmark = (j: JobPostCard) => {
+    setJobs((prev) => prev.map((x) => (x.id === j.id ? { ...x, bookmarked: !j.bookmarked } : x)));
+    coachJobApi.setBookmark(j.id, !j.bookmarked).catch(() => {
+      setJobs((prev) => prev.map((x) => (x.id === j.id ? { ...x, bookmarked: j.bookmarked } : x)));
+    });
+  };
 
   // MY 뱃지 — 신규 지원(채용)·미읽음(채팅) 합산.
   const myBadge = chatUnread;
@@ -182,6 +207,36 @@ function CoachHubInner() {
         </View>
       )}
 
+      {/* 검색 + 정렬 — 공고 피드 */}
+      {tab === 'jobs' && (
+        <View style={styles.searchRow}>
+          <View style={[styles.searchBox, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+            <Ionicons name="search" size={15} color={colors.textLight} />
+            <TextInput
+              style={[styles.searchInput, { color: colors.text }]}
+              value={q}
+              onChangeText={setQ}
+              placeholder="공고 검색 (제목·지역·내용)"
+              placeholderTextColor={colors.textLight}
+              returnKeyType="search"
+            />
+            {q.length > 0 && (
+              <Pressable onPress={() => setQ('')} hitSlop={8}>
+                <Ionicons name="close-circle" size={15} color={colors.textLight} />
+              </Pressable>
+            )}
+          </View>
+          {SORTS.map((so) => {
+            const on = sort === so.key;
+            return (
+              <Pressable key={so.key} onPress={() => setSort(so.key)} style={[styles.sortChip, { backgroundColor: on ? colors.text : colors.surface, borderColor: on ? colors.text : colors.border }]}>
+                <Text style={[styles.sortChipText, { color: on ? '#fff' : colors.textSecondary }]}>{so.label}</Text>
+              </Pressable>
+            );
+          })}
+        </View>
+      )}
+
       {tab === 'coaches' ? (
         <CoachList bottomPad={80} />
       ) : loading ? (
@@ -216,8 +271,20 @@ function CoachHubInner() {
                       {j.clubName ?? '개인 요청'}
                     </Text>
                   </View>
+                  {(() => {
+                    const dd = ddayLabel(j.deadline);
+                    if (!dd) return null;
+                    return (
+                      <View style={[styles.ownerBadge, { backgroundColor: dd.urgent ? colors.danger + '15' : colors.background }]}>
+                        <Text style={[styles.ownerBadgeText, { color: dd.urgent ? colors.danger : colors.textSecondary }]}>{dd.label}</Text>
+                      </View>
+                    );
+                  })()}
                   <View style={{ flex: 1 }} />
                   <Text style={[styles.time, { color: colors.textLight }]}>{relTime(j.createdAt)}</Text>
+                  <Pressable onPress={() => toggleBookmark(j)} hitSlop={10}>
+                    <Ionicons name={j.bookmarked ? 'heart' : 'heart-outline'} size={19} color={j.bookmarked ? colors.danger : colors.textLight} />
+                  </Pressable>
                 </View>
                 <View style={{ flexDirection: 'row', gap: spacing.md }}>
                   <View style={{ flex: 1, minWidth: 0 }}>
@@ -232,13 +299,26 @@ function CoachHubInner() {
                   <Text style={[styles.jobMeta, { color: colors.textSecondary }]}>{j.region}</Text>
                   <Text style={[styles.jobMetaDot, { color: colors.textLight }]}>·</Text>
                   <Text style={[styles.jobMeta, { color: colors.textSecondary }]}>{j.scheduleLabel}</Text>
+                  {!!j.targetAudience && (
+                    <View style={[styles.tinyChip, { backgroundColor: colors.background, borderColor: colors.border }]}>
+                      <Text style={[styles.tinyChipText, { color: colors.textSecondary }]}>{AUDIENCE_LABEL[j.targetAudience] ?? j.targetAudience}</Text>
+                    </View>
+                  )}
+                  {!!j.employmentType && (
+                    <View style={[styles.tinyChip, { backgroundColor: colors.background, borderColor: colors.border }]}>
+                      <Text style={[styles.tinyChipText, { color: colors.textSecondary }]}>{EMPLOYMENT_LABEL[j.employmentType] ?? j.employmentType}</Text>
+                    </View>
+                  )}
                 </View>
                 <View style={[styles.jobFootRow, { borderTopColor: colors.border }]}>
                   <Text style={[styles.pay, { color: colors.text }]}>{j.payLabel}</Text>
-                  <View style={[styles.applicantChip, { backgroundColor: j.applicants > 0 ? colors.primary + '12' : colors.background }]}>
-                    <Text style={[styles.applicants, { color: j.applicants > 0 ? colors.primary : colors.textLight }]}>
-                      지원 {j.applicants}명
-                    </Text>
+                  <View style={styles.footRight}>
+                    <Text style={[styles.viewsText, { color: colors.textLight }]}>조회 {j.views}</Text>
+                    <View style={[styles.applicantChip, { backgroundColor: j.applicants > 0 ? colors.primary + '12' : colors.background }]}>
+                      <Text style={[styles.applicants, { color: j.applicants > 0 ? colors.primary : colors.textLight }]}>
+                        지원 {j.applicants}명
+                      </Text>
+                    </View>
                   </View>
                 </View>
               </Pressable>
@@ -257,6 +337,15 @@ const styles = StyleSheet.create({
   regionBar: { paddingBottom: spacing.sm },
   regionChip: { paddingHorizontal: 12, paddingVertical: 7, borderRadius: 16, borderWidth: 1 },
   regionChipText: { fontSize: 12.5, fontWeight: '800' },
+  searchRow: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: spacing.lg, paddingBottom: spacing.sm },
+  searchBox: { flex: 1, flexDirection: 'row', alignItems: 'center', gap: 6, borderWidth: 1, borderRadius: 12, paddingHorizontal: spacing.md, paddingVertical: Platform.OS === 'web' ? 8 : 7 },
+  searchInput: { flex: 1, fontSize: 13, fontWeight: '600', padding: 0 },
+  sortChip: { paddingHorizontal: 10, paddingVertical: 8, borderRadius: 12, borderWidth: 1 },
+  sortChipText: { fontSize: 12, fontWeight: '800' },
+  tinyChip: { paddingHorizontal: 6, paddingVertical: 2, borderRadius: 6, borderWidth: StyleSheet.hairlineWidth, marginLeft: 2 },
+  tinyChipText: { fontSize: 10.5, fontWeight: '800' },
+  footRight: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
+  viewsText: { fontSize: 11.5, fontWeight: '700' },
   myBtnText: { fontSize: 13, fontWeight: '800' },
   badge: { minWidth: 17, height: 17, borderRadius: 9, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 4 },
   badgeText: { color: '#fff', fontSize: 10, fontWeight: '900' },

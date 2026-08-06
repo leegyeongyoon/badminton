@@ -36,8 +36,9 @@ function optionalUserId(req: Request): string | undefined {
 
 router.get('/', async (req: Request, res: Response, next: NextFunction) => {
   try {
+    // viewer 는 선택적 — 찜 여부 표시용.
     const { region, q, regions } = req.query as { region?: string; q?: string; regions?: string };
-    res.json(await svc.listJobs({ region, q, regions: svc.parseRegionsParam(regions) }));
+    res.json(await svc.listJobs({ region, q, regions: svc.parseRegionsParam(regions) , sort: req.query.sort ? String(req.query.sort) : undefined }, optionalUserId(req)));
   } catch (err) { next(err); }
 });
 
@@ -51,6 +52,27 @@ router.get('/mine', authenticate, async (req: Request, res: Response, next: Next
 router.post('/scrape', authenticate, postLimiter, async (req: Request, res: Response, next: NextFunction) => {
   try {
     res.json(await svc.scrapeJobUrl((req.body as { url?: unknown } | undefined)?.url));
+  } catch (err) { next(err); }
+});
+
+// GET /coach-jobs/bookmarks — 내가 찜한 공고
+router.get('/bookmarks', authenticate, async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    res.json(await svc.listJobBookmarks(req.user!.userId));
+  } catch (err) { next(err); }
+});
+
+// POST/DELETE /coach-jobs/:id/bookmark — 공고 찜 토글
+router.post('/:id/bookmark', authenticate, async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    await svc.setJobBookmark(req.user!.userId, String(req.params.id), true);
+    res.json({ ok: true });
+  } catch (err) { next(err); }
+});
+router.delete('/:id/bookmark', authenticate, async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    await svc.setJobBookmark(req.user!.userId, String(req.params.id), false);
+    res.json({ ok: true });
   } catch (err) { next(err); }
 });
 

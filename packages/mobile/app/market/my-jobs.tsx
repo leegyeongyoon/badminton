@@ -70,7 +70,7 @@ export default function MyJobs() {
                     {j.clubName ?? '개인 요청'} · {j.region} · {j.scheduleLabel}
                   </Text>
                   <View style={styles.footRow}>
-                    <Text style={[styles.applicants, { color: j.applicants > 0 ? colors.text : colors.textLight }]}>지원자 {j.applicants}명 관리 →</Text>
+                    <Text style={[styles.applicants, { color: j.applicants > 0 ? colors.text : colors.textLight }]}>조회 {j.views} · 지원자 {j.applicants}명 관리 →</Text>
                     {j.newApplicants > 0 && (
                       <View style={[styles.newBadge, { backgroundColor: colors.danger }]}>
                         <Text style={styles.newBadgeText}>새 지원 {j.newApplicants}</Text>

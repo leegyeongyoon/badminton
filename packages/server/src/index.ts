@@ -10,6 +10,7 @@ validateConfig();
 import app from './app';
 import { startBillingLoop } from './modules/payment/payment.service';
 import { startAutoSessionLoop } from './modules/clubSession/autoSession.service';
+import { startJobDeadlineLoop } from './modules/coachJob/coachJob.service';
 import { initSocketIO } from './socket';
 import { prisma } from './utils/prisma';
 import { initScheduler, stopScheduler } from './modules/scheduler/scheduler.service';
@@ -83,3 +84,6 @@ startBillingLoop();
 
 // 정모 자동 개설·방치 세션 자동 종료 루프(1분 틱, 멱등).
 startAutoSessionLoop();
+
+// 코치 공고 마감일 자동 마감 루프(1시간 틱, 멱등).
+startJobDeadlineLoop();

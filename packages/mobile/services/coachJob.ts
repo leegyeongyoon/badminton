@@ -15,6 +15,11 @@ export interface JobPostCard {
   thumbnail: string | null; // 첫 첨부 사진
   status: string; // OPEN | CLOSED
   applicants: number;
+  deadline: string | null; // "YYYY-MM-DD", null = 상시
+  targetAudience: string | null; // ADULT | JUNIOR | ALL
+  employmentType: string | null; // FULL | PART
+  views: number;
+  bookmarked: boolean;
   createdAt: string;
 }
 
@@ -94,6 +99,9 @@ export interface JobPostInput {
   region?: string | null;
   attachments?: JobAttachment[] | null;
   externalUrl?: string | null;
+  deadline?: string | null;
+  targetAudience?: string | null;
+  employmentType?: string | null;
   status?: string;
 }
 
@@ -127,6 +135,20 @@ export interface InterviewInfo {
   note?: string | null;
 }
 
+export const AUDIENCE_LABEL: Record<string, string> = { ADULT: '성인', JUNIOR: '주니어', ALL: '전체' };
+export const EMPLOYMENT_LABEL: Record<string, string> = { FULL: '전임', PART: '파트' };
+
+/** D-day 라벨 — null 이면 상시, 지난 날짜면 '마감'. */
+export function ddayLabel(deadline: string | null): { label: string; urgent: boolean } | null {
+  if (!deadline) return null;
+  const today = new Date();
+  const kst = new Date(today.getTime() + 9 * 3600_000).toISOString().slice(0, 10);
+  const diff = Math.round((new Date(deadline).getTime() - new Date(kst).getTime()) / 86_400_000);
+  if (diff < 0) return { label: '마감', urgent: false };
+  if (diff === 0) return { label: '오늘 마감', urgent: true };
+  return { label: `D-${diff}`, urgent: diff <= 3 };
+}
+
 export const APPLICATION_STATUS_LABEL: Record<string, string> = {
   APPLIED: '지원 완료',
   INTERVIEW: '면접 진행',
@@ -138,12 +160,15 @@ export const APPLICATION_STATUS_LABEL: Record<string, string> = {
 };
 
 export const coachJobApi = {
-  list: (params?: { region?: string; q?: string; regions?: string[] }) =>
+  list: (params?: { region?: string; q?: string; regions?: string[]; sort?: string }) =>
     api
       .get<JobPostCard[]>('/coach-jobs', {
         params: { ...params, regions: params?.regions?.length ? params.regions.join(',') : undefined },
       })
       .then((r) => r.data),
+  bookmarks: () => api.get<JobPostCard[]>('/coach-jobs/bookmarks').then((r) => r.data),
+  setBookmark: (postId: string, on: boolean) =>
+    (on ? api.post(`/coach-jobs/${postId}/bookmark`) : api.delete(`/coach-jobs/${postId}/bookmark`)).then((r) => r.data),
   get: (id: string) => api.get<JobPostDetail>(`/coach-jobs/${id}`).then((r) => r.data),
   create: (input: JobPostInput) => api.post<{ id: string }>('/coach-jobs', input).then((r) => r.data),
   update: (id: string, patch: JobPostInput) => api.put(`/coach-jobs/${id}`, patch).then((r) => r.data),

@@ -14,6 +14,14 @@ import { absolutizeUploadUrl } from '../../services/upload';
 // 검색·지역 칩·카드 목록. (기존 coaches.tsx 화면에서 추출)
 // ─────────────────────────────────────────────────────────────
 
+const SKILLS = ['S', 'A', 'B', 'C', 'D', 'E', 'F'];
+const PRICE_OPTIONS = [
+  { value: null, label: '가격 전체' },
+  { value: 200000, label: '월 20만↓' },
+  { value: 300000, label: '월 30만↓' },
+  { value: 500000, label: '월 50만↓' },
+] as const;
+
 function priceLabel(c: CoachCard): string | null {
   if (c.pricePerMonth) return `월 ${c.pricePerMonth.toLocaleString()}원`;
   if (c.pricePerSession) return `회당 ${c.pricePerSession.toLocaleString()}원`;
@@ -29,18 +37,29 @@ export function CoachList({ bottomPad = 40 }: { bottomPad?: number }) {
   const [refreshing, setRefreshing] = useState(false);
   const [q, setQ] = useState('');
   const [regionFilter, setRegionFilter] = useState<string[]>([]);
+  const [skillFilter, setSkillFilter] = useState<string[]>([]);
+  const [certifiedOnly, setCertifiedOnly] = useState(false);
+  const [maxPrice, setMaxPrice] = useState<number | null>(null);
 
   const load = useCallback(async () => {
     try {
-      setCoaches(await coachApi.list({ regions: regionFilter }));
+      setCoaches(await coachApi.list({ regions: regionFilter, skills: skillFilter, certifiedOnly, maxPrice }));
     } catch {
       /* noop */
     } finally {
       setLoading(false);
       setRefreshing(false);
     }
-  }, [regionFilter]);
+  }, [regionFilter, skillFilter, certifiedOnly, maxPrice]);
   useEffect(() => { load(); }, [load]);
+
+  // 카드 하트 토글(옵티미스틱).
+  const toggleBookmark = (c: CoachCard) => {
+    setCoaches((prev) => prev.map((x) => (x.id === c.id ? { ...x, bookmarked: !c.bookmarked } : x)));
+    coachApi.setBookmark(c.id, !c.bookmarked).catch(() => {
+      setCoaches((prev) => prev.map((x) => (x.id === c.id ? { ...x, bookmarked: c.bookmarked } : x)));
+    });
+  };
 
   const filtered = useMemo(() => {
     const query = q.trim().toLowerCase();
@@ -91,14 +110,47 @@ export function CoachList({ bottomPad = 40 }: { bottomPad?: number }) {
           );
         })}
       </ScrollView>
-
-      <View style={{ height: spacing.sm }} />
+      <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: spacing.xs, paddingBottom: spacing.sm }}>
+        {SKILLS.map((lv) => {
+          const on = skillFilter.includes(lv);
+          return (
+            <Pressable
+              key={lv}
+              onPress={() => setSkillFilter((prev) => (on ? prev.filter((x) => x !== lv) : [...prev, lv]))}
+              style={[styles.chip, { backgroundColor: on ? getSkillMeta(lv).color : colors.surface, borderColor: on ? getSkillMeta(lv).color : colors.border }]}
+            >
+              <Text style={[styles.chipText, { color: on ? '#fff' : colors.textSecondary }]}>{lv}조</Text>
+            </Pressable>
+          );
+        })}
+        <Pressable
+          onPress={() => setCertifiedOnly((v) => !v)}
+          style={[styles.chip, { flexDirection: 'row', alignItems: 'center', gap: 3, backgroundColor: certifiedOnly ? colors.primary : colors.surface, borderColor: certifiedOnly ? colors.primary : colors.border }]}
+        >
+          <Ionicons name="checkmark-circle" size={12} color={certifiedOnly ? '#fff' : colors.textLight} />
+          <Text style={[styles.chipText, { color: certifiedOnly ? '#fff' : colors.textSecondary }]}>인증만</Text>
+        </Pressable>
+        {PRICE_OPTIONS.map((po) => {
+          const on = maxPrice === po.value;
+          return (
+            <Pressable
+              key={po.label}
+              onPress={() => setMaxPrice(po.value)}
+              style={[styles.chip, { backgroundColor: on ? colors.text : colors.surface, borderColor: on ? colors.text : colors.border }]}
+            >
+              <Text style={[styles.chipText, { color: on ? '#fff' : colors.textSecondary }]}>{po.label}</Text>
+            </Pressable>
+          );
+        })}
+      </ScrollView>
 
       {filtered.length === 0 ? (
         <View style={styles.emptyBox}>
           <Ionicons name="school-outline" size={34} color={colors.textLight} />
           <Text style={[styles.emptyTitle, { color: colors.text }]}>
-            {coaches.length === 0 ? '아직 등록된 코치가 없어요' : '조건에 맞는 코치가 없어요'}
+            {coaches.length === 0 && regionFilter.length === 0 && skillFilter.length === 0 && !certifiedOnly && maxPrice == null
+              ? '아직 등록된 코치가 없어요'
+              : '조건에 맞는 코치가 없어요'}
           </Text>
           <Text style={[styles.emptyHint, { color: colors.textLight }]}>레슨 경력이 있다면 이력서를 등록해 보세요</Text>
           <Pressable onPress={() => router.push('/coach/edit' as never)} style={[styles.emptyBtn, { backgroundColor: colors.primary }]}>
@@ -111,6 +163,7 @@ export function CoachList({ bottomPad = 40 }: { bottomPad?: number }) {
           const price = priceLabel(c);
           // 숨고식 신뢰 라인 — 인증·구력·입상·진행 레슨을 한 줄로.
           const trust = [
+            c.ratingCount > 0 && c.ratingAvg != null ? `★ ${c.ratingAvg.toFixed(1)} (${c.ratingCount})` : null,
             c.certified ? '인증 코치' : null,
             c.playingYears != null ? `구력 ${c.playingYears}년` : null,
             c.awardCount > 0 ? `입상 ${c.awardCount}회` : null,
@@ -139,6 +192,10 @@ export function CoachList({ bottomPad = 40 }: { bottomPad?: number }) {
                       </View>
                     )}
                     {c.certified && <Ionicons name="checkmark-circle" size={15} color={colors.primary} />}
+                    <View style={{ flex: 1 }} />
+                    <Pressable onPress={() => toggleBookmark(c)} hitSlop={10}>
+                      <Ionicons name={c.bookmarked ? 'heart' : 'heart-outline'} size={18} color={c.bookmarked ? colors.danger : colors.textLight} />
+                    </Pressable>
                   </View>
                   {!!c.intro && <Text style={[styles.intro, { color: colors.textSecondary }]} numberOfLines={2}>{c.intro}</Text>}
                   {!!trust && <Text style={[styles.trust, { color: colors.textLight }]} numberOfLines={1}>{trust}</Text>}

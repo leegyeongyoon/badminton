@@ -810,6 +810,8 @@ model CoachProfile {
 
   @@index([active, certified])
   jobInvites CoachJobInvite[]
+  bookmarkedBy CoachBookmark[]
+  reviews      CoachReview[]
 }
 
 // 원티드식 구조화 경력(이력서 항목). CoachProfile.career(자유 텍스트)는 하위호환
@@ -856,12 +858,19 @@ model CoachJobPost {
   attachments   Json?
   // 원문 공고 링크(학교·센터 홈페이지 게시글 등) — 상세에서 바로 이동.
   externalUrl   String?  @db.VarChar(500)
+  // 모집 마감일 "YYYY-MM-DD"(KST) — 지나면 자동 CLOSED. null = 상시 모집.
+  deadline      String?
+  views         Int      @default(0)
+  // 모집 형태: 레슨 대상(ADULT|JUNIOR|ALL), 고용 형태(FULL|PART) — 칩·필터용.
+  targetAudience String?
+  employmentType String?
   status        String   @default("OPEN") // OPEN | CLOSED
   createdAt     DateTime @default(now())
   updatedAt     DateTime @updatedAt
 
   applications CoachJobApplication[]
   invites      CoachJobInvite[]
+  bookmarks    CoachJobBookmark[]
 
   @@index([status, createdAt])
   @@index([authorUserId])
@@ -872,6 +881,49 @@ model CoachJobPost {
 // APPLIED(지원) → INTERVIEW(면접) → OFFERED(오퍼레터 발송) → ACCEPTED(코치 수락=채용 확정)
 //                                   | DECLINED(코치가 오퍼 거절) | REJECTED(불합격/오퍼 철회)
 // WITHDRAWN(코치 본인 철회). 역방향 전이 금지(서비스에서 가드).
+// 공고 찜 — 코치(또는 누구나)가 나중에 볼 공고 북마크.
+model CoachJobBookmark {
+  id        String   @id @default(uuid())
+  userId    String
+  postId    String
+  createdAt DateTime @default(now())
+
+  post CoachJobPost @relation(fields: [postId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, postId])
+  @@index([userId, createdAt])
+}
+
+// 코치 찜 — 모집자가 관심 코치 북마크.
+model CoachBookmark {
+  id             String   @id @default(uuid())
+  userId         String
+  coachProfileId String
+  createdAt      DateTime @default(now())
+
+  coachProfile CoachProfile @relation(fields: [coachProfileId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, coachProfileId])
+  @@index([userId, createdAt])
+}
+
+// 코치 후기 — 그 코치의 레슨 수강(CONFIRMED) 이력자 또는 채용 확정 공고 작성자만.
+// 1인 1개(수정은 upsert).
+model CoachReview {
+  id             String   @id @default(uuid())
+  coachProfileId String
+  authorUserId   String
+  rating         Int // 1~5
+  text           String?  @db.VarChar(500)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  coachProfile CoachProfile @relation(fields: [coachProfileId], references: [id], onDelete: Cascade)
+
+  @@unique([coachProfileId, authorUserId])
+  @@index([coachProfileId, createdAt])
+}
+
 // 스카웃(공고 제안) — 공고 관리자가 '코치 찾기'에서 발견한 코치에게 자기 공고를
 // 제안. 코치는 받은 제안 목록에서 공고를 보고 지원하거나 거절한다.
 model CoachJobInvite {

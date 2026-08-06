@@ -166,6 +166,7 @@ function MarketMyInner() {
 
           {/* 공통 */}
           <View style={[styles.section, { backgroundColor: colors.surface, borderColor: colors.border }, shadows.sm]}>
+            <MenuRow icon="heart-outline" label="찜 목록" hint="찜해둔 공고와 코치를 한곳에서 봐요" onPress={() => router.push('/market/bookmarks' as never)} />
             <MenuRow icon="chatbubbles-outline" label="코치 채팅" badge={chatUnread} hint="레슨 문의와 채용 대화를 나눠서 보여드려요" onPress={() => router.push('/coach/inbox' as never)} />
           </View>
         </ScrollView>

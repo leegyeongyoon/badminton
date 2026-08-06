@@ -25,6 +25,13 @@ const DAYS = [
   { day: 4, label: '목' }, { day: 5, label: '금' }, { day: 6, label: '토' }, { day: 0, label: '일' },
 ];
 const HHMM = /^([01][0-9]|2[0-3]):[0-5][0-9]$/;
+const YMD = /^\d{4}-\d{2}-\d{2}$/;
+const AUDIENCES = [
+  { value: 'ADULT', label: '성인' }, { value: 'JUNIOR', label: '주니어' }, { value: 'ALL', label: '전체' },
+];
+const EMPLOYMENTS = [
+  { value: 'FULL', label: '전임' }, { value: 'PART', label: '파트' },
+];
 
 export default function JobPostForm() {
   const { id: editId } = useLocalSearchParams<{ id?: string }>();
@@ -67,6 +74,10 @@ export default function JobPostForm() {
   const [docUploading, setDocUploading] = useState(false);
   const [externalUrl, setExternalUrl] = useState('');
   const [scraping, setScraping] = useState(false);
+  // 모집 조건 구조화 — 마감일·대상·고용 형태(전부 선택 사항)
+  const [deadline, setDeadline] = useState('');
+  const [targetAudience, setTargetAudience] = useState<string | null>(null);
+  const [employmentType, setEmploymentType] = useState<string | null>(null);
 
   useEffect(() => {
     if (!editId) return;
@@ -93,6 +104,9 @@ export default function JobPostForm() {
         setPhotos(j.photos ?? []);
         setAttachments(j.attachments ?? []);
         setExternalUrl(j.externalUrl ?? '');
+        setDeadline(j.deadline ?? '');
+        setTargetAudience(j.targetAudience ?? null);
+        setEmploymentType(j.employmentType ?? null);
       })
       .catch(() => {})
       .finally(() => setLoading(false));
@@ -160,6 +174,7 @@ export default function JobPostForm() {
     if (!title.trim()) { showError('공고 제목을 입력해 주세요'); return; }
     if (regionCodes.length === 0) { showError('지역(시/도)을 선택해 주세요'); return; }
     if ((start && !HHMM.test(start)) || (end && !HHMM.test(end))) { showError('시간 형식은 HH:mm 이에요'); return; }
+    if (deadline.trim() && !YMD.test(deadline.trim())) { showError('마감일 형식은 YYYY-MM-DD 이에요'); return; }
     setSaving(true);
     try {
       const input = {
@@ -178,6 +193,9 @@ export default function JobPostForm() {
         photos,
         attachments,
         externalUrl: externalUrl.trim() || null,
+        deadline: deadline.trim() || null,
+        targetAudience,
+        employmentType,
       };
       if (editId) {
         await coachJobApi.update(editId, input);
@@ -285,6 +303,43 @@ export default function JobPostForm() {
             <View style={[styles.field, styles.flex1]}>
               <Text style={[styles.label, { color: colors.textSecondary }]}>회당 급여(원)</Text>
               <TextInput style={inputStyle} value={paySession} onChangeText={setPaySession} placeholder="70000" placeholderTextColor={colors.textLight} keyboardType="number-pad" maxLength={9} />
+            </View>
+          </View>
+
+          {/* 모집 조건 — 마감일·대상·고용 형태 */}
+          <View style={styles.rowFields}>
+            <View style={[styles.field, styles.flex1]}>
+              <Text style={[styles.label, { color: colors.textSecondary }]}>모집 마감일 <Text style={{ color: colors.textLight }}>(비우면 상시)</Text></Text>
+              <TextInput style={inputStyle} value={deadline} onChangeText={setDeadline} placeholder="2026-09-30" placeholderTextColor={colors.textLight} maxLength={10} autoCapitalize="none" />
+            </View>
+          </View>
+
+          <View style={styles.rowFields}>
+            <View style={[styles.field, styles.flex1]}>
+              <Text style={[styles.label, { color: colors.textSecondary }]}>모집 대상</Text>
+              <View style={styles.ownerRow}>
+                {AUDIENCES.map((a) => {
+                  const on = targetAudience === a.value;
+                  return (
+                    <Pressable key={a.value} onPress={() => setTargetAudience(on ? null : a.value)} style={[styles.ownerChip, { backgroundColor: on ? colors.primary : colors.surface, borderColor: on ? colors.primary : colors.border }]}>
+                      <Text style={[styles.ownerChipText, { color: on ? '#fff' : colors.textSecondary }]}>{a.label}</Text>
+                    </Pressable>
+                  );
+                })}
+              </View>
+            </View>
+            <View style={[styles.field, styles.flex1]}>
+              <Text style={[styles.label, { color: colors.textSecondary }]}>고용 형태</Text>
+              <View style={styles.ownerRow}>
+                {EMPLOYMENTS.map((e) => {
+                  const on = employmentType === e.value;
+                  return (
+                    <Pressable key={e.value} onPress={() => setEmploymentType(on ? null : e.value)} style={[styles.ownerChip, { backgroundColor: on ? colors.primary : colors.surface, borderColor: on ? colors.primary : colors.border }]}>
+                      <Text style={[styles.ownerChipText, { color: on ? '#fff' : colors.textSecondary }]}>{e.label}</Text>
+                    </Pressable>
+                  );
+                })}
+              </View>
             </View>
           </View>
 

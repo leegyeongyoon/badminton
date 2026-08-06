@@ -6,7 +6,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useTheme } from '../../../hooks/useTheme';
 import { typography, spacing } from '../../../constants/theme';
 import { BackButton } from '../../../components/ui/BackButton';
-import { coachJobApi, APPLICATION_STATUS_LABEL, type JobPostDetail, type OfferTerms } from '../../../services/coachJob';
+import { coachJobApi, APPLICATION_STATUS_LABEL, AUDIENCE_LABEL, EMPLOYMENT_LABEL, ddayLabel, type JobPostDetail, type OfferTerms } from '../../../services/coachJob';
 import { showSuccess } from '../../../utils/feedback';
 import { absolutizeUploadUrl } from '../../../services/upload';
 
@@ -147,6 +147,16 @@ export default function JobPostDetailScreen() {
         <Text style={[styles.topTitle, { color: colors.text }]} numberOfLines={1}>
           {job.clubName ?? '개인 요청'} · 코치 구인
         </Text>
+        <Pressable
+          onPress={() => {
+            const next = !job.bookmarked;
+            setJob((prev) => (prev ? { ...prev, bookmarked: next } : prev));
+            coachJobApi.setBookmark(job.id, next).catch(() => setJob((prev) => (prev ? { ...prev, bookmarked: !next } : prev)));
+          }}
+          hitSlop={8}
+        >
+          <Ionicons name={job.bookmarked ? 'heart' : 'heart-outline'} size={21} color={job.bookmarked ? colors.danger : colors.textLight} />
+        </Pressable>
         {job.canManage && (
           <Pressable onPress={() => router.push(`/market/job/new?id=${job.id}` as never)} hitSlop={8}>
             <Text style={[styles.editLink, { color: colors.primary }]}>수정</Text>
@@ -170,7 +180,7 @@ export default function JobPostDetailScreen() {
 
         <Text style={[styles.jobTitle, { color: colors.text }]}>{job.title}</Text>
         <Text style={[styles.author, { color: colors.textLight }]}>
-          {job.clubName ? `${job.clubName} · ${job.authorName}` : `${job.authorName} (개인)`} · 지원 {job.applicants}명
+          {job.clubName ? `${job.clubName} · ${job.authorName}` : `${job.authorName} (개인)`} · 조회 {job.views} · 지원 {job.applicants}명
         </Text>
 
         {/* 모집공고 사진(체육관·코트) */}
@@ -249,6 +259,28 @@ export default function JobPostDetailScreen() {
             <Text style={[styles.infoLabel, { color: colors.textLight }]}>급여</Text>
             <Text style={[styles.infoValue, { color: colors.text }]}>{job.payLabel}</Text>
           </View>
+          <View style={styles.infoRow}>
+            <Text style={[styles.infoLabel, { color: colors.textLight }]}>모집 마감</Text>
+            {(() => {
+              const dd = ddayLabel(job.deadline);
+              return (
+                <Text style={[styles.infoValue, { color: dd?.urgent ? colors.danger : colors.text }]}>
+                  {job.deadline ? `${job.deadline}${dd ? ` (${dd.label})` : ''}` : '상시 모집'}
+                </Text>
+              );
+            })()}
+          </View>
+          {(job.targetAudience || job.employmentType) && (
+            <View style={styles.infoRow}>
+              <Text style={[styles.infoLabel, { color: colors.textLight }]}>모집 형태</Text>
+              <Text style={[styles.infoValue, { color: colors.text }]}>
+                {[
+                  job.targetAudience ? `${AUDIENCE_LABEL[job.targetAudience] ?? job.targetAudience} 대상` : null,
+                  job.employmentType ? EMPLOYMENT_LABEL[job.employmentType] ?? job.employmentType : null,
+                ].filter(Boolean).join(' · ')}
+              </Text>
+            </View>
+          )}
           {!!job.requirements && (
             <View style={styles.infoRow}>
               <Text style={[styles.infoLabel, { color: colors.textLight }]}>우대·요구</Text>

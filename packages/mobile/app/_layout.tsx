@@ -310,6 +310,7 @@ function RootLayoutInner() {
           <Stack.Screen name="market/my-jobs" options={transitions.slideFromRight} />
           <Stack.Screen name="market/applications" options={transitions.slideFromRight} />
           <Stack.Screen name="market/invites" options={transitions.slideFromRight} />
+          <Stack.Screen name="market/bookmarks" options={transitions.slideFromRight} />
           <Stack.Screen name="coach/settlement" options={transitions.slideFromRight} />
           <Stack.Screen name="payments/methods" options={transitions.slideFromRight} />
           <Stack.Screen name="payments/history" options={transitions.slideFromRight} />

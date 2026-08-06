@@ -37,6 +37,12 @@ export interface JobPostCard {
   thumbnail: string | null; // 첫 첨부 사진(피드 카드용)
   status: string;
   applicants: number;
+  // 마감·형태·성과 — 피드 카드의 D-day 뱃지·형태 칩·조회수.
+  deadline: string | null; // "YYYY-MM-DD", null = 상시
+  targetAudience: string | null; // ADULT | JUNIOR | ALL
+  employmentType: string | null; // FULL | PART
+  views: number;
+  bookmarked: boolean; // 로그인 시 내가 찜했는지(목록·상세에서 주입)
   createdAt: string;
 }
 
@@ -137,6 +143,9 @@ export interface JobPostInput {
   requirements?: string | null;
   attachments?: { url: string; name: string }[] | null;
   externalUrl?: string | null;
+  deadline?: string | null;
+  targetAudience?: string | null;
+  employmentType?: string | null;
   status?: string;
 }
 
@@ -189,6 +198,20 @@ function sanitizeExternalUrl(raw: unknown): string | null {
   }
 }
 
+const DEADLINE_RE = /^\d{4}-(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01])$/;
+function sanitizeDeadline(raw: unknown): string | null {
+  const v = clamp(raw, 10);
+  if (!v) return null;
+  if (!DEADLINE_RE.test(v)) throw new BadRequestError('마감일은 YYYY-MM-DD 형식이에요');
+  return v;
+}
+const AUDIENCES = ['ADULT', 'JUNIOR', 'ALL'];
+const EMPLOYMENTS = ['FULL', 'PART'];
+function sanitizeChoice(raw: unknown, allowed: string[]): string | null {
+  const v = clamp(raw, 10);
+  return v && allowed.includes(v) ? v : null;
+}
+
 function sanitizeDays(raw: unknown): number[] | null {
   if (!Array.isArray(raw)) return null;
   const out = [...new Set(raw.map(Number).filter((d) => Number.isInteger(d) && d >= 0 && d <= 6))].sort();
@@ -213,6 +236,7 @@ type PostRow = {
   days: unknown; start: string | null; end: string | null;
   payMonthly: number | null; paySession: number | null; payNegotiable: boolean;
   region: string; regionCodes: unknown; requirements: string | null; photos: unknown; status: string; createdAt: Date;
+  deadline: string | null; targetAudience: string | null; employmentType: string | null; views: number;
   _count?: { applications: number };
 };
 
@@ -238,6 +262,11 @@ function toCard(p: PostRow, clubMap: Map<string, string>): JobPostCard {
     scheduleLabel: scheduleLabel(days, p.start, p.end),
     payLabel: payLabel(p),
     thumbnail: sanitizePhotos(p.photos)?.[0] ?? null,
+    deadline: p.deadline,
+    targetAudience: p.targetAudience,
+    employmentType: p.employmentType,
+    views: p.views,
+    bookmarked: false,
     status: p.status,
     applicants: p._count?.applications ?? 0,
     createdAt: p.createdAt.toISOString(),
@@ -259,11 +288,15 @@ async function canManagePost(post: { authorUserId: string; clubId: string | null
 // 지원 카운트는 철회 제외 — 카드의 "지원 N명"이 실제 검토 대상 수가 되게.
 const activeAppCount = { _count: { select: { applications: { where: { status: { not: 'WITHDRAWN' } } } } } } as const;
 
-/** 공개 피드 — OPEN 공고, 최신순. region/q 부분 일치 필터. */
-export async function listJobs(filter: { region?: string; q?: string; regions?: string[] | null }): Promise<JobPostCard[]> {
+/** 공개 피드 — OPEN 공고. region/q 필터 + 정렬(latest|pay|deadline). */
+export async function listJobs(
+  filter: { region?: string; q?: string; regions?: string[] | null; sort?: string },
+  viewerUserId?: string,
+): Promise<JobPostCard[]> {
   const region = filter.region?.trim();
   const q = filter.q?.trim();
   const codes = filter.regions ?? null;
+  const sort = ['latest', 'pay', 'deadline'].includes(String(filter.sort)) ? String(filter.sort) : 'latest';
   const rows = await prisma.coachJobPost.findMany({
     where: {
       status: 'OPEN',
@@ -282,12 +315,30 @@ export async function listJobs(filter: { region?: string; q?: string; regions?: 
           }
         : {}),
     },
-    orderBy: { createdAt: 'desc' },
+    orderBy:
+      sort === 'pay'
+        ? [{ payMonthly: { sort: 'desc', nulls: 'last' } }, { paySession: { sort: 'desc', nulls: 'last' } }, { createdAt: 'desc' }]
+        : sort === 'deadline'
+          ? [{ deadline: { sort: 'asc', nulls: 'last' } }, { createdAt: 'desc' }]
+          : { createdAt: 'desc' },
     take: 100,
     include: activeAppCount,
   });
   const clubMap = await clubNames(rows.map((r) => r.clubId));
-  return rows.map((r) => toCard(r, clubMap));
+  const cards = rows.map((r) => toCard(r, clubMap));
+  await injectJobBookmarks(cards, viewerUserId);
+  return cards;
+}
+
+/** 카드 목록에 내 찜 여부 주입(로그인 시). */
+async function injectJobBookmarks(cards: JobPostCard[], viewerUserId?: string): Promise<void> {
+  if (!viewerUserId || cards.length === 0) return;
+  const marks = await prisma.coachJobBookmark.findMany({
+    where: { userId: viewerUserId, postId: { in: cards.map((c) => c.id) } },
+    select: { postId: true },
+  });
+  const set = new Set(marks.map((m) => m.postId));
+  cards.forEach((c) => { c.bookmarked = set.has(c.id); });
 }
 
 /** 공고 상세 — canManage 면 지원자 목록, 코치면 내 지원 상태 포함. */
@@ -298,6 +349,12 @@ export async function getJob(id: string, viewerUserId?: string): Promise<JobPost
   const clubMap = await clubNames([post.clubId]);
   const author = await prisma.user.findUnique({ where: { id: post.authorUserId }, select: { name: true } });
   const canManage = viewerUserId ? await canManagePost(post, viewerUserId) : false;
+
+  // 조회수 — 관리자(작성자·운영진) 본인 조회는 세지 않는다. 실패해도 응답엔 무영향.
+  if (!canManage) {
+    prisma.coachJobPost.update({ where: { id }, data: { views: { increment: 1 } } }).catch(() => {});
+    post.views += 1;
+  }
 
   let applications: JobApplicantRow[] | null = null;
   if (canManage) {
@@ -395,6 +452,12 @@ export async function getJob(id: string, viewerUserId?: string): Promise<JobPost
     myApplication,
     invited,
     applications,
+    bookmarked: viewerUserId
+      ? !!(await prisma.coachJobBookmark.findUnique({
+          where: { userId_postId: { userId: viewerUserId, postId: id } },
+          select: { id: true },
+        }))
+      : false,
   };
 }
 
@@ -430,6 +493,9 @@ export async function createJob(userId: string, input: JobPostInput): Promise<st
       photos: sanitizePhotos(input.photos) ?? undefined,
       attachments: (sanitizeAttachments(input.attachments) ?? undefined) as never,
       externalUrl: sanitizeExternalUrl(input.externalUrl),
+      deadline: sanitizeDeadline(input.deadline),
+      targetAudience: sanitizeChoice(input.targetAudience, AUDIENCES),
+      employmentType: sanitizeChoice(input.employmentType, EMPLOYMENTS),
     },
   });
   return created.id;
@@ -464,6 +530,9 @@ export async function updateJob(id: string, userId: string, patch: JobPostInput)
   if (patch.photos !== undefined) data.photos = sanitizePhotos(patch.photos) ?? [];
   if (patch.attachments !== undefined) data.attachments = (sanitizeAttachments(patch.attachments) ?? []) as never;
   if (patch.externalUrl !== undefined) data.externalUrl = sanitizeExternalUrl(patch.externalUrl);
+  if (patch.deadline !== undefined) data.deadline = sanitizeDeadline(patch.deadline);
+  if (patch.targetAudience !== undefined) data.targetAudience = sanitizeChoice(patch.targetAudience, AUDIENCES);
+  if (patch.employmentType !== undefined) data.employmentType = sanitizeChoice(patch.employmentType, EMPLOYMENTS);
   if (patch.status !== undefined) {
     if (!['OPEN', 'CLOSED'].includes(String(patch.status))) throw new BadRequestError('잘못된 상태예요');
     data.status = patch.status;
@@ -928,4 +997,50 @@ export async function scrapeJobUrl(rawUrl: unknown): Promise<{ title: string | n
     throw new BadRequestError('이 페이지에서는 내용을 읽어오지 못했어요 — 직접 입력해 주세요');
   }
   return { title, description };
+}
+
+
+// ─── 마감일 자동 마감 ─────────────────────────────────────────
+/** deadline(KST 날짜)이 지난 OPEN 공고를 CLOSED 처리. 1시간 인터벌로 호출(멱등). */
+export async function closeExpiredJobs(): Promise<number> {
+  const kstToday = new Date(Date.now() + 9 * 3600_000).toISOString().slice(0, 10);
+  const r = await prisma.coachJobPost.updateMany({
+    where: { status: 'OPEN', deadline: { not: null, lt: kstToday } },
+    data: { status: 'CLOSED' },
+  });
+  return r.count;
+}
+
+/** 서버 기동 시 1시간 주기 마감 루프. */
+export function startJobDeadlineLoop(): void {
+  const run = () => closeExpiredJobs().catch(() => {});
+  setTimeout(run, 20_000);
+  setInterval(run, 60 * 60_000);
+}
+
+// ─── 공고 찜 ─────────────────────────────────────────────────
+export async function setJobBookmark(userId: string, postId: string, on: boolean): Promise<void> {
+  const post = await prisma.coachJobPost.findUnique({ where: { id: postId }, select: { id: true } });
+  if (!post) throw new NotFoundError('공고');
+  if (on) {
+    await prisma.coachJobBookmark.upsert({
+      where: { userId_postId: { userId, postId } },
+      create: { userId, postId },
+      update: {},
+    });
+  } else {
+    await prisma.coachJobBookmark.deleteMany({ where: { userId, postId } });
+  }
+}
+
+/** 내가 찜한 공고(마감 포함, 최신 찜 순). */
+export async function listJobBookmarks(userId: string): Promise<JobPostCard[]> {
+  const marks = await prisma.coachJobBookmark.findMany({
+    where: { userId },
+    orderBy: { createdAt: 'desc' },
+    take: 100,
+    include: { post: { include: activeAppCount } },
+  });
+  const clubMap = await clubNames(marks.map((m) => m.post.clubId));
+  return marks.map((m) => ({ ...toCard(m.post, clubMap), bookmarked: true }));
 }

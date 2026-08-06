@@ -19,6 +19,9 @@ export interface CoachCard {
   playingYears: number | null;
   skillLevel: string | null; // S~F
   awardCount: number; // 입상 기록 수(신뢰 라인)
+  ratingAvg: number | null;
+  ratingCount: number;
+  bookmarked: boolean;
 }
 
 export interface CoachCareerEntry {
@@ -68,13 +71,43 @@ export interface MyCoachLessonRow {
   students: number;
 }
 
+export interface CoachReviewRow {
+  id: string;
+  authorName: string;
+  rating: number;
+  text: string | null;
+  mine: boolean;
+  createdAt: string;
+}
+export interface CoachReviews {
+  avg: number | null;
+  count: number;
+  eligible: boolean;
+  myReview: { rating: number; text: string | null } | null;
+  reviews: CoachReviewRow[];
+}
+
 export const coachApi = {
-  list: (params?: { region?: string; q?: string; regions?: string[] }) =>
+  list: (params?: { region?: string; q?: string; regions?: string[]; skills?: string[]; certifiedOnly?: boolean; maxPrice?: number | null }) =>
     api
       .get<CoachCard[]>('/coaches', {
-        params: { ...params, regions: params?.regions?.length ? params.regions.join(',') : undefined },
+        params: {
+          region: params?.region,
+          q: params?.q,
+          regions: params?.regions?.length ? params.regions.join(',') : undefined,
+          skills: params?.skills?.length ? params.skills.join(',') : undefined,
+          certified: params?.certifiedOnly ? '1' : undefined,
+          maxPrice: params?.maxPrice || undefined,
+        },
       })
       .then((r) => r.data),
+  bookmarks: () => api.get<CoachCard[]>('/coaches/bookmarks').then((r) => r.data),
+  setBookmark: (coachProfileId: string, on: boolean) =>
+    (on ? api.post(`/coaches/${coachProfileId}/bookmark`) : api.delete(`/coaches/${coachProfileId}/bookmark`)).then((r) => r.data),
+  reviews: (coachProfileId: string) => api.get<CoachReviews>(`/coaches/${coachProfileId}/reviews`).then((r) => r.data),
+  upsertReview: (coachProfileId: string, rating: number, text?: string | null) =>
+    api.put(`/coaches/${coachProfileId}/reviews`, { rating, text }).then((r) => r.data),
+  deleteReview: (coachProfileId: string) => api.delete(`/coaches/${coachProfileId}/reviews`).then((r) => r.data),
   get: (id: string) => api.get<CoachDetail>(`/coaches/${id}`).then((r) => r.data),
   me: () => api.get<CoachDetail | null>('/coaches/me').then((r) => r.data),
   upsertMe: (input: CoachProfileInput) => api.put<CoachDetail>('/coaches/me', input).then((r) => r.data),
