@@ -476,6 +476,18 @@ export default function ClubDetailScreen() {
                       <Text style={styles.iconActionLabel}>QR</Text>
                     </TouchableOpacity>
                   )}
+                  {/* 모임 설정/관리 허브 — 운영진 승급·멤버·출석·회비 등. 운영진만. */}
+                  {isLeaderOrStaff && (
+                    <TouchableOpacity
+                      style={styles.iconAction}
+                      onPress={() => router.push(`/club/${clubId}/manage`)}
+                      activeOpacity={0.7}
+                      accessibilityLabel="모임 설정 · 관리 (운영진 승급·멤버·출석)"
+                    >
+                      <Icon name="settings" size={20} color={Colors.textSecondary} />
+                      <Text style={styles.iconActionLabel}>설정</Text>
+                    </TouchableOpacity>
+                  )}
                 </View>
               </View>
               <View style={styles.inviteRow}>
