@@ -100,19 +100,19 @@ export default function JobApply() {
         <Text style={[styles.sectionLabel, { color: colors.textLight }]}>첨부되는 코치 프로필</Text>
         {me ? (
           <View style={[styles.resumeCard, { backgroundColor: colors.surface, borderColor: colors.border }, shadows.sm]}>
-            <View style={[styles.resumeIcon, { backgroundColor: colors.primary + '10' }]}>
+            <View style={[styles.resumeIcon, { backgroundColor: colors.surface2 }]}>
               <Ionicons name="document-text" size={20} color={colors.primary} />
             </View>
             <View style={{ flex: 1, minWidth: 0 }}>
               <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5 }}>
                 <Text style={[styles.resumeTitle, { color: colors.text }]} numberOfLines={1}>{me.displayName}의 코치 프로필</Text>
                 {!!me.skillLevel && (
-                  <View style={[styles.skillBadge, { backgroundColor: getSkillMeta(me.skillLevel).color }]}>
-                    <Text style={styles.skillBadgeText}>{me.skillLevel}</Text>
+                  <View style={[styles.skillBadge, { backgroundColor: colors.surface2 }]}>
+                    <Text style={[styles.skillBadgeText, { color: colors.textSecondary }]}>{me.skillLevel}</Text>
                   </View>
                 )}
               </View>
-              <Text style={[styles.resumeMeta, { color: completion >= 80 ? colors.secondary : colors.warning }]}>
+              <Text style={[styles.resumeMeta, { color: completion >= 80 ? colors.secondary : colors.textSecondary }]}>
                 완성도 {completion}%{completion < 80 ? ' — 채우면 합격률이 올라가요' : ''}
               </Text>
             </View>
@@ -123,9 +123,9 @@ export default function JobApply() {
         ) : (
           <Pressable
             onPress={() => router.push('/coach/resume' as never)}
-            style={[styles.resumeCard, { backgroundColor: colors.surface, borderColor: colors.warning }, shadows.sm]}
+            style={[styles.resumeCard, { backgroundColor: colors.surface, borderColor: colors.border }, shadows.sm]}
           >
-            <Ionicons name="alert-circle-outline" size={20} color={colors.warning} />
+            <Ionicons name="alert-circle-outline" size={20} color={colors.textSecondary} />
             <View style={{ flex: 1 }}>
               <Text style={[styles.resumeTitle, { color: colors.text }]}>이력서가 없어요</Text>
               <Text style={[styles.resumeMeta, { color: colors.textLight }]}>코치 프로필과 이력서를 만들어야 지원할 수 있어요 — 탭해서 시작</Text>
@@ -165,24 +165,24 @@ const styles = StyleSheet.create({
   center: { flex: 1, alignItems: 'center', justifyContent: 'center' },
   topBar: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, paddingHorizontal: spacing.md, paddingBottom: spacing.sm, borderBottomWidth: StyleSheet.hairlineWidth },
   title: { ...typography.subtitle1, flex: 1 },
-  jobCard: { borderRadius: 16, borderWidth: StyleSheet.hairlineWidth, padding: spacing.lg },
-  jobOwner: { fontSize: 12, fontWeight: '800' },
-  jobTitle: { fontSize: 17, fontWeight: '800', letterSpacing: -0.2, marginTop: 4, lineHeight: 23 },
-  jobMeta: { fontSize: 12.5, fontWeight: '600', marginTop: 6 },
-  sectionLabel: { fontSize: 12, fontWeight: '800', letterSpacing: 0.3, marginTop: spacing.xs },
-  resumeCard: { flexDirection: 'row', alignItems: 'center', gap: spacing.md, borderRadius: 16, borderWidth: 1, padding: spacing.lg },
+  jobCard: { borderRadius: 12, borderWidth: StyleSheet.hairlineWidth, padding: spacing.lg },
+  jobOwner: { fontSize: 12, fontWeight: '600' },
+  jobTitle: { fontSize: 17, fontWeight: '600', letterSpacing: -0.2, marginTop: 4, lineHeight: 23 },
+  jobMeta: { fontSize: 13, fontWeight: '600', marginTop: 6 },
+  sectionLabel: { fontSize: 12, fontWeight: '600', letterSpacing: 0.3, marginTop: spacing.xs },
+  resumeCard: { flexDirection: 'row', alignItems: 'center', gap: spacing.md, borderRadius: 12, borderWidth: 1, padding: spacing.lg },
   resumeIcon: { width: 40, height: 40, borderRadius: 12, alignItems: 'center', justifyContent: 'center' },
-  resumeTitle: { fontSize: 14.5, fontWeight: '800', flexShrink: 1 },
+  resumeTitle: { fontSize: 14, fontWeight: '600', flexShrink: 1 },
   resumeMeta: { fontSize: 12, fontWeight: '700', marginTop: 3 },
-  resumeEdit: { fontSize: 13, fontWeight: '800' },
+  resumeEdit: { fontSize: 13, fontWeight: '600' },
   skillBadge: { minWidth: 19, height: 17, borderRadius: 6, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 4 },
-  skillBadgeText: { color: '#fff', fontSize: 10.5, fontWeight: '900' },
+  skillBadgeText: { fontSize: 11, fontWeight: '700' },
   msgInput: {
-    ...typography.body2, fontWeight: '600', borderWidth: 1, borderRadius: 14,
+    ...typography.body2, fontWeight: '600', borderWidth: 1, borderRadius: 12,
     paddingHorizontal: spacing.lg, paddingVertical: Platform.OS === 'web' ? 12 : 11,
     minHeight: 110, textAlignVertical: 'top',
   },
   bottomBar: { paddingHorizontal: spacing.xl, paddingTop: spacing.md, borderTopWidth: StyleSheet.hairlineWidth },
-  submitBtn: { paddingVertical: 15, borderRadius: 14, alignItems: 'center', maxWidth: 560, width: '100%', alignSelf: 'center' },
-  submitText: { fontSize: 15.5, fontWeight: '800', color: '#fff' },
+  submitBtn: { paddingVertical: 15, borderRadius: 12, alignItems: 'center', maxWidth: 560, width: '100%', alignSelf: 'center' },
+  submitText: { fontSize: 15, fontWeight: '600', color: '#fff' },
 });

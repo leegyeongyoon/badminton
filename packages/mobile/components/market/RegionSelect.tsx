@@ -27,9 +27,9 @@ export function RegionSelect({
           <Pressable
             key={code}
             onPress={() => toggle(code)}
-            style={[styles.chip, { backgroundColor: on ? colors.primary : colors.surface, borderColor: on ? colors.primary : colors.border }]}
+            style={[styles.chip, { backgroundColor: colors.surface, borderColor: on ? colors.primary : colors.border }]}
           >
-            <Text style={[styles.chipText, { color: on ? '#fff' : colors.textSecondary }]}>{code}</Text>
+            <Text style={[styles.chipText, { color: on ? colors.primary : colors.textSecondary }]}>{code}</Text>
           </Pressable>
         );
       })}
@@ -39,6 +39,6 @@ export function RegionSelect({
 
 const styles = StyleSheet.create({
   wrap: { flexDirection: 'row', flexWrap: 'wrap', gap: 7 },
-  chip: { paddingHorizontal: 13, paddingVertical: 8, borderRadius: 18, borderWidth: 1 },
-  chipText: { fontSize: 13, fontWeight: '800' },
+  chip: { paddingHorizontal: 13, paddingVertical: 8, borderRadius: 8, borderWidth: 1 },
+  chipText: { fontSize: 13, fontWeight: '600' },
 });

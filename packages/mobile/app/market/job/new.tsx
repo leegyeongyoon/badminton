@@ -235,9 +235,9 @@ export default function JobPostForm() {
             <View style={styles.ownerRow}>
               <Pressable
                 onPress={() => setClubId(null)}
-                style={[styles.ownerChip, { backgroundColor: clubId === null ? colors.primary : colors.surface, borderColor: clubId === null ? colors.primary : colors.border }]}
+                style={[styles.ownerChip, { backgroundColor: colors.surface, borderColor: clubId === null ? colors.primary : colors.border }]}
               >
-                <Text style={[styles.ownerChipText, { color: clubId === null ? '#fff' : colors.textSecondary }]}>개인 요청</Text>
+                <Text style={[styles.ownerChipText, { color: clubId === null ? colors.primary : colors.textSecondary }]}>개인 요청</Text>
               </Pressable>
               {myClubs.map((c: { id: string; name: string }) => {
                 const on = clubId === c.id;
@@ -245,9 +245,9 @@ export default function JobPostForm() {
                   <Pressable
                     key={c.id}
                     onPress={() => setClubId(c.id)}
-                    style={[styles.ownerChip, { backgroundColor: on ? colors.primary : colors.surface, borderColor: on ? colors.primary : colors.border }]}
+                    style={[styles.ownerChip, { backgroundColor: colors.surface, borderColor: on ? colors.primary : colors.border }]}
                   >
-                    <Text style={[styles.ownerChipText, { color: on ? '#fff' : colors.textSecondary }]} numberOfLines={1}>{c.name}</Text>
+                    <Text style={[styles.ownerChipText, { color: on ? colors.primary : colors.textSecondary }]} numberOfLines={1}>{c.name}</Text>
                   </Pressable>
                 );
               })}
@@ -278,8 +278,8 @@ export default function JobPostForm() {
               {DAYS.map((d) => {
                 const on = days.includes(d.day);
                 return (
-                  <Pressable key={d.day} onPress={() => toggleDay(d.day)} style={[styles.dayChip, { backgroundColor: on ? colors.primary : colors.surface, borderColor: on ? colors.primary : colors.border }]}>
-                    <Text style={[styles.dayChipText, { color: on ? '#fff' : colors.textSecondary }]}>{d.label}</Text>
+                  <Pressable key={d.day} onPress={() => toggleDay(d.day)} style={[styles.dayChip, { backgroundColor: colors.surface, borderColor: on ? colors.primary : colors.border }]}>
+                    <Text style={[styles.dayChipText, { color: on ? colors.primary : colors.textSecondary }]}>{d.label}</Text>
                   </Pressable>
                 );
               })}
@@ -321,8 +321,8 @@ export default function JobPostForm() {
                 {AUDIENCES.map((a) => {
                   const on = targetAudience === a.value;
                   return (
-                    <Pressable key={a.value} onPress={() => setTargetAudience(on ? null : a.value)} style={[styles.ownerChip, { backgroundColor: on ? colors.primary : colors.surface, borderColor: on ? colors.primary : colors.border }]}>
-                      <Text style={[styles.ownerChipText, { color: on ? '#fff' : colors.textSecondary }]}>{a.label}</Text>
+                    <Pressable key={a.value} onPress={() => setTargetAudience(on ? null : a.value)} style={[styles.ownerChip, { backgroundColor: colors.surface, borderColor: on ? colors.primary : colors.border }]}>
+                      <Text style={[styles.ownerChipText, { color: on ? colors.primary : colors.textSecondary }]}>{a.label}</Text>
                     </Pressable>
                   );
                 })}
@@ -334,8 +334,8 @@ export default function JobPostForm() {
                 {EMPLOYMENTS.map((e) => {
                   const on = employmentType === e.value;
                   return (
-                    <Pressable key={e.value} onPress={() => setEmploymentType(on ? null : e.value)} style={[styles.ownerChip, { backgroundColor: on ? colors.primary : colors.surface, borderColor: on ? colors.primary : colors.border }]}>
-                      <Text style={[styles.ownerChipText, { color: on ? '#fff' : colors.textSecondary }]}>{e.label}</Text>
+                    <Pressable key={e.value} onPress={() => setEmploymentType(on ? null : e.value)} style={[styles.ownerChip, { backgroundColor: colors.surface, borderColor: on ? colors.primary : colors.border }]}>
+                      <Text style={[styles.ownerChipText, { color: on ? colors.primary : colors.textSecondary }]}>{e.label}</Text>
                     </Pressable>
                   );
                 })}
@@ -450,13 +450,13 @@ export default function JobPostForm() {
 }
 
 const styles = StyleSheet.create({
-  docRow: { flexDirection: 'row', alignItems: 'center', gap: 8, borderWidth: 1, borderRadius: 12, paddingHorizontal: spacing.md, paddingVertical: 11, marginBottom: 6 },
-  docName: { flex: 1, fontSize: 13.5, fontWeight: '700' },
-  docAdd: { borderWidth: 1, borderStyle: 'dashed', borderRadius: 12, paddingVertical: 12, alignItems: 'center' },
-  docAddText: { fontSize: 13, fontWeight: '700' },
-  scrapeBtn: { paddingHorizontal: 16, borderRadius: 12, alignItems: 'center', justifyContent: 'center' },
-  scrapeBtnText: { color: '#fff', fontSize: 13, fontWeight: '800' },
-  docHint: { fontSize: 11, fontWeight: '600', marginTop: 4, lineHeight: 15 },
+  docRow: { flexDirection: 'row', alignItems: 'center', gap: 8, borderWidth: 1, borderRadius: 10, paddingHorizontal: spacing.md, paddingVertical: 11, marginBottom: 6 },
+  docName: { flex: 1, fontSize: 13, fontWeight: '600' },
+  docAdd: { borderWidth: 1, borderStyle: 'dashed', borderRadius: 10, paddingVertical: 12, alignItems: 'center' },
+  docAddText: { fontSize: 13, fontWeight: '600' },
+  scrapeBtn: { paddingHorizontal: 16, borderRadius: 10, alignItems: 'center', justifyContent: 'center' },
+  scrapeBtnText: { color: '#fff', fontSize: 13, fontWeight: '700' },
+  docHint: { fontSize: 11, fontWeight: '400', marginTop: 4, lineHeight: 15 },
   topBar: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, paddingHorizontal: spacing.md, paddingBottom: spacing.sm, borderBottomWidth: StyleSheet.hairlineWidth },
   title: { ...typography.subtitle1, flex: 1 },
   center: { flex: 1, alignItems: 'center', justifyContent: 'center' },
@@ -464,32 +464,32 @@ const styles = StyleSheet.create({
   rowFields: { flexDirection: 'row', alignItems: 'flex-end', gap: spacing.md },
   flex1: { flex: 1 },
   centerText: { textAlign: 'center' },
-  label: { fontSize: 13, fontWeight: '700' },
-  hint: { fontSize: 11.5, fontWeight: '600', lineHeight: 16 },
+  label: { fontSize: 13, fontWeight: '600' },
+  hint: { fontSize: 12, fontWeight: '400', lineHeight: 16 },
   input: {
     ...typography.body2,
     fontWeight: '600',
     borderWidth: 1,
-    borderRadius: 12,
+    borderRadius: 10,
     paddingHorizontal: spacing.lg,
     paddingVertical: Platform.OS === 'web' ? 12 : 11,
   },
   multiline: { minHeight: 110, textAlignVertical: 'top' },
   multilineShort: { minHeight: 72, textAlignVertical: 'top' },
   ownerRow: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.xs },
-  ownerChip: { paddingHorizontal: 14, paddingVertical: 8, borderRadius: 18, borderWidth: 1, maxWidth: 180 },
-  ownerChipText: { fontSize: 13, fontWeight: '800' },
+  ownerChip: { paddingHorizontal: 14, paddingVertical: 8, borderRadius: 8, borderWidth: 1, maxWidth: 180 },
+  ownerChipText: { fontSize: 13, fontWeight: '600' },
   dayRow: { flexDirection: 'row', gap: 6, flexWrap: 'wrap' },
-  dayChip: { width: 40, height: 40, borderRadius: 20, alignItems: 'center', justifyContent: 'center', borderWidth: 1 },
-  dayChipText: { fontSize: 14, fontWeight: '900' },
-  negotiableRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.md, borderWidth: 1, borderRadius: 14, padding: spacing.lg },
+  dayChip: { width: 40, height: 40, borderRadius: 8, alignItems: 'center', justifyContent: 'center', borderWidth: 1 },
+  dayChipText: { fontSize: 14, fontWeight: '600' },
+  negotiableRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.md, borderWidth: 1, borderRadius: 10, padding: spacing.lg },
   photoWrap: { position: 'relative' },
   photoThumb: { width: 84, height: 84, borderRadius: 12 },
   photoRemove: { position: 'absolute', top: -6, right: -6, width: 20, height: 20, borderRadius: 10, alignItems: 'center', justifyContent: 'center' },
   photoAdd: { width: 84, height: 84, borderRadius: 12, borderWidth: 1, borderStyle: 'dashed', alignItems: 'center', justifyContent: 'center', gap: 3 },
-  photoAddText: { fontSize: 11, fontWeight: '700' },
-  negotiableTitle: { fontSize: 14.5, fontWeight: '800' },
+  photoAddText: { fontSize: 11, fontWeight: '500' },
+  negotiableTitle: { fontSize: 14, fontWeight: '600' },
   bottomBar: { paddingHorizontal: spacing.xl, paddingTop: spacing.md, borderTopWidth: StyleSheet.hairlineWidth },
-  saveBtn: { paddingVertical: 15, borderRadius: 14, alignItems: 'center', maxWidth: 560, width: '100%', alignSelf: 'center' },
-  saveText: { fontSize: 15.5, fontWeight: '800', color: '#fff' },
+  saveBtn: { paddingVertical: 15, borderRadius: 12, alignItems: 'center', maxWidth: 560, width: '100%', alignSelf: 'center' },
+  saveText: { fontSize: 15, fontWeight: '700', color: '#fff' },
 });

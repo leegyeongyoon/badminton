@@ -160,7 +160,7 @@ export default function CoachProfileScreen() {
           {photo ? (
             <Image source={{ uri: photo }} style={styles.photo} />
           ) : (
-            <View style={[styles.photo, styles.photoFallback, { backgroundColor: colors.primary + '10' }]}>
+            <View style={[styles.photo, styles.photoFallback, { backgroundColor: colors.surface2 }]}>
               <Text style={[styles.photoInitial, { color: colors.primary }]}>{coach.displayName.slice(0, 1)}</Text>
             </View>
           )}
@@ -168,7 +168,7 @@ export default function CoachProfileScreen() {
             <View style={styles.nameRow}>
               <Text style={[styles.name, { color: colors.text }]} numberOfLines={1}>{coach.displayName}</Text>
               {coach.certified && (
-                <View style={[styles.certBadge, { backgroundColor: colors.primary + '14' }]}>
+                <View style={[styles.certBadge, { backgroundColor: colors.primaryBg }]}>
                   <Ionicons name="checkmark-circle" size={12} color={colors.primary} />
                   <Text style={[styles.certText, { color: colors.primary }]}>인증 코치</Text>
                 </View>
@@ -184,7 +184,7 @@ export default function CoachProfileScreen() {
             {reviews != null && reviews.count > 0 && reviews.avg != null && (
               <View style={styles.regionRow}>
                 <Ionicons name="star" size={12} color="#F5A623" />
-                <Text style={[styles.regionText, { color: colors.textSecondary, fontWeight: '800' }]}>
+                <Text style={[styles.regionText, { color: colors.textSecondary, fontWeight: '600' }]}>
                   {reviews.avg.toFixed(1)} · 후기 {reviews.count}개
                 </Text>
               </View>
@@ -201,10 +201,16 @@ export default function CoachProfileScreen() {
         <View style={[styles.howCard, { borderColor: colors.border, marginTop: spacing.lg }]}>
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
             <Text style={[styles.howTitle, { color: colors.text, marginBottom: 0 }]}>후기</Text>
-            {reviews != null && reviews.count > 0 && reviews.avg != null && (
-              <Text style={{ fontSize: 13, fontWeight: '800', color: '#F5A623' }}>★ {reviews.avg.toFixed(1)} ({reviews.count})</Text>
-            )}
           </View>
+          {reviews != null && reviews.count > 0 && reviews.avg != null && (
+            <View style={{ flexDirection: 'row', alignItems: 'flex-end', gap: 6, marginTop: spacing.sm }}>
+              <Text style={{ fontSize: 26, fontWeight: '700', lineHeight: 30, color: colors.text }}>{reviews.avg.toFixed(1)}</Text>
+              <View style={{ paddingBottom: 3, flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+                <Text style={{ fontSize: 13, color: '#F5A623' }}>{'★'.repeat(Math.round(reviews.avg))}</Text>
+                <Text style={{ fontSize: 12, color: colors.textLight }}>후기 {reviews.count}개</Text>
+              </View>
+            </View>
+          )}
 
           {reviews == null ? (
             <ActivityIndicator size="small" color={colors.primary} style={{ marginVertical: spacing.md }} />
@@ -218,7 +224,7 @@ export default function CoachProfileScreen() {
                 <View key={rv.id} style={[styles.reviewRow, { borderColor: colors.border }]}>
                   <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
                     <Text style={[styles.reviewAuthor, { color: colors.text }]}>{rv.authorName}</Text>
-                    <Text style={{ fontSize: 12, fontWeight: '800', color: '#F5A623' }}>{'★'.repeat(rv.rating)}</Text>
+                    <Text style={{ fontSize: 12, fontWeight: '600', color: '#F5A623' }}>{'★'.repeat(rv.rating)}</Text>
                     {rv.mine && <Text style={[styles.reviewMine, { color: colors.primary }]}>내 후기</Text>}
                     <View style={{ flex: 1 }} />
                     <Text style={{ fontSize: 11, fontWeight: '600', color: colors.textLight }}>{new Date(rv.createdAt).toLocaleDateString('ko-KR')}</Text>
@@ -316,7 +322,7 @@ export default function CoachProfileScreen() {
                   <Pressable
                     key={j.id}
                     onPress={() => setInvitePostId(j.id)}
-                    style={[styles.jobPick, { borderColor: on ? colors.primary : colors.border, backgroundColor: on ? colors.primary + '0C' : 'transparent' }]}
+                    style={[styles.jobPick, { borderColor: on ? colors.primary : colors.border, backgroundColor: on ? colors.primaryBg : 'transparent' }]}
                   >
                     <Ionicons name={on ? 'radio-button-on' : 'radio-button-off'} size={16} color={on ? colors.primary : colors.textLight} />
                     <View style={{ flex: 1, minWidth: 0 }}>
@@ -352,45 +358,45 @@ export default function CoachProfileScreen() {
 }
 
 const styles = StyleSheet.create({
-  inviteBtn: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 5, borderWidth: 1.5, borderRadius: 14, paddingVertical: 14 },
-  inviteText: { fontSize: 14, fontWeight: '800' },
+  inviteBtn: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 5, borderWidth: 1.5, borderRadius: 12, paddingVertical: 14 },
+  inviteText: { fontSize: 14, fontWeight: '600' },
   sheetOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.45)', justifyContent: 'center', padding: spacing.xl },
-  sheet: { borderRadius: 18, padding: spacing.lg, maxWidth: 480, width: '100%', alignSelf: 'center', gap: spacing.md },
+  sheet: { borderRadius: 12, padding: spacing.lg, maxWidth: 480, width: '100%', alignSelf: 'center', gap: spacing.md },
   sheetTitle: { ...typography.subtitle1 },
   jobPick: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, borderWidth: 1, borderRadius: 12, padding: spacing.md, marginBottom: spacing.sm },
-  jobPickTitle: { fontSize: 14, fontWeight: '800' },
-  jobPickMeta: { fontSize: 11.5, fontWeight: '600', marginTop: 2 },
-  inviteInput: { fontSize: 13.5, fontWeight: '600', borderWidth: 1, borderRadius: 12, padding: spacing.md, minHeight: 64, textAlignVertical: 'top' },
+  jobPickTitle: { fontSize: 14, fontWeight: '600' },
+  jobPickMeta: { fontSize: 12, fontWeight: '600', marginTop: 2 },
+  inviteInput: { fontSize: 13, fontWeight: '600', borderWidth: 1, borderRadius: 12, padding: spacing.md, minHeight: 64, textAlignVertical: 'top' },
   sheetGhost: { flex: 1, alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderRadius: 12, paddingVertical: 13 },
-  sheetGhostText: { fontSize: 14, fontWeight: '800' },
+  sheetGhostText: { fontSize: 14, fontWeight: '600' },
   sheetPrimary: { flex: 2, alignItems: 'center', justifyContent: 'center', borderRadius: 12, paddingVertical: 13 },
-  sheetPrimaryText: { color: '#fff', fontSize: 14, fontWeight: '800' },
+  sheetPrimaryText: { color: '#fff', fontSize: 14, fontWeight: '600' },
   topBar: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, paddingHorizontal: spacing.md, paddingBottom: spacing.sm, borderBottomWidth: StyleSheet.hairlineWidth },
   topBarFloating: { flexDirection: 'row', paddingHorizontal: spacing.md, paddingVertical: spacing.sm },
   topTitle: { ...typography.subtitle1, flex: 1 },
-  editLink: { fontSize: 14, fontWeight: '800' },
+  editLink: { fontSize: 14, fontWeight: '600' },
   header: { flexDirection: 'row', gap: spacing.lg, marginBottom: spacing.lg },
   photo: { width: 92, height: 92, borderRadius: 20 },
   photoFallback: { alignItems: 'center', justifyContent: 'center' },
-  photoInitial: { fontSize: 34, fontWeight: '900' },
+  photoInitial: { fontSize: 34, fontWeight: '700' },
   nameRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
-  name: { fontSize: 21, fontWeight: '800', letterSpacing: -0.3, flexShrink: 1 },
+  name: { fontSize: 21, fontWeight: '600', letterSpacing: -0.3, flexShrink: 1 },
   certBadge: { flexDirection: 'row', alignItems: 'center', gap: 3, paddingHorizontal: 8, paddingVertical: 3, borderRadius: 10 },
-  certText: { fontSize: 11, fontWeight: '800' },
-  intro: { fontSize: 13.5, fontWeight: '600', marginTop: 5, lineHeight: 19 },
+  certText: { fontSize: 11, fontWeight: '600' },
+  intro: { fontSize: 13, fontWeight: '600', marginTop: 5, lineHeight: 19 },
   regionRow: { flexDirection: 'row', alignItems: 'center', gap: 3, marginTop: 6 },
   regionText: { fontSize: 12, fontWeight: '600', flexShrink: 1 },
   inactive: { fontSize: 12, fontWeight: '700', marginTop: spacing.sm },
-  howCard: { borderWidth: 1, borderRadius: 16, padding: spacing.lg, marginTop: spacing.xs },
+  howCard: { borderWidth: 1, borderRadius: 12, padding: spacing.lg, marginTop: spacing.xs },
   reviewRow: { borderWidth: StyleSheet.hairlineWidth, borderRadius: 12, padding: spacing.md },
-  reviewAuthor: { fontSize: 13, fontWeight: '800' },
-  reviewMine: { fontSize: 10.5, fontWeight: '900' },
+  reviewAuthor: { fontSize: 13, fontWeight: '600' },
+  reviewMine: { fontSize: 11, fontWeight: '700' },
   reviewText: { fontSize: 13, fontWeight: '600', lineHeight: 19, marginTop: 5 },
   reviewForm: { borderTopWidth: StyleSheet.hairlineWidth, marginTop: spacing.md, paddingTop: spacing.md },
-  reviewFormTitle: { fontSize: 12.5, fontWeight: '800' },
-  howTitle: { fontSize: 14, fontWeight: '800', marginBottom: 6 },
+  reviewFormTitle: { fontSize: 13, fontWeight: '600' },
+  howTitle: { fontSize: 14, fontWeight: '600', marginBottom: 6 },
   howText: { fontSize: 13, fontWeight: '600', lineHeight: 21 },
   bottomBar: { paddingHorizontal: spacing.xl, paddingTop: spacing.md, borderTopWidth: StyleSheet.hairlineWidth },
-  chatBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: spacing.sm, paddingVertical: 15, borderRadius: 14, maxWidth: 560, width: '100%', alignSelf: 'center' },
-  chatText: { fontSize: 15.5, fontWeight: '800', color: '#fff' },
+  chatBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: spacing.sm, paddingVertical: 15, borderRadius: 12, maxWidth: 560, width: '100%', alignSelf: 'center' },
+  chatText: { fontSize: 15, fontWeight: '600', color: '#fff' },
 });

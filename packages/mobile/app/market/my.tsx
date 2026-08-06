@@ -106,16 +106,16 @@ function MarketMyInner() {
               {photo ? (
                 <Image source={{ uri: photo }} style={styles.profilePhoto} />
               ) : (
-                <View style={[styles.profilePhoto, { backgroundColor: colors.primary + '10', alignItems: 'center', justifyContent: 'center' }]}>
-                  <Text style={{ color: colors.primary, fontSize: 22, fontWeight: '900' }}>{profile.displayName.slice(0, 1)}</Text>
+                <View style={[styles.profilePhoto, { backgroundColor: colors.surface2, alignItems: 'center', justifyContent: 'center' }]}>
+                  <Text style={{ color: colors.primary, fontSize: 22, fontWeight: '700' }}>{profile.displayName.slice(0, 1)}</Text>
                 </View>
               )}
               <View style={{ flex: 1, minWidth: 0 }}>
                 <View style={styles.profileNameRow}>
                   <Text style={[styles.profileName, { color: colors.text }]} numberOfLines={1}>{profile.displayName}</Text>
                   {!!profile.skillLevel && (
-                    <View style={[styles.skillBadge, { backgroundColor: getSkillMeta(profile.skillLevel).color }]}>
-                      <Text style={styles.skillBadgeText}>{profile.skillLevel}</Text>
+                    <View style={[styles.skillBadge, { backgroundColor: colors.surface2 }]}>
+                      <Text style={[styles.skillBadgeText, { color: colors.textSecondary }]}>{profile.skillLevel}</Text>
                     </View>
                   )}
                   {profile.certified && <Ionicons name="checkmark-circle" size={14} color={colors.primary} />}
@@ -134,7 +134,7 @@ function MarketMyInner() {
               onPress={() => router.push('/coach/resume' as never)}
               style={({ pressed }) => [styles.profileCard, { backgroundColor: colors.surface, borderColor: colors.border }, shadows.sm, pressed && { opacity: 0.92 }]}
             >
-              <View style={[styles.profilePhoto, { backgroundColor: colors.primary + '10', alignItems: 'center', justifyContent: 'center' }]}>
+              <View style={[styles.profilePhoto, { backgroundColor: colors.surface2, alignItems: 'center', justifyContent: 'center' }]}>
                 <Ionicons name="person-add-outline" size={20} color={colors.primary} />
               </View>
               <View style={{ flex: 1 }}>
@@ -179,22 +179,22 @@ const styles = StyleSheet.create({
   topBar: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, paddingHorizontal: spacing.md, paddingBottom: spacing.sm, borderBottomWidth: StyleSheet.hairlineWidth },
   title: { ...typography.subtitle1, flex: 1 },
   center: { flex: 1, alignItems: 'center', justifyContent: 'center' },
-  profileCard: { flexDirection: 'row', alignItems: 'center', gap: spacing.md, borderRadius: 16, borderWidth: StyleSheet.hairlineWidth, padding: spacing.lg },
-  profilePhoto: { width: 54, height: 54, borderRadius: 14 },
+  profileCard: { flexDirection: 'row', alignItems: 'center', gap: spacing.md, borderRadius: 12, borderWidth: StyleSheet.hairlineWidth, padding: spacing.lg },
+  profilePhoto: { width: 54, height: 54, borderRadius: 12 },
   profileNameRow: { flexDirection: 'row', alignItems: 'center', gap: 5 },
-  profileName: { fontSize: 16.5, fontWeight: '800', flexShrink: 1 },
+  profileName: { fontSize: 16, fontWeight: '600', flexShrink: 1 },
   profileMeta: { fontSize: 12, fontWeight: '600', marginTop: 3 },
   skillBadge: { minWidth: 20, height: 18, borderRadius: 6, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 5 },
-  skillBadgeText: { color: '#fff', fontSize: 11, fontWeight: '900' },
-  completionPct: { fontSize: 17, fontWeight: '900' },
+  skillBadgeText: { fontSize: 11, fontWeight: '700' },
+  completionPct: { fontSize: 17, fontWeight: '700' },
   completionLabel: { fontSize: 10, fontWeight: '700', marginTop: 2 },
-  section: { borderRadius: 16, borderWidth: StyleSheet.hairlineWidth, paddingHorizontal: spacing.lg, paddingVertical: spacing.sm },
-  sectionTitle: { fontSize: 11.5, fontWeight: '800', letterSpacing: 0.4, marginTop: spacing.sm, marginBottom: 2 },
+  section: { borderRadius: 12, borderWidth: StyleSheet.hairlineWidth, paddingHorizontal: spacing.lg, paddingVertical: spacing.sm },
+  sectionTitle: { fontSize: 12, fontWeight: '600', letterSpacing: 0.4, marginTop: spacing.sm, marginBottom: 2 },
   menuRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.md, paddingVertical: spacing.md },
   menuIcon: { width: 32, height: 32, borderRadius: 10, alignItems: 'center', justifyContent: 'center' },
-  menuLabel: { fontSize: 14.5, fontWeight: '700' },
-  menuHint: { fontSize: 11.5, fontWeight: '600', marginTop: 2, lineHeight: 15 },
-  menuCount: { fontSize: 14, fontWeight: '800' },
+  menuLabel: { fontSize: 14, fontWeight: '700' },
+  menuHint: { fontSize: 12, fontWeight: '600', marginTop: 2, lineHeight: 15 },
+  menuCount: { fontSize: 14, fontWeight: '600' },
   menuBadge: { minWidth: 19, height: 19, borderRadius: 10, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 5 },
-  menuBadgeText: { color: '#fff', fontSize: 10.5, fontWeight: '900' },
+  menuBadgeText: { color: '#fff', fontSize: 11, fontWeight: '700' },
 });

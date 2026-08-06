@@ -131,16 +131,16 @@ export default function BookmarksScreen() {
                   {photo ? (
                     <Image source={{ uri: photo }} style={styles.photo} />
                   ) : (
-                    <View style={[styles.photo, { backgroundColor: colors.primary + '10', alignItems: 'center', justifyContent: 'center' }]}>
-                      <Text style={{ color: colors.primary, fontSize: 18, fontWeight: '900' }}>{c.displayName.slice(0, 1)}</Text>
+                    <View style={[styles.photo, { backgroundColor: colors.surface2, alignItems: 'center', justifyContent: 'center' }]}>
+                      <Text style={{ color: colors.textSecondary, fontSize: 18, fontWeight: '700' }}>{c.displayName.slice(0, 1)}</Text>
                     </View>
                   )}
                   <View style={{ flex: 1, minWidth: 0 }}>
                     <View style={styles.headRow}>
                       <Text style={[styles.cardTitle, { color: colors.text }]} numberOfLines={1}>{c.displayName}</Text>
                       {!!c.skillLevel && (
-                        <View style={[styles.skillBadge, { backgroundColor: getSkillMeta(c.skillLevel).color }]}>
-                          <Text style={styles.skillBadgeText}>{c.skillLevel}</Text>
+                        <View style={[styles.skillBadge, { backgroundColor: colors.surface2 }]}>
+                          <Text style={[styles.skillBadgeText, { color: colors.textSecondary }]}>{c.skillLevel}</Text>
                         </View>
                       )}
                     </View>
@@ -171,16 +171,16 @@ const styles = StyleSheet.create({
   center: { flex: 1, alignItems: 'center', justifyContent: 'center' },
   segment: { flexDirection: 'row', borderRadius: 12, borderWidth: 1, padding: 3, marginTop: spacing.md, maxWidth: 640, width: '92%', alignSelf: 'center' },
   segmentBtn: { flex: 1, paddingVertical: 8, borderRadius: 9, alignItems: 'center' },
-  segmentText: { fontSize: 13.5, fontWeight: '800' },
+  segmentText: { fontSize: 13, fontWeight: '600' },
   emptyBox: { alignItems: 'center', gap: spacing.sm, paddingVertical: spacing.xxxl },
   emptyTitle: { ...typography.subtitle1 },
   emptyHint: { ...typography.caption, textAlign: 'center', lineHeight: 18 },
-  card: { flexDirection: 'row', alignItems: 'center', gap: spacing.md, borderRadius: 14, borderWidth: StyleSheet.hairlineWidth, padding: spacing.lg, marginBottom: spacing.sm },
+  card: { flexDirection: 'row', alignItems: 'center', gap: spacing.md, borderRadius: 12, borderWidth: StyleSheet.hairlineWidth, padding: spacing.lg, marginBottom: spacing.sm },
   headRow: { flexDirection: 'row', alignItems: 'center', gap: 6 },
-  cardTitle: { fontSize: 15, fontWeight: '800', flexShrink: 1 },
-  tag: { fontSize: 12, fontWeight: '800' },
-  meta: { fontSize: 12.5, fontWeight: '600', marginTop: 3 },
+  cardTitle: { fontSize: 15, fontWeight: '600', flexShrink: 1 },
+  tag: { fontSize: 12, fontWeight: '600' },
+  meta: { fontSize: 13, fontWeight: '600', marginTop: 3 },
   photo: { width: 46, height: 46, borderRadius: 12 },
   skillBadge: { minWidth: 20, height: 18, borderRadius: 6, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 5 },
-  skillBadgeText: { color: '#fff', fontSize: 11, fontWeight: '900' },
+  skillBadgeText: { fontSize: 11, fontWeight: '700' },
 });

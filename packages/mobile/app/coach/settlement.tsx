@@ -159,8 +159,8 @@ export default function CoachSettlementScreen() {
                   </View>
                   <View style={{ alignItems: 'flex-end', gap: 4 }}>
                     <Text style={[styles.payoutAmount, { color: colors.text }]}>{po.payoutAmount.toLocaleString()}원</Text>
-                    <View style={[styles.payoutState, { backgroundColor: (po.status === 'PAID' ? colors.secondary : colors.warning) + '16' }]}>
-                      <Text style={[styles.payoutStateText, { color: po.status === 'PAID' ? colors.secondary : colors.warning }]}>
+                    <View style={[styles.payoutState, { backgroundColor: po.status === 'PAID' ? colors.secondaryBg : colors.surface2 }]}>
+                      <Text style={[styles.payoutStateText, { color: po.status === 'PAID' ? colors.secondary : colors.textSecondary }]}>
                         {po.status === 'PAID' ? `지급 완료${po.paidAt ? ` · ${new Date(po.paidAt).toLocaleDateString()}` : ''}` : '지급 대기'}
                       </Text>
                     </View>
@@ -170,8 +170,8 @@ export default function CoachSettlementScreen() {
             </>
           )}
 
-          <View style={[styles.noticeBox, { backgroundColor: colors.warning + '10', borderColor: colors.warning + '40' }]}>
-            <Ionicons name="information-circle-outline" size={15} color={colors.warning} />
+          <View style={[styles.noticeBox, { backgroundColor: colors.surface2, borderColor: 'transparent' }]}>
+            <Ionicons name="information-circle-outline" size={15} color={colors.textSecondary} />
             <Text style={[styles.noticeText, { color: colors.textSecondary }]}>
               플랫폼 자동 정산(카드 정기결제·지급대행)은 준비 중이에요. 지금은 운영진의 입금확인 기준 예상치입니다.
             </Text>

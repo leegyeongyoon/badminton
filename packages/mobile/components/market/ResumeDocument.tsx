@@ -43,8 +43,8 @@ export function ResumeDocument({
       {/* 핵심 스탯 스트립 — 채용 판단 1차 기준 */}
       <View style={[styles.statStrip, { backgroundColor: colors.surface }, shadows.sm]}>
         <View style={styles.statCell}>
-          <View style={[styles.skillBadge, { backgroundColor: coach.skillLevel ? getSkillMeta(coach.skillLevel).color : colors.border }]}>
-            <Text style={styles.skillBadgeText}>{coach.skillLevel ?? '—'}</Text>
+          <View style={[styles.skillBadge, { backgroundColor: colors.surface2 }]}>
+            <Text style={[styles.skillBadgeText, { color: colors.textSecondary }]}>{coach.skillLevel ?? '—'}</Text>
           </View>
           <Text style={[styles.statLabel, { color: colors.textLight }]}>
             {coach.skillLevel ? getSkillMeta(coach.skillLevel).description : '급수 미설정'}
@@ -131,8 +131,8 @@ export function ResumeDocument({
                     <View style={styles.entryTitleRow}>
                       <Text style={[styles.entryTitle, { color: colors.text }]}>{e.title}</Text>
                       {g.kind === 'AWARD' && !!e.result && (
-                        <View style={[styles.resultBadge, { backgroundColor: e.result === '우승' ? colors.warning : colors.textLight }]}>
-                          <Text style={styles.resultBadgeText}>{e.result}</Text>
+                        <View style={[styles.resultBadge, { backgroundColor: colors.surface2 }]}>
+                          <Text style={[styles.resultBadgeText, { color: e.result === '우승' ? colors.primary : colors.textSecondary }]}>{e.result}</Text>
                         </View>
                       )}
                       {g.kind === 'AWARD' && !!e.division && (
@@ -179,33 +179,33 @@ export function ResumeDocument({
 }
 
 const styles = StyleSheet.create({
-  statStrip: { flexDirection: 'row', alignItems: 'center', borderRadius: 16, paddingVertical: spacing.lg, marginBottom: spacing.md },
+  statStrip: { flexDirection: 'row', alignItems: 'center', borderRadius: 12, paddingVertical: spacing.lg, marginBottom: spacing.md },
   statCell: { flex: 1, alignItems: 'center', gap: 4 },
   statDivider: { width: StyleSheet.hairlineWidth, height: 30 },
-  statValue: { fontSize: 16, fontWeight: '900' },
-  statLabel: { fontSize: 10.5, fontWeight: '700' },
+  statValue: { fontSize: 16, fontWeight: '700' },
+  statLabel: { fontSize: 11, fontWeight: '700' },
   skillBadge: { minWidth: 26, height: 22, borderRadius: 7, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 6 },
-  skillBadgeText: { color: '#fff', fontSize: 13, fontWeight: '900' },
-  infoCard: { borderRadius: 16, padding: spacing.lg, marginBottom: spacing.md, gap: spacing.smd },
+  skillBadgeText: { fontSize: 13, fontWeight: '700' },
+  infoCard: { borderRadius: 12, padding: spacing.lg, marginBottom: spacing.md, gap: spacing.smd },
   infoRow: { flexDirection: 'row', alignItems: 'flex-start', gap: spacing.md },
   infoLabel: { fontSize: 13, fontWeight: '700', width: 76 },
   infoValue: { fontSize: 14, fontWeight: '700', flex: 1, lineHeight: 20 },
-  sectionTitle: { fontSize: 15, fontWeight: '800', marginBottom: 2 },
+  sectionTitle: { fontSize: 15, fontWeight: '600', marginBottom: 2 },
   resumeHead: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
-  resumeEdit: { fontSize: 13, fontWeight: '800' },
+  resumeEdit: { fontSize: 13, fontWeight: '600' },
   resumeEmptyText: { fontSize: 13, fontWeight: '600', textAlign: 'center', lineHeight: 19, marginBottom: 6 },
   entryGroup: { gap: 2, marginTop: spacing.xs },
-  entryKind: { fontSize: 11.5, fontWeight: '800', letterSpacing: 0.4, marginBottom: 4 },
+  entryKind: { fontSize: 12, fontWeight: '600', letterSpacing: 0.4, marginBottom: 4 },
   entryRow: { borderLeftWidth: 2, paddingLeft: spacing.md, paddingVertical: 5, marginBottom: 4 },
   entryTitleRow: { flexDirection: 'row', alignItems: 'center', gap: 5, flexWrap: 'wrap' },
-  entryTitle: { fontSize: 14.5, fontWeight: '800' },
-  entryMeta: { fontSize: 12.5, fontWeight: '600', marginTop: 2 },
+  entryTitle: { fontSize: 14, fontWeight: '600' },
+  entryMeta: { fontSize: 13, fontWeight: '600', marginTop: 2 },
   entryDesc: { fontSize: 12, fontWeight: '600', marginTop: 3, lineHeight: 17 },
   resultBadge: { paddingHorizontal: 7, paddingVertical: 2, borderRadius: 7 },
-  resultBadgeText: { color: '#fff', fontSize: 10.5, fontWeight: '900' },
+  resultBadgeText: { fontSize: 11, fontWeight: '600' },
   divisionBadge: { paddingHorizontal: 6, paddingVertical: 2, borderRadius: 7, borderWidth: 1 },
-  divisionBadgeText: { fontSize: 10.5, fontWeight: '800' },
+  divisionBadgeText: { fontSize: 11, fontWeight: '600' },
   careerRow: { flexDirection: 'row', alignItems: 'flex-start', gap: spacing.sm },
   careerDot: { width: 4, height: 4, borderRadius: 2, marginTop: 8 },
-  careerText: { fontSize: 13.5, fontWeight: '600', flex: 1, lineHeight: 20 },
+  careerText: { fontSize: 13, fontWeight: '600', flex: 1, lineHeight: 20 },
 });

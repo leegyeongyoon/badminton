@@ -128,7 +128,7 @@ export default function ClubOperation() {
           {/* 정기 운동 일정 */}
           <View style={[styles.card, { backgroundColor: colors.surface }, shadows.md]}>
             <View style={styles.cardTitleRow}>
-              <View style={[styles.cardIcon, { backgroundColor: colors.primary + '15' }]}>
+              <View style={[styles.cardIcon, { backgroundColor: colors.primaryBg }]}>
                 <Ionicons name="calendar-outline" size={16} color={colors.primary} />
               </View>
               <View style={{ flex: 1, minWidth: 0 }}>
@@ -181,7 +181,7 @@ export default function ClubOperation() {
           {/* 정모 자동 개설 */}
           <View style={[styles.card, { backgroundColor: colors.surface }, shadows.md]}>
             <View style={styles.toggleRow}>
-              <View style={[styles.cardIcon, { backgroundColor: colors.primary + '15' }]}>
+              <View style={[styles.cardIcon, { backgroundColor: colors.primaryBg }]}>
                 <Ionicons name="alarm-outline" size={16} color={colors.primary} />
               </View>
               <View style={{ flex: 1, minWidth: 0 }}>
@@ -241,7 +241,7 @@ export default function ClubOperation() {
           {/* 게스트 신청 정책 */}
           <View style={[styles.card, { backgroundColor: colors.surface }, shadows.md]}>
             <View style={styles.toggleRow}>
-              <View style={[styles.cardIcon, { backgroundColor: colors.primary + '15' }]}>
+              <View style={[styles.cardIcon, { backgroundColor: colors.primaryBg }]}>
                 <Ionicons name="person-add-outline" size={16} color={colors.primary} />
               </View>
               <View style={{ flex: 1, minWidth: 0 }}>
@@ -316,17 +316,17 @@ const styles = StyleSheet.create({
   cardIcon: { width: 30, height: 30, borderRadius: 15, alignItems: 'center', justifyContent: 'center', marginTop: 1 },
   dayRow: { flexDirection: 'row', gap: spacing.sm, flexWrap: 'wrap', marginBottom: spacing.md },
   dayChip: { width: 40, height: 40, borderRadius: 20, alignItems: 'center', justifyContent: 'center' },
-  dayChipText: { ...typography.body2, fontWeight: '900' },
+  dayChipText: { ...typography.body2, fontWeight: '700' },
   timeRow: { flexDirection: 'row', gap: spacing.md },
   slotRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, marginBottom: spacing.sm },
-  slotDay: { ...typography.subtitle2, width: 24, fontWeight: '900' },
-  slotInput: { ...typography.body2, flex: 1, borderRadius: 12, paddingHorizontal: spacing.md, paddingVertical: 12, fontWeight: '800', textAlign: 'center' },
+  slotDay: { ...typography.subtitle2, width: 24, fontWeight: '700' },
+  slotInput: { ...typography.body2, flex: 1, borderRadius: 12, paddingHorizontal: spacing.md, paddingVertical: 12, fontWeight: '600', textAlign: 'center' },
   fieldLabel: { ...typography.caption, fontWeight: '700', marginBottom: spacing.xs },
-  input: { ...typography.body1, borderRadius: 14, paddingHorizontal: spacing.lg, paddingVertical: 13, fontWeight: '700' },
+  input: { ...typography.body1, borderRadius: 12, paddingHorizontal: spacing.lg, paddingVertical: 13, fontWeight: '700' },
   toggleRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.md },
   openChip: { paddingHorizontal: spacing.md, paddingVertical: 9, borderRadius: radius.pill, borderWidth: 1 },
-  openChipText: { fontSize: 13, fontWeight: '800' },
-  saveBtn: { paddingVertical: 16, borderRadius: 16, alignItems: 'center', marginBottom: spacing.sm },
-  saveText: { ...typography.button, color: '#fff', fontSize: 16, fontWeight: '900' },
+  openChipText: { fontSize: 13, fontWeight: '600' },
+  saveBtn: { paddingVertical: 16, borderRadius: 12, alignItems: 'center', marginBottom: spacing.sm },
+  saveText: { ...typography.button, color: '#fff', fontSize: 16, fontWeight: '700' },
   warn: { ...typography.caption, lineHeight: 16, marginBottom: spacing.sm },
 });

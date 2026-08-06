@@ -85,19 +85,19 @@ function JobInvitesInner() {
               return (
                 <View key={r.id} style={[styles.card, { backgroundColor: colors.surface, borderColor: colors.border }, shadows.sm, declined && { opacity: 0.55 }]}>
                   <View style={styles.cardHead}>
-                    <View style={[styles.ownerBadge, { backgroundColor: colors.primary + '14' }]}>
-                      <Text style={[styles.ownerBadgeText, { color: colors.primary }]}>{r.post.clubName ?? '개인 요청'}</Text>
+                    <View style={[styles.ownerBadge, { backgroundColor: colors.surface2 }]}>
+                      <Text style={[styles.ownerBadgeText, { color: colors.textSecondary }]}>{r.post.clubName ?? '개인 요청'}</Text>
                     </View>
                     <View style={{ flex: 1 }} />
                     {declined && <Text style={[styles.stateText, { color: colors.textLight }]}>거절함</Text>}
-                    {r.applied && !declined && <Text style={[styles.stateText, { color: colors.secondary }]}>지원함 ✓</Text>}
+                    {r.applied && !declined && <Text style={[styles.stateText, { color: colors.secondary }]}>지원함</Text>}
                   </View>
                   <Text style={[styles.cardTitle, { color: colors.text }]} numberOfLines={2}>{r.post.title}</Text>
                   <Text style={[styles.meta, { color: colors.textSecondary }]} numberOfLines={1}>
                     {r.post.region} · {r.post.payLabel}
                   </Text>
                   {!!r.message && (
-                    <View style={[styles.msgBox, { backgroundColor: colors.primary + '0A', borderColor: colors.primary + '30' }]}>
+                    <View style={[styles.msgBox, { backgroundColor: colors.surface2, borderColor: 'transparent' }]}>
                       <Text style={[styles.msgText, { color: colors.text }]}>{r.message}</Text>
                     </View>
                   )}
@@ -133,18 +133,18 @@ const styles = StyleSheet.create({
   emptyBox: { alignItems: 'center', gap: spacing.sm, paddingVertical: spacing.xxxl },
   emptyTitle: { ...typography.subtitle1 },
   emptyHint: { ...typography.caption, textAlign: 'center', lineHeight: 18 },
-  card: { borderRadius: 16, borderWidth: StyleSheet.hairlineWidth, padding: spacing.lg, marginBottom: spacing.md },
+  card: { borderRadius: 12, borderWidth: StyleSheet.hairlineWidth, padding: spacing.lg, marginBottom: spacing.md },
   cardHead: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
   ownerBadge: { paddingHorizontal: 8, paddingVertical: 3, borderRadius: 8 },
-  ownerBadgeText: { fontSize: 11, fontWeight: '800' },
-  stateText: { fontSize: 12, fontWeight: '800' },
-  cardTitle: { fontSize: 16.5, fontWeight: '800', marginTop: spacing.sm, lineHeight: 23 },
+  ownerBadgeText: { fontSize: 11, fontWeight: '600' },
+  stateText: { fontSize: 12, fontWeight: '600' },
+  cardTitle: { fontSize: 16, fontWeight: '600', marginTop: spacing.sm, lineHeight: 23 },
   meta: { fontSize: 13, fontWeight: '600', marginTop: 4 },
   msgBox: { borderWidth: 1, borderRadius: 12, padding: spacing.md, marginTop: spacing.md },
-  msgText: { fontSize: 13.5, fontWeight: '600', lineHeight: 19 },
+  msgText: { fontSize: 13, fontWeight: '600', lineHeight: 19 },
   actionRow: { flexDirection: 'row', gap: spacing.sm, marginTop: spacing.md },
   ghostBtn: { flex: 1, alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderRadius: 12, paddingVertical: 12 },
-  ghostText: { fontSize: 13.5, fontWeight: '800' },
+  ghostText: { fontSize: 13, fontWeight: '600' },
   primaryBtn: { alignItems: 'center', justifyContent: 'center', borderRadius: 12, paddingVertical: 12 },
-  primaryText: { color: '#fff', fontSize: 13.5, fontWeight: '800' },
+  primaryText: { color: '#fff', fontSize: 13, fontWeight: '600' },
 });

@@ -184,9 +184,9 @@ export default function ApplicantDetail() {
   const statusColor =
     app.status === 'ACCEPTED' ? colors.secondary
       : app.status === 'INTERVIEW' ? colors.primary
-      : app.status === 'OFFERED' ? colors.info
+      : app.status === 'OFFERED' ? colors.primary
       : app.status === 'REJECTED' || app.status === 'DECLINED' ? colors.textLight
-      : colors.warning;
+      : colors.textSecondary;
 
   return (
     <View style={{ flex: 1, backgroundColor: colors.background }}>
@@ -204,16 +204,16 @@ export default function ApplicantDetail() {
           {photo ? (
             <Image source={{ uri: photo }} style={styles.photo} />
           ) : (
-            <View style={[styles.photo, { backgroundColor: colors.primary + '10', alignItems: 'center', justifyContent: 'center' }]}>
-              <Text style={{ color: colors.primary, fontSize: 28, fontWeight: '900' }}>{app.displayName.slice(0, 1)}</Text>
+            <View style={[styles.photo, { backgroundColor: colors.surface2, alignItems: 'center', justifyContent: 'center' }]}>
+              <Text style={{ color: colors.primary, fontSize: 28, fontWeight: '700' }}>{app.displayName.slice(0, 1)}</Text>
             </View>
           )}
           <View style={{ flex: 1, minWidth: 0, justifyContent: 'center' }}>
             <View style={styles.nameRow}>
               <Text style={[styles.name, { color: colors.text }]} numberOfLines={1}>{app.displayName}</Text>
               {!!app.skillLevel && (
-                <View style={[styles.skillBadge, { backgroundColor: getSkillMeta(app.skillLevel).color }]}>
-                  <Text style={styles.skillBadgeText}>{app.skillLevel}</Text>
+                <View style={[styles.skillBadge, { backgroundColor: colors.surface2 }]}>
+                  <Text style={[styles.skillBadgeText, { color: colors.textSecondary }]}>{app.skillLevel}</Text>
                 </View>
               )}
               {app.certified && <Ionicons name="checkmark-circle" size={14} color={colors.primary} />}
@@ -224,16 +224,16 @@ export default function ApplicantDetail() {
 
         {/* 지원 메시지 */}
         {!!app.message && (
-          <View style={[styles.msgCard, { backgroundColor: colors.primary + '0A', borderColor: colors.primary + '30' }]}>
-            <Text style={[styles.msgLabel, { color: colors.primary }]}>지원 메시지</Text>
+          <View style={[styles.msgCard, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+            <Text style={[styles.msgLabel, { color: colors.textSecondary }]}>지원 메시지</Text>
             <Text style={[styles.msgText, { color: colors.text }]}>{app.message}</Text>
           </View>
         )}
 
         {/* 면접 안내(공고측이 잡은 일시·장소) */}
         {(app.interviewWhen || app.interviewPlace || app.interviewNote) && (
-          <View style={[styles.msgCard, { backgroundColor: colors.warning + '0C', borderColor: colors.warning + '40' }]}>
-            <Text style={[styles.msgLabel, { color: colors.warning }]}>면접 안내</Text>
+          <View style={[styles.msgCard, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+            <Text style={[styles.msgLabel, { color: colors.textSecondary }]}>면접 안내</Text>
             <Text style={[styles.msgText, { color: colors.text }]}>
               {[app.interviewWhen, app.interviewPlace].filter(Boolean).join(' · ') || '일정 협의 중'}
             </Text>
@@ -256,15 +256,15 @@ export default function ApplicantDetail() {
             placeholderTextColor={colors.textLight}
             multiline maxLength={1000}
           />
-          <Pressable onPress={saveNote} disabled={noteSaving} style={({ pressed }) => [styles.noteSaveBtn, { backgroundColor: colors.primary + '12' }, (pressed || noteSaving) && { opacity: 0.7 }]}>
+          <Pressable onPress={saveNote} disabled={noteSaving} style={({ pressed }) => [styles.noteSaveBtn, { backgroundColor: colors.primaryBg }, (pressed || noteSaving) && { opacity: 0.7 }]}>
             <Text style={[styles.noteSaveText, { color: colors.primary }]}>{noteSaving ? '저장 중…' : '메모 저장'}</Text>
           </Pressable>
         </View>
 
         {/* 오퍼레터(발송 후) — 제시한 조건 */}
         {app.offerTerms && (app.status === 'OFFERED' || app.status === 'ACCEPTED' || app.status === 'DECLINED') && (
-          <View style={[styles.offerCard, { backgroundColor: colors.info + '0A', borderColor: colors.info + '40' }]}>
-            <Text style={[styles.offerLabel, { color: colors.info }]}>보낸 오퍼레터</Text>
+          <View style={[styles.offerCard, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+            <Text style={[styles.offerLabel, { color: colors.textSecondary }]}>보낸 오퍼레터</Text>
             <Text style={[styles.offerText, { color: colors.text }]}>{offerSummary(app.offerTerms)}</Text>
             {!!app.offerTerms.message && <Text style={[styles.offerMsg, { color: colors.textSecondary }]}>{app.offerTerms.message}</Text>}
           </View>
@@ -338,7 +338,7 @@ export default function ApplicantDetail() {
               <Pressable onPress={() => setShowOffer(false)} style={[styles.ghostBtn, { borderColor: colors.border, flex: 1 }]}>
                 <Text style={[styles.ghostText, { color: colors.textSecondary }]}>취소</Text>
               </Pressable>
-              <Pressable onPress={sendOffer} disabled={busy} style={({ pressed }) => [styles.primaryBtn, { backgroundColor: colors.info, flex: 2 }, (pressed || busy) && { opacity: 0.85 }]}>
+              <Pressable onPress={sendOffer} disabled={busy} style={({ pressed }) => [styles.primaryBtn, { backgroundColor: colors.primary, flex: 2 }, (pressed || busy) && { opacity: 0.85 }]}>
                 {busy ? <ActivityIndicator color="#fff" /> : (
                   <>
                     <Ionicons name="document-text-outline" size={15} color="#fff" />
@@ -374,7 +374,7 @@ export default function ApplicantDetail() {
                 <Pressable onPress={() => setStatus('REJECTED')} disabled={busy} style={[styles.ghostBtn, { borderColor: colors.border }]}>
                   <Text style={[styles.ghostText, { color: colors.textSecondary }]}>불합격</Text>
                 </Pressable>
-                <Pressable onPress={() => setShowOffer(true)} disabled={busy} style={({ pressed }) => [styles.primaryBtn, { backgroundColor: colors.info, flex: 1.8 }, (pressed || busy) && { opacity: 0.85 }]}>
+                <Pressable onPress={() => setShowOffer(true)} disabled={busy} style={({ pressed }) => [styles.primaryBtn, { backgroundColor: colors.primary, flex: 1.8 }, (pressed || busy) && { opacity: 0.85 }]}>
                   <Ionicons name="document-text-outline" size={15} color="#fff" />
                   <Text style={styles.primaryText}>오퍼레터 보내기</Text>
                 </Pressable>
@@ -389,8 +389,8 @@ export default function ApplicantDetail() {
                 <Pressable onPress={() => setStatus('REJECTED')} disabled={busy} style={[styles.ghostBtn, { borderColor: colors.border, flex: 1 }]}>
                   <Text style={[styles.ghostText, { color: colors.textSecondary }]}>오퍼 철회</Text>
                 </Pressable>
-                <View style={[styles.waitBadge, { backgroundColor: colors.info + '14', flex: 1.4 }]}>
-                  <Text style={[styles.waitText, { color: colors.info }]}>코치 회신 대기 중</Text>
+                <View style={[styles.waitBadge, { backgroundColor: colors.surface2, flex: 1.4 }]}>
+                  <Text style={[styles.waitText, { color: colors.textSecondary }]}>코치 회신 대기 중</Text>
                 </View>
               </>
             )}
@@ -409,38 +409,38 @@ export default function ApplicantDetail() {
 
 const styles = StyleSheet.create({
   center: { flex: 1, alignItems: 'center', justifyContent: 'center' },
-  noteHint: { fontSize: 12.5, fontWeight: '600', marginTop: 4, lineHeight: 18 },
-  editLink: { fontSize: 12.5, fontWeight: '800', textDecorationLine: 'underline' },
-  noteInput: { fontSize: 13.5, fontWeight: '600', borderWidth: 1, borderRadius: 10, padding: 10, minHeight: 64, textAlignVertical: 'top', marginTop: 6, lineHeight: 19 },
+  noteHint: { fontSize: 13, fontWeight: '600', marginTop: 4, lineHeight: 18 },
+  editLink: { fontSize: 13, fontWeight: '600', textDecorationLine: 'underline' },
+  noteInput: { fontSize: 13, fontWeight: '600', borderWidth: 1, borderRadius: 10, padding: 10, minHeight: 64, textAlignVertical: 'top', marginTop: 6, lineHeight: 19 },
   noteSaveBtn: { alignSelf: 'flex-end', paddingHorizontal: 14, paddingVertical: 7, borderRadius: 9, marginTop: 8 },
-  noteSaveText: { fontSize: 12.5, fontWeight: '800' },
+  noteSaveText: { fontSize: 13, fontWeight: '600' },
   topBar: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, paddingHorizontal: spacing.md, paddingBottom: spacing.sm, borderBottomWidth: StyleSheet.hairlineWidth },
   title: { ...typography.subtitle1, flex: 1 },
   stateChip: { paddingHorizontal: 9, paddingVertical: 4, borderRadius: 9 },
-  stateChipText: { fontSize: 11.5, fontWeight: '800' },
+  stateChipText: { fontSize: 12, fontWeight: '600' },
   header: { flexDirection: 'row', gap: spacing.lg, marginBottom: spacing.md },
-  photo: { width: 76, height: 76, borderRadius: 18 },
+  photo: { width: 76, height: 76, borderRadius: 12 },
   nameRow: { flexDirection: 'row', alignItems: 'center', gap: 5 },
-  name: { fontSize: 19, fontWeight: '800', letterSpacing: -0.3, flexShrink: 1 },
+  name: { fontSize: 19, fontWeight: '600', letterSpacing: -0.3, flexShrink: 1 },
   skillBadge: { minWidth: 21, height: 19, borderRadius: 6, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 5 },
-  skillBadgeText: { color: '#fff', fontSize: 11.5, fontWeight: '900' },
+  skillBadgeText: { fontSize: 12, fontWeight: '700' },
   intro: { fontSize: 13, fontWeight: '600', marginTop: 4, lineHeight: 18 },
-  msgCard: { borderRadius: 14, borderWidth: 1, padding: spacing.lg, marginBottom: spacing.md },
-  offerCard: { borderRadius: 14, borderWidth: 1, padding: spacing.lg, marginBottom: spacing.md },
-  offerLabel: { fontSize: 11.5, fontWeight: '800', marginBottom: 4 },
-  offerText: { fontSize: 14.5, fontWeight: '800' },
-  offerMsg: { fontSize: 12.5, fontWeight: '600', marginTop: 4, lineHeight: 18 },
+  msgCard: { borderRadius: 12, borderWidth: 1, padding: spacing.lg, marginBottom: spacing.md },
+  offerCard: { borderRadius: 12, borderWidth: 1, padding: spacing.lg, marginBottom: spacing.md },
+  offerLabel: { fontSize: 12, fontWeight: '600', marginBottom: 4 },
+  offerText: { fontSize: 14, fontWeight: '600' },
+  offerMsg: { fontSize: 13, fontWeight: '600', marginTop: 4, lineHeight: 18 },
   offerForm: { gap: spacing.sm },
-  offerFormTitle: { fontSize: 14.5, fontWeight: '800' },
-  offerInput: { fontSize: 13.5, fontWeight: '600', borderWidth: 1, borderRadius: 11, paddingHorizontal: spacing.md, paddingVertical: Platform.OS === 'web' ? 10 : 9 },
+  offerFormTitle: { fontSize: 14, fontWeight: '600' },
+  offerInput: { fontSize: 13, fontWeight: '600', borderWidth: 1, borderRadius: 11, paddingHorizontal: spacing.md, paddingVertical: Platform.OS === 'web' ? 10 : 9 },
   waitBadge: { alignItems: 'center', justifyContent: 'center', borderRadius: 13, paddingVertical: 14 },
-  waitText: { fontSize: 13, fontWeight: '800' },
-  msgLabel: { fontSize: 11.5, fontWeight: '800', marginBottom: 4 },
-  msgText: { fontSize: 13.5, fontWeight: '600', lineHeight: 20 },
+  waitText: { fontSize: 13, fontWeight: '600' },
+  msgLabel: { fontSize: 12, fontWeight: '600', marginBottom: 4 },
+  msgText: { fontSize: 13, fontWeight: '600', lineHeight: 20 },
   actionBar: { paddingHorizontal: spacing.lg, paddingTop: spacing.md, borderTopWidth: StyleSheet.hairlineWidth },
   actionRow: { flexDirection: 'row', gap: spacing.sm, maxWidth: 560, width: '100%', alignSelf: 'center' },
   ghostBtn: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 4, borderWidth: 1, borderRadius: 13, paddingVertical: 14 },
-  ghostText: { fontSize: 14, fontWeight: '800' },
+  ghostText: { fontSize: 14, fontWeight: '600' },
   primaryBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, borderRadius: 13, paddingVertical: 14 },
-  primaryText: { fontSize: 14.5, fontWeight: '800', color: '#fff' },
+  primaryText: { fontSize: 14, fontWeight: '600', color: '#fff' },
 });

@@ -110,10 +110,9 @@ export default function JobPostDetailScreen() {
   const my = job.myApplication;
   const myStatusColor =
     my?.status === 'ACCEPTED' ? colors.secondary
-      : my?.status === 'INTERVIEW' ? colors.primary
-      : my?.status === 'OFFERED' ? colors.info
+      : my?.status === 'INTERVIEW' || my?.status === 'OFFERED' ? colors.primary
       : my?.status === 'REJECTED' || my?.status === 'DECLINED' ? colors.textLight
-      : colors.warning;
+      : colors.textSecondary;
 
   const offerSummary = (t: OfferTerms | null) => {
     if (!t) return '';
@@ -129,7 +128,7 @@ export default function JobPostDetailScreen() {
     const act = async () => {
       try {
         await coachJobApi.setApplicationStatus(id, my.id, accept ? 'ACCEPTED' : 'DECLINED');
-        showSuccess(accept ? '오퍼를 수락했어요 — 채용이 확정됐어요 🎉' : '오퍼를 정중히 거절했어요');
+        showSuccess(accept ? '오퍼를 수락했어요 — 채용이 확정됐어요' : '오퍼를 정중히 거절했어요');
         await load();
       } catch { /* noop */ }
     };
@@ -166,15 +165,15 @@ export default function JobPostDetailScreen() {
 
       <ScrollView contentContainerStyle={{ padding: spacing.xl, paddingBottom: insets.bottom + 130, maxWidth: 640, width: '100%' as const, alignSelf: 'center' as const }}>
         {job.status === 'CLOSED' && (
-          <View style={[styles.closedBanner, { backgroundColor: colors.textLight + '22' }]}>
+          <View style={[styles.closedBanner, { backgroundColor: colors.surface2 }]}>
             <Text style={[styles.closedText, { color: colors.textSecondary }]}>마감된 공고예요</Text>
           </View>
         )}
 
         {/* 스카웃 — 이 공고에서 나에게 제안을 보냈으면 표시 */}
         {job.invited && !job.myApplication && (
-          <View style={[styles.closedBanner, { backgroundColor: colors.primary + '14' }]}>
-            <Text style={[styles.closedText, { color: colors.primary }]}>🤝 이 공고에서 나에게 함께하자는 제안을 보냈어요</Text>
+          <View style={[styles.closedBanner, { backgroundColor: colors.surface, borderWidth: StyleSheet.hairlineWidth, borderColor: colors.border }]}>
+            <Text style={[styles.closedText, { color: colors.primary }]}>이 공고에서 나에게 함께하자는 제안을 보냈어요</Text>
           </View>
         )}
 
@@ -213,11 +212,11 @@ export default function JobPostDetailScreen() {
         {!!job.externalUrl && (
           <Pressable
             onPress={() => Linking.openURL(job.externalUrl!)}
-            style={({ pressed }) => [styles.attachRow, { backgroundColor: colors.info + '0C', borderColor: colors.info + '40', marginBottom: spacing.md }, pressed && { opacity: 0.8 }]}
+            style={({ pressed }) => [styles.attachRow, { backgroundColor: colors.surface, borderColor: colors.border, marginBottom: spacing.md }, pressed && { opacity: 0.8 }]}
           >
-            <Ionicons name="link-outline" size={16} color={colors.info} />
-            <Text style={[styles.attachName, { color: colors.info }]} numberOfLines={1}>원문 공고 보기</Text>
-            <Ionicons name="open-outline" size={14} color={colors.info} />
+            <Ionicons name="link-outline" size={16} color={colors.textSecondary} />
+            <Text style={[styles.attachName, { color: colors.textSecondary }]} numberOfLines={1}>원문 공고 보기</Text>
+            <Ionicons name="open-outline" size={14} color={colors.textLight} />
           </Pressable>
         )}
 
@@ -225,20 +224,20 @@ export default function JobPostDetailScreen() {
         {job.canManage && (
           <Pressable
             onPress={() => router.push(`/market/job/${job.id}/applicants` as never)}
-            style={({ pressed }) => [styles.applicantsCard, { backgroundColor: colors.primary }, shadows.md, pressed && { opacity: 0.9 }]}
+            style={({ pressed }) => [styles.applicantsCard, { backgroundColor: colors.surface, borderColor: colors.border }, pressed && { opacity: 0.9 }]}
           >
             <View style={{ flex: 1 }}>
-              <Text style={styles.applicantsTitle}>지원자 관리</Text>
-              <Text style={styles.applicantsMeta}>
+              <Text style={[styles.applicantsTitle, { color: colors.text }]}>지원자 관리</Text>
+              <Text style={[styles.applicantsMeta, { color: colors.textSecondary }]}>
                 지원 {stageCounts.applied} · 면접 {stageCounts.interview} · 합격 {stageCounts.accepted}
               </Text>
             </View>
             {stageCounts.applied > 0 && (
-              <View style={styles.newBadge}>
+              <View style={[styles.newBadge, { backgroundColor: colors.primaryBg }]}>
                 <Text style={[styles.newBadgeText, { color: colors.primary }]}>검토 대기 {stageCounts.applied}</Text>
               </View>
             )}
-            <Ionicons name="chevron-forward" size={18} color="#fff" />
+            <Ionicons name="chevron-forward" size={18} color={colors.textLight} />
           </Pressable>
         )}
 
@@ -298,7 +297,7 @@ export default function JobPostDetailScreen() {
 
         {/* ── 코치: 내 지원 상태 배너 ── */}
         {!job.canManage && my && (
-          <View style={[styles.myStatusCard, { backgroundColor: myStatusColor + '12', borderColor: myStatusColor + '55' }]}>
+          <View style={[styles.myStatusCard, { backgroundColor: colors.surface, borderColor: colors.border }]}>
             <View style={{ flex: 1 }}>
               <Text style={[styles.myStatusTitle, { color: myStatusColor }]}>
                 {APPLICATION_STATUS_LABEL[my.status] ?? my.status}
@@ -312,8 +311,8 @@ export default function JobPostDetailScreen() {
                 {my.status === 'REJECTED' && '아쉽지만 다음 기회를 노려봐요'}
               </Text>
               {my.status === 'INTERVIEW' && (my.interviewWhen || my.interviewPlace || my.interviewNote) && (
-                <Text style={[styles.myStatusHint, { color: colors.text, fontWeight: '800', marginTop: 4 }]}>
-                  📅 {[my.interviewWhen, my.interviewPlace].filter(Boolean).join(' · ') || '일정 협의 중'}
+                <Text style={[styles.myStatusHint, { color: colors.text, fontWeight: '600', marginTop: 4 }]}>
+                  {[my.interviewWhen, my.interviewPlace].filter(Boolean).join(' · ') || '일정 협의 중'}
                   {my.interviewNote ? `\n${my.interviewNote}` : ''}
                 </Text>
               )}
@@ -333,8 +332,8 @@ export default function JobPostDetailScreen() {
 
         {/* ── 코치: 오퍼레터 회신 카드 ── */}
         {!job.canManage && my?.status === 'OFFERED' && my.offerTerms && (
-          <View style={[styles.offerCard, { backgroundColor: colors.surface, borderColor: colors.info + '55' }, shadows.sm]}>
-            <Text style={[styles.offerTitle, { color: colors.info }]}>오퍼레터 📄</Text>
+          <View style={[styles.offerCard, { backgroundColor: colors.surface, borderColor: colors.border }, shadows.sm]}>
+            <Text style={[styles.offerTitle, { color: colors.textSecondary }]}>오퍼레터</Text>
             <Text style={[styles.offerTerms, { color: colors.text }]}>{offerSummary(my.offerTerms)}</Text>
             {!!my.offerTerms.message && (
               <Text style={[styles.offerMsg, { color: colors.textSecondary }]}>{my.offerTerms.message}</Text>
@@ -380,47 +379,47 @@ export default function JobPostDetailScreen() {
 }
 
 const styles = StyleSheet.create({
-  attachRow: { flexDirection: 'row', alignItems: 'center', gap: 8, borderWidth: 1, borderRadius: 12, paddingHorizontal: spacing.md, paddingVertical: 12 },
-  attachName: { flex: 1, fontSize: 13.5, fontWeight: '800' },
+  attachRow: { flexDirection: 'row', alignItems: 'center', gap: 8, borderWidth: 1, borderRadius: 10, paddingHorizontal: spacing.md, paddingVertical: 12 },
+  attachName: { flex: 1, fontSize: 13, fontWeight: '600' },
   center: { flex: 1, alignItems: 'center', justifyContent: 'center' },
   topBar: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, paddingHorizontal: spacing.md, paddingBottom: spacing.sm, borderBottomWidth: StyleSheet.hairlineWidth },
   topTitle: { ...typography.subtitle1, flex: 1 },
-  editLink: { fontSize: 14, fontWeight: '800' },
-  closedBanner: { borderRadius: 12, paddingVertical: 10, alignItems: 'center', marginBottom: spacing.md },
-  closedText: { fontSize: 13, fontWeight: '800' },
-  jobTitle: { fontSize: 21, fontWeight: '800', letterSpacing: -0.3, lineHeight: 28 },
-  author: { fontSize: 12.5, fontWeight: '600', marginTop: 6, marginBottom: spacing.lg },
-  galleryPhoto: { width: 200, height: 140, borderRadius: 14 },
-  applicantsCard: { flexDirection: 'row', alignItems: 'center', gap: spacing.md, borderRadius: 16, padding: spacing.lg, marginBottom: spacing.md },
-  applicantsTitle: { color: '#fff', fontSize: 16, fontWeight: '800' },
-  applicantsMeta: { color: 'rgba(255,255,255,0.85)', fontSize: 12.5, fontWeight: '700', marginTop: 3 },
-  newBadge: { backgroundColor: '#fff', paddingHorizontal: 10, paddingVertical: 5, borderRadius: 11 },
-  newBadgeText: { fontSize: 12, fontWeight: '900' },
-  infoCard: { borderRadius: 16, borderWidth: StyleSheet.hairlineWidth, padding: spacing.lg, marginBottom: spacing.md, gap: spacing.smd },
+  editLink: { fontSize: 14, fontWeight: '600' },
+  closedBanner: { borderRadius: 10, paddingVertical: 10, alignItems: 'center', marginBottom: spacing.md },
+  closedText: { fontSize: 13, fontWeight: '600' },
+  jobTitle: { fontSize: 20, fontWeight: '700', letterSpacing: -0.3, lineHeight: 28 },
+  author: { fontSize: 13, fontWeight: '400', marginTop: 6, marginBottom: spacing.lg },
+  galleryPhoto: { width: 200, height: 140, borderRadius: 10 },
+  applicantsCard: { flexDirection: 'row', alignItems: 'center', gap: spacing.md, borderRadius: 12, borderWidth: StyleSheet.hairlineWidth, padding: spacing.lg, marginBottom: spacing.md },
+  applicantsTitle: { fontSize: 16, fontWeight: '700' },
+  applicantsMeta: { fontSize: 13, fontWeight: '400', marginTop: 3 },
+  newBadge: { paddingHorizontal: 8, paddingVertical: 4, borderRadius: 6 },
+  newBadgeText: { fontSize: 12, fontWeight: '700' },
+  infoCard: { borderRadius: 12, borderWidth: StyleSheet.hairlineWidth, padding: spacing.lg, marginBottom: spacing.md, gap: spacing.smd },
   infoRow: { flexDirection: 'row', alignItems: 'flex-start', gap: spacing.md },
-  infoLabel: { fontSize: 13, fontWeight: '700', width: 76 },
-  infoValue: { fontSize: 14, fontWeight: '700', flex: 1, lineHeight: 20 },
-  sectionTitle: { fontSize: 15, fontWeight: '800', marginBottom: 2 },
-  desc: { fontSize: 13.5, fontWeight: '600', lineHeight: 21 },
-  myStatusCard: { flexDirection: 'row', alignItems: 'center', gap: spacing.md, borderWidth: 1, borderRadius: 16, padding: spacing.lg, marginTop: spacing.xs },
-  offerCard: { borderWidth: 1, borderRadius: 16, padding: spacing.lg, marginTop: spacing.md },
-  offerTitle: { fontSize: 13, fontWeight: '900' },
-  offerTerms: { fontSize: 16, fontWeight: '800', marginTop: 6 },
-  offerMsg: { fontSize: 13, fontWeight: '600', marginTop: 6, lineHeight: 19 },
+  infoLabel: { fontSize: 13, fontWeight: '500', width: 76 },
+  infoValue: { fontSize: 14, fontWeight: '500', flex: 1, lineHeight: 20 },
+  sectionTitle: { fontSize: 15, fontWeight: '700', marginBottom: 2 },
+  desc: { fontSize: 14, fontWeight: '400', lineHeight: 21 },
+  myStatusCard: { flexDirection: 'row', alignItems: 'center', gap: spacing.md, borderWidth: StyleSheet.hairlineWidth, borderRadius: 12, padding: spacing.lg, marginTop: spacing.xs },
+  offerCard: { borderWidth: StyleSheet.hairlineWidth, borderRadius: 12, padding: spacing.lg, marginTop: spacing.md },
+  offerTitle: { fontSize: 13, fontWeight: '600' },
+  offerTerms: { fontSize: 16, fontWeight: '700', marginTop: 6 },
+  offerMsg: { fontSize: 13, fontWeight: '400', marginTop: 6, lineHeight: 19 },
   offerActions: { flexDirection: 'row', gap: spacing.sm, marginTop: spacing.md },
-  offerDecline: { flex: 1, borderWidth: 1, borderRadius: 12, paddingVertical: 13, alignItems: 'center' },
-  offerDeclineText: { fontSize: 13.5, fontWeight: '800' },
-  offerAccept: { flex: 2, borderRadius: 12, paddingVertical: 13, alignItems: 'center' },
-  offerAcceptText: { color: '#fff', fontSize: 14, fontWeight: '800' },
-  myStatusTitle: { fontSize: 15, fontWeight: '900' },
-  myStatusHint: { fontSize: 12.5, fontWeight: '600', marginTop: 3, lineHeight: 18 },
+  offerDecline: { flex: 1, borderWidth: 1, borderRadius: 10, paddingVertical: 13, alignItems: 'center' },
+  offerDeclineText: { fontSize: 14, fontWeight: '600' },
+  offerAccept: { flex: 2, borderRadius: 10, paddingVertical: 13, alignItems: 'center' },
+  offerAcceptText: { color: '#fff', fontSize: 14, fontWeight: '700' },
+  myStatusTitle: { fontSize: 15, fontWeight: '700' },
+  myStatusHint: { fontSize: 13, fontWeight: '400', marginTop: 3, lineHeight: 18 },
   smallBtn: { paddingHorizontal: spacing.lg, paddingVertical: 9, borderRadius: 10 },
-  smallBtnText: { color: '#fff', fontSize: 13, fontWeight: '800' },
-  withdrawText: { fontSize: 12, fontWeight: '700', textDecorationLine: 'underline' },
+  smallBtnText: { color: '#fff', fontSize: 13, fontWeight: '700' },
+  withdrawText: { fontSize: 12, fontWeight: '500', textDecorationLine: 'underline' },
   manageRow: { flexDirection: 'row', gap: spacing.sm, marginTop: spacing.md },
-  manageBtn: { flex: 1, borderWidth: 1, borderRadius: 12, paddingVertical: 12, alignItems: 'center' },
-  manageBtnText: { fontSize: 13.5, fontWeight: '800' },
+  manageBtn: { flex: 1, borderWidth: 1, borderRadius: 10, paddingVertical: 12, alignItems: 'center' },
+  manageBtnText: { fontSize: 14, fontWeight: '600' },
   bottomBar: { paddingHorizontal: spacing.xl, paddingTop: spacing.md, borderTopWidth: StyleSheet.hairlineWidth },
-  applyBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: spacing.sm, paddingVertical: 15, borderRadius: 14, maxWidth: 640, width: '100%', alignSelf: 'center' },
-  applyBtnText: { fontSize: 15.5, fontWeight: '800', color: '#fff' },
+  applyBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: spacing.sm, paddingVertical: 15, borderRadius: 12, maxWidth: 640, width: '100%', alignSelf: 'center' },
+  applyBtnText: { fontSize: 15, fontWeight: '700', color: '#fff' },
 });

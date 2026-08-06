@@ -211,7 +211,7 @@ export function MoneyManager({ clubs, api }: { clubs: MoneyClub[]; api: MoneyApi
   const statCards = data ? [
     { label: '총 청구', value: data.totals.billed, tint: colors.primary },
     { label: '납부', value: data.totals.paid, tint: colors.secondary },
-    { label: `미납 ${data.totals.unpaidCount}명`, value: data.totals.unpaid, tint: colors.warning },
+    { label: `미납 ${data.totals.unpaidCount}명`, value: data.totals.unpaid, tint: colors.danger },
   ] : [];
 
   const guestTotal = (guests ?? []).reduce((s, r) => s + (r.feeAmount ?? 0), 0);
@@ -219,7 +219,7 @@ export function MoneyManager({ clubs, api }: { clubs: MoneyClub[]; api: MoneyApi
   const guestStatCards = [
     { label: '게스트', value: `${guests?.length ?? 0}명`, tint: colors.primary },
     { label: '게스트비 합계', value: won(guestTotal), tint: colors.secondary },
-    { label: '미납', value: won(guestUnpaid), tint: guestUnpaid > 0 ? colors.warning : colors.secondary },
+    { label: '미납', value: won(guestUnpaid), tint: guestUnpaid > 0 ? colors.danger : colors.secondary },
   ];
 
   const inputField = (label: string, value: string, setter: (s: string) => void, ph: string, numeric = true) => (
@@ -381,7 +381,7 @@ export function MoneyManager({ clubs, api }: { clubs: MoneyClub[]; api: MoneyApi
               ) : (
                 data.members.map((m, i) => (
                   <View key={m.userId} style={[styles.mRow, i > 0 && { borderTopColor: colors.divider, borderTopWidth: StyleSheet.hairlineWidth }]}>
-                    <Avatar name={m.name} tint={m.balance > 0 ? colors.warning : colors.secondary} />
+                    <Avatar name={m.name} tint={m.balance > 0 ? colors.danger : colors.secondary} />
                     <View style={{ flex: 1, minWidth: 0 }}>
                       <Text style={[styles.rowName, { color: colors.text }]} numberOfLines={1}>
                         {m.name}{m.isGuest ? ' · 게스트' : ''}
@@ -449,8 +449,8 @@ export function MoneyManager({ clubs, api }: { clubs: MoneyClub[]; api: MoneyApi
                           </View>
                         )}
                         {a.status === 'WAITLIST' && (
-                          <View style={[styles.appUserTag, { backgroundColor: alpha(colors.warning, 0.12) }]}>
-                            <Text style={[styles.appUserTagText, { color: colors.warning }]}>대기</Text>
+                          <View style={[styles.appUserTag, { backgroundColor: colors.surface2 }]}>
+                            <Text style={[styles.appUserTagText, { color: colors.textSecondary }]}>대기</Text>
                           </View>
                         )}
                         {a.isAppUser && (
@@ -487,7 +487,7 @@ export function MoneyManager({ clubs, api }: { clubs: MoneyClub[]; api: MoneyApi
               ) : (
                 (guests ?? []).map((r, i) => (
                   <View key={r.checkInId} style={[styles.mRow, i > 0 && { borderTopColor: colors.divider, borderTopWidth: StyleSheet.hairlineWidth }]}>
-                    <Avatar name={r.name} tint={r.feePaid ? colors.secondary : colors.warning} />
+                    <Avatar name={r.name} tint={r.feePaid ? colors.secondary : colors.danger} />
                     <View style={{ flex: 1, minWidth: 0 }}>
                       <Text style={[styles.rowName, { color: colors.text }]} numberOfLines={1}>{r.name}</Text>
                       <Text style={[styles.rowMeta, { color: colors.textLight }]} numberOfLines={1}>
@@ -501,7 +501,7 @@ export function MoneyManager({ clubs, api }: { clubs: MoneyClub[]; api: MoneyApi
                         <Text style={[styles.paidBtnText, { color: colors.secondary }]}>납부 ✓</Text>
                       </Pressable>
                     ) : (
-                      <Pressable onPress={() => toggleGuestPaid(r)} style={[styles.payBtn, { backgroundColor: colors.warning }, busyId === r.checkInId && { opacity: 0.5 }]}>
+                      <Pressable onPress={() => toggleGuestPaid(r)} style={[styles.payBtn, { backgroundColor: colors.primary }, busyId === r.checkInId && { opacity: 0.5 }]}>
                         <Text style={styles.payBtnAmt}>{won(r.feeAmount)}</Text>
                         <Text style={styles.payBtnText}>입금확인</Text>
                       </Pressable>
@@ -556,23 +556,23 @@ const styles = StyleSheet.create({
   topBar: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, paddingHorizontal: spacing.lg, paddingBottom: spacing.sm, borderBottomWidth: StyleSheet.hairlineWidth },
   title: { ...typography.h3 },
   betaTag: { paddingHorizontal: spacing.sm, paddingVertical: 2, borderRadius: radius.sm },
-  betaTagText: { fontSize: 10, fontWeight: '900', letterSpacing: 0.5 },
+  betaTagText: { fontSize: 10, fontWeight: '700', letterSpacing: 0.5 },
   center: { paddingVertical: spacing.xxxl, alignItems: 'center' },
 
   clubChip: { paddingHorizontal: spacing.lg, paddingVertical: spacing.sm, borderRadius: radius.pill, maxWidth: 200, justifyContent: 'center' },
-  clubChipText: { ...typography.body2, fontWeight: '800' },
+  clubChipText: { ...typography.body2, fontWeight: '600' },
 
   segment: { flexDirection: 'row', borderRadius: radius.lg, padding: 3, marginBottom: spacing.md },
   segmentBtn: { flex: 1, alignItems: 'center', paddingVertical: spacing.sm, borderRadius: radius.md },
   segmentText: { ...typography.subtitle2 },
 
   periodRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: spacing.lg, marginBottom: spacing.md },
-  periodBtn: { width: 36, height: 36, borderRadius: 18, alignItems: 'center', justifyContent: 'center' },
+  periodBtn: { width: 36, height: 36, borderRadius: 12, alignItems: 'center', justifyContent: 'center' },
   periodText: { ...typography.h3, minWidth: 100, textAlign: 'center' },
 
   statRow: { flexDirection: 'row', gap: spacing.sm, marginBottom: spacing.md },
   statCard: { flex: 1, alignItems: 'center', paddingVertical: spacing.lg, borderRadius: radius.lg, paddingHorizontal: 4 },
-  statValue: { ...typography.subtitle1, fontWeight: '900' },
+  statValue: { ...typography.subtitle1, fontWeight: '700', ...typography.tabular },
   statLabel: { ...typography.caption, marginTop: 3, fontWeight: '600' },
 
   card: { borderRadius: 20, padding: spacing.lg, marginBottom: spacing.md },
@@ -591,31 +591,31 @@ const styles = StyleSheet.create({
 
   mRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.md, paddingVertical: spacing.smd },
   avatar: { width: 38, height: 38, borderRadius: 19, alignItems: 'center', justifyContent: 'center' },
-  avatarText: { fontSize: 15, fontWeight: '800' },
+  avatarText: { fontSize: 15, fontWeight: '600' },
   rowName: { ...typography.body1, fontWeight: '700' },
   rowMeta: { ...typography.caption, marginTop: 1 },
 
   payBtn: { alignItems: 'center', paddingHorizontal: spacing.md, paddingVertical: spacing.xs, borderRadius: radius.md, minWidth: 88 },
-  payBtnAmt: { color: '#fff', fontSize: 13, fontWeight: '900' },
-  payBtnText: { color: 'rgba(255,255,255,0.9)', fontSize: 10, fontWeight: '800', marginTop: 1 },
+  payBtnAmt: { color: '#fff', fontSize: 13, fontWeight: '700', ...typography.tabular },
+  payBtnText: { color: 'rgba(255,255,255,0.9)', fontSize: 10, fontWeight: '600', marginTop: 1 },
   paidBtn: { paddingHorizontal: spacing.md, paddingVertical: spacing.sm, borderRadius: radius.md, minWidth: 88, alignItems: 'center' },
-  paidBtnText: { fontSize: 13, fontWeight: '900' },
+  paidBtnText: { fontSize: 13, fontWeight: '700' },
 
   primaryBtn: { paddingVertical: spacing.md, borderRadius: radius.lg, alignItems: 'center', marginBottom: spacing.md },
   primaryBtnText: { ...typography.button },
 
   periodTypeRow: { flexDirection: 'row', gap: spacing.sm, flexWrap: 'wrap', marginBottom: spacing.sm },
   ptChip: { paddingHorizontal: spacing.lg, paddingVertical: spacing.sm, borderRadius: radius.md },
-  ptChipText: { ...typography.body2, fontWeight: '800' },
+  ptChipText: { ...typography.body2, fontWeight: '600' },
 
   field: { marginTop: spacing.sm },
   fieldLabel: { ...typography.caption, fontWeight: '700', marginBottom: spacing.xs },
-  fieldInput: { ...typography.body1, borderRadius: 14, paddingHorizontal: spacing.lg, paddingVertical: 13, fontWeight: '700' },
+  fieldInput: { ...typography.body1, borderRadius: 12, paddingHorizontal: spacing.lg, paddingVertical: 13, fontWeight: '700' },
 
   empty: { ...typography.body2, paddingVertical: spacing.lg, textAlign: 'center' },
   note: { ...typography.caption, lineHeight: 17, marginBottom: spacing.md },
   linkBtn: { paddingHorizontal: spacing.md, paddingVertical: spacing.xs, borderRadius: radius.pill },
-  linkBtnText: { fontSize: 12, fontWeight: '800' },
+  linkBtnText: { fontSize: 12, fontWeight: '600' },
   appUserTag: { paddingHorizontal: spacing.sm, paddingVertical: 1, borderRadius: radius.sm },
-  appUserTagText: { fontSize: 10, fontWeight: '800' },
+  appUserTagText: { fontSize: 10, fontWeight: '600' },
 });

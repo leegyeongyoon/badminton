@@ -234,8 +234,8 @@ export default function CoachResume() {
               {AWARD_DIVISIONS.map((d) => {
                 const on = e.division === d;
                 return (
-                  <Pressable key={d} onPress={() => patch(e._key, { division: on ? null : d })} style={[styles.miniChip, { backgroundColor: on ? colors.primary : colors.surface, borderColor: on ? colors.primary : colors.border }]}>
-                    <Text style={[styles.miniChipText, { color: on ? '#fff' : colors.textSecondary }]}>{d}</Text>
+                  <Pressable key={d} onPress={() => patch(e._key, { division: on ? null : d })} style={[styles.miniChip, { backgroundColor: colors.surface, borderColor: on ? colors.primary : colors.border }]}>
+                    <Text style={[styles.miniChipText, { color: on ? colors.primary : colors.textSecondary }]}>{d}</Text>
                   </Pressable>
                 );
               })}
@@ -245,8 +245,8 @@ export default function CoachResume() {
               {AWARD_RESULTS.map((r) => {
                 const on = e.result === r;
                 return (
-                  <Pressable key={r} onPress={() => patch(e._key, { result: on ? null : r })} style={[styles.miniChip, { backgroundColor: on ? colors.warning : colors.surface, borderColor: on ? colors.warning : colors.border }]}>
-                    <Text style={[styles.miniChipText, { color: on ? '#fff' : colors.textSecondary }]}>{r}</Text>
+                  <Pressable key={r} onPress={() => patch(e._key, { result: on ? null : r })} style={[styles.miniChip, { backgroundColor: colors.surface, borderColor: on ? colors.primary : colors.border }]}>
+                    <Text style={[styles.miniChipText, { color: on ? colors.primary : colors.textSecondary }]}>{r}</Text>
                   </Pressable>
                 );
               })}
@@ -260,7 +260,7 @@ export default function CoachResume() {
             <TextInput style={[...inputStyle, styles.flex1, styles.centerText]} value={e.startYm ?? ''} onChangeText={(t) => patch(e._key, { startYm: t || null })} placeholder="2018-03" placeholderTextColor={colors.textLight} maxLength={7} />
             <Text style={{ color: colors.textLight }}>~</Text>
             <TextInput style={[...inputStyle, styles.flex1, styles.centerText, e.endYm === null && { opacity: 0.5 }]} value={e.endYm ?? ''} onChangeText={(t) => patch(e._key, { endYm: t || null })} placeholder="현재" placeholderTextColor={colors.textLight} maxLength={7} />
-            <Pressable onPress={() => patch(e._key, { endYm: null })} style={[styles.nowChip, { backgroundColor: e.endYm === null ? colors.primary + '16' : colors.surface, borderColor: e.endYm === null ? colors.primary : colors.border }]}>
+            <Pressable onPress={() => patch(e._key, { endYm: null })} style={[styles.nowChip, { backgroundColor: colors.surface, borderColor: e.endYm === null ? colors.primary : colors.border }]}>
               <Text style={[styles.miniChipText, { color: e.endYm === null ? colors.primary : colors.textLight }]}>현재</Text>
             </Pressable>
           </View>
@@ -292,7 +292,7 @@ export default function CoachResume() {
         <BackButton />
         <Text style={[styles.title, { color: colors.text }]}>{isNew ? '코치로 활동 시작' : '코치 프로필'}</Text>
         {certified && (
-          <View style={[styles.certBadge, { backgroundColor: colors.primary + '18' }]}>
+          <View style={[styles.certBadge, { backgroundColor: colors.primaryBg }]}>
             <Text style={[styles.certText, { color: colors.primary }]}>인증 코치</Text>
           </View>
         )}
@@ -381,9 +381,9 @@ export default function CoachResume() {
                   <Pressable
                     key={lv}
                     onPress={() => setSkillLevel(on ? null : lv)}
-                    style={[styles.skillChip, { backgroundColor: on ? meta.color : colors.background, borderColor: on ? meta.color : colors.border }]}
+                    style={[styles.skillChip, { backgroundColor: colors.surface, borderColor: on ? colors.primary : colors.border }]}
                   >
-                    <Text style={[styles.skillChipText, { color: on ? '#fff' : colors.textSecondary }]}>{lv}</Text>
+                    <Text style={[styles.skillChipText, { color: on ? colors.primary : colors.textSecondary }]}>{lv}</Text>
                   </Pressable>
                 );
               })}
@@ -439,7 +439,7 @@ export default function CoachResume() {
                 <Ionicons name={ui.icon as never} size={16} color={colors.textSecondary} />
                 <Text style={[styles.sectionTitle, { color: colors.text, marginBottom: 0 }]}>{CAREER_KIND_LABEL[kind]}</Text>
                 <Text style={[styles.sectionHint, { color: colors.textLight }]} numberOfLines={1}>{ui.hint}</Text>
-                <Pressable onPress={() => addEntry(kind)} hitSlop={8} style={[styles.addBtn, { backgroundColor: colors.primary + '14' }]}>
+                <Pressable onPress={() => addEntry(kind)} hitSlop={8} style={[styles.addBtn, { backgroundColor: colors.primaryBg }]}>
                   <Ionicons name="add" size={14} color={colors.primary} />
                   <Text style={[styles.addBtnText, { color: colors.primary }]}>추가</Text>
                 </Pressable>
@@ -469,37 +469,37 @@ const styles = StyleSheet.create({
   center: { flex: 1, alignItems: 'center', justifyContent: 'center' },
   topBar: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, paddingHorizontal: spacing.md, paddingBottom: spacing.sm, borderBottomWidth: StyleSheet.hairlineWidth },
   title: { ...typography.subtitle1, flex: 1 },
-  previewLink: { fontSize: 14, fontWeight: '800' },
+  previewLink: { fontSize: 14, fontWeight: '600' },
   certBadge: { paddingHorizontal: 8, paddingVertical: 4, borderRadius: 8 },
-  certText: { fontSize: 11, fontWeight: '800' },
+  certText: { fontSize: 11, fontWeight: '600' },
   introHint: { ...typography.body2, lineHeight: 20, textAlign: 'center' },
-  card: { borderRadius: 18, padding: spacing.lg },
+  card: { borderRadius: 12, padding: spacing.lg },
   gaugeHead: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
-  gaugeTitle: { fontSize: 15.5, fontWeight: '800' },
-  gaugePct: { fontSize: 19, fontWeight: '900' },
+  gaugeTitle: { fontSize: 15, fontWeight: '600' },
+  gaugePct: { fontSize: 19, fontWeight: '700' },
   gaugeTrack: { height: 8, borderRadius: 4, overflow: 'hidden', marginTop: spacing.sm },
   gaugeFill: { height: 8, borderRadius: 4 },
   gaugeItems: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm, marginTop: spacing.md },
   gaugeItem: { flexDirection: 'row', alignItems: 'center', gap: 3 },
-  gaugeItemText: { fontSize: 11.5, fontWeight: '700' },
+  gaugeItemText: { fontSize: 12, fontWeight: '700' },
   gaugeHint: { fontSize: 11, fontWeight: '600', lineHeight: 15, marginTop: spacing.sm },
-  sectionTitle: { fontSize: 15, fontWeight: '800', marginBottom: spacing.md },
+  sectionTitle: { fontSize: 15, fontWeight: '600', marginBottom: spacing.md },
   sectionHead: { flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: spacing.md },
   sectionHint: { fontSize: 11, fontWeight: '600', flex: 1 },
   addBtn: { flexDirection: 'row', alignItems: 'center', gap: 2, paddingHorizontal: 10, paddingVertical: 6, borderRadius: 10 },
-  addBtnText: { fontSize: 12, fontWeight: '800' },
+  addBtnText: { fontSize: 12, fontWeight: '600' },
   emptyEntry: { borderWidth: 1, borderStyle: 'dashed', borderRadius: 12, paddingVertical: 14, alignItems: 'center' },
   emptyEntryText: { fontSize: 13, fontWeight: '700' },
   basicRow: { flexDirection: 'row', gap: spacing.md, marginBottom: spacing.md },
   field: { gap: 6 },
   flex1: { flex: 1 },
   centerText: { textAlign: 'center' },
-  label: { fontSize: 12.5, fontWeight: '700' },
+  label: { fontSize: 13, fontWeight: '600' },
   skillRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 6 },
-  skillChip: { width: 40, height: 40, borderRadius: 20, alignItems: 'center', justifyContent: 'center', borderWidth: 1.5 },
-  skillChipText: { fontSize: 15, fontWeight: '900' },
-  skillHint: { fontSize: 11.5, fontWeight: '700', marginTop: 2 },
-  entryCard: { borderWidth: 1, borderRadius: 14, padding: spacing.md, gap: spacing.sm, marginBottom: spacing.sm },
+  skillChip: { width: 40, height: 40, borderRadius: 8, alignItems: 'center', justifyContent: 'center', borderWidth: 1 },
+  skillChipText: { fontSize: 15, fontWeight: '700' },
+  skillHint: { fontSize: 12, fontWeight: '700', marginTop: 2 },
+  entryCard: { borderWidth: 1, borderRadius: 12, padding: spacing.md, gap: spacing.sm, marginBottom: spacing.sm },
   entryHead: { flexDirection: 'row', alignItems: 'center', marginBottom: -6 },
   input: {
     ...typography.body2,
@@ -516,15 +516,15 @@ const styles = StyleSheet.create({
   chipRow: { flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', gap: 5 },
   chipRowLabel: { fontSize: 12, fontWeight: '700', marginRight: 3, minWidth: 30 },
   miniChip: { paddingHorizontal: 11, paddingVertical: 6, borderRadius: 13, borderWidth: 1 },
-  miniChipText: { fontSize: 12, fontWeight: '800' },
-  presetToggle: { fontSize: 12.5, fontWeight: '800' },
+  miniChipText: { fontSize: 12, fontWeight: '600' },
+  presetToggle: { fontSize: 13, fontWeight: '600' },
   presetWrap: { flexDirection: 'row', flexWrap: 'wrap', gap: 6 },
   presetChip: { paddingHorizontal: 10, paddingVertical: 7, borderRadius: 10, borderWidth: 1 },
-  presetChipText: { fontSize: 11.5, fontWeight: '700' },
-  activeRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.md, borderWidth: 1, borderRadius: 14, padding: spacing.md, marginTop: spacing.sm },
-  activeTitle: { fontSize: 14.5, fontWeight: '800' },
+  presetChipText: { fontSize: 12, fontWeight: '700' },
+  activeRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.md, borderWidth: 1, borderRadius: 12, padding: spacing.md, marginTop: spacing.sm },
+  activeTitle: { fontSize: 14, fontWeight: '600' },
   activeHint: { fontSize: 12, marginTop: 2 },
   bottomBar: { paddingHorizontal: spacing.xl, paddingTop: spacing.md, borderTopWidth: StyleSheet.hairlineWidth },
-  primaryBtn: { paddingVertical: 15, borderRadius: 14, alignItems: 'center', paddingHorizontal: spacing.xl },
-  primaryBtnText: { fontSize: 15.5, fontWeight: '800', color: '#fff' },
+  primaryBtn: { paddingVertical: 15, borderRadius: 12, alignItems: 'center', paddingHorizontal: spacing.xl },
+  primaryBtnText: { fontSize: 15, fontWeight: '600', color: '#fff' },
 });

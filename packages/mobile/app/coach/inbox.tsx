@@ -76,7 +76,7 @@ export default function CoachInbox() {
             <Text style={[styles.name, { color: colors.text }]} numberOfLines={1}>{t.counterpartName}</Text>
             {t.certified && <Ionicons name="checkmark-circle" size={13} color={colors.primary} />}
             {t.kind === 'RECRUIT' && !!t.jobTitle && (
-              <Text style={[styles.jobTag, { color: colors.info }]} numberOfLines={1}>📄 {t.jobTitle}</Text>
+              <Text style={[styles.jobTag, { color: colors.textSecondary }]} numberOfLines={1}>{t.jobTitle}</Text>
             )}
             {t.kind !== 'RECRUIT' && !!t.clubName && (
               <Text style={[styles.clubTag, { color: colors.textLight }]} numberOfLines={1}>{t.clubName}</Text>
@@ -179,28 +179,28 @@ const styles = StyleSheet.create({
   topBar: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, paddingHorizontal: spacing.md, paddingBottom: spacing.sm, borderBottomWidth: StyleSheet.hairlineWidth },
   title: { ...typography.subtitle1, flex: 1 },
   center: { flex: 1, alignItems: 'center', justifyContent: 'center' },
-  sectionLabel: { fontSize: 12, fontWeight: '800', marginBottom: spacing.sm, marginLeft: 4, letterSpacing: 0.3 },
-  row: { flexDirection: 'row', alignItems: 'center', gap: spacing.md, borderRadius: 18, padding: spacing.lg, marginBottom: spacing.sm + 2 },
+  sectionLabel: { fontSize: 12, fontWeight: '600', marginBottom: spacing.sm, marginLeft: 4, letterSpacing: 0.3 },
+  row: { flexDirection: 'row', alignItems: 'center', gap: spacing.md, borderRadius: 12, padding: spacing.lg, marginBottom: spacing.sm + 2 },
   avatar: { width: 44, height: 44, borderRadius: 22 },
   avatarFallback: { alignItems: 'center', justifyContent: 'center' },
-  avatarText: { fontSize: 18, fontWeight: '900' },
+  avatarText: { fontSize: 18, fontWeight: '700' },
   head: { flexDirection: 'row', alignItems: 'center', gap: 5 },
-  name: { ...typography.subtitle2, fontWeight: '800', flexShrink: 1 },
+  name: { ...typography.subtitle2, fontWeight: '600', flexShrink: 1 },
   clubTag: { fontSize: 11, fontWeight: '700', flexShrink: 1 },
-  jobTag: { fontSize: 11, fontWeight: '800', flexShrink: 1 },
+  jobTag: { fontSize: 11, fontWeight: '600', flexShrink: 1 },
   tabBar: { flexDirection: 'row', borderBottomWidth: StyleSheet.hairlineWidth, paddingHorizontal: spacing.lg },
   tabItem: { flexDirection: 'row', alignItems: 'center', gap: 5, paddingVertical: 12, paddingHorizontal: spacing.md, borderBottomWidth: 2, borderBottomColor: 'transparent' },
-  tabLabel: { fontSize: 14, fontWeight: '800' },
+  tabLabel: { fontSize: 14, fontWeight: '600' },
   tabBadge: { minWidth: 17, height: 17, borderRadius: 9, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 4 },
-  tabBadgeText: { color: '#fff', fontSize: 10, fontWeight: '900' },
+  tabBadgeText: { color: '#fff', fontSize: 10, fontWeight: '700' },
   time: { ...typography.caption },
   previewRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, marginTop: 2 },
   preview: { ...typography.body2, flex: 1 },
   unreadBadge: { minWidth: 20, height: 20, borderRadius: 10, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 5 },
-  unreadText: { color: '#fff', fontSize: 11, fontWeight: '900' },
+  unreadText: { color: '#fff', fontSize: 11, fontWeight: '700' },
   emptyBox: { alignItems: 'center', gap: spacing.sm, paddingVertical: spacing.xxxl },
   emptyTitle: { ...typography.subtitle1 },
   emptyHint: { ...typography.caption, textAlign: 'center', lineHeight: 18 },
   emptyBtn: { marginTop: spacing.md, paddingHorizontal: spacing.xl, paddingVertical: 12, borderRadius: 12 },
-  emptyBtnText: { color: '#fff', fontSize: 14, fontWeight: '800' },
+  emptyBtnText: { color: '#fff', fontSize: 14, fontWeight: '600' },
 });

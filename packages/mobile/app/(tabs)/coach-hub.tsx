@@ -10,20 +10,22 @@ import { COACH_MARKET_ENABLED } from '../../constants/features';
 import { coachJobApi, type JobPostCard, AUDIENCE_LABEL, EMPLOYMENT_LABEL, ddayLabel } from '../../services/coachJob';
 import { coachChatApi, coachApi } from '../../services/coach';
 import { absolutizeUploadUrl } from '../../services/upload';
-import { REGIONS } from '../../constants/regions';
+import { FilterSheet, EMPTY_FILTER, countFilters, type MarketFilter } from '../../components/market/FilterSheet';
+import { BottomSheet } from '../../components/shared/BottomSheet';
 
 // ─────────────────────────────────────────────────────────────
 // 코치 허브(하단 탭 "코치") — 코치 구인·구직.
-//  [구인 공고] 클럽·개인이 올린 코치 채용 공고 피드(원티드식 지원으로 이어짐)
-//  [코치 찾기] 등록 코치 탐색(기존 목록 재사용)
-//  상단 내 활동 바: 내 공고 · 내 지원 · 문의함(미읽음) · 내 이력서
+//  [구인 공고] 클럽·개인이 올린 코치 채용 공고 피드
+//  [코치 찾기] 등록 코치 탐색(CoachList)
+// 신뢰 톤: 언더라인 탭 · 회색 위계 · 색은 CTA/상태에만 · 필터는 시트.
 // ─────────────────────────────────────────────────────────────
 
 const SORTS = [
   { key: 'latest', label: '최신순' },
   { key: 'pay', label: '급여순' },
-  { key: 'deadline', label: '마감임박' },
+  { key: 'deadline', label: '마감임박순' },
 ] as const;
+type SortKey = (typeof SORTS)[number]['key'];
 
 function relTime(iso: string): string {
   const diff = Date.now() - new Date(iso).getTime();
@@ -42,13 +44,15 @@ export default function CoachHub() {
 }
 
 function CoachHubInner() {
-  const { colors, shadows } = useTheme();
+  const { colors } = useTheme();
   const router = useRouter();
 
   const [tab, setTab] = useState<'jobs' | 'coaches'>('jobs');
-  const [regionFilter, setRegionFilter] = useState<string[]>([]);
+  const [filter, setFilter] = useState<MarketFilter>(EMPTY_FILTER);
+  const [showFilter, setShowFilter] = useState(false);
   const [q, setQ] = useState('');
-  const [sort, setSort] = useState<'latest' | 'pay' | 'deadline'>('latest');
+  const [sort, setSort] = useState<SortKey>('latest');
+  const [showSort, setShowSort] = useState(false);
   const [jobs, setJobs] = useState<JobPostCard[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -64,7 +68,7 @@ function CoachHubInner() {
 
   const load = useCallback(async () => {
     try {
-      setJobs(await coachJobApi.list({ regions: regionFilter, q: q.trim() || undefined, sort }));
+      setJobs(await coachJobApi.list({ regions: filter.regions, q: q.trim() || undefined, sort }));
     } catch {
       /* noop */
     } finally {
@@ -89,7 +93,7 @@ function CoachHubInner() {
           .catch(() => {});
       }
     }).catch(() => {});
-  }, [regionFilter, q, sort]);
+  }, [filter.regions, q, sort]);
 
   useFocusEffect(useCallback(() => { load(); }, [load]));
 
@@ -100,7 +104,7 @@ function CoachHubInner() {
     const t = setTimeout(load, 350);
     return () => clearTimeout(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [q, sort, regionFilter]);
+  }, [q, sort, filter.regions]);
 
   // 카드 하트 토글(옵티미스틱).
   const toggleBookmark = (j: JobPostCard) => {
@@ -110,49 +114,37 @@ function CoachHubInner() {
     });
   };
 
-  // MY 뱃지 — 신규 지원(채용)·미읽음(채팅) 합산.
   const myBadge = chatUnread;
+  const filterCount = countFilters(filter, false);
+  const sortLabel = SORTS.find((s) => s.key === sort)?.label ?? '최신순';
 
   return (
     <View style={{ flex: 1, backgroundColor: colors.background }}>
-      {/* 세그먼트 + MY(원티드처럼 탐색/MY 분리) */}
-      <View style={[styles.segmentRow, { paddingTop: spacing.md }]}>
-        <View style={[styles.segment, { backgroundColor: colors.surface, borderColor: colors.border }]}>
-          {([
-            { key: 'jobs', label: '구인 공고' },
-            { key: 'coaches', label: '코치 찾기' },
-          ] as const).map((t) => {
-            const on = tab === t.key;
-            return (
-              <Pressable key={t.key} onPress={() => { tabTouched.current = true; setTab(t.key); }} style={[styles.segmentBtn, on && { backgroundColor: colors.primary }]}>
-                <Text style={[styles.segmentText, { color: on ? '#fff' : colors.textSecondary }]}>{t.label}</Text>
-              </Pressable>
-            );
-          })}
-        </View>
+      {/* 언더라인 탭 + MY */}
+      <View style={[styles.tabBar, { borderBottomColor: colors.border, backgroundColor: colors.surface }]}>
+        {([
+          { key: 'jobs', label: '구인 공고' },
+          { key: 'coaches', label: '코치 찾기' },
+        ] as const).map((t) => {
+          const on = tab === t.key;
+          return (
+            <Pressable
+              key={t.key}
+              onPress={() => { tabTouched.current = true; setTab(t.key); }}
+              style={[styles.tabItem, on && { borderBottomColor: colors.text }]}
+            >
+              <Text style={[styles.tabText, { color: on ? colors.text : colors.textLight, fontWeight: on ? '700' : '500' }]}>{t.label}</Text>
+            </Pressable>
+          );
+        })}
+        <View style={{ flex: 1 }} />
         {tab === 'jobs' && !hasProfile && (
-          <Pressable
-            onPress={() => router.push('/market/job/new' as never)}
-            style={({ pressed }) => [styles.newBtn, { backgroundColor: colors.primary }, pressed && { opacity: 0.85 }]}
-          >
-            <Ionicons name="add" size={16} color="#fff" />
-            <Text style={styles.newBtnText}>공고 올리기</Text>
+          <Pressable onPress={() => router.push('/market/job/new' as never)} hitSlop={6} style={styles.topAction}>
+            <Text style={[styles.topActionText, { color: colors.primary }]}>공고 올리기</Text>
           </Pressable>
         )}
-        {tab === 'jobs' && hasProfile && myAppCount > 0 && (
-          <Pressable
-            onPress={() => router.push('/market/applications' as never)}
-            style={({ pressed }) => [styles.newBtn, { backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border }, pressed && { opacity: 0.85 }]}
-          >
-            <Text style={[styles.newBtnText, { color: colors.text }]}>내 지원 {myAppCount}</Text>
-          </Pressable>
-        )}
-        <Pressable
-          onPress={() => router.push('/market/my' as never)}
-          style={({ pressed }) => [styles.myBtn, { backgroundColor: colors.surface, borderColor: colors.border }, pressed && { opacity: 0.8 }]}
-        >
-          <Ionicons name="person-circle-outline" size={17} color={colors.textSecondary} />
-          <Text style={[styles.myBtnText, { color: colors.text }]}>MY</Text>
+        <Pressable onPress={() => router.push('/market/my' as never)} hitSlop={6} style={styles.topAction}>
+          <Text style={[styles.topActionText, { color: colors.textSecondary }]}>MY</Text>
           {myBadge > 0 && (
             <View style={[styles.badge, { backgroundColor: colors.danger }]}>
               <Text style={styles.badgeText}>{myBadge}</Text>
@@ -165,49 +157,27 @@ function CoachHubInner() {
       {hasProfile === false && (
         <Pressable
           onPress={() => router.push('/coach/resume' as never)}
-          style={({ pressed }) => [styles.roleBanner, { backgroundColor: colors.primary + '10', borderColor: colors.primary + '35' }, pressed && { opacity: 0.85 }]}
+          style={({ pressed }) => [styles.roleBanner, { backgroundColor: colors.surface, borderColor: colors.border }, pressed && { opacity: 0.85 }]}
         >
-          <Text style={[styles.roleBannerText, { color: colors.primary }]}>🏸 코치로 활동하시나요? 프로필 하나로 공고 지원까지 시작해 보세요</Text>
-          <Ionicons name="chevron-forward" size={15} color={colors.primary} />
+          <Ionicons name="person-add-outline" size={15} color={colors.textSecondary} />
+          <Text style={[styles.roleBannerText, { color: colors.textSecondary }]}>코치로 활동 중이신가요? 프로필 하나로 공고 지원까지 시작할 수 있어요</Text>
+          <Ionicons name="chevron-forward" size={14} color={colors.textLight} />
         </Pressable>
       )}
       {hasProfile === true && inviteCount > 0 && (
         <Pressable
           onPress={() => router.push('/market/invites' as never)}
-          style={({ pressed }) => [styles.roleBanner, { backgroundColor: colors.warning + '12', borderColor: colors.warning + '45' }, pressed && { opacity: 0.85 }]}
+          style={({ pressed }) => [styles.roleBanner, { backgroundColor: colors.surface, borderColor: colors.border }, pressed && { opacity: 0.85 }]}
         >
-          <Text style={[styles.roleBannerText, { color: colors.warning }]}>🤝 함께하자는 제안이 {inviteCount}건 와 있어요</Text>
-          <Ionicons name="chevron-forward" size={15} color={colors.warning} />
+          <Ionicons name="mail-unread-outline" size={15} color={colors.primary} />
+          <Text style={[styles.roleBannerText, { color: colors.text }]}>
+            함께하자는 제안이 <Text style={{ color: colors.primary, fontWeight: '700' }}>{inviteCount}건</Text> 와 있어요
+          </Text>
+          <Ionicons name="chevron-forward" size={14} color={colors.textLight} />
         </Pressable>
       )}
 
-      {/* 지역 필터(시/도 복수 선택) — 공고 피드 */}
-      {tab === 'jobs' && (
-        <View style={styles.regionBar}>
-          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 6, paddingHorizontal: spacing.lg }}>
-            <Pressable
-              onPress={() => setRegionFilter([])}
-              style={[styles.regionChip, { backgroundColor: regionFilter.length === 0 ? colors.text : colors.surface, borderColor: regionFilter.length === 0 ? colors.text : colors.border }]}
-            >
-              <Text style={[styles.regionChipText, { color: regionFilter.length === 0 ? '#fff' : colors.textSecondary }]}>전국</Text>
-            </Pressable>
-            {REGIONS.map((r) => {
-              const on = regionFilter.includes(r);
-              return (
-                <Pressable
-                  key={r}
-                  onPress={() => setRegionFilter((prev) => (on ? prev.filter((x) => x !== r) : [...prev, r]))}
-                  style={[styles.regionChip, { backgroundColor: on ? colors.primary : colors.surface, borderColor: on ? colors.primary : colors.border }]}
-                >
-                  <Text style={[styles.regionChipText, { color: on ? '#fff' : colors.textSecondary }]}>{r}</Text>
-                </Pressable>
-              );
-            })}
-          </ScrollView>
-        </View>
-      )}
-
-      {/* 검색 + 정렬 — 공고 피드 */}
+      {/* 검색 · 필터 · 정렬 — 공고 피드 */}
       {tab === 'jobs' && (
         <View style={styles.searchRow}>
           <View style={[styles.searchBox, { backgroundColor: colors.surface, borderColor: colors.border }]}>
@@ -216,7 +186,7 @@ function CoachHubInner() {
               style={[styles.searchInput, { color: colors.text }]}
               value={q}
               onChangeText={setQ}
-              placeholder="공고 검색 (제목·지역·내용)"
+              placeholder="공고 검색"
               placeholderTextColor={colors.textLight}
               returnKeyType="search"
             />
@@ -226,14 +196,22 @@ function CoachHubInner() {
               </Pressable>
             )}
           </View>
-          {SORTS.map((so) => {
-            const on = sort === so.key;
-            return (
-              <Pressable key={so.key} onPress={() => setSort(so.key)} style={[styles.sortChip, { backgroundColor: on ? colors.text : colors.surface, borderColor: on ? colors.text : colors.border }]}>
-                <Text style={[styles.sortChipText, { color: on ? '#fff' : colors.textSecondary }]}>{so.label}</Text>
-              </Pressable>
-            );
-          })}
+          <Pressable
+            onPress={() => setShowFilter(true)}
+            style={[styles.filterBtn, { borderColor: filterCount > 0 ? colors.text : colors.border, backgroundColor: colors.surface }]}
+          >
+            <Ionicons name="options-outline" size={15} color={colors.textSecondary} />
+            <Text style={[styles.filterBtnText, { color: colors.textSecondary }]}>필터</Text>
+            {filterCount > 0 && (
+              <View style={[styles.filterCount, { backgroundColor: colors.text }]}>
+                <Text style={styles.filterCountText}>{filterCount}</Text>
+              </View>
+            )}
+          </Pressable>
+          <Pressable onPress={() => setShowSort(true)} style={styles.sortBtn} hitSlop={6}>
+            <Text style={[styles.sortBtnText, { color: colors.textSecondary }]}>{sortLabel}</Text>
+            <Ionicons name="chevron-down" size={13} color={colors.textSecondary} />
+          </Pressable>
         </View>
       )}
 
@@ -250,7 +228,9 @@ function CoachHubInner() {
           {jobs.length === 0 ? (
             <View style={styles.emptyBox}>
               <Ionicons name="megaphone-outline" size={34} color={colors.textLight} />
-              <Text style={[styles.emptyTitle, { color: colors.text }]}>아직 올라온 공고가 없어요</Text>
+              <Text style={[styles.emptyTitle, { color: colors.text }]}>
+                {q.trim() || filterCount > 0 ? '조건에 맞는 공고가 없어요' : '아직 올라온 공고가 없어요'}
+              </Text>
               <Text style={[styles.emptyHint, { color: colors.textLight }]}>
                 코치가 필요하면 첫 공고를 올려보세요{'\n'}클럽 명의로도, 개인 요청으로도 가능해요
               </Text>
@@ -259,120 +239,127 @@ function CoachHubInner() {
               </Pressable>
             </View>
           ) : (
-            jobs.map((j) => (
-              <Pressable
-                key={j.id}
-                onPress={() => router.push(`/market/job/${j.id}` as never)}
-                style={({ pressed }) => [styles.jobCard, { backgroundColor: colors.surface, borderColor: colors.border }, shadows.sm, pressed && { opacity: 0.92 }]}
-              >
-                <View style={styles.jobHead}>
-                  <View style={[styles.ownerBadge, { backgroundColor: j.clubName ? colors.primary + '14' : colors.info + '18' }]}>
-                    <Text style={[styles.ownerBadgeText, { color: j.clubName ? colors.primary : colors.info }]}>
+            jobs.map((j) => {
+              const dd = ddayLabel(j.deadline);
+              const metaParts = [
+                j.region,
+                j.scheduleLabel,
+                j.targetAudience ? AUDIENCE_LABEL[j.targetAudience] ?? j.targetAudience : null,
+                j.employmentType ? EMPLOYMENT_LABEL[j.employmentType] ?? j.employmentType : null,
+              ].filter(Boolean);
+              return (
+                <Pressable
+                  key={j.id}
+                  onPress={() => router.push(`/market/job/${j.id}` as never)}
+                  style={({ pressed }) => [styles.jobCard, { backgroundColor: colors.surface, borderColor: colors.border }, pressed && { opacity: 0.92 }]}
+                >
+                  <View style={styles.jobHead}>
+                    <Text style={[styles.jobOwner, { color: colors.textSecondary }]} numberOfLines={1}>
                       {j.clubName ?? '개인 요청'}
                     </Text>
+                    {dd && (
+                      <>
+                        <Text style={[styles.headDot, { color: colors.textLight }]}>·</Text>
+                        <Text style={[styles.jobOwner, { color: dd.urgent ? colors.danger : colors.textSecondary, fontWeight: dd.urgent ? '700' : '500' }]}>
+                          {dd.label}
+                        </Text>
+                      </>
+                    )}
+                    <View style={{ flex: 1 }} />
+                    <Text style={[styles.time, { color: colors.textLight }]}>{relTime(j.createdAt)}</Text>
+                    <Pressable onPress={() => toggleBookmark(j)} hitSlop={10}>
+                      <Ionicons name={j.bookmarked ? 'heart' : 'heart-outline'} size={18} color={j.bookmarked ? colors.danger : colors.textLight} />
+                    </Pressable>
                   </View>
-                  {(() => {
-                    const dd = ddayLabel(j.deadline);
-                    if (!dd) return null;
-                    return (
-                      <View style={[styles.ownerBadge, { backgroundColor: dd.urgent ? colors.danger + '15' : colors.background }]}>
-                        <Text style={[styles.ownerBadgeText, { color: dd.urgent ? colors.danger : colors.textSecondary }]}>{dd.label}</Text>
-                      </View>
-                    );
-                  })()}
-                  <View style={{ flex: 1 }} />
-                  <Text style={[styles.time, { color: colors.textLight }]}>{relTime(j.createdAt)}</Text>
-                  <Pressable onPress={() => toggleBookmark(j)} hitSlop={10}>
-                    <Ionicons name={j.bookmarked ? 'heart' : 'heart-outline'} size={19} color={j.bookmarked ? colors.danger : colors.textLight} />
-                  </Pressable>
-                </View>
-                <View style={{ flexDirection: 'row', gap: spacing.md }}>
-                  <View style={{ flex: 1, minWidth: 0 }}>
-                    <Text style={[styles.jobTitle, { color: colors.text }]} numberOfLines={2}>{j.title}</Text>
+                  <View style={{ flexDirection: 'row', gap: spacing.md }}>
+                    <View style={{ flex: 1, minWidth: 0 }}>
+                      <Text style={[styles.jobTitle, { color: colors.text }]} numberOfLines={2}>{j.title}</Text>
+                    </View>
+                    {!!j.thumbnail && (
+                      <Image source={{ uri: absolutizeUploadUrl(j.thumbnail)! }} style={styles.jobThumb} />
+                    )}
                   </View>
-                  {!!j.thumbnail && (
-                    <Image source={{ uri: absolutizeUploadUrl(j.thumbnail)! }} style={styles.jobThumb} />
-                  )}
-                </View>
-                <View style={styles.jobMetaRow}>
-                  <Ionicons name="location-outline" size={13} color={colors.textLight} />
-                  <Text style={[styles.jobMeta, { color: colors.textSecondary }]}>{j.region}</Text>
-                  <Text style={[styles.jobMetaDot, { color: colors.textLight }]}>·</Text>
-                  <Text style={[styles.jobMeta, { color: colors.textSecondary }]}>{j.scheduleLabel}</Text>
-                  {!!j.targetAudience && (
-                    <View style={[styles.tinyChip, { backgroundColor: colors.background, borderColor: colors.border }]}>
-                      <Text style={[styles.tinyChipText, { color: colors.textSecondary }]}>{AUDIENCE_LABEL[j.targetAudience] ?? j.targetAudience}</Text>
-                    </View>
-                  )}
-                  {!!j.employmentType && (
-                    <View style={[styles.tinyChip, { backgroundColor: colors.background, borderColor: colors.border }]}>
-                      <Text style={[styles.tinyChipText, { color: colors.textSecondary }]}>{EMPLOYMENT_LABEL[j.employmentType] ?? j.employmentType}</Text>
-                    </View>
-                  )}
-                </View>
-                <View style={[styles.jobFootRow, { borderTopColor: colors.border }]}>
-                  <Text style={[styles.pay, { color: colors.text }]}>{j.payLabel}</Text>
-                  <View style={styles.footRight}>
-                    <Text style={[styles.viewsText, { color: colors.textLight }]}>조회 {j.views}</Text>
-                    <View style={[styles.applicantChip, { backgroundColor: j.applicants > 0 ? colors.primary + '12' : colors.background }]}>
-                      <Text style={[styles.applicants, { color: j.applicants > 0 ? colors.primary : colors.textLight }]}>
-                        지원 {j.applicants}명
-                      </Text>
-                    </View>
+                  <Text style={[styles.jobMeta, { color: colors.textSecondary }]} numberOfLines={1}>
+                    {metaParts.join(' · ')}
+                  </Text>
+                  <View style={[styles.jobFootRow, { borderTopColor: colors.divider }]}>
+                    <Text style={[styles.pay, { color: colors.text }, typography.tabular]}>{j.payLabel}</Text>
+                    <Text style={[styles.footMeta, { color: colors.textLight }]}>
+                      조회 {j.views} · 지원 {j.applicants}
+                    </Text>
                   </View>
-                </View>
-              </Pressable>
-            ))
+                </Pressable>
+              );
+            })
           )}
         </ScrollView>
       )}
+
+      {/* 필터 시트 — 공고 피드는 지역만 */}
+      <FilterSheet
+        visible={showFilter}
+        onClose={() => setShowFilter(false)}
+        value={filter}
+        onApply={setFilter}
+        showCoachFilters={false}
+      />
+
+      {/* 정렬 시트 */}
+      <BottomSheet visible={showSort} onClose={() => setShowSort(false)} title="정렬" maxHeight={40}>
+        {SORTS.map((s) => {
+          const on = sort === s.key;
+          return (
+            <Pressable
+              key={s.key}
+              onPress={() => { setSort(s.key); setShowSort(false); }}
+              style={[styles.sortRow, { borderBottomColor: colors.divider }]}
+            >
+              <Text style={[styles.sortRowText, { color: on ? colors.primary : colors.text, fontWeight: on ? '700' : '400' }]}>{s.label}</Text>
+              {on && <Ionicons name="checkmark" size={18} color={colors.primary} />}
+            </Pressable>
+          );
+        })}
+      </BottomSheet>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  roleBanner: { flexDirection: 'row', alignItems: 'center', gap: 6, marginHorizontal: spacing.lg, marginBottom: spacing.sm, borderWidth: 1, borderRadius: 12, paddingHorizontal: spacing.md, paddingVertical: 10 },
-  roleBannerText: { flex: 1, fontSize: 12.5, fontWeight: '800', lineHeight: 17 },
-  myBtn: { flexDirection: 'row', alignItems: 'center', gap: 4, borderWidth: 1, borderRadius: 12, paddingHorizontal: spacing.md, paddingVertical: 9 },
-  regionBar: { paddingBottom: spacing.sm },
-  regionChip: { paddingHorizontal: 12, paddingVertical: 7, borderRadius: 16, borderWidth: 1 },
-  regionChipText: { fontSize: 12.5, fontWeight: '800' },
-  searchRow: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: spacing.lg, paddingBottom: spacing.sm },
-  searchBox: { flex: 1, flexDirection: 'row', alignItems: 'center', gap: 6, borderWidth: 1, borderRadius: 12, paddingHorizontal: spacing.md, paddingVertical: Platform.OS === 'web' ? 8 : 7 },
-  searchInput: { flex: 1, fontSize: 13, fontWeight: '600', padding: 0 },
-  sortChip: { paddingHorizontal: 10, paddingVertical: 8, borderRadius: 12, borderWidth: 1 },
-  sortChipText: { fontSize: 12, fontWeight: '800' },
-  tinyChip: { paddingHorizontal: 6, paddingVertical: 2, borderRadius: 6, borderWidth: StyleSheet.hairlineWidth, marginLeft: 2 },
-  tinyChipText: { fontSize: 10.5, fontWeight: '800' },
-  footRight: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
-  viewsText: { fontSize: 11.5, fontWeight: '700' },
-  myBtnText: { fontSize: 13, fontWeight: '800' },
-  badge: { minWidth: 17, height: 17, borderRadius: 9, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 4 },
-  badgeText: { color: '#fff', fontSize: 10, fontWeight: '900' },
-  segmentRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, paddingHorizontal: spacing.lg, paddingVertical: spacing.sm },
-  segment: { flex: 1, flexDirection: 'row', borderRadius: 12, borderWidth: 1, padding: 3 },
-  segmentBtn: { flex: 1, paddingVertical: 8, borderRadius: 9, alignItems: 'center' },
-  segmentText: { fontSize: 13.5, fontWeight: '800' },
-  newBtn: { flexDirection: 'row', alignItems: 'center', gap: 3, paddingHorizontal: spacing.md, paddingVertical: 10, borderRadius: 12 },
-  newBtnText: { color: '#fff', fontSize: 13, fontWeight: '800' },
+  tabBar: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: spacing.lg, borderBottomWidth: StyleSheet.hairlineWidth },
+  tabItem: { paddingVertical: 13, marginRight: spacing.xl, borderBottomWidth: 2, borderBottomColor: 'transparent' },
+  tabText: { fontSize: 15 },
+  topAction: { flexDirection: 'row', alignItems: 'center', gap: 4, paddingVertical: 8, marginLeft: spacing.lg },
+  topActionText: { fontSize: 14, fontWeight: '600' },
+  badge: { minWidth: 16, height: 16, borderRadius: 8, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 4 },
+  badgeText: { color: '#fff', fontSize: 10, fontWeight: '700' },
+  roleBanner: { flexDirection: 'row', alignItems: 'center', gap: 8, marginHorizontal: spacing.lg, marginTop: spacing.md, borderWidth: StyleSheet.hairlineWidth, borderRadius: 10, paddingHorizontal: spacing.md, paddingVertical: 11 },
+  roleBannerText: { flex: 1, fontSize: 13, fontWeight: '500', lineHeight: 18 },
+  searchRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, paddingHorizontal: spacing.lg, paddingVertical: spacing.md },
+  searchBox: { flex: 1, flexDirection: 'row', alignItems: 'center', gap: 6, borderWidth: 1, borderRadius: 10, paddingHorizontal: spacing.md, paddingVertical: Platform.OS === 'web' ? 9 : 8 },
+  searchInput: { flex: 1, fontSize: 14, fontWeight: '400', padding: 0 },
+  filterBtn: { flexDirection: 'row', alignItems: 'center', gap: 4, borderWidth: 1, borderRadius: 10, paddingHorizontal: spacing.md, paddingVertical: 9 },
+  filterBtnText: { fontSize: 13, fontWeight: '600' },
+  filterCount: { minWidth: 16, height: 16, borderRadius: 8, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 4 },
+  filterCountText: { color: '#fff', fontSize: 10, fontWeight: '700' },
+  sortBtn: { flexDirection: 'row', alignItems: 'center', gap: 2, paddingVertical: 9, paddingLeft: 2 },
+  sortBtnText: { fontSize: 13, fontWeight: '500' },
+  sortRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingVertical: 15, borderBottomWidth: StyleSheet.hairlineWidth },
+  sortRowText: { fontSize: 15 },
   center: { flex: 1, alignItems: 'center', justifyContent: 'center' },
   emptyBox: { alignItems: 'center', gap: spacing.sm, paddingVertical: spacing.xxxl },
   emptyTitle: { ...typography.subtitle1 },
   emptyHint: { ...typography.caption, textAlign: 'center', lineHeight: 18 },
-  emptyBtn: { marginTop: spacing.md, paddingHorizontal: spacing.xl, paddingVertical: 12, borderRadius: 12 },
-  emptyBtnText: { color: '#fff', fontSize: 14, fontWeight: '800' },
-  jobCard: { borderRadius: 16, borderWidth: StyleSheet.hairlineWidth, padding: spacing.lg, marginBottom: spacing.md },
-  jobHead: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
-  ownerBadge: { paddingHorizontal: 8, paddingVertical: 3, borderRadius: 8 },
-  ownerBadgeText: { fontSize: 11, fontWeight: '800' },
-  time: { ...typography.caption },
-  jobTitle: { fontSize: 17.5, fontWeight: '800', letterSpacing: -0.3, marginTop: spacing.sm, lineHeight: 24 },
-  jobThumb: { width: 64, height: 64, borderRadius: 12, marginTop: spacing.sm },
-  jobMetaRow: { flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 6 },
-  jobMeta: { fontSize: 13, fontWeight: '600' },
-  jobMetaDot: { fontSize: 12 },
+  emptyBtn: { marginTop: spacing.md, paddingHorizontal: spacing.xl, paddingVertical: 12, borderRadius: 10 },
+  emptyBtnText: { color: '#fff', fontSize: 14, fontWeight: '700' },
+  jobCard: { borderRadius: 12, borderWidth: StyleSheet.hairlineWidth, padding: spacing.lg, marginBottom: spacing.md },
+  jobHead: { flexDirection: 'row', alignItems: 'center', gap: 6 },
+  jobOwner: { fontSize: 13, fontWeight: '500', flexShrink: 1 },
+  headDot: { fontSize: 12 },
+  time: { fontSize: 12, fontWeight: '400', marginRight: 2 },
+  jobTitle: { fontSize: 17, fontWeight: '700', letterSpacing: -0.2, marginTop: spacing.sm, lineHeight: 24 },
+  jobThumb: { width: 56, height: 56, borderRadius: 8, marginTop: spacing.sm },
+  jobMeta: { fontSize: 13, fontWeight: '400', marginTop: 6 },
   jobFootRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: spacing.md, paddingTop: spacing.md, borderTopWidth: StyleSheet.hairlineWidth },
-  pay: { fontSize: 15.5, fontWeight: '900' },
-  applicantChip: { paddingHorizontal: 10, paddingVertical: 5, borderRadius: 12 },
-  applicants: { fontSize: 12.5, fontWeight: '800' },
+  pay: { fontSize: 16, fontWeight: '700' },
+  footMeta: { fontSize: 12, fontWeight: '400' },
 });

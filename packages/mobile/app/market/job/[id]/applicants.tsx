@@ -74,9 +74,9 @@ export default function JobApplicants() {
   const statusColor = (s: string) =>
     s === 'ACCEPTED' ? colors.secondary
       : s === 'INTERVIEW' ? colors.primary
-      : s === 'OFFERED' ? colors.info
+      : s === 'OFFERED' ? colors.primary
       : s === 'REJECTED' || s === 'DECLINED' ? colors.textLight
-      : colors.warning;
+      : colors.textSecondary;
 
   if (loading) {
     return <View style={[styles.center, { backgroundColor: colors.background }]}><ActivityIndicator size="large" color={colors.primary} /></View>;
@@ -145,16 +145,16 @@ export default function JobApplicants() {
                 {photo ? (
                   <Image source={{ uri: photo }} style={styles.photo} />
                 ) : (
-                  <View style={[styles.photo, { backgroundColor: colors.primary + '10', alignItems: 'center', justifyContent: 'center' }]}>
-                    <Text style={{ color: colors.primary, fontWeight: '900', fontSize: 18 }}>{a.displayName.slice(0, 1)}</Text>
+                  <View style={[styles.photo, { backgroundColor: colors.surface2, alignItems: 'center', justifyContent: 'center' }]}>
+                    <Text style={{ color: colors.primary, fontWeight: '700', fontSize: 18 }}>{a.displayName.slice(0, 1)}</Text>
                   </View>
                 )}
                 <View style={{ flex: 1, minWidth: 0 }}>
                   <View style={styles.nameRow}>
                     <Text style={[styles.name, { color: colors.text }]} numberOfLines={1}>{a.displayName}</Text>
                     {!!a.skillLevel && (
-                      <View style={[styles.skillBadge, { backgroundColor: getSkillMeta(a.skillLevel).color }]}>
-                        <Text style={styles.skillBadgeText}>{a.skillLevel}</Text>
+                      <View style={[styles.skillBadge, { backgroundColor: colors.surface2 }]}>
+                        <Text style={[styles.skillBadgeText, { color: colors.textSecondary }]}>{a.skillLevel}</Text>
                       </View>
                     )}
                     {a.certified && <Ionicons name="checkmark-circle" size={13} color={colors.primary} />}
@@ -188,21 +188,21 @@ const styles = StyleSheet.create({
   topBar: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, paddingHorizontal: spacing.md, paddingBottom: spacing.sm, borderBottomWidth: StyleSheet.hairlineWidth },
   title: { ...typography.subtitle1 },
   sub: { ...typography.caption, marginTop: 1 },
-  jobLink: { fontSize: 13, fontWeight: '800' },
+  jobLink: { fontSize: 13, fontWeight: '600' },
   stageBar: { borderBottomWidth: StyleSheet.hairlineWidth },
   stageTab: { flexDirection: 'row', alignItems: 'center', gap: 5, paddingVertical: 12, paddingHorizontal: spacing.md, borderBottomWidth: 2, borderBottomColor: 'transparent' },
-  stageLabel: { fontSize: 14, fontWeight: '800' },
-  stageCount: { fontSize: 13, fontWeight: '900' },
+  stageLabel: { fontSize: 14, fontWeight: '600' },
+  stageCount: { fontSize: 13, fontWeight: '700' },
   emptyBox: { alignItems: 'center', gap: spacing.sm, paddingVertical: spacing.xxxl },
   emptyText: { ...typography.caption, textAlign: 'center', lineHeight: 18 },
-  card: { flexDirection: 'row', alignItems: 'center', gap: spacing.md, borderRadius: 16, borderWidth: StyleSheet.hairlineWidth, padding: spacing.lg, marginBottom: spacing.sm + 2 },
-  photo: { width: 52, height: 52, borderRadius: 14 },
+  card: { flexDirection: 'row', alignItems: 'center', gap: spacing.md, borderRadius: 12, borderWidth: StyleSheet.hairlineWidth, padding: spacing.lg, marginBottom: spacing.sm + 2 },
+  photo: { width: 52, height: 52, borderRadius: 12 },
   nameRow: { flexDirection: 'row', alignItems: 'center', gap: 5 },
-  name: { fontSize: 15.5, fontWeight: '800', flexShrink: 1 },
+  name: { fontSize: 15, fontWeight: '600', flexShrink: 1 },
   skillBadge: { minWidth: 20, height: 18, borderRadius: 6, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 5 },
-  skillBadgeText: { color: '#fff', fontSize: 11, fontWeight: '900' },
-  meta: { fontSize: 12.5, fontWeight: '600', marginTop: 3 },
+  skillBadgeText: { fontSize: 11, fontWeight: '700' },
+  meta: { fontSize: 13, fontWeight: '600', marginTop: 3 },
   applied: { fontSize: 11, fontWeight: '600', marginTop: 3 },
   stateChip: { paddingHorizontal: 8, paddingVertical: 4, borderRadius: 9 },
-  stateChipText: { fontSize: 11, fontWeight: '800' },
+  stateChipText: { fontSize: 11, fontWeight: '600' },
 });

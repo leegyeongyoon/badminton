@@ -582,11 +582,11 @@ export default function ClubManageScreen() {
                       }
                     }}
                     style={{
-                      flex: 1, borderRadius: 14, padding: spacing.md, gap: 2,
+                      flex: 1, borderRadius: 12, padding: spacing.md, gap: 2,
                       backgroundColor: active ? colors.primary : colors.background,
                     }}
                   >
-                    <Text style={{ fontSize: 13, fontWeight: '900', color: active ? '#fff' : colors.text }}>{t.title}</Text>
+                    <Text style={{ fontSize: 13, fontWeight: '700', color: active ? '#fff' : colors.text }}>{t.title}</Text>
                     <Text style={{ fontSize: 10, lineHeight: 14, color: active ? 'rgba(255,255,255,0.85)' : colors.textLight }}>{t.desc}</Text>
                   </TouchableOpacity>
                 );
@@ -982,7 +982,7 @@ export default function ClubManageScreen() {
             <Text style={[styles.cardTitle, { color: colors.text }]}>게스트 문의</Text>
             {guestUnread > 0 && (
               <View style={{ backgroundColor: colors.danger, minWidth: 20, height: 20, borderRadius: 10, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 5, marginLeft: 6 }}>
-                <Text style={{ color: '#fff', fontSize: 11, fontWeight: '900' }}>{guestUnread}</Text>
+                <Text style={{ color: '#fff', fontSize: 11, fontWeight: '700' }}>{guestUnread}</Text>
               </View>
             )}
             <View style={{ flex: 1 }} />
@@ -1057,7 +1057,7 @@ export default function ClubManageScreen() {
                           style={[
                             styles.optionRow,
                             { borderColor: active ? colors.primary : colors.border },
-                            active && { backgroundColor: colors.primary + '14' },
+                            active && { backgroundColor: colors.primaryBg },
                           ]}
                           onPress={() => handleChangeRole(opt.value)}
                           disabled={active || memberBusy}
@@ -1303,8 +1303,8 @@ function formatCheckInTime(iso: string): string {
 function RoleBadge({ role, colors }: { role: string; colors: any }) {
   const isLeader = role === 'LEADER';
   const isStaff = role === 'STAFF';
-  const bg = isLeader ? colors.primary + '1A' : isStaff ? colors.warning + '1A' : colors.border;
-  const fg = isLeader ? colors.primary : isStaff ? colors.warning : colors.textSecondary;
+  const bg = isLeader ? colors.primaryBg : colors.surface2;
+  const fg = isLeader ? colors.primary : colors.textSecondary;
   return (
     <View style={[styles.roleBadge, { backgroundColor: bg }]}>
       <Text style={[styles.roleBadgeText, { color: fg }]}>{ROLE_LABELS[role] ?? role}</Text>
@@ -1412,7 +1412,7 @@ const styles = StyleSheet.create({
 
   visibilityRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.md, marginBottom: spacing.lg },
   visibilityBtn: { paddingHorizontal: spacing.lg, paddingVertical: spacing.sm, borderRadius: radius.pill },
-  visibilityBtnText: { ...typography.buttonSm, fontWeight: '800' },
+  visibilityBtnText: { ...typography.buttonSm, fontWeight: '600' },
   fieldLabel: { ...typography.caption, fontWeight: '600', marginBottom: spacing.xs },
   fieldHint: { ...typography.caption, marginBottom: spacing.sm },
   input: {
@@ -1446,7 +1446,7 @@ const styles = StyleSheet.create({
     marginBottom: spacing.md,
   },
   codeLabel: { ...typography.caption },
-  codeValue: { ...typography.h2, letterSpacing: 4, fontWeight: '800', marginTop: 2 },
+  codeValue: { ...typography.h2, letterSpacing: 4, fontWeight: '600', marginTop: 2 },
 
   linkRow: {
     flexDirection: 'row',
@@ -1491,8 +1491,8 @@ const styles = StyleSheet.create({
     padding: spacing.md,
     marginTop: spacing.lg,
   },
-  guestMergeTitle: { fontSize: 13.5, fontWeight: '800' },
-  guestMergeHint: { fontSize: 11.5, fontWeight: '600', marginTop: 2, lineHeight: 15 },
+  guestMergeTitle: { fontSize: 13, fontWeight: '600' },
+  guestMergeHint: { fontSize: 12, fontWeight: '600', marginTop: 2, lineHeight: 15 },
 
   // ── 멤버·운영진 ──
   memberCount: { ...typography.caption },
@@ -1506,7 +1506,7 @@ const styles = StyleSheet.create({
   memberAvatar: {
     width: 36,
     height: 36,
-    borderRadius: 18,
+    borderRadius: 12,
     borderWidth: 1,
     alignItems: 'center',
     justifyContent: 'center',
@@ -1576,13 +1576,13 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  skillChipText: { ...typography.subtitle1, fontWeight: '800' },
+  skillChipText: { ...typography.subtitle1, fontWeight: '600' },
   // 성별 편집 chip: vector marker + 남/여 label (auto width so both fit).
   genderChip: {
     flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: spacing.xs,
     height: 44, paddingHorizontal: spacing.lg, borderRadius: radius.md, borderWidth: 1.5,
   },
-  genderChipText: { ...typography.subtitle1, fontWeight: '800' },
+  genderChipText: { ...typography.subtitle1, fontWeight: '600' },
   sheetClose: {
     marginTop: spacing.lg,
     borderWidth: 1.5,
@@ -1630,7 +1630,7 @@ const styles = StyleSheet.create({
   },
   duesTotalItem: { flex: 1, alignItems: 'center', gap: 2 },
   duesTotalLabel: { ...typography.caption },
-  duesTotalValue: { ...typography.subtitle2, fontWeight: '800' },
+  duesTotalValue: { ...typography.subtitle2, fontWeight: '600' },
   duesRow: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -1646,5 +1646,5 @@ const styles = StyleSheet.create({
     minWidth: 72,
     alignItems: 'center',
   },
-  paidToggleText: { ...typography.caption, fontWeight: '800' },
+  paidToggleText: { ...typography.caption, fontWeight: '600' },
 });

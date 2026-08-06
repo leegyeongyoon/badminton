@@ -159,8 +159,8 @@ export default function MyApplications() {
 
                   {/* 면접 안내 — 공고측이 잡은 일시·장소 */}
                   {r.status === 'INTERVIEW' && (r.interviewWhen || r.interviewPlace || r.interviewNote) && (
-                    <View style={[styles.interviewBox, { backgroundColor: colors.warning + '0E', borderColor: colors.warning + '40' }]}>
-                      <Ionicons name="calendar-outline" size={13} color={colors.warning} />
+                    <View style={[styles.interviewBox, { backgroundColor: colors.surface2, borderColor: 'transparent' }]}>
+                      <Ionicons name="calendar-outline" size={13} color={colors.textSecondary} />
                       <View style={{ flex: 1, minWidth: 0 }}>
                         <Text style={[styles.interviewText, { color: colors.text }]} numberOfLines={1}>
                           면접 {[r.interviewWhen, r.interviewPlace].filter(Boolean).join(' · ') || '일정 협의 중'}
@@ -186,26 +186,26 @@ const styles = StyleSheet.create({
   title: { ...typography.subtitle1, flex: 1 },
   tabBar: { flexDirection: 'row', borderBottomWidth: StyleSheet.hairlineWidth, paddingHorizontal: spacing.lg },
   tabItem: { flexDirection: 'row', alignItems: 'center', gap: 5, paddingVertical: 12, paddingHorizontal: spacing.md, borderBottomWidth: 2, borderBottomColor: 'transparent' },
-  tabLabel: { fontSize: 14, fontWeight: '800' },
-  tabCount: { fontSize: 13, fontWeight: '900' },
+  tabLabel: { fontSize: 14, fontWeight: '600' },
+  tabCount: { fontSize: 13, fontWeight: '700' },
   interviewBox: { flexDirection: 'row', alignItems: 'center', gap: 7, borderWidth: 1, borderRadius: 10, paddingHorizontal: 10, paddingVertical: 8, marginTop: 10 },
-  interviewText: { fontSize: 12.5, fontWeight: '800' },
-  interviewNote: { fontSize: 11.5, fontWeight: '600', marginTop: 2 },
+  interviewText: { fontSize: 13, fontWeight: '600' },
+  interviewNote: { fontSize: 12, fontWeight: '600', marginTop: 2 },
   center: { flex: 1, alignItems: 'center', justifyContent: 'center' },
   emptyBox: { alignItems: 'center', gap: spacing.sm, paddingVertical: spacing.xxxl },
   emptyTitle: { ...typography.subtitle1 },
   emptyBtn: { marginTop: spacing.md, paddingHorizontal: spacing.xl, paddingVertical: 12, borderRadius: 12 },
-  emptyBtnText: { color: '#fff', fontSize: 14, fontWeight: '800' },
-  card: { borderRadius: 16, borderWidth: StyleSheet.hairlineWidth, padding: spacing.lg, marginBottom: spacing.md },
+  emptyBtnText: { color: '#fff', fontSize: 14, fontWeight: '600' },
+  card: { borderRadius: 12, borderWidth: StyleSheet.hairlineWidth, padding: spacing.lg, marginBottom: spacing.md },
   cardHead: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: spacing.sm },
-  owner: { fontSize: 12, fontWeight: '800', flexShrink: 1 },
+  owner: { fontSize: 12, fontWeight: '600', flexShrink: 1 },
   closedTag: { fontSize: 11, fontWeight: '700' },
-  cardTitle: { fontSize: 16.5, fontWeight: '800', letterSpacing: -0.2, marginTop: 4 },
-  meta: { fontSize: 12.5, fontWeight: '600', marginTop: 4 },
+  cardTitle: { fontSize: 16, fontWeight: '600', letterSpacing: -0.2, marginTop: 4 },
+  meta: { fontSize: 13, fontWeight: '600', marginTop: 4 },
   stepsRow: { flexDirection: 'row', marginTop: spacing.lg },
   step: { flex: 1, alignItems: 'center', gap: 6 },
   stepDotRow: { flexDirection: 'row', alignItems: 'center', width: '100%' },
   stepDot: { width: 18, height: 18, borderRadius: 9, alignItems: 'center', justifyContent: 'center' },
   stepLine: { flex: 1, height: 2 },
-  stepLabel: { fontSize: 11, fontWeight: '800' },
+  stepLabel: { fontSize: 11, fontWeight: '600' },
 });
