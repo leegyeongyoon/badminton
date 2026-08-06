@@ -102,6 +102,22 @@ const TUNING_ROWS: { key: keyof SuggestTuning; label: string; hint: string }[] =
   { key: 'typeVarietyWeight', label: '타입 순환', hint: '혼복/동성복 골고루 (강할수록 한 타입에 안 갇힘)' },
 ];
 
+// ─── 다음 게임 미리 준비 수(버퍼) ───
+// 자동 편성이 '다음 게임' 대기줄에 몇 개를 미리 준비할지. '자동'은 정모 인원수에 맞춰
+// 스케일(사람 많으면 더 깊게), 나머지는 고정. 게임판 조율 패널에서 운영자가 바꾼다.
+const AUTO_BUFFER_OPTIONS: readonly (readonly [string, 'auto' | number])[] = [
+  ['자동', 'auto'],
+  ['적게', 2],
+  ['보통', 4],
+  ['넉넉', 6],
+  ['최대', 99],
+];
+// 인원수 기반 자동 버퍼: 대략 16명당 +1게임, 2~6게임으로 클램프. (32명→2, 48명→3, 60명→4, 80명→5)
+function resolveAutoBuffer(setting: 'auto' | number, attendance: number): number {
+  if (setting === 'auto') return Math.max(2, Math.min(6, Math.ceil(attendance / 16)));
+  return setting;
+}
+
 // ─── Drag-to-compose registry ───────────────────────────────
 // A tiny absolute-coordinate drop-target registry so a player tile dragged
 // out of the 미편성 pool (PanResponder, works on react-native-web) can be
@@ -390,6 +406,31 @@ export default function OperateScreen() {
   }, [gameCycleMin, gameCycleKey]);
   const gameCycleRef = useRef(13);
   useEffect(() => { gameCycleRef.current = gameCycleMin; }, [gameCycleMin]);
+
+  // 다음 게임 미리 준비 수(버퍼) — '자동'=정모 인원수 기반 스케일. 게임판에서 조정. 정모별 저장.
+  const [autoBuffer, setAutoBuffer] = useState<'auto' | number>('auto');
+  const autoBufferKey = clubSessionId ? `operate_autobuffer_${clubSessionId}` : null;
+  const autoBufferLoadedRef = useRef(false);
+  useEffect(() => {
+    if (!autoBufferKey) return;
+    let alive = true;
+    getItem(autoBufferKey)
+      .then((raw) => {
+        if (!alive || !raw) return;
+        if (raw === 'auto') setAutoBuffer('auto');
+        else { const n = parseInt(raw, 10); if ([2, 4, 6, 99].includes(n)) setAutoBuffer(n); }
+      })
+      .catch(() => {})
+      .finally(() => { autoBufferLoadedRef.current = true; });
+    return () => { alive = false; };
+  }, [autoBufferKey]);
+  useEffect(() => {
+    if (!autoBufferKey || !autoBufferLoadedRef.current) return;
+    setItem(autoBufferKey, String(autoBuffer)).catch(() => {});
+  }, [autoBuffer, autoBufferKey]);
+  const autoBufferRef = useRef<'auto' | number>('auto');
+  useEffect(() => { autoBufferRef.current = autoBuffer; }, [autoBuffer]);
+
   // '자동 편성 중' 느낌의 펄스 애니메이션(ON일 때만 은은하게).
   const autoPulse = useRef(new RNAnimated.Value(1)).current;
   useEffect(() => {
@@ -1619,15 +1660,13 @@ export default function OperateScreen() {
   const runAutoFillPass = useCallback(async () => {
     if (!autoPilotRef.current || autoFillLockRef.current || !board) return;
     const readyCount = queuedEntries.filter((e) => e.playerIds.length >= 4).length;
-    // 시간 인지 — 빈 코트 + '곧 끝날' 코트에 더해 다음 게임을 AHEAD개 앞서 준비(대기 인원이
-    // 봐도 '내 다음 게임'이 보이게). 단, 큐에 준비하면 그 4명에게 '편성됨' 알림이 나가므로
-    // 너무 깊게는 안 한다(과도한 사전 알림 방지). 공평성은 서버 aging(오래 기다린 사람 자동
-    // 우선)이 담당하므로 미리 짜둬도 순서가 뒤틀리지 않는다. 코트 수+AHEAD 로 상한.
-    const AUTO_QUEUE_AHEAD = 3;
-    const target = Math.min(
-      courts.length + AUTO_QUEUE_AHEAD,
-      emptyCourts.length + aboutToFinishCount + AUTO_QUEUE_AHEAD,
-    );
+    // 시간 인지 — 빈 코트 + '곧 끝날' 코트에 더해 다음 게임을 '버퍼'개 앞서 준비(대기 인원이
+    // 봐도 '내 다음 게임'이 보이게). 버퍼는 정모 인원수 기반 자동(또는 게임판 조율값). 공평은
+    // 서버 aging(오래 기다린 사람 자동 우선)이 담당하므로 미리 짜둬도 순서가 뒤틀리지 않는다.
+    // 하드 상한 = 전체 게임 수(인원/4) — 사람 수 이상으로는 절대 안 짬.
+    const ahead = resolveAutoBuffer(autoBufferRef.current, uniquePlayers.length);
+    const maxGames = Math.ceil(uniquePlayers.length / 4);
+    const target = Math.min(maxGames, emptyCourts.length + aboutToFinishCount + ahead);
     const need = target - readyCount;
     if (need <= 0) return;                    // 이미 충분히 준비됨
     autoFillLockRef.current = true;
@@ -1659,7 +1698,7 @@ export default function OperateScreen() {
         loadBoard(); loadPool();
       }
     }
-  }, [board, emptyCourts.length, courts.length, aboutToFinishCount, queuedEntries, suggestNext, createQueueGame, getPlayer, loadBoard, loadPool]);
+  }, [board, emptyCourts.length, courts.length, aboutToFinishCount, uniquePlayers.length, queuedEntries, suggestNext, createQueueGame, getPlayer, loadBoard, loadPool]);
   useEffect(() => { runAutoFillRef.current = runAutoFillPass; }, [runAutoFillPass]);
 
   // 자동 편성이 반응할 준비량 지표(완성된 4인 대기 게임 수).
@@ -4399,6 +4438,27 @@ export default function OperateScreen() {
                         accessibilityLabel={`게임 주기 ${v}분`}
                       >
                         <Text style={[styles.tuningSegText, { color: on ? '#fff' : colors.textSecondary }]}>{v}분</Text>
+                      </TouchableOpacity>
+                    );
+                  })}
+                </View>
+              </View>
+              {/* 다음 게임 준비(버퍼) — 미리 준비할 다음 게임 수. '자동'=정모 인원수 기반 스케일. */}
+              <View style={styles.tuningRow}>
+                <Text style={[styles.tuningRowLabel, { color: colors.textSecondary }]}>다음 게임 준비</Text>
+                <View style={styles.tuningSeg}>
+                  {AUTO_BUFFER_OPTIONS.map(([label, val]) => {
+                    const on = autoBuffer === val;
+                    return (
+                      <TouchableOpacity
+                        key={label}
+                        style={[styles.tuningSegItem, { borderColor: on ? colors.secondary : colors.border, backgroundColor: on ? colors.secondary : 'transparent' }]}
+                        onPress={() => setAutoBuffer(val)}
+                        accessibilityRole="button"
+                        accessibilityState={{ selected: on }}
+                        accessibilityLabel={`다음 게임 준비 ${label}`}
+                      >
+                        <Text style={[styles.tuningSegText, { color: on ? '#fff' : colors.textSecondary }]}>{label}</Text>
                       </TouchableOpacity>
                     );
                   })}
