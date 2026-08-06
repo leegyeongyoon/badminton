@@ -888,13 +888,13 @@ export default function ClubDetailScreen() {
                 <>
                   {/* 요약 */}
                   <View style={styles.duesSummaryRow}>
-                    <View style={[styles.duesSummaryCard, { backgroundColor: Colors.primary + '10' }]}>
+                    <View style={[styles.duesSummaryCard, { backgroundColor: Colors.primaryBg }]}>
                       <Text style={styles.duesSummaryLabel}>올해 납부</Text>
                       <Text style={[styles.duesSummaryValue, { color: Colors.primary }]}>
                         {myDues.totals.paidThisYear.toLocaleString()}원
                       </Text>
                     </View>
-                    <View style={[styles.duesSummaryCard, myDues.totals.unpaidCount > 0 ? { backgroundColor: Colors.danger + '10' } : { backgroundColor: Colors.surface }]}>
+                    <View style={[styles.duesSummaryCard, myDues.totals.unpaidCount > 0 ? { backgroundColor: Colors.dangerBg } : { backgroundColor: Colors.surface }]}>
                       <Text style={styles.duesSummaryLabel}>미납</Text>
                       <Text style={[styles.duesSummaryValue, { color: myDues.totals.unpaidCount > 0 ? Colors.danger : Colors.textLight }]}>
                         {myDues.totals.unpaidCount > 0 ? `${myDues.totals.unpaidCount}건 · ${myDues.totals.unpaidAmount.toLocaleString()}원` : '없음'}
@@ -928,7 +928,7 @@ export default function ClubDetailScreen() {
                         <Text style={styles.duesRowAmount}>{pd.total.toLocaleString()}원</Text>
                       )}
                       {pd.total > 0 && (
-                        <View style={[styles.duesBadge, pd.paid ? { backgroundColor: '#16a34a18' } : { backgroundColor: Colors.danger + '15' }]}>
+                        <View style={[styles.duesBadge, pd.paid ? { backgroundColor: Colors.secondaryBg } : { backgroundColor: Colors.dangerBg }]}>
                           <Text style={[styles.duesBadgeText, { color: pd.paid ? '#16a34a' : Colors.danger }]}>
                             {pd.paid ? '완납 ✓' : '미납'}
                           </Text>
@@ -1153,7 +1153,7 @@ const styles = StyleSheet.create({
     backgroundColor: Colors.surface,
     margin: 16,
     marginBottom: 0,
-    borderRadius: 16,
+    borderRadius: 12,
     padding: 14,
     borderWidth: StyleSheet.hairlineWidth,
     borderColor: Colors.border,
@@ -1179,16 +1179,16 @@ const styles = StyleSheet.create({
   },
   clubAvatarText: {
     fontSize: 18,
-    fontWeight: '800',
+    fontWeight: '600',
     color: Colors.primary,
   },
   clubName: {
     fontSize: 17,
-    fontWeight: '800',
+    fontWeight: '600',
     color: Colors.text,
   },
   clubMeta: {
-    fontSize: 12.5,
+    fontSize: 13,
     color: Colors.textSecondary,
     marginTop: 1,
   },
@@ -1205,7 +1205,7 @@ const styles = StyleSheet.create({
     backgroundColor: Colors.surfaceSecondary,
   },
   iconActionLabel: {
-    fontSize: 10.5,
+    fontSize: 11,
     color: Colors.textSecondary,
     fontWeight: '600',
     marginTop: 2,
@@ -1236,13 +1236,13 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 10,
-    backgroundColor: Colors.primary + '10',
-    borderRadius: 14,
+    backgroundColor: Colors.primaryBg,
+    borderRadius: 12,
     paddingVertical: 12,
     paddingHorizontal: 14,
     marginTop: 10,
   },
-  guestApplyShareBigTitle: { fontSize: 14, fontWeight: '900', color: Colors.primary },
+  guestApplyShareBigTitle: { fontSize: 14, fontWeight: '700', color: Colors.primary },
   guestApplyShareBigSub: { fontSize: 11, fontWeight: '600', color: Colors.textSecondary, marginTop: 1 },
   sectionTabs: {
     flexDirection: 'row',
@@ -1261,7 +1261,7 @@ const styles = StyleSheet.create({
   sectionTabBtnActive: { borderBottomColor: Colors.primary },
   sectionTabInner: { flexDirection: 'row', alignItems: 'center', gap: 5 },
   sectionTabText: { fontSize: 14, fontWeight: '700', color: Colors.textLight },
-  sectionTabTextActive: { color: Colors.primary, fontWeight: '900' },
+  sectionTabTextActive: { color: Colors.primary, fontWeight: '700' },
   sectionTabCount: {
     minWidth: 18,
     height: 18,
@@ -1271,45 +1271,45 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     paddingHorizontal: 5,
   },
-  sectionTabCountActive: { backgroundColor: Colors.primary + '18' },
-  sectionTabCountText: { fontSize: 10, fontWeight: '800', color: Colors.textLight },
+  sectionTabCountActive: { backgroundColor: Colors.primaryBg },
+  sectionTabCountText: { fontSize: 10, fontWeight: '600', color: Colors.textLight },
   sectionTabCountTextActive: { color: Colors.primary },
   lessonManageLink: { alignSelf: 'flex-end', paddingVertical: 4, marginBottom: 6 },
-  lessonManageLinkText: { fontSize: 12, fontWeight: '800', color: Colors.primary },
+  lessonManageLinkText: { fontSize: 12, fontWeight: '600', color: Colors.primary },
   lessonEmpty: {
     backgroundColor: Colors.surface,
-    borderRadius: 16,
+    borderRadius: 12,
     padding: 24,
     alignItems: 'center',
     gap: 4,
   },
-  lessonEmptyTitle: { fontSize: 14, fontWeight: '800', color: Colors.text },
+  lessonEmptyTitle: { fontSize: 14, fontWeight: '600', color: Colors.text },
   duesLoading: { paddingVertical: 40, alignItems: 'center' },
   duesSummaryRow: { flexDirection: 'row', gap: 10, marginBottom: 10 },
-  duesSummaryCard: { flex: 1, borderRadius: 16, padding: 14, gap: 4 },
+  duesSummaryCard: { flex: 1, borderRadius: 12, padding: 14, gap: 4 },
   duesSummaryLabel: { fontSize: 11, fontWeight: '700', color: Colors.textSecondary },
-  duesSummaryValue: { fontSize: 16, fontWeight: '900' },
+  duesSummaryValue: { fontSize: 16, fontWeight: '700' },
   duesAccountCard: {
     flexDirection: 'row', alignItems: 'center', gap: 10,
-    backgroundColor: Colors.surface, borderRadius: 16, padding: 14, marginBottom: 10,
+    backgroundColor: Colors.surface, borderRadius: 12, padding: 14, marginBottom: 10,
   },
   duesAccountLabel: { fontSize: 11, fontWeight: '700', color: Colors.textSecondary },
-  duesAccountValue: { fontSize: 14, fontWeight: '800', color: Colors.text, marginTop: 1 },
+  duesAccountValue: { fontSize: 14, fontWeight: '600', color: Colors.text, marginTop: 1 },
   duesRow: {
     flexDirection: 'row', alignItems: 'center', gap: 10,
-    backgroundColor: Colors.surface, borderRadius: 14, paddingVertical: 12, paddingHorizontal: 14, marginBottom: 8,
+    backgroundColor: Colors.surface, borderRadius: 12, paddingVertical: 12, paddingHorizontal: 14, marginBottom: 8,
   },
-  duesRowLabel: { fontSize: 14, fontWeight: '800', color: Colors.text },
+  duesRowLabel: { fontSize: 14, fontWeight: '600', color: Colors.text },
   duesRowMeta: { fontSize: 11, color: Colors.textLight, marginTop: 2 },
-  duesRowAmount: { fontSize: 14, fontWeight: '900', color: Colors.text },
+  duesRowAmount: { fontSize: 14, fontWeight: '700', color: Colors.text },
   duesBadge: { paddingHorizontal: 8, paddingVertical: 4, borderRadius: 999 },
-  duesBadgeText: { fontSize: 11, fontWeight: '900' },
+  duesBadgeText: { fontSize: 11, fontWeight: '700' },
   duesHint: { fontSize: 11, color: Colors.textLight, lineHeight: 16, marginTop: 4, marginBottom: 8 },
   lessonEmptySub: { fontSize: 12, color: Colors.textLight, textAlign: 'center', lineHeight: 17 },
-  guestApplyShareText: { fontSize: 11, fontWeight: '800', color: Colors.primary },
+  guestApplyShareText: { fontSize: 11, fontWeight: '600', color: Colors.primary },
   inviteCode: {
     fontSize: 14,
-    fontWeight: '800',
+    fontWeight: '600',
     color: Colors.text,
     letterSpacing: 1.5,
   },
@@ -1318,7 +1318,7 @@ const styles = StyleSheet.create({
     margin: 16,
     marginBottom: 0,
     backgroundColor: Colors.surface,
-    borderRadius: 18,
+    borderRadius: 12,
     borderWidth: 1,
     borderColor: Colors.primaryLight,
     padding: 18,
@@ -1344,7 +1344,7 @@ const styles = StyleSheet.create({
   },
   heroTitle: {
     fontSize: 17,
-    fontWeight: '800',
+    fontWeight: '600',
     color: Colors.text,
     flexShrink: 1,
   },
@@ -1367,13 +1367,13 @@ const styles = StyleSheet.create({
   },
   liveBadgeText: {
     color: Colors.info,
-    fontSize: 10.5,
-    fontWeight: '800',
+    fontSize: 11,
+    fontWeight: '600',
   },
   // ONE primary action — teal (앱의 primary, 화면에서 유일한 강조)
   heroPrimaryBtn: {
     backgroundColor: Colors.primary,
-    borderRadius: 14,
+    borderRadius: 12,
     paddingVertical: 15,
     alignItems: 'center',
     ...createShadow(2, 8, 0.18, 3, Colors.primary),
@@ -1381,11 +1381,11 @@ const styles = StyleSheet.create({
   heroPrimaryText: {
     color: Colors.textInverse,
     fontSize: 16,
-    fontWeight: '800',
+    fontWeight: '600',
   },
   // 멤버 체크인 (secondary, 카드 안 — outline)
   heroSecondaryBtn: {
-    borderRadius: 14,
+    borderRadius: 12,
     paddingVertical: 13,
     alignItems: 'center',
     borderWidth: 1.5,
@@ -1398,7 +1398,7 @@ const styles = StyleSheet.create({
     fontWeight: '700',
   },
   heroCheckoutBtn: {
-    borderRadius: 14,
+    borderRadius: 12,
     paddingVertical: 12,
     paddingHorizontal: 18,
     alignItems: 'center',
@@ -1426,7 +1426,7 @@ const styles = StyleSheet.create({
     color: Colors.textSecondary,
   },
   heroEmptySub: {
-    fontSize: 12.5,
+    fontSize: 13,
     color: Colors.textLight,
     textAlign: 'center',
   },
@@ -1434,7 +1434,7 @@ const styles = StyleSheet.create({
     marginTop: -4,
     textAlign: 'center',
     color: Colors.textSecondary,
-    fontSize: 12.5,
+    fontSize: 13,
   },
   // 참석 중 표시 + 체크아웃 (한 줄)
   attendingRow: {
@@ -1445,7 +1445,7 @@ const styles = StyleSheet.create({
   attendingBadge: {
     flex: 1,
     backgroundColor: Colors.secondaryBg,
-    borderRadius: 14,
+    borderRadius: 12,
     paddingVertical: 12,
     alignItems: 'center',
     borderWidth: 1.5,
@@ -1454,7 +1454,7 @@ const styles = StyleSheet.create({
   attendingText: {
     color: Colors.secondary,
     fontSize: 15,
-    fontWeight: '800',
+    fontWeight: '600',
   },
   // Section
   section: {
@@ -1630,7 +1630,7 @@ const styles = StyleSheet.create({
   },
   modalTitle: {
     fontSize: 20,
-    fontWeight: '800',
+    fontWeight: '600',
     color: Colors.text,
   },
   modalClose: {
@@ -1666,7 +1666,7 @@ const styles = StyleSheet.create({
   },
   facilityChipActive: {
     borderColor: Colors.primary,
-    backgroundColor: Colors.primary + '14',
+    backgroundColor: Colors.primaryBg,
   },
   facilityChipText: {
     fontSize: 13,
@@ -1726,7 +1726,7 @@ const styles = StyleSheet.create({
   },
   confirmBtn: {
     backgroundColor: '#7C3AED',
-    borderRadius: 14,
+    borderRadius: 12,
     paddingVertical: 16,
     alignItems: 'center',
   },
@@ -1794,7 +1794,7 @@ const styles = StyleSheet.create({
     marginTop: 20,
     marginHorizontal: 16,
     backgroundColor: Colors.surface,
-    borderRadius: 14,
+    borderRadius: 12,
     borderWidth: StyleSheet.hairlineWidth,
     borderColor: Colors.border,
     overflow: 'hidden',
@@ -1808,7 +1808,7 @@ const styles = StyleSheet.create({
   },
   membersHeaderText: {
     fontSize: 15,
-    fontWeight: '800',
+    fontWeight: '600',
     color: Colors.text,
   },
   membersBody: {
@@ -1825,7 +1825,7 @@ const styles = StyleSheet.create({
   },
   lessonCard: {
     backgroundColor: Colors.surface,
-    borderRadius: 16,
+    borderRadius: 12,
     padding: 16,
     marginBottom: 10,
   },
@@ -1835,12 +1835,12 @@ const styles = StyleSheet.create({
     backgroundColor: Colors.primary + '22',
     alignItems: 'center', justifyContent: 'center',
   },
-  lessonAvatarText: { fontSize: 17, fontWeight: '900', color: Colors.primary },
-  lessonCertBadge: { backgroundColor: Colors.primary + '16', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 7 },
-  lessonCertText: { fontSize: 10, fontWeight: '800', color: Colors.primary },
-  lessonCoach: { fontSize: 15, fontWeight: '900', color: Colors.text },
+  lessonAvatarText: { fontSize: 17, fontWeight: '700', color: Colors.primary },
+  lessonCertBadge: { backgroundColor: Colors.primaryBg, paddingHorizontal: 6, paddingVertical: 2, borderRadius: 7 },
+  lessonCertText: { fontSize: 10, fontWeight: '600', color: Colors.primary },
+  lessonCoach: { fontSize: 15, fontWeight: '700', color: Colors.text },
   lessonIntro: { fontSize: 12, color: Colors.textSecondary, marginTop: 1 },
-  lessonFee: { fontSize: 14, fontWeight: '900', color: Colors.text },
+  lessonFee: { fontSize: 14, fontWeight: '700', color: Colors.text },
   lessonCareerBox: {
     backgroundColor: Colors.background,
     borderRadius: 10, padding: 10, marginTop: 10, gap: 2,
@@ -1850,21 +1850,21 @@ const styles = StyleSheet.create({
   lessonDayBadges: { flexDirection: 'row', alignItems: 'center', gap: 4, flexWrap: 'wrap' },
   lessonDayBadge: {
     width: 24, height: 24, borderRadius: 12,
-    backgroundColor: Colors.primary + '18',
+    backgroundColor: Colors.primaryBg,
     alignItems: 'center', justifyContent: 'center',
   },
-  lessonDayBadgeText: { fontSize: 11, fontWeight: '900', color: Colors.primary },
-  lessonTime: { fontSize: 13, fontWeight: '800', color: Colors.text, marginLeft: 4 },
+  lessonDayBadgeText: { fontSize: 11, fontWeight: '700', color: Colors.primary },
+  lessonTime: { fontSize: 13, fontWeight: '600', color: Colors.text, marginLeft: 4 },
   lessonGaugeRow: { flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 10 },
   lessonGaugeTrack: { flex: 1, height: 7, borderRadius: 4, backgroundColor: Colors.background, overflow: 'hidden' },
   lessonGaugeFill: { height: 7, borderRadius: 4, backgroundColor: Colors.primary },
-  lessonGaugeText: { fontSize: 11, fontWeight: '800', color: Colors.textSecondary, minWidth: 56, textAlign: 'right' },
+  lessonGaugeText: { fontSize: 11, fontWeight: '600', color: Colors.textSecondary, minWidth: 56, textAlign: 'right' },
   lessonWaitBtn: { backgroundColor: Colors.warning },
   lessonPayBtn: {
     backgroundColor: Colors.text, borderRadius: 12, paddingVertical: 13,
     alignItems: 'center', marginTop: 10,
   },
-  lessonPayText: { color: '#fff', fontSize: 14, fontWeight: '800' },
+  lessonPayText: { color: '#fff', fontSize: 14, fontWeight: '600' },
   lessonApplyBtn: {
     backgroundColor: Colors.primary,
     paddingVertical: 12,
@@ -1872,19 +1872,19 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     marginTop: 12,
   },
-  lessonApplyText: { fontSize: 14, fontWeight: '900', color: '#fff' },
+  lessonApplyText: { fontSize: 14, fontWeight: '700', color: '#fff' },
   lessonAppliedBadge: {
-    backgroundColor: Colors.primary + '15',
+    backgroundColor: Colors.primaryBg,
     paddingVertical: 10, borderRadius: 12, alignItems: 'center', marginTop: 12,
   },
-  lessonAppliedText: { fontSize: 13, fontWeight: '800', color: Colors.primary },
-  lessonConfirmedBadge: { backgroundColor: '#16a34a18' },
+  lessonAppliedText: { fontSize: 13, fontWeight: '600', color: Colors.primary },
+  lessonConfirmedBadge: { backgroundColor: Colors.secondaryBg },
   lessonConfirmedText: { color: '#16a34a' },
   inquiryBanner: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 8,
-    backgroundColor: Colors.primary + '12',
+    backgroundColor: Colors.primaryBg,
     borderRadius: 12,
     paddingVertical: 10,
     paddingHorizontal: 14,
@@ -1899,6 +1899,6 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     paddingHorizontal: 5,
   },
-  inquiryBadgeText: { color: '#fff', fontSize: 11, fontWeight: '900' },
-  inquiryText: { flex: 1, fontSize: 13, fontWeight: '800', color: Colors.primary },
+  inquiryBadgeText: { color: '#fff', fontSize: 11, fontWeight: '700' },
+  inquiryText: { flex: 1, fontSize: 13, fontWeight: '600', color: Colors.primary },
 });

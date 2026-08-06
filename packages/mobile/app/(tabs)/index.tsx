@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import { View, Text, ScrollView, StyleSheet, Pressable, Platform } from 'react-native';
 import { useRouter } from 'expo-router';
 import { useAuthStore } from '../../store/authStore';
@@ -7,21 +7,28 @@ import { useCheckinStore } from '../../store/checkinStore';
 import { useTurnStore } from '../../store/turnStore';
 import { clubSessionApi } from '../../services/clubSession';
 import { profileApi, MyStatusResponse } from '../../services/profile';
-import { getItem, setItem } from '../../services/storage';
-import { showSuccess } from '../../utils/feedback';
 import { useSocketEvent, useUserRoom } from '../../hooks/useSocket';
 import { useTheme } from '../../hooks/useTheme';
-import { getSkillMeta } from '../../constants/skill';
-import { typography, spacing, radius, palette } from '../../constants/theme';
+import { typography, spacing, radius } from '../../constants/theme';
 import { Button } from '../../components/ui/Button';
 import { Icon } from '../../components/ui/Icon';
+import { Tag } from '../../components/ui/Tag';
 import { COACH_MARKET_ENABLED } from '../../constants/features';
 import { Skeleton, SkeletonGroup } from '../../components/ui/Skeleton';
 import { EmptyState } from '../../components/ui/EmptyState';
-import { SectionHeader } from '../../components/ui/SectionHeader';
 import { AnimatedRefreshControl } from '../../components/ui/AnimatedRefreshControl';
 import { ScreenContainer } from '../../components/ui/ScreenContainer';
 import { ClubModal } from '../../components/settings/ClubModal';
+
+// ─────────────────────────────────────────────────────────────
+// 홈 — "오늘 정모" 중심 대시보드 (신뢰 톤).
+//  1) 헤더: 이름 + 급수 태그 + 알림
+//  2) 내 차례 히어로(게임 배정 시)
+//  3) 오늘 정모: 진행 중 정모 카드(내 상태 + 맥락 CTA)
+//  4) 내 모임: 간결한 리스트 행
+//  5) 바로가기: 텍스트 행
+// 데이터 배선(소켓 리프레시·체크인 정책)은 기존 그대로 — 렌더만 재구성.
+// ─────────────────────────────────────────────────────────────
 
 interface ActiveSession {
   id: string;
@@ -54,7 +61,7 @@ function formatSessionDateLabel(iso?: string): string {
 
 export default function HomeScreen() {
   const router = useRouter();
-  const { colors, shadows } = useTheme();
+  const { colors } = useTheme();
   const { user } = useAuthStore();
   const { clubs, fetchClubs } = useClubStore();
   const { status: checkinStatus, fetchStatus } = useCheckinStore();
@@ -185,33 +192,33 @@ export default function HomeScreen() {
     [checkinStatus],
   );
 
-  const skillMeta = skillLevel ? getSkillMeta(skillLevel) : null;
   const greetingName = user?.name || '회원';
 
   // Only operators may create a 모임 (운영자만 모임 생성). A PLAYER sees a short
   // hint linking to 운영자 신청 (더보기) instead of the create button.
   const canCreateClub = user?.role === 'SUPER_ADMIN' || user?.role === 'CLUB_LEADER';
 
-  // Page background: a soft neutral so white cards have definition by contrast
-  // (Toss/당근 style structure) without leaning on drop-shadows.
-  const pageBg = colors.surfaceSecondary;
+  // 정모가 없을 때 운영진에게 보여줄 "정모 시작" 진입점 — 첫 운영 모임.
+  const firstStaffClub = useMemo(
+    () => (clubs as any[]).find((c) => staffClubIds.has(c.id)) ?? null,
+    [clubs, staffClubIds],
+  );
 
   // ─── Loading skeleton ───
   if (loading) {
     return (
-      <View style={[styles.container, { backgroundColor: pageBg }]}>
+      <View style={[styles.container, { backgroundColor: colors.background }]}>
         <ScreenContainer>
           <ScrollView style={styles.container} contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
-            <View style={styles.greetingRow}>
+            <View style={styles.headerRow}>
               <SkeletonGroup>
-                <Skeleton width={160} height={28} borderRadius={radius.sm} />
-                <Skeleton width={220} height={16} borderRadius={radius.sm} style={{ marginTop: spacing.sm }} />
+                <Skeleton width={140} height={22} borderRadius={radius.sm} />
               </SkeletonGroup>
             </View>
             <View style={{ height: spacing.xl }} />
-            <Skeleton width="100%" height={150} borderRadius={radius.card} />
+            <Skeleton width="100%" height={140} borderRadius={12} />
             <View style={{ height: spacing.lg }} />
-            <Skeleton width="100%" height={130} borderRadius={radius.card} />
+            <Skeleton width="100%" height={120} borderRadius={12} />
           </ScrollView>
         </ScreenContainer>
       </View>
@@ -219,7 +226,7 @@ export default function HomeScreen() {
   }
 
   return (
-    <View style={[styles.container, { backgroundColor: pageBg }]}>
+    <View style={[styles.container, { backgroundColor: colors.background }]}>
       <ScreenContainer>
       <ScrollView
         style={styles.container}
@@ -228,32 +235,25 @@ export default function HomeScreen() {
         // Android(Fabric)는 RefreshControl이 스크롤 높이를 0으로 붕괴 → 백지. iOS만 붙임.
         refreshControl={Platform.OS === 'ios' ? <AnimatedRefreshControl refreshing={refreshing} onRefresh={onRefresh} /> : undefined}
       >
-        {/* ─── 1. Greeting ─── */}
-        <View style={styles.greetingRow}>
-          <View style={{ flex: 1 }}>
-            <Text style={[styles.greeting, { color: colors.text }]} numberOfLines={1}>
-              {greetingName}님 👋
-            </Text>
-            <Text style={[styles.greetingSub, { color: colors.textSecondary }]}>
-              오늘도 즐거운 한 게임!
-            </Text>
-          </View>
-          {skillMeta ? (
-            <View style={[styles.skillBadge, { backgroundColor: skillMeta.color }]}>
-              <Text style={styles.skillBadgeLevel}>{skillMeta.level}</Text>
-              <Text style={styles.skillBadgeLabel} numberOfLines={1}>{skillMeta.description}</Text>
-            </View>
-          ) : null}
+        {/* ─── 1. 헤더 — 이름·급수·알림 ─── */}
+        <View style={styles.headerRow}>
+          <Text style={[styles.headerName, { color: colors.text }]} numberOfLines={1}>
+            {greetingName}님
+          </Text>
+          {!!skillLevel && <Tag label={`${skillLevel}조`} />}
+          <View style={{ flex: 1 }} />
+          <Pressable onPress={() => router.push('/notifications')} hitSlop={8}>
+            <Icon name="notification" size={20} color={colors.textSecondary} />
+          </Pressable>
         </View>
 
-        {/* ─── 2. 내 차례 hero ─── */}
+        {/* ─── 2. 내 차례 히어로 ─── */}
         {playingTurn && (
           <Pressable
             onPress={() => router.push('/(tabs)/my-status')}
             style={({ pressed }) => [
               styles.heroCard,
               { backgroundColor: colors.secondary },
-              shadows.sm,
               pressed && { opacity: 0.94 },
             ]}
           >
@@ -262,240 +262,160 @@ export default function HomeScreen() {
               <Text style={styles.heroBadgeText}>지금 내 차례</Text>
             </View>
             <Text style={styles.heroTitle}>{playingTurn.courtName} · 게임 시작</Text>
-            <Text style={styles.heroSub}>
-              지금 바로 코트로 가세요. 탭하면 게임 화면이 열려요.
-            </Text>
-            <View style={styles.heroCta}>
-              <Text style={styles.heroCtaText}>게임 보기</Text>
-              <Icon name="chevronRight" size={18} color={palette.white} />
-            </View>
+            <Text style={styles.heroSub}>지금 바로 코트로 가세요. 탭하면 게임 화면이 열려요.</Text>
           </Pressable>
         )}
 
-        {/* ─── 3. 내 모임 (centerpiece) — ONE unified list ───
-            모임마다 카드 하나. 각 카드가 그 모임의 "지금" 진행 상황(진행 중 정모 +
-            내 상태)과 맥락에 맞는 단 하나의 primary 액션을 보여준다.
-            운영판은 그 모임의 LEADER/STAFF에게만 노출(staffClubIds 게이트). */}
-        {/* ─── 퀵액션 — 만들기/참여/찾기를 상단에 (맨 아래 파묻히지 않게) ─── */}
-        {clubs.length > 0 && (
-          <View style={styles.quickRow}>
-            {canCreateClub && (
-              <Pressable onPress={() => setShowCreate(true)} style={({ pressed }) => [styles.quickBtn, { backgroundColor: colors.surface }, pressed && { opacity: 0.85 }]}>
-                <View style={[styles.quickIcon, { backgroundColor: colors.primaryLight }]}>
-                  <Icon name="add" size={18} color={colors.primary} />
-                </View>
-                <Text style={[styles.quickLabel, { color: colors.text }]}>모임 만들기</Text>
-              </Pressable>
-            )}
-            <Pressable onPress={() => setShowJoin(true)} style={({ pressed }) => [styles.quickBtn, { backgroundColor: colors.surface }, pressed && { opacity: 0.85 }]}>
-              <View style={[styles.quickIcon, { backgroundColor: colors.primaryLight }]}>
-                <Icon name="link" size={18} color={colors.primary} />
-              </View>
-              <Text style={[styles.quickLabel, { color: colors.text }]}>초대코드 참여</Text>
-            </Pressable>
-            <Pressable onPress={() => router.push('/discover')} style={({ pressed }) => [styles.quickBtn, { backgroundColor: colors.surface }, pressed && { opacity: 0.85 }]}>
-              <View style={[styles.quickIcon, { backgroundColor: colors.primaryLight }]}>
-                <Icon name="search" size={18} color={colors.primary} />
-              </View>
-              <Text style={[styles.quickLabel, { color: colors.text }]}>모임 찾기</Text>
-            </Pressable>
-            {COACH_MARKET_ENABLED && (
-              <Pressable onPress={() => router.push('/(tabs)/coach-hub' as never)} style={({ pressed }) => [styles.quickBtn, { backgroundColor: colors.surface }, pressed && { opacity: 0.85 }]}>
-                <View style={[styles.quickIcon, { backgroundColor: colors.primaryLight }]}>
-                  <Icon name="whistle" size={18} color={colors.primary} />
-                </View>
-                <Text style={[styles.quickLabel, { color: colors.text }]}>코치 구인·구직</Text>
-              </Pressable>
-            )}
-          </View>
-        )}
-
+        {/* ─── 3. 오늘 정모 ─── */}
         {clubs.length > 0 && (
           <View style={styles.section}>
-            {/* Section header: 내 모임 + count badge + quiet subtitle */}
-            <View style={styles.sectionHead}>
-              <View style={styles.sectionHeadRow}>
-                <Text style={[styles.sectionTitle, { color: colors.text }]}>내 모임</Text>
-                <View style={[styles.sectionCount, { backgroundColor: colors.primaryLight }]}>
-                  <Text style={[styles.sectionCountText, { color: colors.primary }]}>{clubs.length}</Text>
-                </View>
+            <Text style={[styles.sectionTitle, { color: colors.text }]}>오늘 정모</Text>
+            {activeSessions.length === 0 ? (
+              <View style={[styles.card, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+                <Text style={[styles.emptySessionText, { color: colors.textSecondary }]}>
+                  지금 진행 중인 정모가 없어요
+                </Text>
+                {firstStaffClub && (
+                  <Pressable onPress={() => router.push(`/club/${firstStaffClub.id}`)} hitSlop={6} style={{ marginTop: 6 }}>
+                    <Text style={[styles.linkText, { color: colors.primary }]}>정모 시작하러 가기</Text>
+                  </Pressable>
+                )}
               </View>
-              <Text style={[styles.sectionSub, { color: colors.textSecondary }]}>
-                정모 진행 상황과 내 상태를 한눈에 확인하세요
-              </Text>
-            </View>
-            {(clubs as any[]).map((c) => {
-              const isStaff = staffClubIds.has(c.id);
-              const session = activeSessions.find((s) => s.clubId === c.id) || null;
-              const checkedIn = session ? isCheckedInToSession(session) : false;
-              const mine = session && myStatus && myStatus.clubSessionId === session.id ? myStatus : null;
-              const isPlaying = mine?.status === 'PLAYING';
-              const isQueued = mine?.status === 'QUEUED';
+            ) : (
+              activeSessions.map((session) => {
+                const isStaff = staffClubIds.has(session.clubId);
+                const checkedIn = isCheckedInToSession(session);
+                const mine = myStatus && myStatus.clubSessionId === session.id ? myStatus : null;
+                const isPlaying = mine?.status === 'PLAYING';
+                const isQueued = mine?.status === 'QUEUED';
 
-              // 상태 한 줄: 진행 중 정모면 정모(일자)+내 상태, 없으면 calm.
-              let stateTint = colors.textLight;
-              let stateText = '진행 중인 정모 없음';
-              let stateStrong = false;
-              if (session) {
-                const dateLabel = session.title || formatSessionDateLabel(session.scheduledStartAt || session.startedAt);
                 let mineLabel: string;
+                let mineTint: string;
                 if (isPlaying) {
                   mineLabel = mine?.courtName ? `게임 중 · ${mine.courtName}` : '게임 중';
-                  stateTint = colors.playerInTurn;
+                  mineTint = colors.danger;
                 } else if (isQueued) {
                   mineLabel = mine?.queueOrder && mine.queueOrder > 0 ? `대기 ${mine.queueOrder}번째` : '다음 게임 대기';
-                  stateTint = colors.primary;
+                  mineTint = colors.primary;
                 } else if (checkedIn) {
                   mineLabel = '참석 중';
-                  stateTint = colors.secondary;
+                  mineTint = colors.secondary;
                 } else {
                   mineLabel = '미체크인';
-                  stateTint = colors.warning;
+                  mineTint = colors.textSecondary;
                 }
-                stateText = `${dateLabel} · 진행 중 · ${mineLabel}`;
-                stateStrong = true;
-              }
+                const dateLabel = session.title || formatSessionDateLabel(session.scheduledStartAt || session.startedAt);
 
-              // 맥락별 단 하나의 primary 액션 (+ 조용한 secondary는 운영진 현황 보기뿐).
-              // member→현황 보기 / member 미체크인→체크인 / operator→운영판
-              //   / 정모 없는 operator→정모 시작 / 정모 없는 member→카드 탭(클럽).
-              const goClub = () => router.push(`/club/${c.id}`);
-              return (
-                <Pressable
-                  key={c.id}
-                  onPress={goClub}
-                  style={({ pressed }) => [
-                    styles.clubCard,
-                    { backgroundColor: colors.surface },
-                    shadows.md,
-                    pressed && { opacity: 0.96 },
-                  ]}
-                >
-                  {/* Header: 아바타 | (이름·운영진 / 상태칩) | 모임 홈 — 흩어지지 않게 한 덩어리로 */}
-                  <View style={styles.clubTitleRow}>
-                    <View style={[styles.clubIconWrap, { backgroundColor: session ? colors.secondaryLight : colors.primaryLight }]}>
-                      <Text style={[styles.clubAvatarLetter, { color: session ? colors.secondary : colors.primary }]}>{c.name[0]}</Text>
+                return (
+                  <View key={session.id} style={[styles.card, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+                    <View style={styles.sessionHead}>
+                      <View style={[styles.liveDot, { backgroundColor: colors.secondary }]} />
+                      <Text style={[styles.sessionClub, { color: colors.text }]} numberOfLines={1}>{session.clubName}</Text>
+                      <Text style={[styles.sessionMeta, { color: colors.textLight }]}>진행 중</Text>
                     </View>
-                    <View style={{ flex: 1, minWidth: 0, gap: 6 }}>
-                      <View style={styles.clubNameRow}>
-                        <Text style={[styles.clubName, { color: colors.text }]} numberOfLines={1}>
-                          {c.name}
-                        </Text>
-                        {isStaff && (
-                          <View style={[styles.rolePill, { backgroundColor: colors.warningLight }]}>
-                            <Icon name="leader" size={11} color={colors.warning} />
-                            <Text style={[styles.rolePillText, { color: colors.warning }]}>운영진</Text>
-                          </View>
-                        )}
-                      </View>
-                      <View style={[styles.statusChip, { backgroundColor: stateStrong ? stateTint + '14' : colors.background }]}>
-                        <View style={[styles.statusDot, { backgroundColor: stateStrong ? stateTint : colors.textLight }]} />
-                        <Text
-                          style={[styles.clubStatusText, { color: stateStrong ? stateTint : colors.textLight }, stateStrong && { fontWeight: '800' }]}
-                          numberOfLines={1}
-                        >
-                          {stateText}
-                        </Text>
-                      </View>
+                    <Text style={[styles.sessionSub, { color: colors.textSecondary }]} numberOfLines={1}>
+                      {dateLabel} · {session.facilityName}
+                    </Text>
+                    <Text style={[styles.mineState, { color: mineTint }]}>{mineLabel}</Text>
+
+                    <View style={styles.sessionActions}>
+                      {isStaff ? (
+                        <>
+                          <Button title="운영판" icon="board" variant="primary" size="md" onPress={() => router.push(`/session/${session.id}/operate`)} style={{ flex: 1 }} />
+                          <Button title="현황 보기" icon="tv" variant="ghost" size="md" onPress={() => router.push(`/session/${session.id}/board`)} style={{ flex: 1, backgroundColor: colors.surface2 }} />
+                        </>
+                      ) : !checkedIn ? (
+                        <>
+                          <Button title="QR 체크인" icon="checkin" variant="primary" size="md" onPress={() => router.push('/checkin-modal')} style={{ flex: 1 }} />
+                          <Button title="현황 보기" icon="tv" variant="ghost" size="md" onPress={() => router.push(`/session/${session.id}/board`)} style={{ flex: 1, backgroundColor: colors.surface2 }} />
+                        </>
+                      ) : (
+                        <Button title="현황 보기" icon="tv" variant="primary" size="md" fullWidth onPress={() => router.push(`/session/${session.id}/board`)} style={{ flex: 1 }} />
+                      )}
                     </View>
-                    <Pressable onPress={goClub} hitSlop={6} style={({ pressed }) => [styles.clubHomePill, { backgroundColor: colors.primaryLight }, pressed && { opacity: 0.8 }]}>
-                      <Text style={[styles.clubHomePillText, { color: colors.primary }]}>모임 홈</Text>
-                      <Icon name="chevronRight" size={13} color={colors.primary} />
-                    </Pressable>
+                    {isStaff && !checkedIn && (
+                      // 운영진도 게임에 참석 가능 — 미체크인이면 앱 내 QR 스캔으로 출석.
+                      <Pressable onPress={() => router.push('/checkin-modal')} hitSlop={6} style={{ marginTop: spacing.md, alignSelf: 'center' }}>
+                        <Text style={[styles.linkText, { color: colors.textSecondary }]}>아직 출석 전이에요 — QR 체크인</Text>
+                      </Pressable>
+                    )}
                   </View>
-
-                  {/* ONE primary action by context (운영판 = 운영진만). */}
-                  {(session || isStaff) && (
-                  <View style={{ marginTop: spacing.lg }}>
-                  {session ? (
-                    isStaff ? (
-                      <View style={{ gap: spacing.sm + 2 }}>
-                        <View style={styles.clubActions}>
-                          <Button
-                            title="운영판"
-                            icon="board"
-                            variant="primary"
-                            size="md"
-                            onPress={() => router.push(`/session/${session.id}/operate`)}
-                            style={{ flex: 1 }}
-                          />
-                          <Button
-                            title="현황 보기"
-                            icon="tv"
-                            variant="ghost"
-                            size="md"
-                            onPress={() => router.push(`/session/${session.id}/board`)}
-                            style={{ flex: 1, backgroundColor: colors.background }}
-                          />
-                        </View>
-                        {!checkedIn && (
-                          // 운영진도 게임에 참석 가능 — 미체크인이면 앱 내 QR 스캔으로 출석.
-                          <Button
-                            title="QR 체크인"
-                            icon="checkin"
-                            variant="ghost"
-                            size="md"
-                            fullWidth
-                            onPress={() => router.push('/checkin-modal')}
-                            style={{ backgroundColor: colors.background }}
-                          />
-                        )}
-                      </View>
-                    ) : !checkedIn ? (
-                      // 회원 · 미체크인: 앱 내 카메라로 정모 QR을 스캔해 출석 + 현황 보기.
-                      <View style={styles.clubActions}>
-                        <Button
-                          title="QR 체크인"
-                          icon="checkin"
-                          variant="primary"
-                          size="md"
-                          onPress={() => router.push('/checkin-modal')}
-                          style={{ flex: 1 }}
-                        />
-                        <Button
-                          title="현황 보기"
-                          icon="tv"
-                          variant="ghost"
-                          size="md"
-                          onPress={() => router.push(`/session/${session.id}/board`)}
-                          style={{ flex: 1, backgroundColor: colors.background }}
-                        />
-                      </View>
-                    ) : (
-                      // 회원 · 체크인 완료: 현황 보기.
-                      <Button
-                        title="현황 보기"
-                        icon="tv"
-                        variant="primary"
-                        size="md"
-                        fullWidth
-                        onPress={() => router.push(`/session/${session.id}/board`)}
-                        style={styles.clubPrimaryBtn}
-                      />
-                    )
-                  ) : (
-                    isStaff && (
-                      <Button
-                        title="정모 시작"
-                        icon="play"
-                        variant="primary"
-                        size="md"
-                        fullWidth
-                        onPress={goClub}
-                        style={styles.clubPrimaryBtn}
-                      />
-                    )
-                  )}
-                  </View>
-                  )}
-                </Pressable>
-              );
-            })}
-
+                );
+              })
+            )}
           </View>
         )}
 
-        {/* ─── 4. Empty state (no clubs) ─── */}
+        {/* ─── 4. 내 모임 — 리스트 행 ─── */}
+        {clubs.length > 0 && (
+          <View style={styles.section}>
+            <Text style={[styles.sectionTitle, { color: colors.text }]}>내 모임</Text>
+            <View style={[styles.card, styles.listCard, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+              {(clubs as any[]).map((c, i) => {
+                const isStaff = staffClubIds.has(c.id);
+                return (
+                  <Pressable
+                    key={c.id}
+                    onPress={() => router.push(`/club/${c.id}`)}
+                    style={({ pressed }) => [
+                      styles.clubRow,
+                      i > 0 && { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.divider },
+                      pressed && { opacity: 0.8 },
+                    ]}
+                  >
+                    <View style={[styles.clubAvatar, { backgroundColor: colors.surface2 }]}>
+                      <Text style={[styles.clubAvatarLetter, { color: colors.textSecondary }]}>{c.name[0]}</Text>
+                    </View>
+                    <Text style={[styles.clubName, { color: colors.text }]} numberOfLines={1}>{c.name}</Text>
+                    {isStaff && <Tag label="운영진" variant="primary" />}
+                    <View style={{ flex: 1 }} />
+                    {c.memberCount != null && (
+                      <Text style={[styles.clubMeta, { color: colors.textLight }]}>{c.memberCount}명</Text>
+                    )}
+                    <Icon name="chevronRight" size={15} color={colors.textLight} />
+                  </Pressable>
+                );
+              })}
+            </View>
+          </View>
+        )}
+
+        {/* ─── 5. 바로가기 — 텍스트 행 ─── */}
+        <View style={styles.section}>
+          <Text style={[styles.sectionTitle, { color: colors.text }]}>바로가기</Text>
+          <View style={[styles.card, styles.listCard, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+            {[
+              canCreateClub ? { icon: 'add' as const, label: '모임 만들기', onPress: () => setShowCreate(true) } : null,
+              { icon: 'link' as const, label: '초대코드로 참여', onPress: () => setShowJoin(true) },
+              { icon: 'search' as const, label: '모임 찾기', onPress: () => router.push('/discover') },
+              COACH_MARKET_ENABLED ? { icon: 'whistle' as const, label: '코치 구인·구직', onPress: () => router.push('/(tabs)/coach-hub' as never) } : null,
+            ].filter(Boolean).map((item, i) => (
+              <Pressable
+                key={item!.label}
+                onPress={item!.onPress}
+                style={({ pressed }) => [
+                  styles.quickRow,
+                  i > 0 && { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.divider },
+                  pressed && { opacity: 0.8 },
+                ]}
+              >
+                <Icon name={item!.icon} size={17} color={colors.textSecondary} />
+                <Text style={[styles.quickLabel, { color: colors.text }]}>{item!.label}</Text>
+                <View style={{ flex: 1 }} />
+                <Icon name="chevronRight" size={15} color={colors.textLight} />
+              </Pressable>
+            ))}
+          </View>
+          {!canCreateClub && clubs.length > 0 && (
+            <Pressable onPress={() => router.push('/(tabs)/more')} hitSlop={6}>
+              <Text style={[styles.operatorHint, { color: colors.textLight }]}>
+                모임을 만들려면 <Text style={{ color: colors.primary, fontWeight: '600' }}>운영자 신청</Text>이 필요해요
+              </Text>
+            </Pressable>
+          )}
+        </View>
+
+        {/* ─── 빈 상태 (모임 0) ─── */}
         {clubs.length === 0 && (
           <View style={styles.emptyWrap}>
             <EmptyState
@@ -512,7 +432,7 @@ export default function HomeScreen() {
             {!canCreateClub && (
               <Pressable onPress={() => router.push('/(tabs)/more')} hitSlop={6}>
                 <Text style={[styles.operatorHint, { color: colors.textLight }]}>
-                  모임을 만들려면 <Text style={{ color: colors.primary, fontWeight: '700' }}>운영자 신청</Text>이 필요해요
+                  모임을 만들려면 <Text style={{ color: colors.primary, fontWeight: '600' }}>운영자 신청</Text>이 필요해요
                 </Text>
               </Pressable>
             )}
@@ -577,282 +497,79 @@ const styles = StyleSheet.create({
     paddingBottom: spacing.xxxxl,
   },
 
-  // Greeting — large, confident, tight line-height with a muted sub-line.
-  greetingRow: {
+  headerRow: {
     flexDirection: 'row',
     alignItems: 'center',
+    gap: spacing.sm,
     marginTop: spacing.sm,
-    marginBottom: spacing.xl,
-    gap: spacing.md,
+    marginBottom: spacing.lg,
   },
-  greeting: {
-    fontSize: 24,
-    fontWeight: '800',
-    lineHeight: 30,
-    letterSpacing: -0.3,
-    fontFamily: typography.h2.fontFamily,
-  },
-  greetingSub: {
-    fontSize: 14,
-    fontWeight: '500',
-    lineHeight: 18,
-    marginTop: 3,
-    fontFamily: typography.body2.fontFamily,
-  },
-  skillBadge: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing.xs + 2,
-    paddingLeft: spacing.sm,
-    paddingRight: spacing.md,
-    paddingVertical: 7,
-    borderRadius: radius.pill,
-    maxWidth: 168,
-  },
-  skillBadgeLevel: {
-    color: palette.white,
-    fontSize: 13,
-    fontWeight: '900',
-    lineHeight: 16,
-  },
-  skillBadgeLabel: {
-    color: palette.white,
-    fontSize: 12,
+  headerName: {
+    fontSize: 18,
     fontWeight: '700',
-    lineHeight: 16,
-    flexShrink: 1,
+    letterSpacing: -0.2,
+    fontFamily: typography.h3.fontFamily,
   },
 
-  // Hero (내 차례)
+  // Hero (내 차례) — 긴급 기능이라 색 배경 유지, 굵기만 절제.
   heroCard: {
-    borderRadius: radius.card,
+    borderRadius: 12,
     padding: spacing.xl,
-    marginBottom: spacing.xxl,
+    marginBottom: spacing.lg,
   },
   heroBadge: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: spacing.sm - 2,
+    gap: 6,
     alignSelf: 'flex-start',
     backgroundColor: 'rgba(255,255,255,0.22)',
     paddingHorizontal: spacing.md,
-    paddingVertical: spacing.xs + 1,
-    borderRadius: radius.pill,
-    marginBottom: spacing.mlg,
-  },
-  heroLiveDot: {
-    width: 8,
-    height: 8,
-    borderRadius: 4,
-    backgroundColor: palette.white,
-  },
-  heroBadgeText: {
-    color: palette.white,
-    fontSize: 12,
-    fontWeight: '800',
-    letterSpacing: 0.4,
-  },
-  heroTitle: {
-    color: palette.white,
-    fontSize: 26,
-    fontWeight: '800',
-    lineHeight: 32,
-    letterSpacing: -0.4,
-    marginBottom: spacing.xs + 1,
-    fontFamily: typography.h1.fontFamily,
-  },
-  heroSub: {
-    color: 'rgba(255,255,255,0.92)',
-    fontSize: 14,
-    fontWeight: '500',
-    lineHeight: 20,
-    marginBottom: spacing.lg,
-    fontFamily: typography.body2.fontFamily,
-  },
-  heroCta: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    alignSelf: 'flex-start',
-    gap: spacing.xs,
-    backgroundColor: 'rgba(255,255,255,0.18)',
-    paddingHorizontal: spacing.lg,
-    paddingVertical: spacing.smd,
-    borderRadius: radius.xxl,
-  },
-  heroCtaText: {
-    color: palette.white,
-    ...typography.button,
-  },
-
-  // Sections
-  section: {
-    marginBottom: spacing.xl,
-  },
-  sectionHead: {
+    paddingVertical: 4,
+    borderRadius: 8,
     marginBottom: spacing.md,
   },
-  sectionHeadRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing.sm,
-  },
-  sectionTitle: {
-    fontSize: 18,
-    fontWeight: '800',
-    lineHeight: 24,
-    letterSpacing: -0.2,
-    fontFamily: typography.h3.fontFamily,
-  },
-  sectionCount: {
-    minWidth: 22,
-    height: 22,
-    borderRadius: 11,
-    paddingHorizontal: 7,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  sectionCountText: {
-    fontSize: 12,
-    fontWeight: '800',
-  },
-  sectionSub: {
-    fontSize: 13,
-    fontWeight: '500',
-    lineHeight: 18,
-    marginTop: 4,
-    fontFamily: typography.body2.fontFamily,
-  },
+  heroLiveDot: { width: 7, height: 7, borderRadius: 4, backgroundColor: '#fff' },
+  heroBadgeText: { color: '#fff', fontSize: 12, fontWeight: '700' },
+  heroTitle: { color: '#fff', fontSize: 18, fontWeight: '700', letterSpacing: -0.2 },
+  heroSub: { color: 'rgba(255,255,255,0.85)', fontSize: 13, fontWeight: '400', marginTop: 4, lineHeight: 18 },
 
-  // 운영진 배지 (모임 카드 제목 옆)
-  rolePill: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing.xs,
-    paddingHorizontal: spacing.sm,
-    paddingVertical: spacing.xs,
-    borderRadius: radius.md,
-    alignSelf: 'flex-start',
-  },
-  rolePillText: {
-    fontSize: 11,
-    fontWeight: '800',
-  },
+  section: { marginBottom: spacing.xl },
+  sectionTitle: { fontSize: 15, fontWeight: '700', marginBottom: spacing.sm, letterSpacing: -0.2 },
 
-  // ─── 내 모임 — 통합 카드 (모임 + 그 모임의 현재 진행 상황) ───
-  clubHomePill: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 2,
-    paddingLeft: 10,
-    paddingRight: 6,
-    paddingVertical: 5,
-    borderRadius: 999,
-  },
-  clubHomePillText: { fontSize: 12, fontWeight: '800' },
-  quickRow: { flexDirection: 'row', gap: 10, marginBottom: 18 },
-  quickBtn: {
-    flex: 1,
-    alignItems: 'center',
-    gap: 6,
-    paddingVertical: 12,
-    borderRadius: 16,
-  },
-  quickIcon: { width: 38, height: 38, borderRadius: 19, alignItems: 'center', justifyContent: 'center' },
-  quickLabel: { fontSize: 12, fontWeight: '800' },
-  clubHomeLinkRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 4,
-    borderTopWidth: StyleSheet.hairlineWidth,
-    marginTop: 12,
-    paddingTop: 10,
-  },
-  clubHomeLinkText: { fontSize: 12, fontWeight: '700' },
-  clubCard: {
+  card: {
+    borderRadius: 12,
+    borderWidth: StyleSheet.hairlineWidth,
     padding: spacing.lg,
-    borderRadius: 20,
-    marginBottom: spacing.md,
   },
-  clubTitleRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing.md,
-  },
-  clubIconWrap: {
-    width: 42,
-    height: 42,
-    borderRadius: radius.xl,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  clubName: {
-    fontSize: 17,
-    fontWeight: '700',
-    lineHeight: 22,
-    letterSpacing: -0.2,
-    fontFamily: typography.subtitle1.fontFamily,
-  },
-  clubNameRow: { flexDirection: 'row', alignItems: 'center', gap: 6 },
-  statusDot: {
-    width: 7,
-    height: 7,
-    borderRadius: 4,
-  },
-  clubStatusText: {
-    fontSize: 12.5,
-    fontWeight: '600',
-    lineHeight: 17,
-    fontFamily: typography.body2.fontFamily,
-  },
-  statusChip: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    borderRadius: 999,
-    paddingHorizontal: 11,
-    paddingVertical: 5,
-    alignSelf: 'flex-start',
-  },
-  clubAvatarLetter: { fontSize: 18, fontWeight: '900' },
-  clubDivider: {
-    height: 1,
-    marginTop: spacing.lg,
-    marginBottom: spacing.lg,
-    marginHorizontal: -spacing.lg,
-  },
-  clubPrimaryBtn: {},
-  clubActions: {
-    flexDirection: 'row',
-    gap: spacing.sm + 2,
-  },
+  listCard: { paddingVertical: 2, paddingHorizontal: spacing.lg },
 
-  // Footer — tidy anchored section for 모임 만들기 / 참여
-  footerCard: {
-    marginTop: spacing.xs,
-    padding: spacing.lg,
-    borderRadius: radius.card,
-    borderWidth: 1,
-    gap: spacing.md,
-  },
-  footerLabel: {
-    fontSize: 13,
-    fontWeight: '600',
-    lineHeight: 18,
-    fontFamily: typography.body2.fontFamily,
-  },
-  footerActions: {
-    flexDirection: 'row',
-    gap: spacing.sm + 2,
-  },
+  // 오늘 정모
+  emptySessionText: { fontSize: 14, fontWeight: '400', lineHeight: 20 },
+  linkText: { fontSize: 13, fontWeight: '600' },
+  sessionHead: { flexDirection: 'row', alignItems: 'center', gap: 7 },
+  liveDot: { width: 7, height: 7, borderRadius: 4 },
+  sessionClub: { fontSize: 16, fontWeight: '700', letterSpacing: -0.2, flexShrink: 1 },
+  sessionMeta: { fontSize: 12, fontWeight: '500' },
+  sessionSub: { fontSize: 13, fontWeight: '400', marginTop: 5 },
+  mineState: { fontSize: 13, fontWeight: '600', marginTop: 3 },
+  sessionActions: { flexDirection: 'row', gap: spacing.sm, marginTop: spacing.lg },
+
+  // 내 모임 행
+  clubRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.md, paddingVertical: 13 },
+  clubAvatar: { width: 34, height: 34, borderRadius: 9, alignItems: 'center', justifyContent: 'center' },
+  clubAvatarLetter: { fontSize: 15, fontWeight: '700' },
+  clubName: { fontSize: 15, fontWeight: '600', flexShrink: 1 },
+  clubMeta: { fontSize: 12, fontWeight: '400' },
+
+  // 바로가기 행
+  quickRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.md, paddingVertical: 13 },
+  quickLabel: { fontSize: 14, fontWeight: '500' },
+
   operatorHint: {
-    ...typography.caption,
+    fontSize: 12,
+    fontWeight: '400',
     textAlign: 'center',
-    marginTop: spacing.xs,
+    marginTop: spacing.md,
   },
-
-  // Empty
-  emptyWrap: {
-    marginTop: spacing.xxl,
-  },
+  emptyWrap: { marginTop: spacing.xl, gap: spacing.md },
 });
