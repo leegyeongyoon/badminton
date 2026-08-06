@@ -34,11 +34,13 @@ httpServer.listen(PORT, () => {
 // log line (vanishing on restart) or, for rejections, silently warn. We log it
 // to the persisted error file FIRST so the team can know after the fact.
 process.on('uncaughtException', (err) => {
-  logger.error('uncaughtException', { err });
-  // The process is now in an undefined state; the only safe action is to exit
-  // and let the restart policy (docker `restart: unless-stopped`) bring up a
-  // clean instance. Give winston a moment to flush file transports first.
-  setTimeout(() => process.exit(1), 1000).unref();
+  // 이전엔 여기서 process.exit(1)로 프로세스를 죽였다. 하지만 서버는 라즈베리파이 단일
+  // 인스턴스라 도커 재시작에 2~3분이 걸려, 정모 도중 '한 번'의 미처리 에러가 접속한
+  // 전원을 2~3분씩 끊는 주원인이 됐다. 한 요청/소켓의 에러가 서버 전체를 다운시키지
+  // 않도록, 여기서는 로그만 남기고 계속 살아있게 둔다(unhandledRejection과 동일 정책).
+  // 대부분의 에러는 Express 전역 에러 미들웨어 + 소켓 핸들러 가드에서 이미 잡히므로,
+  // 여기까지 도달하는 건 드물다. (프로세스가 정말 손상됐다면 헬스체크/SIGTERM로 회수.)
+  logger.error('uncaughtException (surviving, not exiting)', { err });
 });
 
 process.on('unhandledRejection', (reason) => {
