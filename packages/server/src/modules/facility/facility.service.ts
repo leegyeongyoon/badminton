@@ -1,9 +1,58 @@
 import { prisma } from '../../utils/prisma';
 import { NotFoundError, ForbiddenError } from '../../utils/errors';
+import { logger } from '../../utils/logger';
 import { CourtGameType } from '@badminton/shared';
 import type { CreateFacilityInput, UpdatePolicyInput, UpdateCoordinatesInput, DisplayBoardResponse, BoardCourtData, ClubSessionInfo } from '@badminton/shared';
 import { getPlayersRequired } from '../court/court.service';
 import QRCode from 'qrcode';
+
+// 카카오 로컬 '키워드 장소검색' 프록시. REST 키를 서버에 두고(클라 노출·웹 CORS 회피)
+// "OO배드민턴/체육관" 검색 → 이름·주소·좌표를 돌려준다. 키 없거나 실패 시 빈 배열(안전).
+export interface PlaceSearchResult {
+  name: string;
+  address: string;
+  latitude: number;
+  longitude: number;
+}
+
+export async function searchPlaces(query: string): Promise<PlaceSearchResult[]> {
+  const q = (query || '').trim();
+  if (!q) return [];
+  const key = process.env.KAKAO_REST_KEY || '';
+  if (!key) {
+    logger.warn('searchPlaces 스킵 — KAKAO_REST_KEY 미설정');
+    return [];
+  }
+  const url = `https://dapi.kakao.com/v2/local/search/keyword.json?query=${encodeURIComponent(q)}&size=15`;
+  try {
+    // 이 키는 카카오 JS(지도) 키라, Local API 는 JS SDK 처럼 KA 헤더(os/javascript + 등록된
+    // 웹 도메인 origin)를 요구한다. origin 은 카카오 앱에 등록된 badmintoncourt.store(지도가
+    // 이미 여기서 동작). 이거 없으면 401 "KA Header is required".
+    const res = await fetch(url, {
+      headers: {
+        Authorization: `KakaoAK ${key}`,
+        KA: 'sdk/1.43.0 os/javascript lang/ko-KR device/server origin/https%3A%2F%2Fbadmintoncourt.store',
+      },
+    });
+    if (!res.ok) {
+      logger.error('카카오 장소검색 실패(HTTP)', { status: res.status });
+      return [];
+    }
+    const json: any = await res.json();
+    const docs: any[] = Array.isArray(json?.documents) ? json.documents : [];
+    return docs
+      .map((d) => ({
+        name: String(d.place_name ?? ''),
+        address: String(d.road_address_name || d.address_name || ''),
+        latitude: Number(d.y),
+        longitude: Number(d.x),
+      }))
+      .filter((p) => p.name && Number.isFinite(p.latitude) && Number.isFinite(p.longitude));
+  } catch (err) {
+    logger.error('카카오 장소검색 예외', { err });
+    return [];
+  }
+}
 
 export async function createFacility(userId: string, input: CreateFacilityInput) {
   // 좌표/주소는 선택. 이름만으로 만들 수 있고(좌표 null), 나중에 GPS 핀을 찍는다.

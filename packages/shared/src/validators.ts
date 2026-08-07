@@ -262,6 +262,8 @@ export type AttendancePeriodInput = z.infer<typeof attendancePeriodSchema>;
 export const createClubSchema = z.object({
   clubType: z.enum(['CLUB', 'MEETUP']).optional(),
   name: z.string().min(1).max(50),
+  // 생성 시 홈 시설(위치) 연결 — 선택(서버). 클라는 필수로 요구한다. 서버에서 실존 검증.
+  homeFacilityId: z.string().uuid().optional(),
 });
 
 export const joinClubSchema = z.object({

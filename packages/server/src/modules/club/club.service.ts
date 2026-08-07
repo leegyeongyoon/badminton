@@ -29,11 +29,22 @@ function generateInviteCode(): string {
 }
 
 export async function createClub(userId: string, input: CreateClubInput) {
+  // 생성 시 홈 시설(위치) 연결 — 제공되면 실존 검증 후 세팅.
+  const homeFacilityId = (input as { homeFacilityId?: string }).homeFacilityId;
+  if (homeFacilityId) {
+    const facility = await prisma.facility.findUnique({
+      where: { id: homeFacilityId },
+      select: { id: true },
+    });
+    if (!facility) throw new NotFoundError('시설');
+  }
+
   const club = await prisma.club.create({
     data: {
       name: input.name,
       clubType: (input as { clubType?: string }).clubType === 'MEETUP' ? 'MEETUP' : 'CLUB',
       inviteCode: generateInviteCode(),
+      homeFacilityId: homeFacilityId ?? null,
       members: { create: { userId, role: 'LEADER' } },
     },
     include: { _count: { select: { members: true } } },

@@ -449,10 +449,10 @@ export default function HomeScreen() {
         onChangeText={setClubName}
         clubType={newClubType}
         onChangeClubType={setNewClubType}
-        onConfirm={async () => {
+        onConfirm={async (homeFacilityId) => {
           if (!clubName.trim()) return;
           try {
-            await createClub(clubName.trim(), newClubType);
+            await createClub(clubName.trim(), newClubType, homeFacilityId);
             setClubName('');
             setShowCreate(false);
             await loadAll();

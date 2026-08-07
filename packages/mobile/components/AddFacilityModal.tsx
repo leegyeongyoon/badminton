@@ -18,7 +18,7 @@ import {
   Platform,
 } from 'react-native';
 import { Colors } from '../constants/colors';
-import { facilityApi } from '../services/facility';
+import { facilityApi, type PlaceSearchResult } from '../services/facility';
 import { getCurrentPosition } from '../utils/geo';
 import { showAlert } from '../utils/alert';
 import { useResponsiveLayout } from '../hooks/useResponsiveLayout';
@@ -37,6 +37,11 @@ export function AddFacilityModal({ visible, onClose, onCreated }: AddFacilityMod
   const [coords, setCoords] = useState<{ latitude: number; longitude: number } | null>(null);
   const [locating, setLocating] = useState(false);
   const [saving, setSaving] = useState(false);
+  // 카카오 장소 검색
+  const [query, setQuery] = useState('');
+  const [results, setResults] = useState<PlaceSearchResult[]>([]);
+  const [searching, setSearching] = useState(false);
+  const [searched, setSearched] = useState(false);
 
   const reset = useCallback(() => {
     setName('');
@@ -44,6 +49,33 @@ export function AddFacilityModal({ visible, onClose, onCreated }: AddFacilityMod
     setCoords(null);
     setLocating(false);
     setSaving(false);
+    setQuery('');
+    setResults([]);
+    setSearched(false);
+  }, []);
+
+  const handleSearch = useCallback(async () => {
+    const q = query.trim();
+    if (!q) return;
+    setSearching(true);
+    setSearched(true);
+    try {
+      const { data } = await facilityApi.searchPlaces(q);
+      setResults(Array.isArray(data) ? data : []);
+    } catch {
+      setResults([]);
+    } finally {
+      setSearching(false);
+    }
+  }, [query]);
+
+  // 검색 결과 탭 → 이름·주소·좌표 자동 채움(그대로 저장하거나 손봐도 됨).
+  const handlePickPlace = useCallback((p: PlaceSearchResult) => {
+    setName(p.name);
+    setAddress(p.address);
+    setCoords({ latitude: p.latitude, longitude: p.longitude });
+    setResults([]);
+    setSearched(false);
   }, []);
 
   const handleClose = useCallback(() => {
@@ -109,6 +141,53 @@ export function AddFacilityModal({ visible, onClose, onCreated }: AddFacilityMod
               <Text style={styles.close}>✕</Text>
             </TouchableOpacity>
           </View>
+
+          <Text style={styles.label}>장소 검색</Text>
+          <View style={styles.searchRow}>
+            <TextInput
+              style={[styles.input, styles.searchInput]}
+              value={query}
+              onChangeText={setQuery}
+              placeholder="예: 행복배드민턴, OO체육관"
+              placeholderTextColor={Colors.textLight}
+              onSubmitEditing={handleSearch}
+              returnKeyType="search"
+              maxLength={40}
+              accessibilityLabel="장소 검색어"
+            />
+            <TouchableOpacity
+              style={styles.searchBtn}
+              onPress={handleSearch}
+              disabled={searching || !query.trim()}
+              accessibilityLabel="장소 검색"
+            >
+              {searching ? (
+                <ActivityIndicator size="small" color={Colors.textInverse} />
+              ) : (
+                <Text style={styles.searchBtnText}>검색</Text>
+              )}
+            </TouchableOpacity>
+          </View>
+          {results.length > 0 && (
+            <View style={styles.results}>
+              {results.map((r, i) => (
+                <TouchableOpacity
+                  key={`${r.name}-${i}`}
+                  style={[styles.resultItem, i > 0 && styles.resultItemBorder]}
+                  onPress={() => handlePickPlace(r)}
+                  accessibilityLabel={`${r.name} 선택`}
+                >
+                  <Text style={styles.resultName} numberOfLines={1}>{r.name}</Text>
+                  {!!r.address && (
+                    <Text style={styles.resultAddr} numberOfLines={1}>{r.address}</Text>
+                  )}
+                </TouchableOpacity>
+              ))}
+            </View>
+          )}
+          {searched && !searching && results.length === 0 && (
+            <Text style={styles.coordHint}>검색 결과가 없어요. 아래에 이름·주소를 직접 입력해도 돼요.</Text>
+          )}
 
           <Text style={styles.label}>
             이름 <Text style={styles.required}>*</Text>
@@ -233,6 +312,53 @@ const styles = StyleSheet.create({
     fontSize: 15,
     color: Colors.text,
     backgroundColor: Colors.background,
+  },
+  searchRow: {
+    flexDirection: 'row',
+    gap: 8,
+    alignItems: 'stretch',
+  },
+  searchInput: {
+    flex: 1,
+  },
+  searchBtn: {
+    backgroundColor: Colors.primary,
+    borderRadius: 10,
+    paddingHorizontal: 16,
+    minWidth: 64,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  searchBtnText: {
+    fontSize: 15,
+    fontWeight: '800',
+    color: Colors.textInverse,
+  },
+  results: {
+    marginTop: 8,
+    borderWidth: 1,
+    borderColor: Colors.border,
+    borderRadius: 10,
+    backgroundColor: Colors.background,
+    overflow: 'hidden',
+  },
+  resultItem: {
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+  },
+  resultItemBorder: {
+    borderTopWidth: 1,
+    borderTopColor: Colors.border,
+  },
+  resultName: {
+    fontSize: 15,
+    fontWeight: '700',
+    color: Colors.text,
+  },
+  resultAddr: {
+    fontSize: 12,
+    color: Colors.textLight,
+    marginTop: 2,
   },
   locBtn: {
     borderWidth: 1,

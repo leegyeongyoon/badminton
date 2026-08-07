@@ -172,7 +172,8 @@ export interface ClubInfo {
 
 export const clubApi = {
   list: () => api.get('/clubs'),
-  create: (name: string, clubType: 'CLUB' | 'MEETUP' = 'CLUB') => api.post('/clubs', { name, clubType }),
+  create: (name: string, clubType: 'CLUB' | 'MEETUP' = 'CLUB', homeFacilityId?: string) =>
+    api.post('/clubs', { name, clubType, homeFacilityId }),
   // 모임 정보 수정 (이름/홈시설/소개). 서버 권한: 해당 모임 LEADER 또는 SUPER_ADMIN.
   updateClub: (id: string, body: UpdateClubBody) =>
     api.patch<ClubInfo>(`/clubs/${id}`, body),

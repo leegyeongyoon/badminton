@@ -22,6 +22,15 @@ router.get('/', async (_req: Request, res: Response, next: NextFunction) => {
   } catch (err) { next(err); }
 });
 
+// 카카오 장소 검색 프록시 — 로그인 사용자. '/:id' 보다 먼저 선언해야 매칭됨.
+// 반환: [{ name, address, latitude, longitude }]. 장소추가/모임생성에서 좌표 자동 채움에 사용.
+router.get('/search', authenticate, async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const results = await facilityService.searchPlaces(String(req.query.q ?? ''));
+    res.json(results);
+  } catch (err) { next(err); }
+});
+
 router.get('/:id', async (req: Request, res: Response, next: NextFunction) => {
   try {
     const facility = await facilityService.getFacility(req.params.id as string);

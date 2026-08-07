@@ -98,10 +98,10 @@ export default function SettingsScreen() {
     }, Strings.auth.logout);
   };
 
-  const handleCreateClub = async () => {
+  const handleCreateClub = async (homeFacilityId?: string) => {
     if (!clubName.trim()) return;
     try {
-      await createClub(clubName.trim());
+      await createClub(clubName.trim(), undefined, homeFacilityId);
       setClubName('');
       setShowCreateModal(false);
       fetchClubs();

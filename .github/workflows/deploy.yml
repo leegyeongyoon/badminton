@@ -123,6 +123,16 @@ jobs:
           ssh_pi "cd /opt/badminton && touch .env.prod && sed -i '/^JWT_EXPIRES_IN=/d; /^JWT_REFRESH_EXPIRES_IN=/d' .env.prod && printf 'JWT_EXPIRES_IN=12h\nJWT_REFRESH_EXPIRES_IN=30d\n' >> .env.prod && echo 'JWT expiry set (access 12h / refresh 30d)'" \
             || echo "JWT 만료 주입 실패(무시) — 코드 기본값(access 12h / refresh 30d) 사용"
 
+      - name: Inject KAKAO_REST_KEY into .env.prod (Pi)
+        env:
+          SSHPASS: ${{ secrets.SSH_PASSWORD }}
+        run: |
+          ssh_pi() { sshpass -e ssh -o ConnectTimeout=25 "${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}" "$1"; }
+          # 카카오 REST 키 — 장소검색 프록시(GET /facilities/search)용. 클라 번들에도 이미 있는
+          # 공개 키라 비밀값 아님 → 워크플로에 고정. idempotent 주입.
+          ssh_pi "cd /opt/badminton && touch .env.prod && sed -i '/^KAKAO_REST_KEY=/d' .env.prod && echo 'KAKAO_REST_KEY=5a202bd90ab8dff01348f24cb1c37f3f' >> .env.prod && echo 'KAKAO_REST_KEY set'" \
+            || echo "KAKAO_REST_KEY 주입 실패(무시) — 장소검색 비활성"
+
       - name: Build & deploy on Pi (detached) + poll
         env:
           SSHPASS: ${{ secrets.SSH_PASSWORD }}
