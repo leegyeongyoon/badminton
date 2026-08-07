@@ -14,8 +14,9 @@ import { sendSms, isSmsEnabled } from '../modules/notification/sms.service';
 const MODE = (process.argv[2] || 'dryrun').toLowerCase();
 const TEXT =
   '[콕고] 안녕하세요! 콕고 운영진으로 등록돼 있어요.\n' +
-  '정모 운영·순번 관리·자동 편성을 앱에서 바로 쓰실 수 있어요.\n' +
-  '▶ badmintoncourt.store';
+  '정모 운영·순번 관리·자동 편성을 하실 수 있어요.\n' +
+  '관리자 로그인 👉 badmintoncourt.store\n' +
+  '사용법 가이드 👉 badmintoncourt.store/help';
 
 function normalize(p: string | null | undefined): string {
   return (p || '').replace(/[^0-9]/g, '');

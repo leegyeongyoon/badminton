@@ -129,7 +129,7 @@ export async function notifyStaffPromoted(userId: string, clubName: string) {
     if (user?.phone) {
       await sendSms(
         user.phone,
-        `[콕고] ${clubName} 운영진이 되셨어요 🎉\n이제 앱에서 정모 운영·순번 관리·자동 편성을 바로 쓰실 수 있어요.\n▶ badmintoncourt.store`,
+        `[콕고] ${clubName} 운영진이 되셨어요 🎉\n정모 운영·순번 관리·자동 편성을 하실 수 있어요.\n관리자 로그인 👉 badmintoncourt.store\n사용법 가이드 👉 badmintoncourt.store/help`,
       );
     }
   } catch (err) {
