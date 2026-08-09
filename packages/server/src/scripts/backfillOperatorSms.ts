@@ -29,30 +29,50 @@ function sleep(ms: number): Promise<void> {
   return new Promise((r) => setTimeout(r, ms));
 }
 
+// argv[3] = ISO 날짜(선택). 주면 그 시각 이후 '승인(reviewedAt)'된 사람만 대상 — 8월 6일
+// 백필 이후 새로 승인된 사람에게만 재발송해 중복(이미 받은 5명)을 피한다.
+const SINCE = process.argv[3];
+
 async function main(): Promise<void> {
+  // 빈 문자열/잘못된 날짜는 필터 없음(전체)로 처리.
+  const parsed = SINCE ? new Date(SINCE) : null;
+  const sinceDate = parsed && !isNaN(parsed.getTime()) ? parsed : null;
   const reqs = await prisma.operatorRequest.findMany({
-    where: { status: 'APPROVED' },
-    select: { user: { select: { id: true, name: true, phone: true } } },
+    where: {
+      status: 'APPROVED',
+      ...(sinceDate ? { reviewedAt: { gte: sinceDate } } : {}),
+    },
+    select: { reviewedAt: true, user: { select: { id: true, name: true, phone: true } } },
   });
 
-  // 같은 사람이 여러 번 승인됐을 수 있으니 유저 단위로 중복 제거.
-  const byUser = new Map<string, { id: string; name: string | null; phone: string | null }>();
-  for (const r of reqs) if (r.user) byUser.set(r.user.id, r.user);
-  const all = [...byUser.values()];
+  // 같은 사람이 여러 번 승인됐을 수 있으니 유저 단위로 중복 제거(가장 최근 승인일 유지).
+  type Row = { id: string; name: string | null; phone: string | null; reviewedAt: Date | null };
+  const byUser = new Map<string, Row>();
+  for (const r of reqs) {
+    if (!r.user) continue;
+    const prev = byUser.get(r.user.id);
+    const rv = r.reviewedAt ?? null;
+    if (!prev || (rv && (!prev.reviewedAt || rv > prev.reviewedAt))) {
+      byUser.set(r.user.id, { ...r.user, reviewedAt: rv });
+    }
+  }
+  const all = [...byUser.values()].sort((a, b) => (a.reviewedAt?.getTime() ?? 0) - (b.reviewedAt?.getTime() ?? 0));
 
   const withPhone = all.filter((u) => normalize(u.phone).length >= 9);
   const noPhone = all.filter((u) => normalize(u.phone).length < 9);
 
-  console.log(`\n===== 운영자 신청 승인자 백필 (${MODE.toUpperCase()}) =====`);
+  console.log(`\n===== 운영자 신청 승인자 백필 (${MODE.toUpperCase()})${sinceDate ? ` · ${SINCE} 이후 승인분` : ''} =====`);
   console.log(`총 승인자(중복 제거): ${all.length}명`);
   console.log(`전화번호 있음(발송 대상): ${withPhone.length}명`);
   console.log(`전화번호 없음(제외):     ${noPhone.length}명`);
   console.log(`SMS 활성화(SOLAPI 설정): ${isSmsEnabled()}`);
   console.log(`발신번호: ${process.env.SOLAPI_SENDER || '(미설정)'}`);
 
-  console.log('\n--- 발송 대상(전화번호 마스킹) ---');
+  console.log('\n--- 발송 대상(전화번호 마스킹 · 승인일) ---');
   withPhone.forEach((u, i) =>
-    console.log(`  ${String(i + 1).padStart(2)}. ${(u.name ?? '(이름없음)').padEnd(10)} ${mask(u.phone)}`),
+    console.log(
+      `  ${String(i + 1).padStart(2)}. ${(u.name ?? '(이름없음)').padEnd(10)} ${mask(u.phone)}  승인:${u.reviewedAt ? u.reviewedAt.toISOString().slice(0, 10) : '미상'}`,
+    ),
   );
   if (noPhone.length) {
     console.log('\n--- 번호 없어 제외 ---');

@@ -136,3 +136,28 @@ export async function notifyStaffPromoted(userId: string, clubName: string) {
     logger.error('notifyStaffPromoted 문자 단계 실패(무시)', { err });
   }
 }
+
+/**
+ * 운영자 신청 '승인' 알림 — 인앱/푸시 + 문자(SOLAPI 설정 시).
+ * OperatorRequest 가 APPROVED 로 바뀔 때(reviewRequest approve) 호출한다. 이게 실제로
+ * "관리자(최고관리자)가 신규 운영자를 허용"하는 지점 — 여기 알림이 없어 신규 승인자에게
+ * 문자가 안 나가던 버그를 메운다. 문자 실패는 삼켜 상위(승인) 로직에 영향 없음.
+ */
+export async function notifyOperatorApproved(userId: string) {
+  await sendPushToUser(userId, {
+    title: '운영자 신청 승인 🎉',
+    body: '이제 모임을 만들고 정모 운영·순번 관리·자동 편성을 하실 수 있어요.',
+    data: { type: 'operatorApproved' },
+  });
+  try {
+    const user = await prisma.user.findUnique({ where: { id: userId }, select: { phone: true } });
+    if (user?.phone) {
+      await sendSms(
+        user.phone,
+        '[콕고] 운영자 신청이 승인됐어요 🎉\n이제 모임을 만들고 정모 운영·순번 관리·자동 편성을 하실 수 있어요.\n관리자 로그인 👉 badmintoncourt.store\n사용법 가이드 👉 badmintoncourt.store/help',
+      );
+    }
+  } catch (err) {
+    logger.error('notifyOperatorApproved 문자 단계 실패(무시)', { err });
+  }
+}

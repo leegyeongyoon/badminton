@@ -1,5 +1,7 @@
 import { prisma } from '../../utils/prisma';
 import { ConflictError, NotFoundError, BadRequestError } from '../../utils/errors';
+import { logger } from '../../utils/logger';
+import { notifyOperatorApproved } from '../notification/notification.service';
 import type {
   OperatorRequestCreateInput,
   OperatorRequestReviewInput,
@@ -173,6 +175,13 @@ export async function reviewRequest(
 
     return req;
   });
+
+  // 승인 시 신규 운영자에게 알림(푸시+문자). fire-and-forget — 알림 실패가 승인 응답을 막지 않게.
+  if (input.decision === 'approve') {
+    notifyOperatorApproved(existing.userId).catch((err) =>
+      logger.error('운영자 승인 알림 실패(무시)', { err }),
+    );
+  }
 
   return toResponse(updated);
 }

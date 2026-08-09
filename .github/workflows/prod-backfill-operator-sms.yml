@@ -16,6 +16,11 @@ on:
         options:
           - dryrun
           - send
+      since:
+        description: '이 ISO 시각 이후 승인분만 (예: 2026-08-06T08:20:00Z). 비우면 전체.'
+        required: false
+        default: ''
+        type: string
 
 concurrency:
   group: prod-backfill-operator-sms
@@ -54,4 +59,4 @@ jobs:
             exit 1
           fi
           ssh_pi() { sshpass -e ssh -o ConnectTimeout=25 "${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}" "$1"; }
-          ssh_pi "docker exec -e SOLAPI_API_KEY='$SOLAPI_KEY' -e SOLAPI_API_SECRET='$SOLAPI_SECRET' -e SOLAPI_SENDER='$SOLAPI_FROM' badminton-prod-server node dist/src/scripts/backfillOperatorSms.js ${{ inputs.mode }}"
+          ssh_pi "docker exec -e SOLAPI_API_KEY='$SOLAPI_KEY' -e SOLAPI_API_SECRET='$SOLAPI_SECRET' -e SOLAPI_SENDER='$SOLAPI_FROM' badminton-prod-server node dist/src/scripts/backfillOperatorSms.js ${{ inputs.mode }} '${{ inputs.since }}'"
