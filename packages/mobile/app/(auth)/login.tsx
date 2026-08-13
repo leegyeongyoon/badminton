@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect } from 'react';
 import {
   View,
   Text,
@@ -16,6 +16,7 @@ import { useTheme } from '../../hooks/useTheme';
 import { useFormValidation } from '../../hooks/useFormValidation';
 import { compose, required, phone as phoneRule, password as passwordRule } from '../../utils/validation';
 import { typography, spacing, radius } from '../../constants/theme';
+import { API_URL } from '../../constants/api';
 import { Strings } from '../../constants/strings';
 import { showError, showInfo } from '../../utils/feedback';
 import { Input } from '../../components/ui/Input';
@@ -37,6 +38,35 @@ const GOOGLE_BLUE = '#4285F4';
 // 앱 라우트 /guide 와 겹치지 않게 /help 로 서빙.
 const GUIDE_URL = 'https://badmintoncourt.store/help';
 
+// ── 서버 점검 감지 ─────────────────────────────────────────────
+// 헬스체크가 실패하는 동안에만 화면 상단에 점검 안내를 띄운다. 서버가
+// 복구되면 다음 체크에서 자동으로 사라지므로 안내 제거 배포가 필요 없다.
+const HEALTH_URL = `${API_URL}/health`;
+const HEALTH_INTERVAL_MS = 30_000;
+const HEALTH_TIMEOUT_MS = 5_000;
+
+function useServerDown(): boolean {
+  const [down, setDown] = useState(false);
+  useEffect(() => {
+    let alive = true;
+    const check = async () => {
+      try {
+        const ctrl = new AbortController();
+        const timer = setTimeout(() => ctrl.abort(), HEALTH_TIMEOUT_MS);
+        const res = await fetch(HEALTH_URL, { signal: ctrl.signal });
+        clearTimeout(timer);
+        if (alive) setDown(!res.ok);
+      } catch {
+        if (alive) setDown(true);
+      }
+    };
+    check();
+    const id = setInterval(check, HEALTH_INTERVAL_MS);
+    return () => { alive = false; clearInterval(id); };
+  }, []);
+  return down;
+}
+
 export default function LoginScreen() {
   const [loading, setLoading] = useState(false);
   const [kakaoLoading, setKakaoLoading] = useState(false);
@@ -46,6 +76,7 @@ export default function LoginScreen() {
   const { login, kakaoLogin, googleLogin } = useAuthStore();
   const { colors } = useTheme();
   const router = useRouter();
+  const serverDown = useServerDown();
 
   const rules = useMemo(() => ({
     phone: compose(required, phoneRule),
@@ -158,6 +189,14 @@ export default function LoginScreen() {
     >
       <ScreenContainer maxWidth={440}>
       <View style={styles.content}>
+        {serverDown && (
+          <View style={[styles.maintenanceCard, { backgroundColor: colors.dangerBg }]}>
+            <Text style={[styles.maintenanceTitle, { color: colors.danger }]}>지금 서버 점검 중이에요</Text>
+            <Text style={[styles.maintenanceBody, { color: colors.textSecondary }]}>
+              일시적으로 로그인과 데이터 이용이 안 될 수 있어요. 빠르게 복구하고 있으니 잠시 후 다시 이용해 주세요.
+            </Text>
+          </View>
+        )}
         <Text style={[styles.title, { color: colors.primary }]}>{Strings.app.name}</Text>
         <Text style={[styles.subtitle, { color: colors.textSecondary }]}>{Strings.auth.login}</Text>
 
@@ -290,6 +329,21 @@ export default function LoginScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
+  },
+  maintenanceCard: {
+    borderRadius: 12,
+    padding: spacing.lg,
+    marginBottom: spacing.xl,
+  },
+  maintenanceTitle: {
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  maintenanceBody: {
+    fontSize: 13,
+    fontWeight: '400',
+    lineHeight: 19,
+    marginTop: 4,
   },
   content: {
     flex: 1,
