@@ -12,7 +12,7 @@ rm -rf /tmp/bmt-src
 git clone --depth 1 https://github.com/leegyeongyoon/badminton.git /tmp/bmt-src
 SHA=$(git -C /tmp/bmt-src rev-parse --short HEAD)
 rsync -a --delete \
-  --exclude '.env.prod' --exclude 'backups' --exclude 'STANDBY_MODE' \
+  --exclude '.env.prod' --exclude 'backups' --exclude 'backups-repo' --exclude 'STANDBY_MODE' \
   --exclude 'standby.log' --exclude '*.status' --exclude 'deploy.log' \
   --exclude '.git' --exclude 'node_modules' --exclude 'packages/mobile' \
   /tmp/bmt-src/ /opt/badminton/
