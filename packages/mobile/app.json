@@ -87,18 +87,26 @@
     },
     "plugins": [
       "expo-router",
-      "expo-secure-store",
+      [
+        "expo-secure-store",
+        {
+          "faceIDPermission": false
+        }
+      ],
       "expo-web-browser",
       [
         "expo-camera",
         {
-          "cameraPermission": "QR코드 체크인을 위해 카메라 접근이 필요합니다"
+          "cameraPermission": "QR코드 체크인을 위해 카메라 접근이 필요합니다",
+          "microphonePermission": false,
+          "recordAudioAndroid": false
         }
       ],
       [
         "expo-image-picker",
         {
-          "photosPermission": "코치 프로필 사진 등록을 위해 사진 접근이 필요합니다"
+          "photosPermission": "코치 프로필 사진 등록을 위해 사진 접근이 필요합니다",
+          "microphonePermission": false
         }
       ],
       [
@@ -110,7 +118,9 @@
       [
         "expo-location",
         {
-          "locationWhenInUsePermission": "주변 체육관을 찾기 위해 위치 정보가 필요합니다"
+          "locationWhenInUsePermission": "주변 체육관을 찾기 위해 위치 정보가 필요합니다",
+          "locationAlwaysAndWhenInUsePermission": false,
+          "locationAlwaysPermission": false
         }
       ],
       [
