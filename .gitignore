@@ -33,3 +33,9 @@ packages/mobile/web-build/
 
 # 업로드 이미지(로컬 개발용 저장소 — 프로덕션은 도커 볼륨)
 packages/server/uploads/
+
+# Terraform (infra/aws) — 상태·변수는 로컬 전용(비밀 포함)
+infra/aws/.terraform/
+infra/aws/*.tfstate*
+infra/aws/terraform.tfvars
+infra/aws/.terraform.lock.hcl
