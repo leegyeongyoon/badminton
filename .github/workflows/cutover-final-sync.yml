@@ -1,0 +1,70 @@
+name: Cutover Final Sync
+
+# 컷오버 최종 동기화 (M8 S4, 일회용 dispatch).
+# 1) 파이 server 정지(점검 배너 자동 표출) → 2) 최종 덤프 → 3) EC2 복원 →
+# 4) EC2 server 재시작 + 헬스체크. 이후 api 라우트 전환은 대시보드에서 수동.
+# 시크릿: SSH_HOST/USER/PASSWORD=파이(원본 유지), *_AWS=EC2.
+on:
+  workflow_dispatch:
+
+concurrency:
+  group: cutover-final-sync
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Install cloudflared + sshpass
+        run: |
+          curl -fsSL https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64.deb -o cloudflared.deb
+          sudo dpkg -i cloudflared.deb
+          sudo apt-get update && sudo apt-get install -y sshpass
+
+      - name: Configure SSH over Cloudflare Tunnel (Pi + EC2)
+        run: |
+          mkdir -p ~/.ssh
+          cat >> ~/.ssh/config << SSHCONFIG
+          Host ${{ secrets.SSH_HOST }} ${{ secrets.SSH_HOST_AWS }}
+            ProxyCommand cloudflared access ssh --hostname %h
+            StrictHostKeyChecking no
+            UserKnownHostsFile /dev/null
+            ConnectTimeout 25
+          SSHCONFIG
+
+      - name: Stop Pi server + final dump
+        env:
+          SSHPASS: ${{ secrets.SSH_PASSWORD }}
+        run: |
+          ssh_pi() { sshpass -e ssh "${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}" "$1"; }
+          echo "==> 파이 server 정지 (점검 배너 자동 표출)"
+          ssh_pi "docker stop badminton-prod-server"
+          echo "==> 최종 덤프"
+          ssh_pi "cd /opt/badminton && bash scripts/backup-db.sh" | tail -2
+          LATEST=$(ssh_pi "ls -t /opt/badminton/backups/badminton-*.sql.gz | head -1" | tr -d '\r')
+          [ -n "$LATEST" ] || { echo "::error::덤프 없음"; exit 1; }
+          sshpass -e scp "${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}:$LATEST" ./final.sql.gz
+          [ "$(wc -c < final.sql.gz)" -gt 1024 ] || { echo "::error::덤프 비정상"; exit 1; }
+          echo "==> uploads 최종본"
+          ssh_pi "docker run --rm -v badminton-prod_uploads:/vol alpine tar czf - -C /vol ." > final-uploads.tar.gz || echo "(uploads 실패 — 계속)"
+          ls -lh final.sql.gz final-uploads.tar.gz 2>/dev/null || true
+
+      - name: Restore on EC2 + restart
+        env:
+          SSHPASS: ${{ secrets.SSH_PASSWORD_AWS }}
+        run: |
+          ssh_aws() { sshpass -e ssh "${{ secrets.SSH_USER_AWS }}@${{ secrets.SSH_HOST_AWS }}" "$1"; }
+          sshpass -e scp final.sql.gz "${{ secrets.SSH_USER_AWS }}@${{ secrets.SSH_HOST_AWS }}:/opt/badminton/final.sql.gz"
+          [ -f final-uploads.tar.gz ] && sshpass -e scp final-uploads.tar.gz "${{ secrets.SSH_USER_AWS }}@${{ secrets.SSH_HOST_AWS }}:/opt/badminton/final-uploads.tar.gz" || true
+          ssh_aws "cd /opt/badminton && bash scripts/restore-db.sh --yes ./final.sql.gz && docker compose -f docker-compose.prod.yml restart server"
+          ssh_aws 'cd /opt/badminton && if [ -f final-uploads.tar.gz ]; then docker cp final-uploads.tar.gz badminton-prod-server:/tmp/u.tar.gz && docker exec -u root badminton-prod-server sh -c "tar xzf /tmp/u.tar.gz -C /app/uploads && chown -R node:node /app/uploads && rm /tmp/u.tar.gz"; fi'
+          for i in $(seq 1 15); do
+            sleep 4
+            code=$(ssh_aws "curl -s -o /dev/null -w '%{http_code}' http://localhost:3131/api/v1/health" 2>/dev/null || echo 000)
+            echo "[$i/15] EC2 health: $code"
+            [ "$code" = "200" ] && break
+          done
+          [ "$code" = "200" ] || { ssh_aws "docker logs badminton-prod-server --tail 30"; exit 1; }
+          ssh_aws "rm -f /opt/badminton/final.sql.gz /opt/badminton/final-uploads.tar.gz"
+          echo "FINAL SYNC DONE — 이제 api 라우트를 AWS_TUNNEL로 전환하세요"

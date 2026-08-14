@@ -1,0 +1,70 @@
+name: Setup Standby (Pi)
+
+# 파이 웜 스탠바이 구성 (M8 S5, 일회용 dispatch — 컷오버 '후'에만 실행할 것).
+# 읽기 전용 키 설치 → 백업 저장소 클론 → STANDBY_MODE 마커 → cron 2개
+# (매일 04:30 데이터 복원, 매주 일 04:00 코드 리프레시) → 즉시 1회 복원 검증.
+# 시크릿: SSH_HOST/USER/PASSWORD=파이(원본), STANDBY_BACKUP_READ_KEY=읽기 키.
+on:
+  workflow_dispatch:
+
+concurrency:
+  group: setup-standby
+  cancel-in-progress: false
+
+jobs:
+  setup:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Install cloudflared + sshpass + rsync
+        run: |
+          curl -fsSL https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64.deb -o cloudflared.deb
+          sudo dpkg -i cloudflared.deb
+          sudo apt-get update && sudo apt-get install -y sshpass rsync
+
+      - name: Configure SSH over Cloudflare Tunnel
+        run: |
+          mkdir -p ~/.ssh
+          cat >> ~/.ssh/config << SSHCONFIG
+          Host ${{ secrets.SSH_HOST }}
+            ProxyCommand cloudflared access ssh --hostname %h
+            StrictHostKeyChecking no
+            UserKnownHostsFile /dev/null
+            ConnectTimeout 25
+          SSHCONFIG
+
+      - name: Sync latest source to Pi (standby scripts 포함)
+        env:
+          SSHPASS: ${{ secrets.SSH_PASSWORD }}
+        run: |
+          sshpass -e rsync -az \
+            --exclude '.git' --exclude '.env.prod' --exclude '.env' --exclude '**/.env' \
+            --exclude 'node_modules' --exclude '**/node_modules' \
+            --exclude 'packages/mobile' --exclude '**/dist' \
+            --exclude 'backups' --exclude 'STANDBY_MODE' --exclude '*.log' --exclude '*.status' \
+            ./ "${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}:/opt/badminton/"
+
+      - name: Install read key + clone backups repo + marker + cron
+        env:
+          SSHPASS: ${{ secrets.SSH_PASSWORD }}
+          READ_KEY: ${{ secrets.STANDBY_BACKUP_READ_KEY }}
+        run: |
+          ssh_pi() { sshpass -e ssh "${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}" "$1"; }
+          echo "$READ_KEY" | sshpass -e ssh "${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}" "mkdir -p ~/.ssh && cat > ~/.ssh/backup_read_key && chmod 600 ~/.ssh/backup_read_key && ssh-keyscan github.com >> ~/.ssh/known_hosts 2>/dev/null"
+          ssh_pi 'export GIT_SSH_COMMAND="ssh -i $HOME/.ssh/backup_read_key -o IdentitiesOnly=yes"; if [ -d /opt/badminton-backups/.git ]; then cd /opt/badminton-backups && git fetch --depth 1 origin main && git reset --hard FETCH_HEAD; else git clone --depth 1 git@github.com:leegyeongyoon/badminton-backups.git /opt/badminton-backups; fi'
+          ssh_pi "touch /opt/badminton/STANDBY_MODE && chmod +x /opt/badminton/scripts/standby-*.sh"
+          ssh_pi '( crontab -l 2>/dev/null | grep -v "standby-restore.sh" | grep -v "standby-refresh-code.sh" ; echo "30 4 * * * cd /opt/badminton && bash scripts/standby-restore.sh >> /opt/badminton/standby.log 2>&1" ; echo "0 4 * * 0 cd /opt/badminton && bash scripts/standby-refresh-code.sh >> /opt/badminton/standby.log 2>&1" ) | crontab -'
+          echo "==> cron 설치 확인"; ssh_pi "crontab -l | grep standby"
+
+      - name: Warm up (server 기동 + 즉시 1회 복원 검증)
+        env:
+          SSHPASS: ${{ secrets.SSH_PASSWORD }}
+        run: |
+          ssh_pi() { sshpass -e ssh "${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}" "$1"; }
+          ssh_pi "cd /opt/badminton && docker compose -f docker-compose.prod.yml up -d postgres server"
+          sleep 10
+          ssh_pi "cd /opt/badminton && bash scripts/standby-restore.sh" | tail -2
+          echo "STANDBY READY"

@@ -39,7 +39,7 @@ jobs:
         run: |
           mkdir -p ~/.ssh
           cat >> ~/.ssh/config << SSHCONFIG
-          Host ${{ secrets.SSH_HOST }}
+          Host ${{ secrets.SSH_HOST_AWS }}
             ProxyCommand cloudflared access ssh --hostname %h
             StrictHostKeyChecking no
             UserKnownHostsFile /dev/null
@@ -47,7 +47,7 @@ jobs:
 
       - name: Sync source to Pi
         env:
-          SSHPASS: ${{ secrets.SSH_PASSWORD }}
+          SSHPASS: ${{ secrets.SSH_PASSWORD_AWS }}
         run: |
           for attempt in 1 2 3; do
             sshpass -e rsync -az --delete \
@@ -60,47 +60,47 @@ jobs:
               --exclude 'packages/mobile' \
               --exclude '**/dist' \
               -e "ssh -o ConnectTimeout=25" \
-              ./ "${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}:/opt/badminton/" && break
+              ./ "${{ secrets.SSH_USER_AWS }}@${{ secrets.SSH_HOST_AWS }}:/opt/badminton/" && break
             echo "rsync 재시도 $attempt..."; sleep 10
           done
 
       - name: Inject Google OAuth keys into .env.prod (Pi)
         env:
-          SSHPASS: ${{ secrets.SSH_PASSWORD }}
+          SSHPASS: ${{ secrets.SSH_PASSWORD_AWS }}
           G_CLIENT_ID: ${{ secrets.GOOGLE_CLIENT_ID }}
           G_CLIENT_SECRET: ${{ secrets.GOOGLE_CLIENT_SECRET }}
         run: |
           if [ -z "$G_CLIENT_SECRET" ]; then echo "GOOGLE 시크릿 미설정 — 건너뜀"; exit 0; fi
-          ssh_pi() { sshpass -e ssh -o ConnectTimeout=25 "${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}" "$1"; }
+          ssh_pi() { sshpass -e ssh -o ConnectTimeout=25 "${{ secrets.SSH_USER_AWS }}@${{ secrets.SSH_HOST_AWS }}" "$1"; }
           # .env.prod 는 서버에만 있고 rsync 에서 제외됨 — 여기서 GOOGLE_* 만 idempotent 하게 갱신.
           ssh_pi "cd /opt/badminton && touch .env.prod && sed -i '/^GOOGLE_CLIENT_ID=/d; /^GOOGLE_CLIENT_SECRET=/d' .env.prod && echo 'GOOGLE_CLIENT_ID=$G_CLIENT_ID' >> .env.prod && echo 'GOOGLE_CLIENT_SECRET=$G_CLIENT_SECRET' >> .env.prod && echo 'GOOGLE keys injected'" \
             || echo "주입 실패(무시) — 구글 로그인은 키 설정 전까지 비활성"
 
       - name: Inject OPENAI_API_KEY into .env.prod (Pi)
         env:
-          SSHPASS: ${{ secrets.SSH_PASSWORD }}
+          SSHPASS: ${{ secrets.SSH_PASSWORD_AWS }}
           OPENAI_KEY: ${{ secrets.OPENAI_API_KEY }}
         run: |
           if [ -z "$OPENAI_KEY" ]; then echo "OPENAI 시크릿 미설정 — 건너뜀(운영판 AI 명령 비활성)"; exit 0; fi
-          ssh_pi() { sshpass -e ssh -o ConnectTimeout=25 "${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}" "$1"; }
+          ssh_pi() { sshpass -e ssh -o ConnectTimeout=25 "${{ secrets.SSH_USER_AWS }}@${{ secrets.SSH_HOST_AWS }}" "$1"; }
           # .env.prod 에 OPENAI_API_KEY 만 idempotent 하게 갱신 (운영판 자유문장 명령 AI 파싱용).
           ssh_pi "cd /opt/badminton && touch .env.prod && sed -i '/^OPENAI_API_KEY=/d' .env.prod && echo 'OPENAI_API_KEY=$OPENAI_KEY' >> .env.prod && echo 'OPENAI key injected'" \
             || echo "주입 실패(무시) — AI 명령은 키 설정 전까지 비활성"
 
       - name: Inject SLACK_WEBHOOK_URL into .env.prod (Pi)
         env:
-          SSHPASS: ${{ secrets.SSH_PASSWORD }}
+          SSHPASS: ${{ secrets.SSH_PASSWORD_AWS }}
           SLACK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
         run: |
           if [ -z "$SLACK_URL" ]; then echo "SLACK 시크릿 미설정 — 건너뜀(가입 신청 알림 비활성)"; exit 0; fi
-          ssh_pi() { sshpass -e ssh -o ConnectTimeout=25 "${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}" "$1"; }
+          ssh_pi() { sshpass -e ssh -o ConnectTimeout=25 "${{ secrets.SSH_USER_AWS }}@${{ secrets.SSH_HOST_AWS }}" "$1"; }
           # .env.prod 에 SLACK_WEBHOOK_URL 만 idempotent 하게 갱신 (운영자 가입 신청 알림용).
           ssh_pi "cd /opt/badminton && touch .env.prod && sed -i '/^SLACK_WEBHOOK_URL=/d' .env.prod && echo 'SLACK_WEBHOOK_URL=$SLACK_URL' >> .env.prod && echo 'SLACK webhook injected'" \
             || echo "주입 실패(무시) — 가입 신청 알림은 웹훅 설정 전까지 비활성"
 
       - name: Inject SOLAPI(문자) 키 into .env.prod (Pi)
         env:
-          SSHPASS: ${{ secrets.SSH_PASSWORD }}
+          SSHPASS: ${{ secrets.SSH_PASSWORD_AWS }}
           SOLAPI_KEY: ${{ secrets.SOLAPI_API_KEY }}
           SOLAPI_SECRET: ${{ secrets.SOLAPI_API_SECRET }}
           SOLAPI_FROM: ${{ secrets.SOLAPI_SENDER }}
@@ -108,27 +108,27 @@ jobs:
           if [ -z "$SOLAPI_KEY" ] || [ -z "$SOLAPI_SECRET" ] || [ -z "$SOLAPI_FROM" ]; then
             echo "SOLAPI 시크릿 미설정 — 건너뜀(문자 알림 비활성, 푸시는 정상 동작)"; exit 0;
           fi
-          ssh_pi() { sshpass -e ssh -o ConnectTimeout=25 "${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}" "$1"; }
+          ssh_pi() { sshpass -e ssh -o ConnectTimeout=25 "${{ secrets.SSH_USER_AWS }}@${{ secrets.SSH_HOST_AWS }}" "$1"; }
           # .env.prod 에 SOLAPI_* 3개만 idempotent 하게 갱신 (운영진 승급 문자 알림용).
           ssh_pi "cd /opt/badminton && touch .env.prod && sed -i '/^SOLAPI_API_KEY=/d; /^SOLAPI_API_SECRET=/d; /^SOLAPI_SENDER=/d' .env.prod && printf 'SOLAPI_API_KEY=%s\nSOLAPI_API_SECRET=%s\nSOLAPI_SENDER=%s\n' '$SOLAPI_KEY' '$SOLAPI_SECRET' '$SOLAPI_FROM' >> .env.prod && echo 'SOLAPI keys injected'" \
             || echo "SOLAPI 주입 실패(무시) — 문자 알림은 키 설정 전까지 비활성"
 
       - name: Inject SENTRY_DSN into .env.prod (Pi)
         env:
-          SSHPASS: ${{ secrets.SSH_PASSWORD }}
+          SSHPASS: ${{ secrets.SSH_PASSWORD_AWS }}
           SENTRY_DSN: ${{ secrets.SENTRY_DSN_SERVER }}
         run: |
           if [ -z "$SENTRY_DSN" ]; then echo "SENTRY 시크릿 미설정 — 건너뜀(서버 에러 추적 비활성)"; exit 0; fi
-          ssh_pi() { sshpass -e ssh -o ConnectTimeout=25 "${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}" "$1"; }
+          ssh_pi() { sshpass -e ssh -o ConnectTimeout=25 "${{ secrets.SSH_USER_AWS }}@${{ secrets.SSH_HOST_AWS }}" "$1"; }
           # .env.prod 에 SENTRY_DSN 만 idempotent 하게 갱신 (서버 500/크래시 원격 추적용).
           ssh_pi "cd /opt/badminton && touch .env.prod && sed -i '/^SENTRY_DSN=/d' .env.prod && echo 'SENTRY_DSN=$SENTRY_DSN' >> .env.prod && echo 'SENTRY dsn injected'" \
             || echo "주입 실패(무시) — 에러 추적은 DSN 설정 전까지 비활성"
 
       - name: Inject JWT 만료 정책 into .env.prod (Pi)
         env:
-          SSHPASS: ${{ secrets.SSH_PASSWORD }}
+          SSHPASS: ${{ secrets.SSH_PASSWORD_AWS }}
         run: |
-          ssh_pi() { sshpass -e ssh -o ConnectTimeout=25 "${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}" "$1"; }
+          ssh_pi() { sshpass -e ssh -o ConnectTimeout=25 "${{ secrets.SSH_USER_AWS }}@${{ secrets.SSH_HOST_AWS }}" "$1"; }
           # 세션 유지 = refresh 30일, access 12시간(탈취 창 최소화). 비밀값 아님 → 워크플로에 고정.
           # 기존 값이 있으면 지우고 다시 써서 서버 .env.prod의 옛 7d 등을 idempotent 하게 덮어쓴다.
           ssh_pi "cd /opt/badminton && touch .env.prod && sed -i '/^JWT_EXPIRES_IN=/d; /^JWT_REFRESH_EXPIRES_IN=/d' .env.prod && printf 'JWT_EXPIRES_IN=12h\nJWT_REFRESH_EXPIRES_IN=30d\n' >> .env.prod && echo 'JWT expiry set (access 12h / refresh 30d)'" \
@@ -136,9 +136,9 @@ jobs:
 
       - name: Inject KAKAO_REST_KEY into .env.prod (Pi)
         env:
-          SSHPASS: ${{ secrets.SSH_PASSWORD }}
+          SSHPASS: ${{ secrets.SSH_PASSWORD_AWS }}
         run: |
-          ssh_pi() { sshpass -e ssh -o ConnectTimeout=25 "${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}" "$1"; }
+          ssh_pi() { sshpass -e ssh -o ConnectTimeout=25 "${{ secrets.SSH_USER_AWS }}@${{ secrets.SSH_HOST_AWS }}" "$1"; }
           # 카카오 REST 키 — 장소검색 프록시(GET /facilities/search)용. 클라 번들에도 이미 있는
           # 공개 키라 비밀값 아님 → 워크플로에 고정. idempotent 주입.
           ssh_pi "cd /opt/badminton && touch .env.prod && sed -i '/^KAKAO_REST_KEY=/d' .env.prod && echo 'KAKAO_REST_KEY=5a202bd90ab8dff01348f24cb1c37f3f' >> .env.prod && echo 'KAKAO_REST_KEY set'" \
@@ -146,9 +146,9 @@ jobs:
 
       - name: Build & deploy on Pi (detached) + poll
         env:
-          SSHPASS: ${{ secrets.SSH_PASSWORD }}
+          SSHPASS: ${{ secrets.SSH_PASSWORD_AWS }}
         run: |
-          ssh_pi() { sshpass -e ssh -o ConnectTimeout=25 "${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}" "$1"; }
+          ssh_pi() { sshpass -e ssh -o ConnectTimeout=25 "${{ secrets.SSH_USER_AWS }}@${{ secrets.SSH_HOST_AWS }}" "$1"; }
 
           # Build on the Pi takes several minutes and the tunnel can drop, so run
           # it detached and write OK/FAIL to a status file we poll for.
