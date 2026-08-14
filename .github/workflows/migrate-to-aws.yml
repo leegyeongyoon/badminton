@@ -1,0 +1,120 @@
+name: Migrate to AWS
+
+# 파이 → EC2 데이터 이관 (M8 S3, 일회용 dispatch).
+# 파이에서 .env.prod / 최신 DB 덤프 / uploads tar를 꺼내 EC2(/opt/badminton)에
+# 심고, 소스 rsync → DB 복원 → deploy-remote.sh(빌드+마이그레이트+기동) →
+# uploads 주입 → 헬스체크까지. 프로덕션(파이)은 건드리지 않는다(읽기만).
+# 시크릿: SSH_HOST/USER/PASSWORD=파이(기존), SSH_HOST_AWS/USER_AWS/PASSWORD_AWS=EC2.
+on:
+  workflow_dispatch:
+
+concurrency:
+  group: migrate-to-aws
+  cancel-in-progress: false
+
+jobs:
+  migrate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Install cloudflared + sshpass + rsync
+        run: |
+          curl -fsSL https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64.deb -o cloudflared.deb
+          sudo dpkg -i cloudflared.deb
+          sudo apt-get update && sudo apt-get install -y sshpass rsync
+
+      - name: Configure SSH over Cloudflare Tunnel (Pi + EC2)
+        run: |
+          mkdir -p ~/.ssh
+          cat >> ~/.ssh/config << SSHCONFIG
+          Host ${{ secrets.SSH_HOST }} ${{ secrets.SSH_HOST_AWS }}
+            ProxyCommand cloudflared access ssh --hostname %h
+            StrictHostKeyChecking no
+            UserKnownHostsFile /dev/null
+            ConnectTimeout 25
+          SSHCONFIG
+
+      - name: Fetch data from Pi (dump + env + uploads)
+        env:
+          SSHPASS: ${{ secrets.SSH_PASSWORD }}
+        run: |
+          ssh_pi() { sshpass -e ssh "${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}" "$1"; }
+          echo "==> 파이에서 새 덤프 생성"
+          ssh_pi "cd /opt/badminton && bash scripts/backup-db.sh" | tail -3
+          LATEST=$(ssh_pi "ls -t /opt/badminton/backups/badminton-*.sql.gz | head -1" | tr -d '\r')
+          [ -n "$LATEST" ] || { echo "::error::덤프 없음"; exit 1; }
+          sshpass -e scp "${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}:$LATEST" ./dump.sql.gz
+          [ "$(wc -c < dump.sql.gz)" -gt 1024 ] || { echo "::error::덤프 비정상"; exit 1; }
+          echo "==> .env.prod (내용 비출력)"
+          ssh_pi "base64 /opt/badminton/.env.prod" > env.b64
+          [ -s env.b64 ] || { echo "::error::.env.prod 없음"; exit 1; }
+          echo "==> uploads 볼륨 tar"
+          ssh_pi "docker exec badminton-prod-server tar czf - -C /app/uploads ." > uploads.tar.gz || echo "(uploads 비었거나 실패 — 계속)"
+          ls -lh dump.sql.gz uploads.tar.gz 2>/dev/null || true
+
+      - name: Push source + data to EC2
+        env:
+          SSHPASS: ${{ secrets.SSH_PASSWORD_AWS }}
+        run: |
+          ssh_aws() { sshpass -e ssh "${{ secrets.SSH_USER_AWS }}@${{ secrets.SSH_HOST_AWS }}" "$1"; }
+          echo "==> 소스 rsync"
+          sshpass -e rsync -az --delete \
+            --exclude '.git' --exclude '.env.prod' --exclude '.env' --exclude '**/.env' \
+            --exclude 'node_modules' --exclude '**/node_modules' \
+            --exclude 'packages/mobile' --exclude '**/dist' \
+            ./ "${{ secrets.SSH_USER_AWS }}@${{ secrets.SSH_HOST_AWS }}:/opt/badminton/"
+          echo "==> env/덤프/uploads 전송"
+          cat env.b64 | ssh_aws "base64 -d > /opt/badminton/.env.prod && chmod 600 /opt/badminton/.env.prod"
+          sshpass -e scp dump.sql.gz "${{ secrets.SSH_USER_AWS }}@${{ secrets.SSH_HOST_AWS }}:/opt/badminton/migrate-dump.sql.gz"
+          [ -f uploads.tar.gz ] && sshpass -e scp uploads.tar.gz "${{ secrets.SSH_USER_AWS }}@${{ secrets.SSH_HOST_AWS }}:/opt/badminton/migrate-uploads.tar.gz" || true
+
+      - name: Restore DB and deploy on EC2 (detached) + poll
+        env:
+          SSHPASS: ${{ secrets.SSH_PASSWORD_AWS }}
+        run: |
+          ssh_aws() { sshpass -e ssh "${{ secrets.SSH_USER_AWS }}@${{ secrets.SSH_HOST_AWS }}" "$1"; }
+          # ARM 빌드가 몇 분 걸리므로 파이 배포와 같은 detached+poll 패턴.
+          ssh_aws 'rm -f /opt/badminton/migrate.status /opt/badminton/migrate.log; setsid bash -c "
+            set -e
+            cd /opt/badminton
+            docker compose -f docker-compose.prod.yml up -d postgres
+            for i in \$(seq 1 24); do docker compose -f docker-compose.prod.yml exec -T postgres pg_isready -U badminton -d badminton && break; sleep 5; done
+            bash scripts/restore-db.sh --yes ./migrate-dump.sql.gz
+            bash scripts/deploy-remote.sh
+            if [ -f migrate-uploads.tar.gz ]; then docker cp migrate-uploads.tar.gz badminton-prod-server:/tmp/u.tar.gz && docker exec -u root badminton-prod-server sh -c \"tar xzf /tmp/u.tar.gz -C /app/uploads && chown -R node:node /app/uploads && rm /tmp/u.tar.gz\"; fi
+            echo OK > migrate.status
+          " >> /opt/badminton/migrate.log 2>&1 || echo FAIL > /opt/badminton/migrate.status &' < /dev/null
+
+          echo "=== 폴링 (최대 ~25분) ==="
+          STATUS=""
+          for i in $(seq 1 50); do
+            sleep 30
+            STATUS=$(ssh_aws "cat /opt/badminton/migrate.status 2>/dev/null" 2>/dev/null || echo "")
+            echo "[$i/50] 상태: ${STATUS:-진행중}"
+            [ -n "$STATUS" ] && break
+          done
+          echo "=== 로그(마지막 40줄) ==="
+          ssh_aws "tail -40 /opt/badminton/migrate.log" || true
+          [ "$STATUS" = "OK" ] || { echo "::error::이관 실패 (status=${STATUS:-timeout})"; exit 1; }
+
+      - name: Healthcheck (EC2 local + staging hostname)
+        env:
+          SSHPASS: ${{ secrets.SSH_PASSWORD_AWS }}
+        run: |
+          ssh_aws() { sshpass -e ssh "${{ secrets.SSH_USER_AWS }}@${{ secrets.SSH_HOST_AWS }}" "$1"; }
+          for i in $(seq 1 12); do
+            sleep 5
+            code=$(ssh_aws "curl -s -o /dev/null -w '%{http_code}' http://localhost:3131/api/v1/health" 2>/dev/null || echo 000)
+            echo "[$i/12] local health: $code"
+            [ "$code" = "200" ] && break
+          done
+          [ "$code" = "200" ] || { ssh_aws "docker logs badminton-prod-server --tail 30"; exit 1; }
+          pub=$(curl -s -o /dev/null -w '%{http_code}' -m 10 https://api-staging.badmintoncourt.store/api/v1/health)
+          echo "api-staging: $pub"
+          [ "$pub" = "200" ] || exit 1
+          # 이관 산출물 정리
+          ssh_aws "rm -f /opt/badminton/migrate-dump.sql.gz /opt/badminton/migrate-uploads.tar.gz"
+          echo "MIGRATION SUCCESS"
