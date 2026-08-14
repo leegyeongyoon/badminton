@@ -1,4 +1,4 @@
-import { useState, useMemo, useEffect } from 'react';
+import { useState, useMemo } from 'react';
 import {
   View,
   Text,
@@ -16,7 +16,7 @@ import { useTheme } from '../../hooks/useTheme';
 import { useFormValidation } from '../../hooks/useFormValidation';
 import { compose, required, phone as phoneRule, password as passwordRule } from '../../utils/validation';
 import { typography, spacing, radius } from '../../constants/theme';
-import { API_URL } from '../../constants/api';
+import { useServerDown } from '../../hooks/useServerDown';
 import { Strings } from '../../constants/strings';
 import { showError, showInfo } from '../../utils/feedback';
 import { Input } from '../../components/ui/Input';
@@ -37,35 +37,6 @@ const GOOGLE_BLUE = '#4285F4';
 // 콕고 간편 가이드 — badmintoncourt.store 에 배포되는 정적 페이지(로그인 불필요).
 // 앱 라우트 /guide 와 겹치지 않게 /help 로 서빙.
 const GUIDE_URL = 'https://badmintoncourt.store/help';
-
-// ── 서버 점검 감지 ─────────────────────────────────────────────
-// 헬스체크가 실패하는 동안에만 화면 상단에 점검 안내를 띄운다. 서버가
-// 복구되면 다음 체크에서 자동으로 사라지므로 안내 제거 배포가 필요 없다.
-const HEALTH_URL = `${API_URL}/health`;
-const HEALTH_INTERVAL_MS = 30_000;
-const HEALTH_TIMEOUT_MS = 5_000;
-
-function useServerDown(): boolean {
-  const [down, setDown] = useState(false);
-  useEffect(() => {
-    let alive = true;
-    const check = async () => {
-      try {
-        const ctrl = new AbortController();
-        const timer = setTimeout(() => ctrl.abort(), HEALTH_TIMEOUT_MS);
-        const res = await fetch(HEALTH_URL, { signal: ctrl.signal });
-        clearTimeout(timer);
-        if (alive) setDown(!res.ok);
-      } catch {
-        if (alive) setDown(true);
-      }
-    };
-    check();
-    const id = setInterval(check, HEALTH_INTERVAL_MS);
-    return () => { alive = false; clearInterval(id); };
-  }, []);
-  return down;
-}
 
 export default function LoginScreen() {
   const [loading, setLoading] = useState(false);

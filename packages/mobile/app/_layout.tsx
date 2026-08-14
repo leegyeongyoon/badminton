@@ -14,6 +14,7 @@ import { TurnBanner } from '../components/shared/TurnBanner';
 import { ConfirmDialogContainer } from '../components/ui/ConfirmDialog';
 import { ErrorBoundary } from '../components/shared/ErrorBoundary';
 import { NetworkStatusBar } from '../components/shared/NetworkStatusBar';
+import { ServerDownBanner } from '../components/shared/ServerDownBanner';
 import { AppInstallBanner } from '../components/shared/AppInstallBanner';
 import { AppGate } from '../components/shared/AppGate';
 import { ThemeProvider, useThemeContext } from '../contexts/ThemeContext';
@@ -260,6 +261,8 @@ function RootLayoutInner() {
           isConnected={isConnected}
           isReconnecting={isConnected && !isSocketConnected}
         />
+        {/* 서버(파이) 무응답 안내 — 기기 오프라인일 땐 NetworkStatusBar가 담당. */}
+        <ServerDownBanner suppress={!isConnected} />
         <Stack screenOptions={{ headerShown: false }}>
           <Stack.Screen name="onboarding" options={transitions.fadeScale} />
           <Stack.Screen name="(auth)" options={transitions.fadeScale} />

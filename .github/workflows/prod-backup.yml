@@ -1,0 +1,73 @@
+name: Prod DB Backup
+
+# 프로덕션 DB 덤프를 파이에서 떠서 '비공개' 저장소(badminton-backups)로 복사한다.
+# 파이 SD카드에만 백업이 쌓이는 단일 장애점 제거(8/13 장애 후속). 매일 03:17 KST.
+#
+# 이 저장소는 PUBLIC이므로 덤프(개인정보 포함)를 여기 아티팩트로 올리면 절대 안 된다.
+# 업로드 대상은 반드시 비공개 badminton-backups — 쓰기 전용 디플로이 키
+# (secrets.BACKUP_REPO_SSH_KEY)로만 접근하고, 매회 orphan 커밋 force-push라
+# 저장소 크기가 보관분(최근 30개)만큼으로 유지된다.
+on:
+  schedule:
+    - cron: '17 18 * * *' # 03:17 KST
+  workflow_dispatch:
+
+concurrency:
+  group: prod-db-backup
+  cancel-in-progress: false
+
+jobs:
+  backup:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Install cloudflared + sshpass
+        run: |
+          curl -fsSL https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64.deb -o cloudflared.deb
+          sudo dpkg -i cloudflared.deb
+          sudo apt-get update && sudo apt-get install -y sshpass
+
+      - name: Configure SSH over Cloudflare Tunnel
+        run: |
+          mkdir -p ~/.ssh
+          cat >> ~/.ssh/config << SSHCONFIG
+          Host ${{ secrets.SSH_HOST }}
+            ProxyCommand cloudflared access ssh --hostname %h
+            StrictHostKeyChecking no
+            UserKnownHostsFile /dev/null
+          SSHCONFIG
+
+      - name: Dump DB on Pi and fetch
+        env:
+          SSHPASS: ${{ secrets.SSH_PASSWORD }}
+        run: |
+          ssh_pi() { sshpass -e ssh -o ConnectTimeout=25 "${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}" "$1"; }
+          ssh_pi "cd /opt/badminton && bash scripts/backup-db.sh"
+          LATEST=$(ssh_pi "ls -t /opt/badminton/backups/badminton-*.sql.gz | head -1" | tr -d '\r')
+          echo "latest dump: $LATEST"
+          [ -n "$LATEST" ] || { echo "::error::백업 파일을 찾지 못함"; exit 1; }
+          echo "DUMP_NAME=$(basename "$LATEST")" >> "$GITHUB_ENV"
+          sshpass -e scp -o ConnectTimeout=25 "${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}:$LATEST" ./dump.sql.gz
+          # 잘린 덤프 방어 — 실제 덤프는 넉넉히 1KB를 넘는다.
+          [ "$(wc -c < dump.sql.gz)" -gt 1024 ] || { echo "::error::덤프가 비정상적으로 작음"; exit 1; }
+          ls -lh dump.sql.gz
+
+      - name: Push to private backup repo (keep last 30)
+        env:
+          BACKUP_KEY: ${{ secrets.BACKUP_REPO_SSH_KEY }}
+        run: |
+          mkdir -p ~/.ssh
+          echo "$BACKUP_KEY" > ~/.ssh/backup_key && chmod 600 ~/.ssh/backup_key
+          ssh-keyscan github.com >> ~/.ssh/known_hosts 2>/dev/null
+          export GIT_SSH_COMMAND="ssh -i ~/.ssh/backup_key -o IdentitiesOnly=yes"
+          git clone --depth 1 git@github.com:leegyeongyoon/badminton-backups.git repo
+          cd repo
+          # orphan 커밋으로 항상 히스토리 1개 — 지운 옛 덤프가 히스토리에 남아
+          # 저장소가 무한히 크는 것을 막는다.
+          git checkout --orphan snapshot
+          cp ../dump.sql.gz "./$DUMP_NAME"
+          ls -1 badminton-*.sql.gz 2>/dev/null | sort -r | tail -n +31 | xargs -r rm -f
+          git add -A
+          git -c user.name=backup-bot -c user.email=backup-bot@users.noreply.github.com commit -m "backup: $DUMP_NAME"
+          git push --force origin snapshot:main
+          echo "보관 중인 덤프:"; ls -1 badminton-*.sql.gz | sort -r | head -5

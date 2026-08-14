@@ -1,0 +1,30 @@
+name: Health Check
+
+# 프로덕션 API 생존 감시 — 15분마다 health를 확인하고, 3회 연속 실패하면
+# 워크플로가 실패로 끝나 GitHub이 실패 메일을 보낸다(외부 서비스 불필요).
+# 8/13 장애(집 인터넷 순단 5시간)를 사용자 제보로야 안 게 계기.
+# 주의: 다운이 지속되면 15분마다 실패 메일이 반복된다 — 복구 전까지의 의도된 소음.
+on:
+  schedule:
+    - cron: '*/15 * * * *'
+  workflow_dispatch:
+
+concurrency:
+  group: health-check
+  cancel-in-progress: true
+
+jobs:
+  api:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: API health (3 tries)
+        run: |
+          for i in 1 2 3; do
+            code=$(curl -s -o /dev/null -w '%{http_code}' -m 15 https://api.badmintoncourt.store/api/v1/health || echo 000)
+            echo "[$i/3] health: $code"
+            [ "$code" = "200" ] && exit 0
+            sleep 20
+          done
+          echo "::error::API DOWN — api.badmintoncourt.store/api/v1/health 3회 연속 실패 (마지막 코드: $code). 파이 전원/인터넷을 확인하세요."
+          exit 1

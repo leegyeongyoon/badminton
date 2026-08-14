@@ -2,10 +2,12 @@ import 'dotenv/config';
 import { createServer } from 'http';
 import { validateConfig } from './config';
 import { logger } from './utils/logger';
+import { initSentry, captureError } from './utils/sentry';
 
 // Validate secrets/env BEFORE importing modules that read them or open the DB.
 // In production this exits(1) on missing/weak JWT secrets or missing DATABASE_URL.
 validateConfig();
+initSentry();
 
 import app from './app';
 import { startBillingLoop } from './modules/payment/payment.service';
@@ -41,12 +43,14 @@ process.on('uncaughtException', (err) => {
   // 대부분의 에러는 Express 전역 에러 미들웨어 + 소켓 핸들러 가드에서 이미 잡히므로,
   // 여기까지 도달하는 건 드물다. (프로세스가 정말 손상됐다면 헬스체크/SIGTERM로 회수.)
   logger.error('uncaughtException (surviving, not exiting)', { err });
+  captureError(err, { source: 'uncaughtException' });
 });
 
 process.on('unhandledRejection', (reason) => {
   // Log but do NOT exit: an unhandled rejection is less certainly fatal than an
   // uncaught exception, and exiting here would be a denial-of-service vector.
   logger.error('unhandledRejection', { reason });
+  captureError(reason, { source: 'unhandledRejection' });
 });
 
 // Graceful shutdown with a hard timeout so a hung prisma.$disconnect() (or any
