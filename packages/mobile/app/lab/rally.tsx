@@ -523,6 +523,7 @@ function ShotButton({ size, color, icon, label, style, onPress }: {
         pressed && { transform: [{ scale: 0.9 }], opacity: 0.9 },
       ]}
     >
+      <View style={{ position: 'absolute', top: size * 0.08, width: size * 0.52, height: size * 0.2, borderRadius: size * 0.26, backgroundColor: 'rgba(255,255,255,0.3)' }} />
       <MaterialCommunityIcons name={icon} size={size * 0.36} color="#fff" />
       <Text style={[styles.shotBtnLabel, { fontSize: size * 0.15 }]}>{label}</Text>
     </Pressable>
@@ -589,8 +590,8 @@ function Court({ proj }: { proj: Projector }) {
     }
     return out;
   };
-  const outer = buildStrips(4.35, COURT.HALF_LEN + 1.15, 30);
-  const inner = buildStrips(COURT.HALF_W, COURT.HALF_LEN, 28);
+  const outer = buildStrips(4.35, COURT.HALF_LEN + 1.15, 90);
+  const inner = buildStrips(COURT.HALF_W, COURT.HALF_LEN, 80);
 
   // 백보드 광고판
   const adTop = proj.y(7.55, 1.0);
@@ -598,10 +599,29 @@ function Court({ proj }: { proj: Projector }) {
   const adL = proj.x(-4.6, 7.55);
   const adR = proj.x(4.6, 7.55);
 
+  // 관중석 — 광고판 위 두 줄의 도트 (렌더마다 안 바뀌게 결정적 배치)
+  const crowd: { left: number; top: number; c: string; s: number }[] = [];
+  const crowdColors = ['#6B7A8F', '#8A6F5C', '#5C748A', '#7F6B8A', '#5F8A75', '#8A5C5C'];
+  for (let i = 0; i < 46; i++) {
+    const fx = ((i * 37) % 100) / 100;
+    const row = i % 2;
+    crowd.push({
+      left: adL + (adR - adL) * fx,
+      top: adTop - 14 - row * 11 - ((i * 13) % 5),
+      c: crowdColors[i % crowdColors.length],
+      s: 5 + ((i * 7) % 3),
+    });
+  }
+
   return (
     <View style={StyleSheet.absoluteFill} pointerEvents="none">
       <View style={[styles.wall, { height: adTop }]} />
       <View style={[styles.gymFloor, { top: adTop }]} />
+      {/* 관중석 */}
+      <View style={{ position: 'absolute', left: adL - 10, top: adTop - 34, width: adR - adL + 20, height: 34, backgroundColor: '#1A222E', borderTopLeftRadius: 6, borderTopRightRadius: 6 }} />
+      {crowd.map((d, i) => (
+        <View key={i} style={{ position: 'absolute', left: d.left, top: d.top, width: d.s, height: d.s, borderRadius: d.s / 2, backgroundColor: d.c }} />
+      ))}
       {/* 광고판 */}
       <View style={{ position: 'absolute', left: adL, top: adTop, width: adR - adL, height: adBottom - adTop, backgroundColor: '#0E7A63', borderTopWidth: 2, borderTopColor: '#134E40', flexDirection: 'row', alignItems: 'center', justifyContent: 'space-around' }}>
         <Text style={styles.adText}>콕고</Text>
@@ -662,21 +682,32 @@ function Character({ kit, skin, front, armStyle }: {
   return (
     <View style={styles.charBox}>
       <View style={styles.charShadow} />
-      <View style={[styles.leg, { left: 20 }]} />
-      <View style={[styles.leg, { left: 32 }]} />
-      <View style={[styles.torso, { backgroundColor: kit }]} />
+      {/* 신발·다리 */}
+      <View style={[styles.shoe, { left: 16 }]} />
+      <View style={[styles.shoe, { left: 33 }]} />
+      <View style={[styles.leg, { left: 20, backgroundColor: skin }]} />
+      <View style={[styles.leg, { left: 33, backgroundColor: skin }]} />
+      {/* 하의·유니폼 */}
       <View style={styles.shorts} />
+      <View style={[styles.jersey, { backgroundColor: kit }]} />
+      <View style={styles.jerseyStripe} />
+      {/* 왼팔 */}
+      <View style={[styles.armLeft, { backgroundColor: skin }]} />
+      {/* 라켓 팔 */}
       <Animated.View style={[styles.armPivot, armStyle]}>
         <View style={[styles.arm, { backgroundColor: skin }]} />
         <View style={styles.racketShaft} />
         <View style={styles.racketHead} />
+        <View style={styles.racketString} />
       </Animated.View>
+      {/* 머리 */}
       <View style={[styles.head, { backgroundColor: skin }]} />
-      <View style={[styles.hair, front ? { top: 8 } : null]} />
+      <View style={styles.hair} />
+      <View style={styles.headband} />
       {front && (
         <>
-          <View style={[styles.eye, { left: 24 }]} />
-          <View style={[styles.eye, { left: 32 }]} />
+          <View style={[styles.eye, { left: 25 }]} />
+          <View style={[styles.eye, { left: 33 }]} />
         </>
       )}
     </View>
@@ -802,17 +833,22 @@ const styles = StyleSheet.create({
 
   char: { position: 'absolute', left: 0, top: 0 },
   charBox: { width: 60, height: 112 },
-  charShadow: { position: 'absolute', bottom: 0, left: 12, width: 36, height: 10, borderRadius: 18, backgroundColor: 'rgba(0,0,0,0.32)' },
-  leg: { position: 'absolute', bottom: 4, width: 8, height: 26, borderRadius: 4, backgroundColor: '#E8DCC8' },
-  torso: { position: 'absolute', bottom: 44, left: 15, width: 30, height: 34, borderRadius: 10 },
-  shorts: { position: 'absolute', bottom: 28, left: 17, width: 26, height: 18, borderRadius: 7, backgroundColor: '#1F2937' },
-  armPivot: { position: 'absolute', bottom: 66, left: 40, width: 34, height: 10, transformOrigin: 'left center' } as never,
+  charShadow: { position: 'absolute', bottom: 0, left: 10, width: 40, height: 10, borderRadius: 20, backgroundColor: 'rgba(0,0,0,0.32)' },
+  shoe: { position: 'absolute', bottom: 2, width: 12, height: 6, borderRadius: 3, backgroundColor: '#F8FAFC' },
+  leg: { position: 'absolute', bottom: 7, width: 7, height: 24, borderRadius: 4 },
+  shorts: { position: 'absolute', bottom: 28, left: 16, width: 28, height: 17, borderRadius: 6, backgroundColor: '#1E293B' },
+  jersey: { position: 'absolute', bottom: 42, left: 14, width: 32, height: 33, borderRadius: 9 },
+  jerseyStripe: { position: 'absolute', bottom: 43, left: 17, width: 4, height: 29, borderRadius: 2, backgroundColor: 'rgba(255,255,255,0.65)' },
+  armLeft: { position: 'absolute', bottom: 50, left: 7, width: 8, height: 22, borderRadius: 4, transform: [{ rotate: '14deg' }] },
+  armPivot: { position: 'absolute', bottom: 64, left: 41, width: 36, height: 10, transformOrigin: 'left center' } as never,
   arm: { position: 'absolute', left: 0, top: 2, width: 18, height: 7, borderRadius: 4 },
-  racketShaft: { position: 'absolute', left: 16, top: 4, width: 12, height: 3, borderRadius: 2, backgroundColor: '#334155' },
-  racketHead: { position: 'absolute', left: 25, top: -4, width: 15, height: 18, borderRadius: 9, borderWidth: 2.5, borderColor: '#334155', backgroundColor: 'rgba(226,232,240,0.5)' },
-  head: { position: 'absolute', bottom: 76, left: 21, width: 18, height: 18, borderRadius: 9 },
-  hair: { position: 'absolute', top: 16, left: 20, width: 20, height: 10, borderTopLeftRadius: 10, borderTopRightRadius: 10, backgroundColor: '#2B2118' },
-  eye: { position: 'absolute', top: 26, width: 3, height: 3, borderRadius: 2, backgroundColor: '#1F2937' },
+  racketShaft: { position: 'absolute', left: 16, top: 4, width: 12, height: 3, borderRadius: 2, backgroundColor: '#475569' },
+  racketHead: { position: 'absolute', left: 26, top: -6, width: 16, height: 20, borderRadius: 10, borderWidth: 2.5, borderColor: '#475569', backgroundColor: 'rgba(241,245,249,0.55)' },
+  racketString: { position: 'absolute', left: 33, top: -3, width: 1.5, height: 14, backgroundColor: 'rgba(71,85,105,0.5)' },
+  head: { position: 'absolute', bottom: 76, left: 19, width: 22, height: 22, borderRadius: 11 },
+  hair: { position: 'absolute', top: 11, left: 18, width: 24, height: 11, borderTopLeftRadius: 12, borderTopRightRadius: 12, backgroundColor: '#2B2118' },
+  headband: { position: 'absolute', top: 21, left: 18, width: 24, height: 4, borderRadius: 2, backgroundColor: '#F8FAFC' },
+  eye: { position: 'absolute', top: 28, width: 3.5, height: 3.5, borderRadius: 2, backgroundColor: '#1F2937' },
 
   shuttle: { position: 'absolute', left: 0, top: 0, alignItems: 'center', width: 18 },
   shuttleCork: { width: 9, height: 9, borderRadius: 5, backgroundColor: '#E11D48', borderWidth: 1.5, borderColor: '#FECDD3' },

@@ -17,7 +17,7 @@ export const COURT = {
 // 카메라/투영 파라미터 — 룩을 결정하는 튜닝 값
 const CAM_D = 16; // 카메라가 네트에서 뒤로 떨어진 거리(내 쪽)
 const CAM_H = 9; // 카메라 높이
-const F_RATIO = 1.38; // 초점거리 = 컨테이너 폭 × 비율
+const F_RATIO = 1.52; // 초점거리 = 컨테이너 폭 × 비율 (클수록 코트가 크게)
 
 export interface Projector {
   x: (wx: number, wy: number) => number;
@@ -30,9 +30,9 @@ export interface Projector {
 export function makeProjector(w: number, h: number): Projector {
   const F = w * F_RATIO;
   const cx = w / 2;
-  // 내 베이스라인이 화면 하단 ~90%에 오도록 수평선(horizon)을 잡는다
+  // 내 베이스라인이 화면 하단 ~94%에 오도록 수평선(horizon)을 잡는다
   const nearDy = -COURT.HALF_LEN + CAM_D; // 9.3
-  const horizon = h * 0.9 - (CAM_H / nearDy) * F;
+  const horizon = h * 0.94 - (CAM_H / nearDy) * F;
   const proj = {
     x: (wx: number, wy: number) => cx + (wx / (wy + CAM_D)) * F,
     y: (wy: number, wz: number) => horizon + ((CAM_H - wz) / (wy + CAM_D)) * F,
