@@ -52,6 +52,9 @@ export interface Traj {
 export type SimPhase = 'serve' | 'rally' | 'point' | 'over';
 
 export interface SimState {
+  /** 시뮬레이션 자체 클록(ms) — tick이 감는다. 벽시계를 쓰지 않으므로
+   *  앱이 백그라운드로 갔다 와도 셔틀이 순간이동하지 않고 그대로 일시정지된다. */
+  clock: number;
   phase: SimPhase;
   config: MatchConfig;
   score: Score;
@@ -71,7 +74,9 @@ export interface SimState {
   events: string[];
 }
 
-export type SwingGesture = 'up' | 'down' | 'smash';
+// 게임식 버튼 조작 — 공격(스매시/네트킬)·연결(클리어/헤어핀)·드롭
+export type SwingIntent = 'attack' | 'rally' | 'drop';
+export type AimLane = -1 | 0 | 1 | 'auto';
 
 // ─── 튜닝 상수 ─────────────────────────────────────────────────────
 const PLAYER_SPEED = 4.4; // m/s
@@ -103,6 +108,7 @@ const dist2 = (ax: number, ay: number, bx: number, by: number) => Math.hypot(ax 
 // ─── 상태 생성 ─────────────────────────────────────────────────────
 export function createSim(config: MatchConfig): SimState {
   return {
+    clock: 0,
     phase: 'serve',
     config,
     score: { player: 0, ai: 0 },
@@ -209,14 +215,27 @@ export function contactMenu(contact: Vec3): ShotType[] {
   return ['lift'];
 }
 
-function mapGesture(g: SwingGesture, menu: ShotType[]): ShotType {
-  if (g === 'smash' && menu.includes('smash')) return 'smash';
-  if (g === 'down') {
+function shotForIntent(intent: SwingIntent, menu: ShotType[]): ShotType {
+  if (intent === 'attack') {
+    if (menu.includes('smash')) return 'smash';
+    if (menu.includes('hairpin')) return 'hairpin'; // 네트 앞 공격 = 네트 킬
+    return 'lift';
+  }
+  if (intent === 'drop') {
     if (menu.includes('drop')) return 'drop';
     if (menu.includes('hairpin')) return 'hairpin';
+    return 'lift';
   }
   if (menu.includes('clear')) return 'clear';
+  if (menu.includes('hairpin')) return 'hairpin';
   return 'lift';
+}
+
+// 오토에임 — 상대가 없는 쪽을 노린다
+export function autoAim(s: SimState): -1 | 0 | 1 {
+  if (s.ai.x > 0.5) return -1;
+  if (s.ai.x < -0.5) return 1;
+  return Math.random() < 0.5 ? -1 : 1;
 }
 
 // ─── 득점 처리 ─────────────────────────────────────────────────────
@@ -248,7 +267,8 @@ function afterBanner(s: SimState, now: number) {
 }
 
 // ─── 스윙(플레이어) ─────────────────────────────────────────────────
-export function swingPlayer(s: SimState, g: SwingGesture, aimX: -1 | 0 | 1, now: number): void {
+export function swingPlayer(s: SimState, intent: SwingIntent, aim: AimLane): void {
+  const now = s.clock;
   if (s.phase !== 'rally' || !s.traj || s.traj.by === 'player') {
     // 칠 공이 없어도 스윙 모션은 나간다(헛스윙)
     s.player.anim = 'swing';
@@ -266,7 +286,8 @@ export function swingPlayer(s: SimState, g: SwingGesture, aimX: -1 | 0 | 1, now:
   const quality: Quality = d <= REACH_PERFECT ? 'perfect' : d <= REACH_GOOD ? 'good' : 'bad';
   const contact: Vec3 = { ...s.shuttle };
   const menu = contactMenu(contact);
-  const shot = mapGesture(g, menu);
+  const shot = shotForIntent(intent, menu);
+  const aimX: -1 | 0 | 1 = aim === 'auto' ? autoAim(s) : aim;
   if (quality === 'perfect') s.stats.perfects += 1;
   s.rallyLen += 1;
   s.lastShot = { shot, quality };
@@ -277,7 +298,8 @@ export function swingPlayer(s: SimState, g: SwingGesture, aimX: -1 | 0 | 1, now:
 }
 
 // ─── 서브 ──────────────────────────────────────────────────────────
-export function servePlayer(s: SimState, kind: 'short' | 'long', gaugePhase: number, now: number): void {
+export function servePlayer(s: SimState, kind: 'short' | 'long', gaugePhase: number): void {
+  const now = s.clock;
   if (s.phase !== 'serve' || s.server !== 'player') return;
   const quality: Quality = gaugePhase > 0.92 ? 'perfect' : gaugePhase > 0.65 ? 'good' : 'bad';
   const from: Vec3 = { x: s.player.x, y: s.player.y, z: 0.9 };
@@ -344,8 +366,11 @@ export interface MoveInput {
   dy: number; // -1..1 (화면 위쪽 + = 네트 방향)
 }
 
-export function tick(s: SimState, now: number, dtMs: number, input: MoveInput): void {
-  const dt = Math.min(dtMs, 50) / 1000;
+export function tick(s: SimState, dtMs: number, input: MoveInput): void {
+  const stepMs = Math.min(dtMs, 50);
+  s.clock += stepMs;
+  const now = s.clock;
+  const dt = stepMs / 1000;
 
   // 플레이어 이동
   const mag = Math.hypot(input.dx, input.dy);
