@@ -38,4 +38,5 @@ packages/server/uploads/
 infra/aws/.terraform/
 infra/aws/*.tfstate*
 infra/aws/terraform.tfvars
+infra/aws/tfplan
 infra/aws/.terraform.lock.hcl

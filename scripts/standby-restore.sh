@@ -24,6 +24,11 @@ cd /opt/badminton
 docker compose -f docker-compose.prod.yml up -d postgres >/dev/null
 bash scripts/restore-db.sh --yes "/opt/badminton/backups-repo/$LATEST" >/dev/null
 
+# 복원이 DB를 재생성하며 서버의 커넥션을 강제로 끊었으므로 재시작해 풀을 정리.
+if docker ps --format '{{.Names}}' | grep -q '^badminton-prod-server$'; then
+  docker restart badminton-prod-server >/dev/null
+fi
+
 # 업로드 이미지(있으면) — 서버 컨테이너 볼륨에 주입.
 UP=$(ls -1 /opt/badminton/backups-repo/uploads-*.tar.gz 2>/dev/null | sort -r | head -1 || true)
 if [ -n "$UP" ] && docker ps --format '{{.Names}}' | grep -q '^badminton-prod-server$'; then

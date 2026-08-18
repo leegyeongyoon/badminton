@@ -63,6 +63,8 @@ jobs:
         env:
           SSHPASS: ${{ secrets.SSH_PASSWORD }}
         run: |
+          # pipefail 없으면 tail이 복원 실패의 종료코드를 삼켜 가짜 READY가 찍힌다.
+          set -o pipefail
           ssh_pi() { sshpass -e ssh "${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}" "$1"; }
           ssh_pi "cd /opt/badminton && docker compose -f docker-compose.prod.yml up -d postgres server"
           sleep 10

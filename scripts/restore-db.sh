@@ -2,9 +2,11 @@
 #
 # restore-db.sh — Restore a gzip pg_dump file into the badminton Postgres DB.
 #
-# !!! DESTRUCTIVE !!! A plain pg_dump (the format backup-db.sh produces) contains
-# DROP/CREATE statements, so restoring OVERWRITES existing data in the target DB.
-# You are prompted to confirm unless --yes is passed.
+# !!! DESTRUCTIVE !!! The target database is DROPPED and recreated before the
+# dump is streamed in (backup-db.sh produces a plain pg_dump without --clean,
+# so restoring on top of an existing schema fails with "already exists").
+# Existing connections are force-terminated. You are prompted to confirm
+# unless --yes is passed.
 #
 # Usage:
 #   bash scripts/restore-db.sh ./backups/badminton-20260617-120000.sql.gz
@@ -67,6 +69,18 @@ if [[ "$ASSUME_YES" != "1" ]]; then
     echo "Aborted (no confirmation)."
     exit 1
   fi
+fi
+
+echo "==> Recreating database '${DB_NAME}' (existing connections terminated)..."
+
+# 덤프에 DROP문이 없으므로 DB를 통째로 재생성해야 한다. WITH (FORCE)가 서버
+# 컨테이너 등 살아있는 연결을 끊는다(끊긴 클라이언트는 알아서 재연결).
+if ! $COMPOSE exec -T "$DB_SERVICE" \
+     psql -v ON_ERROR_STOP=1 -U "$DB_USER" -d postgres \
+       -c "DROP DATABASE IF EXISTS \"${DB_NAME}\" WITH (FORCE);" \
+       -c "CREATE DATABASE \"${DB_NAME}\" OWNER \"${DB_USER}\";"; then
+  echo "ERROR: failed to recreate database '${DB_NAME}'." >&2
+  exit 1
 fi
 
 echo "==> Restoring ${DUMP_FILE} into '${DB_NAME}'..."
