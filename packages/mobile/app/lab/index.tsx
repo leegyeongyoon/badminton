@@ -13,6 +13,7 @@ const CARDS: { key: string; icon: IconName; tint: 'primary' | 'secondary' | 'war
   { key: 'money', icon: 'stats', tint: 'secondary', title: '회비 관리', desc: '정산(회비·참가비·엔빵·게스트비) · 게스트 · 설정을 한 곳에서', route: '/lab/money', ready: true },
   { key: 'profile', icon: 'trophy', tint: 'primary', title: '내 배드민턴 프로필', desc: '총 게임 · 연속 출석 · 파트너 랭킹 · 성취 뱃지', route: '/lab/profile', ready: true },
   { key: 'lesson', icon: 'court', tint: 'info', title: '레슨 중개', desc: '레슨 개설 · 회원 신청 · 확정 관리', route: '/lab/lessons', ready: true },
+  { key: 'rally', icon: 'gamepad', tint: 'warning', title: '콕고 랠리', desc: '1:1 배드민턴 대결 미니게임 — 대기 시간에 옆 사람과 한 판 (v1: vs AI)', route: '/lab/rally', ready: true },
 ];
 
 export default function LabHome() {
