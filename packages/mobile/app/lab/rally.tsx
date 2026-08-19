@@ -136,6 +136,7 @@ export default function RallyGameScreen() {
   const g2X = useSharedValue(0), g2Y = useSharedValue(0), g2On = useSharedValue(0);
   const shadX = useSharedValue(0), shadY = useSharedValue(0), shadO = useSharedValue(0);
   const mkX = useSharedValue(0), mkY = useSharedValue(0), mkS = useSharedValue(1), mkOn = useSharedValue(0);
+  const mk2X = useSharedValue(0), mk2Y = useSharedValue(0), mk2S = useSharedValue(1), mk2On = useSharedValue(0);
   const mkPulse = useSharedValue(0);
   const laneOn = useSharedValue(0), aimLaneSV = useSharedValue(0);
   const gauge = useSharedValue(0);
@@ -229,7 +230,7 @@ export default function RallyGameScreen() {
         g2On.value = 0;
       }
 
-      // 낙하 마커 (내게 오는 인)
+      // 낙하 마커 — 내게 오는 공(골드), 내가 보낸 공(화이트, 코스 학습용)
       if (s.phase === 'rally' && s.traj && s.traj.by === 'ai' && s.traj.landing === 'in') {
         mkOn.value = 1;
         mkX.value = p.x(s.traj.p2.x, s.traj.p2.y);
@@ -237,6 +238,14 @@ export default function RallyGameScreen() {
         mkS.value = p.scale(s.traj.p2.y);
       } else {
         mkOn.value = 0;
+      }
+      if (s.phase === 'rally' && s.traj && s.traj.by === 'player' && s.traj.landing === 'in') {
+        mk2On.value = 1;
+        mk2X.value = p.x(s.traj.p2.x, s.traj.p2.y);
+        mk2Y.value = p.y(s.traj.p2.y, 0);
+        mk2S.value = p.scale(s.traj.p2.y);
+      } else {
+        mk2On.value = 0;
       }
 
       // 조준 레인
@@ -271,8 +280,11 @@ export default function RallyGameScreen() {
         if (s.lastShot && lsKey !== lastShotKeyRef.current && s.phase === 'rally') {
           lastShotKeyRef.current = lsKey;
           const q = s.lastShot.quality;
-          const base = s.lastShot.shot === 'drop' && q === 'perfect' ? '커트' : SHOT_KO[s.lastShot.shot];
+          const base = s.lastShot.cut ? '커트' : SHOT_KO[s.lastShot.shot];
           const shotName = s.lastShot.cross ? `크로스 ${base}` : base;
+          const badText = s.lastShot.shot === 'smash'
+            ? s.lastShot.weak === 'late' ? '타점 낮음!' : '밀린 스매시!'
+            : '런지!';
           // 퍼펙트 콤보 스트릭
           if (!s.lastShot.whiff && !s.lastShot.serve && q === 'perfect') streakRef.current += 1;
           else streakRef.current = 0;
@@ -294,7 +306,7 @@ export default function RallyGameScreen() {
                 ? q === 'perfect' ? '퍼펙트 서브!' : q === 'bad' ? '흔들린 서브…' : '서브'
                 : q === 'perfect'
                   ? streak >= 2 ? `퍼펙트 x${streak}!` : `${shotName}!`
-                  : q === 'good' ? shotName : '런지!',
+                  : q === 'good' ? shotName : badText,
             color: s.lastShot.whiff ? '#94A3B8' : q === 'perfect' ? '#FACC15' : q === 'good' ? '#F1F5F9' : '#FB923C',
             x: pX.value,
             y: pY.value - 130 * pS.value,
@@ -410,6 +422,10 @@ export default function RallyGameScreen() {
       { scale: mkS.value * (1 + mkPulse.value * 0.18) },
     ],
   }));
+  const marker2Style = useAnimatedStyle(() => ({
+    opacity: mk2On.value * 0.75,
+    transform: [{ translateX: mk2X.value - 14 }, { translateY: mk2Y.value - 6 }, { scale: mk2S.value }],
+  }));
   const knobStyle = useAnimatedStyle(() => ({
     transform: [{ translateX: knobX.value }, { translateY: knobY.value }],
   }));
@@ -484,6 +500,7 @@ export default function RallyGameScreen() {
 
           {/* 낙하 마커 */}
           <Animated.View style={[styles.marker, markerStyle]} pointerEvents="none" />
+          <Animated.View style={[styles.marker2, marker2Style]} pointerEvents="none" />
 
           {/* 셔틀 그림자 */}
           <Animated.View style={[styles.shuttleShadow, shadowStyle]} pointerEvents="none" />
@@ -601,9 +618,9 @@ export default function RallyGameScreen() {
               <View style={styles.guideCard}>
                 <Text style={[styles.guideTitle, juaStyle]}>조작법</Text>
                 <Text style={styles.guideRow}>🕹  왼손 조이스틱 — 이동 · 기울인 채 치면 그 방향 코스</Text>
-                <Text style={styles.guideRow}>⚡  스매시 — 높은 공 스매시 · 중간 높이 드라이브 · 네트 앞 킬</Text>
+                <Text style={styles.guideRow}>⚡  스매시 — 셔틀이 높을 때! 낮게 잡으면 뜬공이 돼요 · 중간 높이는 드라이브</Text>
                 <Text style={styles.guideRow}>⬆  클리어 — 높고 깊게 올려 시간 벌기</Text>
-                <Text style={styles.guideRow}>💧  드롭 — 네트 앞에 톡 (퍼펙트 타이밍 = 커트)</Text>
+                <Text style={styles.guideRow}>💧  드롭 — 높은 타점에서 자르면 커트 · 네트 앞은 헤어핀</Text>
                 <Text style={styles.guideRow}>🏸  서브 — 짝수 점수 우측 · 홀수 좌측, 빛나는 대각선 박스로</Text>
                 <Pressable style={styles.guideBtn} onPress={() => setGuideOpen(false)}>
                   <Text style={[styles.guideBtnText, juaStyle]}>시작하기</Text>
@@ -892,6 +909,10 @@ const styles = StyleSheet.create({
   marker: {
     position: 'absolute', width: 36, height: 14, borderRadius: 18,
     borderWidth: 2.5, borderColor: '#FACC15', backgroundColor: 'rgba(250,204,21,0.2)',
+  },
+  marker2: {
+    position: 'absolute', width: 28, height: 11, borderRadius: 14,
+    borderWidth: 2, borderColor: 'rgba(255,255,255,0.95)', backgroundColor: 'rgba(255,255,255,0.22)',
   },
   shuttleShadow: {
     position: 'absolute', width: 20, height: 8, borderRadius: 10, backgroundColor: '#000',

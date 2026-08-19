@@ -72,7 +72,15 @@ export interface SimState {
   aiServeAt: number;
   winner: Side | null;
   stats: { longestRally: number; perfects: number };
-  lastShot: { shot: ShotType; quality: Quality; whiff?: boolean; serve?: boolean; cross?: boolean } | null;
+  lastShot: {
+    shot: ShotType;
+    quality: Quality;
+    whiff?: boolean;
+    serve?: boolean;
+    cross?: boolean;
+    cut?: boolean; // 높은 타점에서 자른 드롭
+    weak?: 'late' | 'stretch'; // 배드의 원인 — 낮은 타점 / 밀린 발
+  } | null;
   events: string[];
 }
 
@@ -206,9 +214,23 @@ function makeTraj(
     }
   } else if (quality === 'bad') {
     if (shot === 'smash') {
-      // 배드 스매시 = 아웃 — 리스크의 대가
-      ty = dir * rnd(7.2, 8.2);
-      landing = 'out';
+      // 밀렸거나 타점이 낮은 스매시 — 힘이 안 실려 대부분 뜬다
+      const r = Math.random();
+      if (r < 0.6) {
+        ty = dir * rnd(2.0, 3.2);
+        tx = rnd(-0.8, 0.8);
+        apex = 3.2;
+        dur = 1150;
+        chance = true;
+      } else if (r < 0.85) {
+        ty = 0;
+        apex = 1.2;
+        dur = 480;
+        landing = 'net';
+      } else {
+        ty = dir * rnd(7.0, 7.9);
+        landing = 'out';
+      }
     } else if ((shot === 'hairpin' || shot === 'drop' || shot === 'drive') && Math.random() < 0.45) {
       // 네트에 꽂힘
       ty = 0;
@@ -239,7 +261,7 @@ function makeTraj(
 
   const p2: Vec3 = { x: tx, y: ty, z: 0.02 };
   const c: Vec3 =
-    shot === 'smash'
+    shot === 'smash' && !chance
       ? { x: (from.x + tx) / 2, y: (from.y + ty) / 2, z: (from.z + 0.4) / 2 }
       : { x: (from.x + tx) / 2, y: (from.y + ty) / 2, z: Math.max(from.z, apex) + (quality === 'bad' ? 0.4 : 0) };
 
@@ -254,20 +276,41 @@ export function contactMenu(contact: Vec3): ShotType[] {
   return ['lift'];
 }
 
-function shotForIntent(intent: SwingIntent, menu: ShotType[]): ShotType {
+// 플레이어의 버튼 의도 × 타점(컨택트 높이·위치) → 실제 샷.
+// 메뉴로 막지 않고 타점의 인과로 푼다 — 낮은 타점 스매시도 시도는 되지만 뜬다.
+function shotForContact(intent: SwingIntent, contact: Vec3): ShotType {
+  const z = contact.z;
+  const nearNet = Math.abs(contact.y) <= 2.5 && z < 1.5;
   if (intent === 'attack') {
-    if (menu.includes('smash')) return 'smash';
-    if (menu.includes('drive')) return 'drive'; // 중간 높이 공격 = 드라이브
-    if (menu.includes('hairpin')) return 'hairpin'; // 네트 앞 공격 = 네트 킬
+    if (nearNet) return 'hairpin'; // 네트 앞 공격 = 네트 킬
+    if (z >= 1.2) return 'smash';
+    if (z >= 0.7) return 'drive';
     return 'lift';
   }
   if (intent === 'drop') {
-    if (menu.includes('drop')) return 'drop'; // 퍼펙트 드롭 = 커트
-    if (menu.includes('hairpin')) return 'hairpin';
+    if (z >= 1.4 && !nearNet) return 'drop';
+    if (nearNet || z < 1.4) return 'hairpin';
     return 'lift';
   }
-  if (menu.includes('clear')) return 'clear';
+  if (z >= 1.3 && !nearNet) return 'clear';
   return 'lift';
+}
+
+// 타점(셔틀 높이) 퀄리티 — 샷마다 스위트 존이 다르다.
+// 스매시는 높은 타점, 드라이브는 허리 높이, 헤어핀은 네트 아래 타점.
+function timingQuality(shot: ShotType, z: number): 0 | 1 | 2 {
+  switch (shot) {
+    case 'smash':
+      return z >= 1.7 && z <= 2.7 ? 2 : z >= 1.45 ? 1 : 0;
+    case 'drive':
+      return z >= 0.9 && z <= 1.6 ? 2 : 1;
+    case 'drop':
+      return z >= 1.7 ? 2 : 1;
+    case 'hairpin':
+      return z <= 1.25 ? 2 : 1;
+    default:
+      return 2; // 클리어·리프트·블록은 타점에 관대
+  }
 }
 
 // 오토에임 — 상대가 없는 쪽을 노린다
@@ -322,18 +365,23 @@ export function swingPlayer(s: SimState, intent: SwingIntent, aim: AimLane): voi
     s.events.push('whiff');
     return;
   }
-  const quality: Quality = d <= REACH_PERFECT ? 'perfect' : d <= REACH_GOOD ? 'good' : 'bad';
   const contact: Vec3 = { ...s.shuttle };
-  const menu = contactMenu(contact);
-  const shot = shotForIntent(intent, menu);
+  const shot = shotForContact(intent, contact);
+  // 퀄리티 = 발(거리) × 타점(높이) — 둘 중 나쁜 쪽이 결과를 정한다
+  const distQ = d <= REACH_PERFECT ? 2 : d <= REACH_GOOD ? 1 : 0;
+  const timeQ = timingQuality(shot, contact.z);
+  const qn = Math.min(distQ, timeQ);
+  const quality: Quality = qn === 2 ? 'perfect' : qn === 1 ? 'good' : 'bad';
+  const weak = quality === 'bad' ? (timeQ === 0 ? 'late' as const : 'stretch' as const) : undefined;
+  const cut = shot === 'drop' && contact.z >= 1.7 && quality === 'perfect';
   const aimX: -1 | 0 | 1 = aim === 'auto' ? autoAim(s) : aim;
   if (quality === 'perfect') s.stats.perfects += 1;
   s.rallyLen += 1;
   s.player.anim = quality === 'bad' ? 'lunge' : 'swing';
   s.player.animUntil = now + 260;
   s.traj = makeTraj('player', shot, quality, contact, aimX, now, s.rallyLen);
-  s.lastShot = { shot, quality, cross: s.traj.cross };
-  s.events.push(`swing:${shot}:${quality}${s.traj.cross ? ':cross' : ''}:d${d.toFixed(2)}`);
+  s.lastShot = { shot, quality, cross: s.traj.cross, cut, weak };
+  s.events.push(`swing:${shot}:${quality}${s.traj.cross ? ':cross' : ''}${weak ? `:${weak}` : ''}:z${contact.z.toFixed(2)}:d${d.toFixed(2)}`);
 }
 
 // ─── 서브 ──────────────────────────────────────────────────────────
