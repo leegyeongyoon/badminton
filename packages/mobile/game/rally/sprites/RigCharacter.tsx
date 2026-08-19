@@ -26,9 +26,9 @@ import type { MotionKey } from '../sim';
 const JOINTS = ['torso', 'armL', 'foreL', 'armR', 'foreR', 'racket', 'legL', 'legR'] as const;
 type Joint = (typeof JOINTS)[number];
 
-// 준비 자세: 라켓을 어깨 옆에 세워 든 배드민턴 레디 스탠스
+// 준비 자세: 라켓 헤드가 위로 서는 배드민턴 레디 스탠스 (손은 가슴 앞, 라켓은 얼굴 옆)
 const REST: Record<Joint, number> = {
-  torso: 0, armL: 7, foreL: 9, armR: -20, foreR: -95, racket: 8, legL: 2, legR: -2,
+  torso: 0, armL: 7, foreL: 9, armR: -24, foreR: -70, racket: -55, legL: 2, legR: -2,
 };
 
 interface Frame {
@@ -36,53 +36,64 @@ interface Frame {
   j: Partial<Record<Joint, number>>; // 명시 안 한 관절은 직전 값 유지, 마지막 프레임은 REST 복귀
   y?: number; // rootY(점프/크라우치). 마지막 프레임 생략 시 0 복귀
 }
+interface Clip {
+  f: Frame[];
+  /** true면 마지막 프레임에서 멈춰 유지 (windup처럼 다음 클립을 기다리는 자세) */
+  hold?: boolean;
+}
 
-// 샷별 스윙 클립 — 아티팩트 데모(rig-character-demo)와 같은 키프레임
-const CLIPS: Record<string, Frame[]> = {
-  // 클리어/드롭·커트: 백스윙 → 임팩트(팔 쭉) → 팔로스루
-  overhead: [
-    { d: 160, j: { armR: -128, foreR: -108, racket: -52, torso: -7 } },
-    { d: 110, j: { armR: -178, foreR: -4, racket: 14, torso: 4 } },
-    { d: 170, j: { armR: -70, foreR: -30, racket: 10 } },
+// 샷별 스윙 클립.
+// 타이밍 원칙: 공은 버튼 누른 순간 떠난다 → 임팩트가 press 후 ~60-100ms에 오도록
+// 백스윙은 짧게, 팔로스루는 길게. 오는 공이 가까우면 windup이 미리 백스윙을 젖혀 놓는다.
+const CLIPS: Record<string, Clip> = {
+  // 공이 다가오면 자동 재생 — 라켓을 뒤로 젖히고 대기
+  windup: { hold: true, f: [{ d: 110, j: { armR: -112, foreR: -100, racket: -48, torso: -7 } }] },
+  // 공이 지나가면 준비 자세로 복귀
+  relax: { f: [{ d: 180, j: {} }] },
+  // 클리어/드롭·커트: (짧은) 백스윙 → 임팩트(팔 쭉) → 팔로스루
+  overhead: { f: [
+    { d: 60, j: { armR: -128, foreR: -108, racket: -52, torso: -7 } },
+    { d: 70, j: { armR: -178, foreR: -4, racket: 14, torso: 4 } },
+    { d: 180, j: { armR: -70, foreR: -30, racket: 10 } },
     { d: 160, j: {} },
-  ],
+  ] },
   // 스매시: 크라우치 → 점프 + 내려찍기 → 착지
-  smashJump: [
-    { d: 170, j: { armR: -120, foreR: -118, racket: -58, torso: -10, legL: -16, legR: 14 }, y: 7 },
-    { d: 140, j: { armR: -182, foreR: -2, racket: 18, torso: 9, legL: 4, legR: -4 }, y: -16 },
-    { d: 150, j: { armR: -60, foreR: -24, racket: 40 }, y: -10 },
+  smashJump: { f: [
+    { d: 90, j: { armR: -120, foreR: -118, racket: -58, torso: -10, legL: -16, legR: 14 }, y: 7 },
+    { d: 90, j: { armR: -182, foreR: -2, racket: 18, torso: 9, legL: 4, legR: -4 }, y: -16 },
+    { d: 160, j: { armR: -60, foreR: -24, racket: 40 }, y: -10 },
     { d: 200, j: {} },
-  ],
+  ] },
   // 리프트/롱서브: 아래에서 위로 퍼올리기
-  under: [
-    { d: 160, j: { armR: 28, foreR: 18, racket: 40, torso: 6 } },
-    { d: 150, j: { armR: -78, foreR: -30, racket: -24, torso: -4 } },
-    { d: 200, j: {} },
-  ],
-  // 헤어핀·푸시·숏서브: 런지 스텝과 함께 짧게 밀기
-  netPush: [
-    { d: 180, j: { armR: -88, foreR: -6, torso: 9, legR: 24, legL: -14 } },
-    { d: 130, j: { armR: -96, foreR: -2 } },
-    { d: 170, j: {} },
-  ],
-  // 드라이브: 옆에서 평평하게 후려치기
-  drive: [
-    { d: 140, j: { armR: -66, foreR: -96, racket: -70, torso: -6 } },
-    { d: 120, j: { armR: -108, foreR: 6, racket: 64, torso: 7 } },
+  under: { f: [
+    { d: 70, j: { armR: 28, foreR: 18, racket: 40, torso: 6 } },
+    { d: 100, j: { armR: -78, foreR: -30, racket: -24, torso: -4 } },
     { d: 210, j: {} },
-  ],
+  ] },
+  // 헤어핀·푸시·숏서브: 런지 스텝과 함께 짧게 밀기
+  netPush: { f: [
+    { d: 80, j: { armR: -88, foreR: -6, racket: 6, torso: 9, legR: 24, legL: -14 } },
+    { d: 110, j: { armR: -96, foreR: -2 } },
+    { d: 180, j: {} },
+  ] },
+  // 드라이브: 옆에서 평평하게 후려치기
+  drive: { f: [
+    { d: 70, j: { armR: -66, foreR: -96, racket: -70, torso: -6 } },
+    { d: 80, j: { armR: -108, foreR: 6, racket: 64, torso: 7 } },
+    { d: 210, j: {} },
+  ] },
   // 런지: 다리 쫙 뻗고 낮게 리치 (배드 퀄리티 리턴)
-  lunge: [
-    { d: 220, j: { armR: -98, foreR: 0, legR: 38, legL: -26, torso: 13 }, y: 9 },
-    { d: 240, j: { armR: -98, foreR: 0, legR: 38, legL: -26, torso: 13 }, y: 9 },
+  lunge: { f: [
+    { d: 130, j: { armR: -98, foreR: 0, racket: 10, legR: 38, legL: -26, torso: 13 }, y: 9 },
+    { d: 260, j: { armR: -98, foreR: 0, legR: 38, legL: -26, torso: 13 }, y: 9 },
     { d: 200, j: {} },
-  ],
-  cheer: [
-    { d: 200, j: { armL: 160, armR: -160, foreR: -8, foreL: 0 } },
+  ] },
+  cheer: { f: [
+    { d: 200, j: { armL: 160, armR: -160, foreR: -8, foreL: 0, racket: 10 } },
     { d: 250, j: { armL: 146, armR: -146 } },
     { d: 200, j: { armL: 160, armR: -160 } },
     { d: 250, j: {} },
-  ],
+  ] },
 };
 
 // 결과 화면용 정지 포즈
@@ -101,8 +112,11 @@ const PAL: Record<Variant, { skin: string; hair: string; jersey: string; jerseyL
   oppo: { skin: '#EFC096', hair: '#33404C', jersey: '#E2695C', jerseyLine: '#B84A3E', shorts: '#33414F', band: '#FFFFFF' },
 };
 
+/** rig가 재생할 수 있는 클립 — 샷 모션 + 준비/복귀 */
+export type RigClip = MotionKey | 'windup' | 'relax';
+
 export interface RigHandle {
-  play: (motion: MotionKey) => void;
+  play: (motion: RigClip) => void;
 }
 
 interface Props {
@@ -144,24 +158,26 @@ export const RigCharacter = forwardRef<RigHandle, Props>(function RigCharacter(
   const sv: Record<Joint, SharedValue<number>> = { torso, armL, foreL, armR, foreR, racket, legL, legR };
 
   useImperativeHandle(ref, () => ({
-    play: (motion: MotionKey) => {
-      const clip = CLIPS[motion] ?? CLIPS.overhead;
+    play: (motion: RigClip) => {
+      const { f: clip, hold } = CLIPS[motion] ?? CLIPS.overhead;
       for (const j of JOINTS) {
         let prev = REST[j];
         const seq = clip.map((f, i) => {
-          const target = f.j[j] !== undefined ? f.j[j]! : i === clip.length - 1 ? REST[j] : prev;
+          const isLast = i === clip.length - 1;
+          const target = f.j[j] !== undefined ? f.j[j]! : isLast && !hold ? REST[j] : prev;
           prev = target;
           return withTiming(target, { duration: f.d, easing: EASE });
         });
-        sv[j].value = withSequence(seq[0], ...seq.slice(1));
+        sv[j].value = seq.length === 1 ? seq[0] : withSequence(seq[0], ...seq.slice(1));
       }
       let prevY = 0;
       const seqY = clip.map((f, i) => {
-        const target = f.y !== undefined ? f.y : i === clip.length - 1 ? 0 : prevY;
+        const isLast = i === clip.length - 1;
+        const target = f.y !== undefined ? f.y : isLast && !hold ? 0 : prevY;
         prevY = target;
         return withTiming(target, { duration: f.d, easing: EASE });
       });
-      rootY.value = withSequence(seqY[0], ...seqY.slice(1));
+      rootY.value = seqY.length === 1 ? seqY[0] : withSequence(seqY[0], ...seqY.slice(1));
     },
   }));
 

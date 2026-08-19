@@ -50,6 +50,8 @@ export interface Actor {
   moving: boolean;
   facing: 1 | -1; // 좌우 시선(연출용)
   motion?: MotionKey; // 마지막 스윙의 모션 클립
+  /** 오는 공이 가까움 — 렌더러가 백스윙을 미리 젖힌다(임팩트 타이밍 체감) */
+  windup?: boolean;
 }
 
 export interface Traj {
@@ -389,6 +391,8 @@ export function autoAim(s: SimState): -1 | 0 | 1 {
 
 // ─── 득점 처리 ─────────────────────────────────────────────────────
 function pointTo(s: SimState, winner: Side, reason: string, now: number) {
+  s.player.windup = false;
+  s.ai.windup = false;
   s.score = { ...s.score, [winner]: s.score[winner] + 1 };
   s.stats.longestRally = Math.max(s.stats.longestRally, s.rallyLen);
   s.banner = { winner, reason };
@@ -646,6 +650,10 @@ export function tick(s: SimState, dtMs: number, input: MoveInput, remote?: MoveI
   const u = Math.min(1, (now - t.t0) / t.dur);
   s.shuttle = bezier(t, easeU(t.shot, u));
 
+  // 백스윙 준비 — 오는 공이 절반쯤 넘어오면 받을 쪽이 라켓을 미리 젖힌다
+  s.player.windup = t.by === 'ai' && u > 0.45 && s.player.anim === 'idle';
+  s.ai.windup = t.by === 'player' && u > 0.5 && s.ai.anim === 'idle';
+
   // AI 이동: 내 샷이면 낙하점으로, 아니면 홈으로 (PvP에선 원격 입력이 조종)
   if (s.pvp) {
     // 원격 스윙 판정은 swingRemote가 처리 — 여기선 자동 행동 없음
@@ -850,12 +858,14 @@ export function applySnapshot(s: SimState, snap: NetSnapshot): void {
     s.player.anim = 'lunge';
     s.player.animUntil = snap.player.animUntil;
   }
+  s.player.windup = snap.player.windup; // 백스윙 준비 신호도 미러
   // 상대 캐릭터: 목표만 갱신 — 실제 이동은 guestTick이 보간(12Hz 점프 방지)
   s.ai.anim = snap.ai.anim;
   s.ai.animUntil = snap.ai.animUntil;
   s.ai.facing = snap.ai.facing;
   s.ai.moving = snap.ai.moving;
   s.ai.motion = snap.ai.motion; // 상대 스윙 클립 — 게스트 화면 모션 재생용
+  s.ai.windup = snap.ai.windup;
 }
 
 /** 게스트 프레임 렌더 틱 — sim 없이 이동 예측 + 셔틀 비행 + 서브 정렬만. */

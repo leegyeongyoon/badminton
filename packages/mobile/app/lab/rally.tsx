@@ -53,7 +53,7 @@ import { useAuthStore } from '../../store/authStore';
 import { useSocketEvent } from '../../hooks/useSocket';
 import { showError, showInfo } from '../../utils/feedback';
 import { PlayerCard, PlayerCardData } from '../../components/game-board/PlayerCard';
-import { RigCharacter, RigHandle } from '../../game/rally/sprites/RigCharacter';
+import { RigCharacter, RigClip, RigHandle } from '../../game/rally/sprites/RigCharacter';
 import { ArenaScene, CourtNet } from '../../game/rally/sprites/ArenaScene';
 import { ShuttleSvg, HitBurstSvg } from '../../game/rally/sprites/ShuttleFx';
 
@@ -145,7 +145,7 @@ export default function RallyGameScreen() {
   const joyRef = useRef({ dx: 0, dy: 0 });
   const uiKeyRef = useRef('');
   const lastShotKeyRef = useRef('');
-  const prevAnimRef = useRef({ p: 'idle', a: 'idle' });
+  const prevAnimRef = useRef({ p: 'idle', a: 'idle', pw: false, aw: false });
   const shuttleHist = useRef<{ x: number; y: number; t: number }[]>([]);
   const pRigRef = useRef<RigHandle>(null); // 내 캐릭터 리그 — 샷별 스윙 클립 재생
   const aRigRef = useRef<RigHandle>(null);
@@ -298,6 +298,19 @@ export default function RallyGameScreen() {
         if (s.ai.anim === 'swing') aRigRef.current?.play(s.ai.motion ?? 'overhead');
         else if (s.ai.anim === 'lunge') aRigRef.current?.play('lunge');
         prevAnimRef.current.a = s.ai.anim;
+      }
+      // 백스윙 준비 — 오는 공이 가까우면 미리 젖히고, 스윙 없이 지나가면 풀기
+      const pw = !!s.player.windup;
+      if (pw !== prevAnimRef.current.pw) {
+        if (pw) pRigRef.current?.play('windup');
+        else if (s.player.anim === 'idle') pRigRef.current?.play('relax');
+        prevAnimRef.current.pw = pw;
+      }
+      const aw = !!s.ai.windup;
+      if (aw !== prevAnimRef.current.aw) {
+        if (aw) aRigRef.current?.play('windup');
+        else if (s.ai.anim === 'idle') aRigRef.current?.play('relax');
+        prevAnimRef.current.aw = aw;
       }
 
       // 셔틀 + 그림자 + 트레일
@@ -490,7 +503,7 @@ export default function RallyGameScreen() {
       },
       net: () => netRef.current, // PvP 검증용 — 숨김 탭에서도 직접 송신 가능
       snap: () => (simRef.current ? makeSnapshot(simRef.current) : null), // 호스트 헤드리스 스냅샷
-      rig: (m: MotionKey) => pRigRef.current?.play(m), // 스윙 클립 시각 검증용
+      rig: (m: RigClip) => pRigRef.current?.play(m), // 스윙 클립 시각 검증용
     };
   }
 
