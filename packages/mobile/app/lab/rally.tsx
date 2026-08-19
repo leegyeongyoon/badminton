@@ -1,9 +1,8 @@
 /**
- * 콕고 랠리 v1.6 — 게임식 UI (모바일 배드민턴 게임 문법).
- * 왼손 조이스틱 = 이동 + 코스 조준(누르는 순간의 기울기, 중립이면 오토에임).
- * 오른손 버튼 = 스매시(공격)·클리어(연결)·드롭. 상대 코트에 조준 레인 표시,
- * 셔틀 바닥 그림자·퀄리티 팝업·득점 배너로 상황이 읽히게.
- * 시뮬레이션은 game/rally/sim.ts, 투영은 court3d.ts.
+ * 콕고 랠리 v2 — 스포티(B) 아트 패스.
+ * 렌더 레이어를 react-native-svg 벡터로 교체: SportyPlayer 캐릭터(포즈·사지 모션),
+ * ArenaScene(클럽 나이트 코트), ShuttleFx(셔틀·트레일·히트 버스트), Jua 타이포 HUD.
+ * 게임플레이는 game/rally/sim.ts 그대로 — 여기는 tick 결과를 그리기만 한다.
  */
 import { ComponentProps, useEffect, useMemo, useRef, useState } from 'react';
 import { Platform, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
@@ -12,10 +11,13 @@ import Animated, {
   Easing,
   useAnimatedStyle,
   useSharedValue,
+  withRepeat,
   withSequence,
   withTiming,
 } from 'react-native-reanimated';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
+import { useFonts } from 'expo-font';
+import { Jua_400Regular } from '@expo-google-fonts/jua';
 import * as Haptics from 'expo-haptics';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTheme } from '../../hooks/useTheme';
@@ -23,17 +25,22 @@ import { typography, spacing, radius } from '../../constants/theme';
 import { BackButton } from '../../components/ui/BackButton';
 import { Icon } from '../../components/ui/Icon';
 import { MatchConfig, Quality, ShotType, Side, Score } from '../../game/rally/engine';
-import { COURT, H_LINES, V_LINES, makeProjector, segmentStyle, Projector } from '../../game/rally/court3d';
+import { COURT, makeProjector, Projector } from '../../game/rally/court3d';
 import {
   AimLane,
+  ServeSpots,
   SimState,
   SimPhase,
   SwingIntent,
   createSim,
   servePlayer,
+  serveSpots,
   swingPlayer,
   tick,
 } from '../../game/rally/sim';
+import { SportyPlayer } from '../../game/rally/sprites/SportyPlayer';
+import { ArenaScene } from '../../game/rally/sprites/ArenaScene';
+import { ShuttleSvg, HitBurstSvg } from '../../game/rally/sprites/ShuttleFx';
 
 const SERVE_PERIOD = 1100;
 const servePhase = (now: number) => Math.abs(Math.sin((Math.PI * (now % SERVE_PERIOD)) / SERVE_PERIOD));
@@ -45,6 +52,7 @@ const SHOT_KO: Record<ShotType, string> = {
   hairpin: '헤어핀',
   lift: '리프트',
   block: '블록',
+  drive: '드라이브',
 };
 
 function haptic(kind: 'light' | 'success' | 'error') {
@@ -62,7 +70,7 @@ interface UiSnap {
   rallyLen: number;
   banner: { winner: Side; reason: string } | null;
   winner: Side | null;
-  lastShot: { shot: ShotType; quality: Quality; whiff?: boolean } | null;
+  lastShot: { shot: ShotType; quality: Quality; whiff?: boolean; serve?: boolean } | null;
   stats: { longestRally: number; perfects: number };
 }
 
@@ -72,6 +80,8 @@ interface Popup {
   color: string;
   x: number;
   y: number;
+  burst: boolean;
+  burstColor: string;
 }
 
 export default function RallyGameScreen() {
@@ -82,12 +92,16 @@ export default function RallyGameScreen() {
   const [area, setArea] = useState({ w: 0, h: 0 });
   const [ui, setUi] = useState<UiSnap | null>(null);
   const [popup, setPopup] = useState<Popup | null>(null);
+  const [guideOpen, setGuideOpen] = useState(true);
+  const [fontsLoaded] = useFonts({ Jua_400Regular });
+  const jua = fontsLoaded ? 'Jua_400Regular' : undefined;
 
   const simRef = useRef<SimState | null>(null);
   const joyRef = useRef({ dx: 0, dy: 0 });
   const uiKeyRef = useRef('');
   const lastShotKeyRef = useRef('');
   const prevAnimRef = useRef({ p: 'idle', a: 'idle' });
+  const shuttleHist = useRef<{ x: number; y: number; t: number }[]>([]);
 
   const proj: Projector | null = useMemo(
     () => (area.w > 0 ? makeProjector(area.w, area.h) : null),
@@ -99,15 +113,23 @@ export default function RallyGameScreen() {
   // ── 공유값 ────────────────────────────────────────────────────────
   const pX = useSharedValue(0), pY = useSharedValue(0), pS = useSharedValue(1);
   const aX = useSharedValue(0), aY = useSharedValue(0), aS = useSharedValue(0.5);
-  const pFace = useSharedValue(1), aFace = useSharedValue(1);
   const pArm = useSharedValue(0), aArm = useSharedValue(0);
+  const pLeg = useSharedValue(0), aLeg = useSharedValue(0);
   const shX = useSharedValue(0), shY = useSharedValue(0), shS = useSharedValue(1);
   const shRot = useSharedValue(0), shOn = useSharedValue(0);
+  const g1X = useSharedValue(0), g1Y = useSharedValue(0), g1On = useSharedValue(0);
+  const g2X = useSharedValue(0), g2Y = useSharedValue(0), g2On = useSharedValue(0);
   const shadX = useSharedValue(0), shadY = useSharedValue(0), shadO = useSharedValue(0);
   const mkX = useSharedValue(0), mkY = useSharedValue(0), mkS = useSharedValue(1), mkOn = useSharedValue(0);
+  const mkPulse = useSharedValue(0);
   const laneOn = useSharedValue(0), aimLaneSV = useSharedValue(0);
   const gauge = useSharedValue(0);
   const prevShuttleScreen = useRef({ x: 0, y: 0 });
+
+  useEffect(() => {
+    mkPulse.value = withRepeat(withTiming(1, { duration: 650, easing: Easing.inOut(Easing.quad) }), -1, true);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // ── 게임 루프 ─────────────────────────────────────────────────────
   useEffect(() => {
@@ -123,31 +145,32 @@ export default function RallyGameScreen() {
       last = now;
       tick(s, dt, joyRef.current);
 
-      // 캐릭터
+      // 캐릭터 위치·모션
       pX.value = p.x(s.player.x, s.player.y);
       pY.value = p.y(s.player.y, 0);
       pS.value = p.scale(s.player.y);
-      pFace.value = s.player.facing;
       aX.value = p.x(s.ai.x, s.ai.y);
       aY.value = p.y(s.ai.y, 0);
       aS.value = p.scale(s.ai.y);
-      aFace.value = s.ai.facing;
+      const step = Math.min(dt, 50);
+      pLeg.value = s.player.moving ? (pLeg.value + step * 0.016) % (Math.PI * 2) : pLeg.value * 0.8;
+      aLeg.value = s.ai.moving ? (aLeg.value + step * 0.014) % (Math.PI * 2) : aLeg.value * 0.8;
       if (s.player.anim !== prevAnimRef.current.p) {
         if (s.player.anim === 'swing' || s.player.anim === 'lunge') {
-          pArm.value = -70;
-          pArm.value = withSequence(withTiming(45, { duration: 130 }), withTiming(0, { duration: 220 }));
+          pArm.value = -80;
+          pArm.value = withSequence(withTiming(50, { duration: 120 }), withTiming(0, { duration: 240 }));
         }
         prevAnimRef.current.p = s.player.anim;
       }
       if (s.ai.anim !== prevAnimRef.current.a) {
         if (s.ai.anim === 'swing' || s.ai.anim === 'lunge') {
-          aArm.value = -70;
-          aArm.value = withSequence(withTiming(45, { duration: 130 }), withTiming(0, { duration: 220 }));
+          aArm.value = -80;
+          aArm.value = withSequence(withTiming(50, { duration: 120 }), withTiming(0, { duration: 240 }));
         }
         prevAnimRef.current.a = s.ai.anim;
       }
 
-      // 셔틀 + 바닥 그림자
+      // 셔틀 + 그림자 + 트레일
       const sx = p.x(s.shuttle.x, s.shuttle.y);
       const sy = p.y(s.shuttle.y, s.shuttle.z);
       shX.value = sx;
@@ -156,11 +179,28 @@ export default function RallyGameScreen() {
       shOn.value = s.phase === 'rally' || s.phase === 'serve' ? 1 : 0;
       shadX.value = p.x(s.shuttle.x, s.shuttle.y);
       shadY.value = p.y(s.shuttle.y, 0);
-      shadO.value = s.phase === 'rally' ? Math.max(0.08, 0.4 - s.shuttle.z * 0.055) : 0;
+      shadO.value = s.phase === 'rally' ? Math.max(0.08, 0.38 - s.shuttle.z * 0.05) : 0;
       const dxs = sx - prevShuttleScreen.current.x;
       const dys = sy - prevShuttleScreen.current.y;
       if (Math.hypot(dxs, dys) > 1.5) shRot.value = Math.atan2(dys, dxs) + Math.PI / 2;
       prevShuttleScreen.current = { x: sx, y: sy };
+      const hist = shuttleHist.current;
+      if (s.phase === 'rally' && s.traj) {
+        hist.push({ x: sx, y: sy, t: now });
+        while (hist.length > 30) hist.shift();
+        const pick = (age: number) => {
+          for (let i = hist.length - 1; i >= 0; i--) if (now - hist[i].t >= age) return hist[i];
+          return null;
+        };
+        const h1 = pick(70);
+        const h2 = pick(150);
+        if (h1) { g1X.value = h1.x; g1Y.value = h1.y; g1On.value = 0.3; } else g1On.value = 0;
+        if (h2) { g2X.value = h2.x; g2Y.value = h2.y; g2On.value = 0.14; } else g2On.value = 0;
+      } else {
+        hist.length = 0;
+        g1On.value = 0;
+        g2On.value = 0;
+      }
 
       // 낙하 마커 (내게 오는 인)
       if (s.phase === 'rally' && s.traj && s.traj.by === 'ai' && s.traj.landing === 'in') {
@@ -172,7 +212,7 @@ export default function RallyGameScreen() {
         mkOn.value = 0;
       }
 
-      // 조준 레인 — 랠리 중 항상, 조이스틱 기울기(중립=오토가 노리는 빈 코트)
+      // 조준 레인
       laneOn.value = s.phase === 'rally' ? 1 : 0;
       const jdx = joyRef.current.dx;
       aimLaneSV.value = jdx > 0.35 ? 1 : jdx < -0.35 ? -1 : s.ai.x > 0.15 ? -1 : s.ai.x < -0.15 ? 1 : 0;
@@ -195,17 +235,23 @@ export default function RallyGameScreen() {
           stats: { ...s.stats },
         });
         if (s.banner) haptic(s.banner.winner === 'player' ? 'success' : 'error');
-        // 퀄리티 팝업 — 내 스윙 위치에서 떠오른다
         const lsKey = s.lastShot ? `${s.rallyLen}|${s.lastShot.shot}|${s.lastShot.quality}|${s.lastShot.whiff ? 'w' : ''}` : '';
         if (s.lastShot && lsKey !== lastShotKeyRef.current && s.phase === 'rally') {
           lastShotKeyRef.current = lsKey;
           const q = s.lastShot.quality;
+          const shotName = s.lastShot.shot === 'drop' && q === 'perfect' ? '커트' : SHOT_KO[s.lastShot.shot];
           setPopup({
             key: now,
-            text: s.lastShot.whiff ? '헛스윙!' : q === 'perfect' ? `퍼펙트 ${SHOT_KO[s.lastShot.shot]}!` : q === 'good' ? SHOT_KO[s.lastShot.shot] : '런지!',
+            text: s.lastShot.whiff
+              ? '헛스윙!'
+              : s.lastShot.serve
+                ? q === 'perfect' ? '퍼펙트 서브!' : q === 'bad' ? '흔들린 서브…' : '서브'
+                : q === 'perfect' ? `${shotName}!` : q === 'good' ? shotName : '런지!',
             color: s.lastShot.whiff ? '#94A3B8' : q === 'perfect' ? '#FACC15' : q === 'good' ? '#F1F5F9' : '#FB923C',
             x: pX.value,
-            y: pY.value - 118 * pS.value,
+            y: pY.value - 130 * pS.value,
+            burst: !s.lastShot.whiff,
+            burstColor: q === 'perfect' ? '#FACC15' : '#E2E8F0',
           });
         }
       }
@@ -262,27 +308,34 @@ export default function RallyGameScreen() {
     });
 
   // ── 애니메이티드 스타일 ───────────────────────────────────────────
-  const charStyle = (x: typeof pX, y: typeof pY, sc: typeof pS, face: typeof pFace) =>
-    useAnimatedStyle(() => ({
-      transform: [
-        { translateX: x.value - 30 },
-        { translateY: y.value - 108 },
-        { scale: sc.value },
-        { scaleX: face.value },
-      ],
-    }));
-  const playerStyle = charStyle(pX, pY, pS, pFace);
-  const aiStyle = charStyle(aX, aY, aS, aFace);
+  const playerStyle = useAnimatedStyle(() => ({
+    transform: [{ translateX: pX.value - 32 }, { translateY: pY.value - 122 }, { scale: pS.value }],
+  }));
+  const aiStyle = useAnimatedStyle(() => ({
+    transform: [{ translateX: aX.value - 32 }, { translateY: aY.value - 122 }, { scale: aS.value }],
+  }));
   const pArmStyle = useAnimatedStyle(() => ({ transform: [{ rotate: `${pArm.value}deg` }] }));
   const aArmStyle = useAnimatedStyle(() => ({ transform: [{ rotate: `${aArm.value}deg` }] }));
+  const pLegLStyle = useAnimatedStyle(() => ({ transform: [{ rotate: `${Math.sin(pLeg.value) * 24}deg` }] }));
+  const pLegRStyle = useAnimatedStyle(() => ({ transform: [{ rotate: `${-Math.sin(pLeg.value) * 24}deg` }] }));
+  const aLegLStyle = useAnimatedStyle(() => ({ transform: [{ rotate: `${Math.sin(aLeg.value) * 24}deg` }] }));
+  const aLegRStyle = useAnimatedStyle(() => ({ transform: [{ rotate: `${-Math.sin(aLeg.value) * 24}deg` }] }));
   const shuttleStyle = useAnimatedStyle(() => ({
     opacity: shOn.value,
     transform: [
-      { translateX: shX.value - 9 },
-      { translateY: shY.value - 12 },
-      { scale: Math.max(0.45, shS.value) },
+      { translateX: shX.value - 13 },
+      { translateY: shY.value - 26 },
+      { scale: Math.max(0.5, shS.value) },
       { rotate: `${shRot.value}rad` },
     ],
+  }));
+  const ghost1Style = useAnimatedStyle(() => ({
+    opacity: g1On.value * shOn.value,
+    transform: [{ translateX: g1X.value - 10 }, { translateY: g1Y.value - 20 }, { scale: 0.8 * Math.max(0.5, shS.value) }],
+  }));
+  const ghost2Style = useAnimatedStyle(() => ({
+    opacity: g2On.value * shOn.value,
+    transform: [{ translateX: g2X.value - 8 }, { translateY: g2Y.value - 17 }, { scale: 0.62 * Math.max(0.5, shS.value) }],
   }));
   const shadowStyle = useAnimatedStyle(() => ({
     opacity: shadO.value,
@@ -290,7 +343,11 @@ export default function RallyGameScreen() {
   }));
   const markerStyle = useAnimatedStyle(() => ({
     opacity: mkOn.value * 0.9,
-    transform: [{ translateX: mkX.value - 18 }, { translateY: mkY.value - 7 }, { scale: mkS.value }],
+    transform: [
+      { translateX: mkX.value - 18 },
+      { translateY: mkY.value - 7 },
+      { scale: mkS.value * (1 + mkPulse.value * 0.18) },
+    ],
   }));
   const knobStyle = useAnimatedStyle(() => ({
     transform: [{ translateX: knobX.value }, { translateY: knobY.value }],
@@ -298,7 +355,7 @@ export default function RallyGameScreen() {
   const gaugeStyle = useAnimatedStyle(() => ({ width: `${gauge.value * 100}%` }));
   const laneStyleFor = (lane: -1 | 0 | 1) =>
     useAnimatedStyle(() => ({
-      opacity: laneOn.value === 0 ? 0 : aimLaneSV.value === lane ? 0.75 : 0.14,
+      opacity: laneOn.value === 0 ? 0 : aimLaneSV.value === lane ? 0.8 : 0.15,
     }));
   const laneL = laneStyleFor(-1);
   const laneC = laneStyleFor(0);
@@ -314,6 +371,7 @@ export default function RallyGameScreen() {
           simRef.current = createSim(cfg);
           uiKeyRef.current = '';
           setUi(null);
+          setGuideOpen(true);
           setScreen('game');
         }}
       />
@@ -323,6 +381,8 @@ export default function RallyGameScreen() {
   const serving = ui?.phase === 'serve' && ui.server === 'player';
   const maxScore = Math.max(ui?.score.player ?? 0, ui?.score.ai ?? 0);
   const gamePoint = !ui?.deuce && ui?.phase !== 'over' && maxScore >= cfg.target - 1 && maxScore < cfg.target;
+  const spots: ServeSpots | null = ui?.phase === 'serve' && simRef.current ? serveSpots(simRef.current) : null;
+  const juaStyle = jua ? { fontFamily: jua } : null;
 
   return (
     <View style={{ flex: 1, backgroundColor: '#10151D' }}>
@@ -339,9 +399,14 @@ export default function RallyGameScreen() {
           style={styles.arena}
           onLayout={(e) => setArea({ w: e.nativeEvent.layout.width, h: e.nativeEvent.layout.height })}
         >
-          {proj && <Court proj={proj} />}
+          {proj && <ArenaScene proj={proj} juaFont={jua} />}
 
-          {/* 조준 레인 (상대 코트) */}
+          {/* 서비스 박스 하이라이트 */}
+          {proj && spots && ui && (
+            <ServiceBoxHighlight proj={proj} spots={spots} server={ui.server} />
+          )}
+
+          {/* 조준 레인 */}
           {proj && ([-1, 0, 1] as const).map((lane) => {
             const lx = proj.x(lane * 1.7, 4.4);
             const ly = proj.y(4.4, 0);
@@ -361,20 +426,19 @@ export default function RallyGameScreen() {
           {/* 셔틀 그림자 */}
           <Animated.View style={[styles.shuttleShadow, shadowStyle]} pointerEvents="none" />
 
-          {/* AI */}
+          {/* AI (원경) */}
           <Animated.View style={[styles.char, aiStyle]} pointerEvents="none">
-            <Character kit="#E2695C" skin="#F0C8A0" front armStyle={aArmStyle} />
+            <SportyPlayer kit="#E2695C" variant="front" juaFont={jua} armStyle={aArmStyle} legLStyle={aLegLStyle} legRStyle={aLegRStyle} />
           </Animated.View>
 
-          {/* 셔틀 */}
-          <Animated.View style={[styles.shuttle, shuttleStyle]} pointerEvents="none">
-            <View style={styles.shuttleSkirt} />
-            <View style={styles.shuttleCork} />
-          </Animated.View>
+          {/* 셔틀 트레일 + 본체 */}
+          <Animated.View style={[styles.fx, ghost2Style]} pointerEvents="none"><ShuttleSvg size={20} /></Animated.View>
+          <Animated.View style={[styles.fx, ghost1Style]} pointerEvents="none"><ShuttleSvg size={22} /></Animated.View>
+          <Animated.View style={[styles.fx, shuttleStyle]} pointerEvents="none"><ShuttleSvg size={26} /></Animated.View>
 
           {/* 플레이어 */}
           <Animated.View style={[styles.char, playerStyle]} pointerEvents="none">
-            <Character kit="#14B8A6" skin="#F0C8A0" armStyle={pArmStyle} />
+            <SportyPlayer kit="#14B8A6" variant="back" juaFont={jua} armStyle={pArmStyle} legLStyle={pLegLStyle} legRStyle={pLegRStyle} />
           </Animated.View>
 
           {/* 스코어보드 */}
@@ -385,9 +449,9 @@ export default function RallyGameScreen() {
                 <Text style={styles.sideName}>나</Text>
                 {ui?.server === 'player' && <MaterialCommunityIcons name="badminton" size={12} color="#FACC15" />}
               </View>
-              <Text style={styles.scoreBig}>{ui?.score.player ?? 0}</Text>
-              <Text style={styles.scoreColon}>:</Text>
-              <Text style={styles.scoreBig}>{ui?.score.ai ?? 0}</Text>
+              <Text style={[styles.scoreBig, juaStyle]}>{ui?.score.player ?? 0}</Text>
+              <Text style={[styles.scoreColon, juaStyle]}>:</Text>
+              <Text style={[styles.scoreBig, juaStyle]}>{ui?.score.ai ?? 0}</Text>
               <View style={styles.scoreSide}>
                 {ui?.server === 'ai' && <MaterialCommunityIcons name="badminton" size={12} color="#FACC15" />}
                 <Text style={styles.sideName}>AI</Text>
@@ -398,12 +462,13 @@ export default function RallyGameScreen() {
               <View style={styles.subChip}><Text style={styles.subChipText}>{cfg.target}점</Text></View>
               {ui?.deuce && <View style={[styles.subChip, { backgroundColor: '#C8443A' }]}><Text style={[styles.subChipText, { color: '#fff' }]}>듀스</Text></View>}
               {gamePoint && <View style={[styles.subChip, { backgroundColor: '#B48A2F' }]}><Text style={[styles.subChipText, { color: '#fff' }]}>게임 포인트</Text></View>}
-              {(ui?.rallyLen ?? 0) > 4 && <View style={styles.subChip}><Text style={[styles.subChipText, { color: '#5EEAD4' }]}>🔥 {ui!.rallyLen}</Text></View>}
+              {(ui?.rallyLen ?? 0) > 4 && <View style={styles.subChip}><Text style={[styles.subChipText, { color: '#5EEAD4' }]}>랠리 {ui!.rallyLen}</Text></View>}
             </View>
           </View>
 
-          {/* 퀄리티 팝업 */}
-          {popup && <QualityPopup key={popup.key} popup={popup} />}
+          {/* 히트 버스트 + 퀄리티 팝업 */}
+          {popup && popup.burst && <BurstFx key={`b${popup.key}`} popup={popup} />}
+          {popup && <QualityPopup key={popup.key} popup={popup} jua={jua} />}
 
           {/* 득점 배너 */}
           {ui?.banner && (
@@ -411,12 +476,13 @@ export default function RallyGameScreen() {
               key={`${ui.score.player}-${ui.score.ai}`}
               text={ui.banner.reason}
               mine={ui.banner.winner === 'player'}
+              jua={jua}
             />
           )}
 
           {/* 조이스틱 */}
           <GestureDetector gesture={joyGesture}>
-            <View style={styles.joyZone}>
+            <View style={[styles.joyZone, ui?.phase === 'serve' && { opacity: 0.35 }]}>
               <View style={styles.joyBase}>
                 <View style={[styles.joyTick, { top: 6, left: 50 }]} />
                 <View style={[styles.joyTick, { bottom: 6, left: 50 }]} />
@@ -430,15 +496,18 @@ export default function RallyGameScreen() {
           {/* 샷 버튼 */}
           {!serving && ui?.phase !== 'over' && (
             <View style={styles.btnCluster} pointerEvents="box-none">
-              <ShotButton size={62} color="#E5A63C" icon="water" label="드롭" style={{ right: 30, bottom: 132 }} onPress={() => doSwing('drop')} />
-              <ShotButton size={70} color="#1FA98C" icon="arrow-up-bold" label="클리어" style={{ right: 116, bottom: 48 }} onPress={() => doSwing('rally')} />
-              <ShotButton size={88} color="#E2544A" icon="flash" label="스매시" style={{ right: 16, bottom: 30 }} onPress={() => doSwing('attack')} />
+              <ShotButton size={62} color="#E5A63C" icon="water" label="드롭" jua={jua} style={{ right: 30, bottom: 132 }} onPress={() => doSwing('drop')} />
+              <ShotButton size={70} color="#1FA98C" icon="arrow-up-bold" label="클리어" jua={jua} style={{ right: 116, bottom: 48 }} onPress={() => doSwing('rally')} />
+              <ShotButton size={88} color="#E2544A" icon="flash" label="스매시" jua={jua} style={{ right: 16, bottom: 30 }} onPress={() => doSwing('attack')} />
             </View>
           )}
 
           {/* 서브 UI */}
           {serving && (
             <View style={styles.serveWrap}>
+              <Text style={styles.serveCourtText}>
+                {spots?.right ? '우측' : '좌측'} 서비스 · 대각선 박스로
+              </Text>
               <View style={styles.gaugeTrack}>
                 <View style={styles.gaugePerfect} />
                 <Animated.View style={[styles.gaugeFill, gaugeStyle]} />
@@ -461,6 +530,23 @@ export default function RallyGameScreen() {
               <Text style={styles.aiServeText}>AI 서브…</Text>
             </View>
           )}
+
+          {/* 첫 서브 전 조작 가이드 */}
+          {guideOpen && ui?.phase === 'serve' && (
+            <View style={styles.guideWrap}>
+              <View style={styles.guideCard}>
+                <Text style={[styles.guideTitle, juaStyle]}>조작법</Text>
+                <Text style={styles.guideRow}>🕹  왼손 조이스틱 — 이동 · 기울인 채 치면 그 방향 코스</Text>
+                <Text style={styles.guideRow}>⚡  스매시 — 높은 공 스매시 · 중간 높이 드라이브 · 네트 앞 킬</Text>
+                <Text style={styles.guideRow}>⬆  클리어 — 높고 깊게 올려 시간 벌기</Text>
+                <Text style={styles.guideRow}>💧  드롭 — 네트 앞에 톡 (퍼펙트 타이밍 = 커트)</Text>
+                <Text style={styles.guideRow}>🏸  서브 — 짝수 점수 우측 · 홀수 좌측, 빛나는 대각선 박스로</Text>
+                <Pressable style={styles.guideBtn} onPress={() => setGuideOpen(false)}>
+                  <Text style={[styles.guideBtnText, juaStyle]}>시작하기</Text>
+                </Pressable>
+              </View>
+            </View>
+          )}
         </View>
       </View>
 
@@ -473,10 +559,10 @@ export default function RallyGameScreen() {
         <View style={styles.overWrap}>
           <View style={[styles.overCard, { backgroundColor: colors.surface }, shadows.sm]}>
             <MaterialCommunityIcons name="trophy" size={40} color={ui.winner === 'player' ? '#E5A63C' : '#94A3B8'} />
-            <Text style={[styles.overTitle, { color: colors.text }]}>
+            <Text style={[styles.overTitle, { color: colors.text }, juaStyle]}>
               {ui.winner === 'player' ? '승리!' : '패배…'}
             </Text>
-            <Text style={[styles.overScore, { color: colors.text }]}>
+            <Text style={[styles.overScore, { color: colors.text }, juaStyle]}>
               {ui.score.player} : {ui.score.ai}
             </Text>
             <Text style={[styles.overStat, { color: colors.textSecondary }]}>
@@ -503,11 +589,12 @@ export default function RallyGameScreen() {
 }
 
 // ─── 샷 버튼 ───────────────────────────────────────────────────────
-function ShotButton({ size, color, icon, label, style, onPress }: {
+function ShotButton({ size, color, icon, label, jua, style, onPress }: {
   size: number;
   color: string;
   icon: ComponentProps<typeof MaterialCommunityIcons>['name'];
   label: string;
+  jua?: string;
   style: { right: number; bottom: number };
   onPress: () => void;
 }) {
@@ -525,13 +612,32 @@ function ShotButton({ size, color, icon, label, style, onPress }: {
     >
       <View style={{ position: 'absolute', top: size * 0.08, width: size * 0.52, height: size * 0.2, borderRadius: size * 0.26, backgroundColor: 'rgba(255,255,255,0.3)' }} />
       <MaterialCommunityIcons name={icon} size={size * 0.36} color="#fff" />
-      <Text style={[styles.shotBtnLabel, { fontSize: size * 0.15 }]}>{label}</Text>
+      <Text style={[styles.shotBtnLabel, { fontSize: size * 0.15 }, jua ? { fontFamily: jua } : null]}>{label}</Text>
     </Pressable>
   );
 }
 
+// ─── 히트 버스트 ───────────────────────────────────────────────────
+function BurstFx({ popup }: { popup: Popup }) {
+  const t = useSharedValue(0);
+  useEffect(() => {
+    t.value = 0;
+    t.value = withTiming(1, { duration: 380, easing: Easing.out(Easing.cubic) });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [popup.key]);
+  const style = useAnimatedStyle(() => ({
+    opacity: 1 - t.value,
+    transform: [{ scale: 0.35 + t.value * 0.9 }],
+  }));
+  return (
+    <Animated.View pointerEvents="none" style={[{ position: 'absolute', left: popup.x + 2, top: popup.y + 42, width: 60, height: 60, marginLeft: -30 }, style]}>
+      <HitBurstSvg color={popup.burstColor} />
+    </Animated.View>
+  );
+}
+
 // ─── 퀄리티 팝업 ───────────────────────────────────────────────────
-function QualityPopup({ popup }: { popup: Popup }) {
+function QualityPopup({ popup, jua }: { popup: Popup; jua?: string }) {
   const t = useSharedValue(0);
   useEffect(() => {
     t.value = 0;
@@ -544,13 +650,13 @@ function QualityPopup({ popup }: { popup: Popup }) {
   }));
   return (
     <Animated.View pointerEvents="none" style={[styles.popup, { left: popup.x - 70, top: popup.y }, style]}>
-      <Text style={[styles.popupText, { color: popup.color }]}>{popup.text}</Text>
+      <Text style={[styles.popupText, { color: popup.color }, jua ? { fontFamily: jua, fontStyle: 'normal' } : null]}>{popup.text}</Text>
     </Animated.View>
   );
 }
 
 // ─── 득점 배너 ─────────────────────────────────────────────────────
-function BigBanner({ text, mine }: { text: string; mine: boolean }) {
+function BigBanner({ text, mine, jua }: { text: string; mine: boolean; jua?: string }) {
   const t = useSharedValue(0);
   useEffect(() => {
     t.value = 0;
@@ -564,151 +670,44 @@ function BigBanner({ text, mine }: { text: string; mine: boolean }) {
   return (
     <View style={styles.bannerWrap} pointerEvents="none">
       <Animated.View style={style}>
-        <Text style={[styles.bannerBig, { color: mine ? '#5EEAD4' : '#FCA5A5' }]}>{text}</Text>
+        <Text style={[styles.bannerBig, { color: mine ? '#5EEAD4' : '#FCA5A5' }, jua ? { fontFamily: jua, fontStyle: 'normal' } : null]}>{text}</Text>
         <Text style={styles.bannerSub}>{mine ? '내 득점!' : 'AI 득점'}</Text>
       </Animated.View>
     </View>
   );
 }
 
-// ─── 코트 렌더 (정적) ───────────────────────────────────────────────
-function Court({ proj }: { proj: Projector }) {
-  const farY = proj.y(COURT.HALF_LEN, 0);
-  const nearY = proj.y(-COURT.HALF_LEN, 0);
-
-  // 매트 스트립 — 바깥(어두운 그린) 위에 코트 안(밝은 그린) 두 겹
-  const buildStrips = (mx: number, my: number, n: number) => {
-    const out: { left: number; top: number; width: number; height: number }[] = [];
-    for (let i = 0; i < n; i++) {
-      const yF = -my + ((2 * my) * (i + 1)) / n;
-      const yN = -my + ((2 * my) * i) / n;
-      const top = proj.y(yF, 0);
-      const bottom = proj.y(yN, 0);
-      const left = proj.x(-mx, yN);
-      const right = proj.x(mx, yN);
-      out.push({ left, top, width: right - left, height: bottom - top + 1 });
-    }
-    return out;
-  };
-  const outer = buildStrips(4.35, COURT.HALF_LEN + 1.15, 90);
-  const inner = buildStrips(COURT.HALF_W, COURT.HALF_LEN, 80);
-
-  // 백보드 광고판
-  const adTop = proj.y(7.55, 1.0);
-  const adBottom = proj.y(7.55, 0);
-  const adL = proj.x(-4.6, 7.55);
-  const adR = proj.x(4.6, 7.55);
-
-  // 관중석 — 광고판 위 두 줄의 도트 (렌더마다 안 바뀌게 결정적 배치)
-  const crowd: { left: number; top: number; c: string; s: number }[] = [];
-  const crowdColors = ['#6B7A8F', '#8A6F5C', '#5C748A', '#7F6B8A', '#5F8A75', '#8A5C5C'];
-  for (let i = 0; i < 46; i++) {
-    const fx = ((i * 37) % 100) / 100;
-    const row = i % 2;
-    crowd.push({
-      left: adL + (adR - adL) * fx,
-      top: adTop - 14 - row * 11 - ((i * 13) % 5),
-      c: crowdColors[i % crowdColors.length],
-      s: 5 + ((i * 7) % 3),
-    });
+// ─── 서비스 박스 하이라이트 ─────────────────────────────────────────
+function ServiceBoxHighlight({ proj, spots, server }: {
+  proj: Projector;
+  spots: ServeSpots;
+  server: Side;
+}) {
+  const dir = server === 'player' ? 1 : -1;
+  const yLo = dir === 1 ? COURT.SHORT_SERVICE : -(COURT.HALF_LEN - 0.15);
+  const yHi = dir === 1 ? COURT.HALF_LEN - 0.15 : -COURT.SHORT_SERVICE;
+  const xA = Math.min(spots.targetSign * 0.12, spots.targetSign * COURT.SINGLES_W);
+  const xB = Math.max(spots.targetSign * 0.12, spots.targetSign * COURT.SINGLES_W);
+  const N = 10;
+  const strips = [];
+  for (let i = 0; i < N; i++) {
+    const yF = yLo + ((yHi - yLo) * (i + 1)) / N;
+    const yN = yLo + ((yHi - yLo) * i) / N;
+    const top = proj.y(Math.max(yF, yN), 0);
+    const bottom = proj.y(Math.min(yF, yN), 0);
+    const left = proj.x(xA, Math.min(yF, yN));
+    const right = proj.x(xB, Math.min(yF, yN));
+    strips.push({ left, top: Math.min(top, bottom), width: right - left, height: Math.abs(bottom - top) + 1 });
   }
-
+  const cx = proj.x(spots.targetSign * 1.35, (yLo + yHi) / 2);
+  const cy = proj.y((yLo + yHi) / 2, 0);
   return (
     <View style={StyleSheet.absoluteFill} pointerEvents="none">
-      <View style={[styles.wall, { height: adTop }]} />
-      <View style={[styles.gymFloor, { top: adTop }]} />
-      {/* 관중석 */}
-      <View style={{ position: 'absolute', left: adL - 10, top: adTop - 34, width: adR - adL + 20, height: 34, backgroundColor: '#1A222E', borderTopLeftRadius: 6, borderTopRightRadius: 6 }} />
-      {crowd.map((d, i) => (
-        <View key={i} style={{ position: 'absolute', left: d.left, top: d.top, width: d.s, height: d.s, borderRadius: d.s / 2, backgroundColor: d.c }} />
+      {strips.map((st, i) => (
+        <View key={i} style={{ position: 'absolute', backgroundColor: 'rgba(94,234,212,0.13)', ...st }} />
       ))}
-      {/* 광고판 */}
-      <View style={{ position: 'absolute', left: adL, top: adTop, width: adR - adL, height: adBottom - adTop, backgroundColor: '#0E7A63', borderTopWidth: 2, borderTopColor: '#134E40', flexDirection: 'row', alignItems: 'center', justifyContent: 'space-around' }}>
-        <Text style={styles.adText}>콕고</Text>
-        <Text style={styles.adText}>KOKGO</Text>
-        <Text style={styles.adText}>🏸</Text>
-        <Text style={styles.adText}>콕고</Text>
-      </View>
-      {outer.map((st, i) => (
-        <View key={`o${i}`} style={{ position: 'absolute', backgroundColor: '#1D5F47', ...st }} />
-      ))}
-      {inner.map((st, i) => (
-        <View key={`i${i}`} style={{ position: 'absolute', backgroundColor: '#2E8B67', ...st }} />
-      ))}
-      {H_LINES.map((l) => {
-        const y = proj.y(l.y, 0);
-        const x1 = proj.x(-COURT.HALF_W, l.y);
-        const x2 = proj.x(COURT.HALF_W, l.y);
-        return (
-          <View key={l.label} style={{ position: 'absolute', left: x1, top: y - 1, width: x2 - x1, height: 2, backgroundColor: 'rgba(255,255,255,0.92)' }} />
-        );
-      })}
-      {V_LINES.map((l) => (
-        <View
-          key={l.label}
-          style={[
-            { position: 'absolute', backgroundColor: l.label === 'center' ? 'rgba(255,255,255,0.5)' : 'rgba(255,255,255,0.92)' },
-            segmentStyle(proj, l.x, -COURT.HALF_LEN, l.x, COURT.HALF_LEN, 2),
-          ]}
-        />
-      ))}
-      {/* 네트 */}
-      {(() => {
-        const netTop = proj.y(0, COURT.NET_H);
-        const netBottom = proj.y(0, 0);
-        const netL = proj.x(-COURT.HALF_W - 0.4, 0);
-        const netR = proj.x(COURT.HALF_W + 0.4, 0);
-        return (
-          <>
-            <View style={{ position: 'absolute', left: netL, top: netTop, width: netR - netL, height: netBottom - netTop, backgroundColor: 'rgba(20,26,34,0.3)', borderTopWidth: 3, borderTopColor: '#F8FAFC', borderBottomWidth: 1, borderBottomColor: 'rgba(255,255,255,0.35)' }} />
-            <View style={{ position: 'absolute', left: netL - 2, top: netTop - 4, width: 4, height: netBottom - netTop + 4, backgroundColor: '#3D4A5C', borderRadius: 2 }} />
-            <View style={{ position: 'absolute', left: netR - 2, top: netTop - 4, width: 4, height: netBottom - netTop + 4, backgroundColor: '#3D4A5C', borderRadius: 2 }} />
-          </>
-        );
-      })()}
-      {/* 근경 페이드 */}
-      <View style={{ position: 'absolute', left: 0, right: 0, top: nearY + 18, bottom: 0, backgroundColor: '#10151D' }} />
-    </View>
-  );
-}
-
-// ─── 캐릭터 ────────────────────────────────────────────────────────
-function Character({ kit, skin, front, armStyle }: {
-  kit: string;
-  skin: string;
-  front?: boolean;
-  armStyle: ReturnType<typeof useAnimatedStyle>;
-}) {
-  return (
-    <View style={styles.charBox}>
-      <View style={styles.charShadow} />
-      {/* 신발·다리 */}
-      <View style={[styles.shoe, { left: 16 }]} />
-      <View style={[styles.shoe, { left: 33 }]} />
-      <View style={[styles.leg, { left: 20, backgroundColor: skin }]} />
-      <View style={[styles.leg, { left: 33, backgroundColor: skin }]} />
-      {/* 하의·유니폼 */}
-      <View style={styles.shorts} />
-      <View style={[styles.jersey, { backgroundColor: kit }]} />
-      <View style={styles.jerseyStripe} />
-      {/* 왼팔 */}
-      <View style={[styles.armLeft, { backgroundColor: skin }]} />
-      {/* 라켓 팔 */}
-      <Animated.View style={[styles.armPivot, armStyle]}>
-        <View style={[styles.arm, { backgroundColor: skin }]} />
-        <View style={styles.racketShaft} />
-        <View style={styles.racketHead} />
-        <View style={styles.racketString} />
-      </Animated.View>
-      {/* 머리 */}
-      <View style={[styles.head, { backgroundColor: skin }]} />
-      <View style={styles.hair} />
-      <View style={styles.headband} />
-      {front && (
-        <>
-          <View style={[styles.eye, { left: 25 }]} />
-          <View style={[styles.eye, { left: 33 }]} />
-        </>
+      {server === 'player' && (
+        <Text style={[styles.serviceBoxLabel, { left: cx - 40, top: cy - 8 }]}>서비스 박스</Text>
       )}
     </View>
   );
@@ -749,7 +748,7 @@ function ConfigScreen({ cfg, onChange, onStart }: {
         <BackButton />
         <Text style={[styles.cfgScreenTitle, { color: colors.text }]}>콕고 랠리</Text>
         <View style={[styles.betaTag, { backgroundColor: colors.primaryBg }]}>
-          <Text style={[styles.betaTagText, { color: colors.primary }]}>v1.6</Text>
+          <Text style={[styles.betaTagText, { color: colors.primary }]}>v2</Text>
         </View>
       </View>
       <ScrollView contentContainerStyle={{ padding: spacing.lg, maxWidth: 560, width: '100%', alignSelf: 'center' }}>
@@ -800,9 +799,6 @@ const styles = StyleSheet.create({
 
   arenaWrap: { flex: 1, alignItems: 'center' },
   arena: { flex: 1, width: '100%', maxWidth: 480, overflow: 'hidden' },
-  wall: { position: 'absolute', left: 0, right: 0, top: 0, backgroundColor: '#151C26' },
-  gymFloor: { position: 'absolute', left: 0, right: 0, bottom: 0, backgroundColor: '#243043' },
-  adText: { color: 'rgba(255,255,255,0.85)', fontWeight: '900', fontSize: 11, letterSpacing: 1 },
 
   scoreboard: { position: 'absolute', top: 8, alignSelf: 'center', alignItems: 'center', gap: 5 },
   scoreCard: {
@@ -812,16 +808,16 @@ const styles = StyleSheet.create({
   },
   scoreSide: { flexDirection: 'row', alignItems: 'center', gap: 5 },
   sideDot: { width: 8, height: 8, borderRadius: 4 },
-  sideName: { color: '#CBD5E1', fontSize: 12, fontWeight: '800' },
-  scoreBig: { color: '#F8FAFC', fontSize: 26, fontWeight: '900', fontVariant: ['tabular-nums'], minWidth: 26, textAlign: 'center' },
-  scoreColon: { color: '#64748B', fontSize: 20, fontWeight: '900' },
+  sideName: { color: '#CBD5E1', fontSize: 12, fontWeight: '700' },
+  scoreBig: { color: '#F8FAFC', fontSize: 26, fontWeight: '700', fontVariant: ['tabular-nums'], minWidth: 26, textAlign: 'center' },
+  scoreColon: { color: '#64748B', fontSize: 20, fontWeight: '700' },
   scoreSub: { flexDirection: 'row', gap: 6 },
   subChip: { backgroundColor: 'rgba(13,18,26,0.7)', paddingHorizontal: 8, paddingVertical: 2, borderRadius: radius.pill },
-  subChipText: { fontSize: 10, fontWeight: '800', color: '#94A3B8' },
+  subChipText: { fontSize: 10, fontWeight: '700', color: '#94A3B8' },
 
   lane: {
     position: 'absolute', width: 68, height: 60, borderRadius: 34,
-    backgroundColor: 'rgba(94,234,212,0.28)', borderWidth: 2, borderColor: 'rgba(94,234,212,0.7)',
+    backgroundColor: 'rgba(94,234,212,0.26)', borderWidth: 2, borderColor: 'rgba(94,234,212,0.7)',
   },
   marker: {
     position: 'absolute', width: 36, height: 14, borderRadius: 18,
@@ -832,31 +828,7 @@ const styles = StyleSheet.create({
   },
 
   char: { position: 'absolute', left: 0, top: 0 },
-  charBox: { width: 60, height: 112 },
-  charShadow: { position: 'absolute', bottom: 0, left: 10, width: 40, height: 10, borderRadius: 20, backgroundColor: 'rgba(0,0,0,0.32)' },
-  shoe: { position: 'absolute', bottom: 2, width: 12, height: 6, borderRadius: 3, backgroundColor: '#F8FAFC' },
-  leg: { position: 'absolute', bottom: 7, width: 7, height: 24, borderRadius: 4 },
-  shorts: { position: 'absolute', bottom: 28, left: 16, width: 28, height: 17, borderRadius: 6, backgroundColor: '#1E293B' },
-  jersey: { position: 'absolute', bottom: 42, left: 14, width: 32, height: 33, borderRadius: 9 },
-  jerseyStripe: { position: 'absolute', bottom: 43, left: 17, width: 4, height: 29, borderRadius: 2, backgroundColor: 'rgba(255,255,255,0.65)' },
-  armLeft: { position: 'absolute', bottom: 50, left: 7, width: 8, height: 22, borderRadius: 4, transform: [{ rotate: '14deg' }] },
-  armPivot: { position: 'absolute', bottom: 64, left: 41, width: 36, height: 10, transformOrigin: 'left center' } as never,
-  arm: { position: 'absolute', left: 0, top: 2, width: 18, height: 7, borderRadius: 4 },
-  racketShaft: { position: 'absolute', left: 16, top: 4, width: 12, height: 3, borderRadius: 2, backgroundColor: '#475569' },
-  racketHead: { position: 'absolute', left: 26, top: -6, width: 16, height: 20, borderRadius: 10, borderWidth: 2.5, borderColor: '#475569', backgroundColor: 'rgba(241,245,249,0.55)' },
-  racketString: { position: 'absolute', left: 33, top: -3, width: 1.5, height: 14, backgroundColor: 'rgba(71,85,105,0.5)' },
-  head: { position: 'absolute', bottom: 76, left: 19, width: 22, height: 22, borderRadius: 11 },
-  hair: { position: 'absolute', top: 11, left: 18, width: 24, height: 11, borderTopLeftRadius: 12, borderTopRightRadius: 12, backgroundColor: '#2B2118' },
-  headband: { position: 'absolute', top: 21, left: 18, width: 24, height: 4, borderRadius: 2, backgroundColor: '#F8FAFC' },
-  eye: { position: 'absolute', top: 28, width: 3.5, height: 3.5, borderRadius: 2, backgroundColor: '#1F2937' },
-
-  shuttle: { position: 'absolute', left: 0, top: 0, alignItems: 'center', width: 18 },
-  shuttleCork: { width: 9, height: 9, borderRadius: 5, backgroundColor: '#E11D48', borderWidth: 1.5, borderColor: '#FECDD3' },
-  shuttleSkirt: {
-    width: 0, height: 0, marginBottom: -2,
-    borderLeftWidth: 8, borderRightWidth: 8, borderTopWidth: 15,
-    borderLeftColor: 'transparent', borderRightColor: 'transparent', borderTopColor: '#F8FAFC',
-  },
+  fx: { position: 'absolute', left: 0, top: 0 },
 
   joyZone: { position: 'absolute', left: 0, bottom: 0, width: '44%', height: 210, alignItems: 'center', justifyContent: 'flex-end', paddingBottom: 26 },
   joyBase: {
@@ -876,40 +848,49 @@ const styles = StyleSheet.create({
     shadowColor: '#000', shadowOpacity: 0.35, shadowRadius: 6, shadowOffset: { width: 0, height: 3 },
     elevation: 6,
   },
-  shotBtnLabel: { color: '#fff', fontWeight: '900', marginTop: 1 },
+  shotBtnLabel: { color: '#fff', fontWeight: '700', marginTop: 1 },
 
   popup: { position: 'absolute', width: 140, alignItems: 'center' },
   popupText: {
-    fontSize: 19, fontWeight: '900', fontStyle: 'italic',
+    fontSize: 19, fontWeight: '700', fontStyle: 'italic',
     textShadowColor: 'rgba(0,0,0,0.65)', textShadowRadius: 5, textShadowOffset: { width: 0, height: 2 },
   },
 
   bannerWrap: { ...StyleSheet.absoluteFillObject, alignItems: 'center', justifyContent: 'center' },
   bannerBig: {
-    fontSize: 40, fontWeight: '900', fontStyle: 'italic', textAlign: 'center',
+    fontSize: 42, fontWeight: '700', fontStyle: 'italic', textAlign: 'center',
     textShadowColor: 'rgba(0,0,0,0.7)', textShadowRadius: 8, textShadowOffset: { width: 0, height: 3 },
   },
-  bannerSub: { fontSize: 14, fontWeight: '800', color: '#CBD5E1', textAlign: 'center', marginTop: 4 },
+  bannerSub: { fontSize: 14, fontWeight: '700', color: '#CBD5E1', textAlign: 'center', marginTop: 4 },
 
-  serveWrap: { position: 'absolute', bottom: 30, alignSelf: 'center', alignItems: 'center', gap: spacing.md, width: 260 },
+  serveWrap: { position: 'absolute', bottom: 26, alignSelf: 'center', alignItems: 'center', gap: spacing.sm, width: 260 },
   gaugeTrack: { width: '100%', height: 16, borderRadius: 8, overflow: 'hidden', backgroundColor: 'rgba(13,18,26,0.75)', borderWidth: 1, borderColor: 'rgba(148,163,184,0.4)' },
   gaugeFill: { height: '100%', backgroundColor: '#14B8A6' },
   gaugePerfect: { position: 'absolute', right: 0, top: 0, bottom: 0, width: '8%', backgroundColor: 'rgba(250,204,21,0.55)' },
-  gaugePerfectLabel: { position: 'absolute', right: 4, top: 1, fontSize: 8, fontWeight: '900', color: '#0F172A' },
+  gaugePerfectLabel: { position: 'absolute', right: 4, top: 1, fontSize: 8, fontWeight: '700', color: '#0F172A' },
   serveBtns: { flexDirection: 'row', gap: spacing.md },
   serveBtn: {
     flexDirection: 'row', alignItems: 'center', gap: 6,
     paddingHorizontal: spacing.lg, paddingVertical: spacing.sm, borderRadius: radius.pill,
     backgroundColor: '#F1F5F9', borderWidth: 2, borderColor: '#CBD5E1',
   },
-  serveBtnText: { fontSize: 14, fontWeight: '900', color: '#0F172A' },
+  serveBtnText: { fontSize: 14, fontWeight: '700', color: '#0F172A' },
   aiServeToast: { position: 'absolute', bottom: 40, alignSelf: 'center' },
-  aiServeText: { color: '#94A3B8', fontSize: 13, fontWeight: '800' },
+  aiServeText: { color: '#94A3B8', fontSize: 13, fontWeight: '700' },
+  serveCourtText: { color: '#5EEAD4', fontSize: 12, fontWeight: '700' },
+  serviceBoxLabel: { position: 'absolute', width: 80, textAlign: 'center', fontSize: 10, fontWeight: '700', color: 'rgba(94,234,212,0.9)' },
+
+  guideWrap: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(10,14,20,0.55)', alignItems: 'center', justifyContent: 'center', padding: 20 },
+  guideCard: { width: '100%', maxWidth: 340, backgroundColor: 'rgba(17,23,32,0.97)', borderRadius: 16, borderWidth: 1, borderColor: 'rgba(94,234,212,0.35)', padding: 20, gap: 9 },
+  guideTitle: { color: '#F1F5F9', fontSize: 17, fontWeight: '700', marginBottom: 2 },
+  guideRow: { color: '#CBD5E1', fontSize: 12.5, lineHeight: 19, fontWeight: '600' },
+  guideBtn: { marginTop: 8, backgroundColor: '#14B8A6', borderRadius: 10, alignItems: 'center', paddingVertical: 11 },
+  guideBtnText: { color: '#fff', fontSize: 14, fontWeight: '700' },
 
   overWrap: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(10, 14, 20, 0.6)', alignItems: 'center', justifyContent: 'center', padding: spacing.lg },
   overCard: { width: '100%', maxWidth: 340, borderRadius: radius.card, padding: spacing.xl, alignItems: 'center', gap: spacing.sm },
   overTitle: { ...typography.h2 },
-  overScore: { fontSize: 34, fontWeight: '900', fontVariant: ['tabular-nums'] },
+  overScore: { fontSize: 34, fontWeight: '700', fontVariant: ['tabular-nums'] },
   overStat: { ...typography.caption },
   againBtn: { alignSelf: 'stretch', alignItems: 'center', paddingVertical: spacing.md, borderRadius: radius.lg, marginTop: spacing.sm },
   againBtnText: { color: '#fff', fontSize: 15, fontWeight: '800' },
