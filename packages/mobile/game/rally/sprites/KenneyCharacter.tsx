@@ -20,6 +20,7 @@ const SPRITES = {
     ],
     attack: require('../../../assets/game/char/player_attack.png'),
     lunge: require('../../../assets/game/char/player_lunge.png'),
+    cheer: require('../../../assets/game/char/player_cheer.png'),
   },
   ai: {
     base: require('../../../assets/game/char/ai_idle.png'),
@@ -30,6 +31,7 @@ const SPRITES = {
     ],
     attack: require('../../../assets/game/char/ai_attack.png'),
     lunge: require('../../../assets/game/char/ai_lunge.png'),
+    cheer: require('../../../assets/game/char/ai_cheer.png'),
   },
 } as const;
 
@@ -67,7 +69,9 @@ export function KenneyCharacter({ variant, poseMode, runFrame, armStyle }: Kenne
   const run2Op = useAnimatedStyle(() => ({ opacity: poseMode.value === 1 && Math.floor(runFrame.value) % 3 === 2 ? 1 : 0 }));
   const attackOp = useAnimatedStyle(() => ({ opacity: poseMode.value === 2 ? 1 : 0 }));
   const lungeOp = useAnimatedStyle(() => ({ opacity: poseMode.value === 3 ? 1 : 0 }));
-  const racketOp = useAnimatedStyle(() => ({ opacity: poseMode.value === 2 ? 1 : 0 }));
+  const cheerOp = useAnimatedStyle(() => ({ opacity: poseMode.value === 4 ? 1 : 0 }));
+  // 배드민턴 선수는 항상 라켓을 든다 — 세리머니 때만 내려놓는다
+  const racketOp = useAnimatedStyle(() => ({ opacity: poseMode.value === 4 ? 0 : 1 }));
 
   return (
     <View style={st.box} pointerEvents="none">
@@ -78,6 +82,7 @@ export function KenneyCharacter({ variant, poseMode, runFrame, armStyle }: Kenne
       <Animated.Image source={s.run[2]} style={[st.img, run2Op]} resizeMode="contain" fadeDuration={0} />
       <Animated.Image source={s.attack} style={[st.img, attackOp]} resizeMode="contain" fadeDuration={0} />
       <Animated.Image source={s.lunge} style={[st.img, lungeOp]} resizeMode="contain" fadeDuration={0} />
+      <Animated.Image source={s.cheer} style={[st.img, cheerOp]} resizeMode="contain" fadeDuration={0} />
       <Animated.View style={[st.racket, racketOp, armStyle]}>
         <RacketSvg />
       </Animated.View>

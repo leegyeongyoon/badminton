@@ -50,6 +50,10 @@ const UI_IMG = {
   joyBase: require('../../assets/game/ui/joy_base.png'),
   joyKnob: require('../../assets/game/ui/joy_knob.png'),
 };
+const RESULT_IMG = {
+  win: require('../../assets/game/char/player_cheer.png'),
+  lose: require('../../assets/game/char/player_lunge.png'),
+};
 
 const SERVE_PERIOD = 1100;
 const servePhase = (now: number) => Math.abs(Math.sin((Math.PI * (now % SERVE_PERIOD)) / SERVE_PERIOD));
@@ -135,7 +139,9 @@ export default function RallyGameScreen() {
   const mkPulse = useSharedValue(0);
   const laneOn = useSharedValue(0), aimLaneSV = useSharedValue(0);
   const gauge = useSharedValue(0);
+  const shakeT = useSharedValue(1), flashT = useSharedValue(0);
   const prevShuttleScreen = useRef({ x: 0, y: 0 });
+  const streakRef = useRef(0);
 
   useEffect(() => {
     mkPulse.value = withRepeat(withTiming(1, { duration: 650, easing: Easing.inOut(Easing.quad) }), -1, true);
@@ -170,6 +176,11 @@ export default function RallyGameScreen() {
       if (s.ai.moving) aRun.value += step * 0.008;
       pFace.value = s.player.facing;
       aFace.value = s.ai.facing;
+      // 득점 세리머니 — 배너 동안 승자는 cheer 포즈
+      if (s.banner) {
+        if (s.banner.winner === 'player') pPose.value = 4;
+        else aPose.value = 4;
+      }
       if (s.player.anim !== prevAnimRef.current.p) {
         if (s.player.anim === 'swing' || s.player.anim === 'lunge') {
           pArm.value = -80;
@@ -209,8 +220,9 @@ export default function RallyGameScreen() {
         };
         const h1 = pick(70);
         const h2 = pick(150);
-        if (h1) { g1X.value = h1.x; g1Y.value = h1.y; g1On.value = 0.3; } else g1On.value = 0;
-        if (h2) { g2X.value = h2.x; g2Y.value = h2.y; g2On.value = 0.14; } else g2On.value = 0;
+        const smashing = s.traj.shot === 'smash';
+        if (h1) { g1X.value = h1.x; g1Y.value = h1.y; g1On.value = smashing ? 0.5 : 0.3; } else g1On.value = 0;
+        if (h2) { g2X.value = h2.x; g2Y.value = h2.y; g2On.value = smashing ? 0.26 : 0.14; } else g2On.value = 0;
       } else {
         hist.length = 0;
         g1On.value = 0;
@@ -249,19 +261,40 @@ export default function RallyGameScreen() {
           winner: s.winner, lastShot: s.lastShot ? { ...s.lastShot } : null,
           stats: { ...s.stats },
         });
-        if (s.banner) haptic(s.banner.winner === 'player' ? 'success' : 'error');
+        if (s.banner) {
+          haptic(s.banner.winner === 'player' ? 'success' : 'error');
+          // 득점 순간 — 강한 셰이크
+          shakeT.value = 0;
+          shakeT.value = withTiming(1, { duration: 450, easing: Easing.out(Easing.quad) });
+        }
         const lsKey = s.lastShot ? `${s.rallyLen}|${s.lastShot.shot}|${s.lastShot.quality}|${s.lastShot.whiff ? 'w' : ''}` : '';
         if (s.lastShot && lsKey !== lastShotKeyRef.current && s.phase === 'rally') {
           lastShotKeyRef.current = lsKey;
           const q = s.lastShot.quality;
-          const shotName = s.lastShot.shot === 'drop' && q === 'perfect' ? '커트' : SHOT_KO[s.lastShot.shot];
+          const base = s.lastShot.shot === 'drop' && q === 'perfect' ? '커트' : SHOT_KO[s.lastShot.shot];
+          const shotName = s.lastShot.cross ? `크로스 ${base}` : base;
+          // 퍼펙트 콤보 스트릭
+          if (!s.lastShot.whiff && !s.lastShot.serve && q === 'perfect') streakRef.current += 1;
+          else streakRef.current = 0;
+          const streak = streakRef.current;
+          // 타격감 — 스매시/퍼펙트에 셰이크, 퍼펙트에 플래시
+          if (!s.lastShot.whiff && (q === 'perfect' || s.lastShot.shot === 'smash')) {
+            shakeT.value = 0;
+            shakeT.value = withTiming(1, { duration: 300, easing: Easing.out(Easing.quad) });
+          }
+          if (!s.lastShot.whiff && q === 'perfect') {
+            flashT.value = 0.15;
+            flashT.value = withTiming(0, { duration: 260 });
+          }
           setPopup({
             key: now,
             text: s.lastShot.whiff
               ? '헛스윙!'
               : s.lastShot.serve
                 ? q === 'perfect' ? '퍼펙트 서브!' : q === 'bad' ? '흔들린 서브…' : '서브'
-                : q === 'perfect' ? `${shotName}!` : q === 'good' ? shotName : '런지!',
+                : q === 'perfect'
+                  ? streak >= 2 ? `퍼펙트 x${streak}!` : `${shotName}!`
+                  : q === 'good' ? shotName : '런지!',
             color: s.lastShot.whiff ? '#94A3B8' : q === 'perfect' ? '#FACC15' : q === 'good' ? '#F1F5F9' : '#FB923C',
             x: pX.value,
             y: pY.value - 130 * pS.value,
@@ -339,8 +372,15 @@ export default function RallyGameScreen() {
       { scaleX: aFace.value },
     ],
   }));
-  const pArmStyle = useAnimatedStyle(() => ({ transform: [{ rotate: `${pArm.value * 0.7}deg` }] }));
-  const aArmStyle = useAnimatedStyle(() => ({ transform: [{ rotate: `${aArm.value * 0.7}deg` }] }));
+  // 라켓은 평소 내려 든 각도(-26°)에서 스윙 때 스냅
+  const pArmStyle = useAnimatedStyle(() => ({ transform: [{ rotate: `${-26 + pArm.value * 0.7}deg` }] }));
+  const aArmStyle = useAnimatedStyle(() => ({ transform: [{ rotate: `${-26 + aArm.value * 0.7}deg` }] }));
+  const shakeStyle = useAnimatedStyle(() => {
+    const t = shakeT.value;
+    const amp = 7 * (1 - t);
+    return { transform: [{ translateX: Math.sin(t * 34) * amp }, { translateY: Math.cos(t * 27) * amp * 0.6 }] };
+  });
+  const flashStyle = useAnimatedStyle(() => ({ opacity: flashT.value }));
   const shuttleStyle = useAnimatedStyle(() => ({
     opacity: shOn.value,
     transform: [
@@ -420,6 +460,7 @@ export default function RallyGameScreen() {
           style={styles.arena}
           onLayout={(e) => setArea({ w: e.nativeEvent.layout.width, h: e.nativeEvent.layout.height })}
         >
+          <Animated.View style={[StyleSheet.absoluteFill, shakeStyle]} pointerEvents="none">
           {proj && <ArenaScene proj={proj} juaFont={jua} />}
 
           {/* 서비스 박스 하이라이트 */}
@@ -461,6 +502,10 @@ export default function RallyGameScreen() {
           <Animated.View style={[styles.char, playerStyle]} pointerEvents="none">
             <KenneyCharacter variant="player" poseMode={pPose} runFrame={pRun} armStyle={pArmStyle} />
           </Animated.View>
+          </Animated.View>
+
+          {/* 퍼펙트 플래시 */}
+          <Animated.View style={[StyleSheet.absoluteFill, { backgroundColor: '#FFFFFF' }, flashStyle]} pointerEvents="none" />
 
           {/* 스코어보드 */}
           <View style={styles.scoreboard} pointerEvents="none">
@@ -576,15 +621,23 @@ export default function RallyGameScreen() {
       {/* 결과 */}
       {ui?.phase === 'over' && (
         <View style={styles.overWrap}>
-          <View style={[styles.overCard, { backgroundColor: colors.surface }, shadows.sm]}>
-            <MaterialCommunityIcons name="trophy" size={40} color={ui.winner === 'player' ? '#E5A63C' : '#94A3B8'} />
-            <Text style={[styles.overTitle, { color: colors.text }, juaStyle]}>
+          <View style={[styles.overCard, { backgroundColor: '#151C26', borderWidth: 1, borderColor: 'rgba(94,234,212,0.3)' }, shadows.sm]}>
+            <View style={styles.overRankRow}>
+              <Image source={ui.winner === 'player' ? RESULT_IMG.win : RESULT_IMG.lose} style={styles.overChar} resizeMode="contain" />
+              <View style={{ alignItems: 'center' }}>
+                <Text style={[styles.overRank, juaStyle, { color: ui.winner === 'player' ? '#FACC15' : '#94A3B8' }]}>
+                  {ui.winner === 'player' ? (ui.score.player - ui.score.ai >= 5 ? 'S' : 'A') : ui.score.player - ui.score.ai >= -2 ? 'B' : 'C'}
+                </Text>
+                <Text style={styles.overRankLabel}>등급</Text>
+              </View>
+            </View>
+            <Text style={[styles.overTitle, { color: '#F1F5F9' }, juaStyle]}>
               {ui.winner === 'player' ? '승리!' : '패배…'}
             </Text>
-            <Text style={[styles.overScore, { color: colors.text }, juaStyle]}>
+            <Text style={[styles.overScore, { color: '#F8FAFC' }, juaStyle]}>
               {ui.score.player} : {ui.score.ai}
             </Text>
-            <Text style={[styles.overStat, { color: colors.textSecondary }]}>
+            <Text style={[styles.overStat, { color: '#94A3B8' }]}>
               최장 랠리 {ui.stats.longestRally}구 · 퍼펙트 {ui.stats.perfects}회
             </Text>
             <Pressable
@@ -598,7 +651,7 @@ export default function RallyGameScreen() {
               <Text style={styles.againBtnText}>한 판 더</Text>
             </Pressable>
             <Pressable onPress={() => setScreen('config')} hitSlop={8}>
-              <Text style={[styles.exitText, { color: colors.textSecondary }]}>대결 설정으로</Text>
+              <Text style={[styles.exitText, { color: '#94A3B8' }]}>대결 설정으로</Text>
             </Pressable>
           </View>
         </View>
@@ -897,6 +950,10 @@ const styles = StyleSheet.create({
 
   overWrap: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(10, 14, 20, 0.6)', alignItems: 'center', justifyContent: 'center', padding: spacing.lg },
   overCard: { width: '100%', maxWidth: 340, borderRadius: radius.card, padding: spacing.xl, alignItems: 'center', gap: spacing.sm },
+  overRankRow: { flexDirection: 'row', alignItems: 'center', gap: 22, marginBottom: 2 },
+  overChar: { width: 72, height: 96 },
+  overRank: { fontSize: 56, lineHeight: 60, fontWeight: '700' },
+  overRankLabel: { fontSize: 11, fontWeight: '700', color: '#64748B', marginTop: -2 },
   overTitle: { ...typography.h2 },
   overScore: { fontSize: 34, fontWeight: '700', fontVariant: ['tabular-nums'] },
   overStat: { ...typography.caption },

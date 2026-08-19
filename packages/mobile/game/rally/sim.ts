@@ -41,6 +41,7 @@ export interface Traj {
   quality: Quality;
   chance: boolean;
   serve?: boolean; // 서브 궤적 — 폴트 문구 처리용
+  cross?: boolean; // 크로스(대각) 샷 — 비행이 길지만 상대를 넓게 뛰게 한다
   p0: Vec3;
   c: Vec3;
   p2: Vec3;
@@ -71,7 +72,7 @@ export interface SimState {
   aiServeAt: number;
   winner: Side | null;
   stats: { longestRally: number; perfects: number };
-  lastShot: { shot: ShotType; quality: Quality; whiff?: boolean; serve?: boolean } | null;
+  lastShot: { shot: ShotType; quality: Quality; whiff?: boolean; serve?: boolean; cross?: boolean } | null;
   events: string[];
 }
 
@@ -227,6 +228,13 @@ function makeTraj(
       chance = true;
     }
   }
+  // 크로스(대각) 샷 — 반대 사이드 깊숙이 보내는 각. 비행이 길어지는 대신
+  // 상대를 코트 폭 끝까지 뛰게 만든다. 흔들린 크로스는 사이드라인을 넘기 쉽다.
+  const cross = Math.abs(tx - from.x) > 2.6 && Math.sign(tx || 0.01) !== Math.sign(from.x || 0.01);
+  if (cross) {
+    dur *= 1.1;
+    if (quality !== 'perfect') tx += rnd(-0.3, 0.3);
+  }
   if (landing === 'in' && Math.abs(tx) > COURT.SINGLES_W) landing = 'out';
 
   const p2: Vec3 = { x: tx, y: ty, z: 0.02 };
@@ -235,7 +243,7 @@ function makeTraj(
       ? { x: (from.x + tx) / 2, y: (from.y + ty) / 2, z: (from.z + 0.4) / 2 }
       : { x: (from.x + tx) / 2, y: (from.y + ty) / 2, z: Math.max(from.z, apex) + (quality === 'bad' ? 0.4 : 0) };
 
-  return { by, shot, quality, chance, p0: { ...from }, c, p2, t0: now, dur, landing, aiHandled: false };
+  return { by, shot, quality, chance, cross, p0: { ...from }, c, p2, t0: now, dur, landing, aiHandled: false };
 }
 
 // ─── 컨택트 상황 → 가능한 샷 ────────────────────────────────────────
@@ -321,11 +329,11 @@ export function swingPlayer(s: SimState, intent: SwingIntent, aim: AimLane): voi
   const aimX: -1 | 0 | 1 = aim === 'auto' ? autoAim(s) : aim;
   if (quality === 'perfect') s.stats.perfects += 1;
   s.rallyLen += 1;
-  s.lastShot = { shot, quality };
   s.player.anim = quality === 'bad' ? 'lunge' : 'swing';
   s.player.animUntil = now + 260;
   s.traj = makeTraj('player', shot, quality, contact, aimX, now, s.rallyLen);
-  s.events.push(`swing:${shot}:${quality}:d${d.toFixed(2)}`);
+  s.lastShot = { shot, quality, cross: s.traj.cross };
+  s.events.push(`swing:${shot}:${quality}${s.traj.cross ? ':cross' : ''}:d${d.toFixed(2)}`);
 }
 
 // ─── 서브 ──────────────────────────────────────────────────────────
