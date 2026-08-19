@@ -446,12 +446,12 @@ export default function RallyGameScreen() {
   const juaStyle = jua ? { fontFamily: jua } : null;
 
   return (
-    <View style={{ flex: 1, backgroundColor: '#10151D' }}>
+    <View style={{ flex: 1, backgroundColor: '#EAF4FB' }}>
       <View style={[styles.topBar, { paddingTop: insets.top + 6 }]}>
         <BackButton />
         <View style={{ flex: 1 }} />
         <Pressable onPress={() => setScreen('config')} hitSlop={8}>
-          <Icon name="close" size={22} color="#64748B" />
+          <Icon name="close" size={22} color="#5A6B7E" />
         </Pressable>
       </View>
 
@@ -621,23 +621,23 @@ export default function RallyGameScreen() {
       {/* 결과 */}
       {ui?.phase === 'over' && (
         <View style={styles.overWrap}>
-          <View style={[styles.overCard, { backgroundColor: '#151C26', borderWidth: 1, borderColor: 'rgba(94,234,212,0.3)' }, shadows.sm]}>
+          <View style={[styles.overCard, { backgroundColor: '#FFFFFF', borderWidth: 1, borderColor: '#D3E8E2' }, shadows.sm]}>
             <View style={styles.overRankRow}>
               <Image source={ui.winner === 'player' ? RESULT_IMG.win : RESULT_IMG.lose} style={styles.overChar} resizeMode="contain" />
               <View style={{ alignItems: 'center' }}>
-                <Text style={[styles.overRank, juaStyle, { color: ui.winner === 'player' ? '#FACC15' : '#94A3B8' }]}>
+                <Text style={[styles.overRank, juaStyle, { color: ui.winner === 'player' ? '#EAB308' : '#94A3B8' }]}>
                   {ui.winner === 'player' ? (ui.score.player - ui.score.ai >= 5 ? 'S' : 'A') : ui.score.player - ui.score.ai >= -2 ? 'B' : 'C'}
                 </Text>
                 <Text style={styles.overRankLabel}>등급</Text>
               </View>
             </View>
-            <Text style={[styles.overTitle, { color: '#F1F5F9' }, juaStyle]}>
+            <Text style={[styles.overTitle, { color: '#0F172A' }, juaStyle]}>
               {ui.winner === 'player' ? '승리!' : '패배…'}
             </Text>
-            <Text style={[styles.overScore, { color: '#F8FAFC' }, juaStyle]}>
+            <Text style={[styles.overScore, { color: '#0F172A' }, juaStyle]}>
               {ui.score.player} : {ui.score.ai}
             </Text>
-            <Text style={[styles.overStat, { color: '#94A3B8' }]}>
+            <Text style={[styles.overStat, { color: '#64748B' }]}>
               최장 랠리 {ui.stats.longestRally}구 · 퍼펙트 {ui.stats.perfects}회
             </Text>
             <Pressable
@@ -651,7 +651,7 @@ export default function RallyGameScreen() {
               <Text style={styles.againBtnText}>한 판 더</Text>
             </Pressable>
             <Pressable onPress={() => setScreen('config')} hitSlop={8}>
-              <Text style={[styles.exitText, { color: '#94A3B8' }]}>대결 설정으로</Text>
+              <Text style={[styles.exitText, { color: '#64748B' }]}>대결 설정으로</Text>
             </Pressable>
           </View>
         </View>
@@ -740,7 +740,7 @@ function BigBanner({ text, mine, jua }: { text: string; mine: boolean; jua?: str
   return (
     <View style={styles.bannerWrap} pointerEvents="none">
       <Animated.View style={style}>
-        <Text style={[styles.bannerBig, { color: mine ? '#5EEAD4' : '#FCA5A5' }, jua ? { fontFamily: jua, fontStyle: 'normal' } : null]}>{text}</Text>
+        <Text style={[styles.bannerBig, { color: mine ? '#FFFFFF' : '#FFE1DC' }, jua ? { fontFamily: jua, fontStyle: 'normal' } : null]}>{text}</Text>
         <Text style={styles.bannerSub}>{mine ? '내 득점!' : 'AI 득점'}</Text>
       </Animated.View>
     </View>
@@ -774,7 +774,7 @@ function ServiceBoxHighlight({ proj, spots, server }: {
   return (
     <View style={StyleSheet.absoluteFill} pointerEvents="none">
       {strips.map((st, i) => (
-        <View key={i} style={{ position: 'absolute', backgroundColor: 'rgba(94,234,212,0.13)', ...st }} />
+        <View key={i} style={{ position: 'absolute', backgroundColor: 'rgba(255,255,255,0.18)', ...st }} />
       ))}
       {server === 'player' && (
         <Text style={[styles.serviceBoxLabel, { left: cx - 40, top: cy - 8 }]}>서비스 박스</Text>
@@ -887,7 +887,7 @@ const styles = StyleSheet.create({
 
   lane: {
     position: 'absolute', width: 68, height: 60, borderRadius: 34,
-    backgroundColor: 'rgba(94,234,212,0.26)', borderWidth: 2, borderColor: 'rgba(94,234,212,0.7)',
+    backgroundColor: 'rgba(255,255,255,0.3)', borderWidth: 2.5, borderColor: 'rgba(255,255,255,0.95)',
   },
   marker: {
     position: 'absolute', width: 36, height: 14, borderRadius: 18,
@@ -925,7 +925,7 @@ const styles = StyleSheet.create({
   bannerSub: { fontSize: 14, fontWeight: '700', color: '#CBD5E1', textAlign: 'center', marginTop: 4 },
 
   serveWrap: { position: 'absolute', bottom: 26, alignSelf: 'center', alignItems: 'center', gap: spacing.sm, width: 260 },
-  gaugeTrack: { width: '100%', height: 16, borderRadius: 8, overflow: 'hidden', backgroundColor: 'rgba(13,18,26,0.75)', borderWidth: 1, borderColor: 'rgba(148,163,184,0.4)' },
+  gaugeTrack: { width: '100%', height: 16, borderRadius: 8, overflow: 'hidden', backgroundColor: 'rgba(255,255,255,0.7)', borderWidth: 1, borderColor: '#B9D2E4' },
   gaugeFill: { height: '100%', backgroundColor: '#14B8A6' },
   gaugePerfect: { position: 'absolute', right: 0, top: 0, bottom: 0, width: '8%', backgroundColor: 'rgba(250,204,21,0.55)' },
   gaugePerfectLabel: { position: 'absolute', right: 4, top: 1, fontSize: 8, fontWeight: '700', color: '#0F172A' },
@@ -937,18 +937,18 @@ const styles = StyleSheet.create({
   },
   serveBtnText: { fontSize: 14, fontWeight: '700', color: '#0F172A' },
   aiServeToast: { position: 'absolute', bottom: 40, alignSelf: 'center' },
-  aiServeText: { color: '#94A3B8', fontSize: 13, fontWeight: '700' },
-  serveCourtText: { color: '#5EEAD4', fontSize: 12, fontWeight: '700' },
-  serviceBoxLabel: { position: 'absolute', width: 80, textAlign: 'center', fontSize: 10, fontWeight: '700', color: 'rgba(94,234,212,0.9)' },
+  aiServeText: { color: '#3D5A73', fontSize: 13, fontWeight: '700' },
+  serveCourtText: { color: '#0F766E', fontSize: 12, fontWeight: '700' },
+  serviceBoxLabel: { position: 'absolute', width: 80, textAlign: 'center', fontSize: 10, fontWeight: '700', color: '#FFFFFF', textShadowColor: 'rgba(0,0,0,0.3)', textShadowRadius: 2, textShadowOffset: { width: 0, height: 1 } },
 
-  guideWrap: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(10,14,20,0.55)', alignItems: 'center', justifyContent: 'center', padding: 20 },
-  guideCard: { width: '100%', maxWidth: 340, backgroundColor: 'rgba(17,23,32,0.97)', borderRadius: 16, borderWidth: 1, borderColor: 'rgba(94,234,212,0.35)', padding: 20, gap: 9 },
-  guideTitle: { color: '#F1F5F9', fontSize: 17, fontWeight: '700', marginBottom: 2 },
-  guideRow: { color: '#CBD5E1', fontSize: 12.5, lineHeight: 19, fontWeight: '600' },
+  guideWrap: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(15,23,42,0.35)', alignItems: 'center', justifyContent: 'center', padding: 20 },
+  guideCard: { width: '100%', maxWidth: 340, backgroundColor: '#FFFFFF', borderRadius: 16, borderWidth: 1, borderColor: '#BEE3DA', padding: 20, gap: 9 },
+  guideTitle: { color: '#0F172A', fontSize: 17, fontWeight: '700', marginBottom: 2 },
+  guideRow: { color: '#475569', fontSize: 12.5, lineHeight: 19, fontWeight: '600' },
   guideBtn: { marginTop: 8, backgroundColor: '#14B8A6', borderRadius: 10, alignItems: 'center', paddingVertical: 11 },
   guideBtnText: { color: '#fff', fontSize: 14, fontWeight: '700' },
 
-  overWrap: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(10, 14, 20, 0.6)', alignItems: 'center', justifyContent: 'center', padding: spacing.lg },
+  overWrap: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(15, 23, 42, 0.35)', alignItems: 'center', justifyContent: 'center', padding: spacing.lg },
   overCard: { width: '100%', maxWidth: 340, borderRadius: radius.card, padding: spacing.xl, alignItems: 'center', gap: spacing.sm },
   overRankRow: { flexDirection: 'row', alignItems: 'center', gap: 22, marginBottom: 2 },
   overChar: { width: 72, height: 96 },
@@ -961,7 +961,7 @@ const styles = StyleSheet.create({
   againBtnText: { color: '#fff', fontSize: 15, fontWeight: '800' },
   exitText: { ...typography.caption, fontWeight: '600', marginTop: 2 },
 
-  hint: { textAlign: 'center', fontSize: 11, color: '#5B6675', paddingVertical: 8, paddingHorizontal: 16 },
+  hint: { textAlign: 'center', fontSize: 11, color: '#6B7E90', paddingVertical: 8, paddingHorizontal: 16 },
 
   cfgCard: { borderRadius: radius.card, padding: spacing.xl },
   cfgTitle: { ...typography.h3, marginBottom: spacing.lg },
