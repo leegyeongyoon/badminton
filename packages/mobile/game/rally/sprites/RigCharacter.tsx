@@ -26,8 +26,9 @@ import type { MotionKey } from '../sim';
 const JOINTS = ['torso', 'armL', 'foreL', 'armR', 'foreR', 'racket', 'legL', 'legR'] as const;
 type Joint = (typeof JOINTS)[number];
 
+// 준비 자세: 라켓을 어깨 옆에 세워 든 배드민턴 레디 스탠스
 const REST: Record<Joint, number> = {
-  torso: 0, armL: 14, foreL: 10, armR: -16, foreR: -34, racket: 6, legL: 2, legR: -2,
+  torso: 0, armL: 7, foreL: 9, armR: -20, foreR: -95, racket: 8, legL: 2, legR: -2,
 };
 
 interface Frame {
@@ -177,16 +178,16 @@ export const RigCharacter = forwardRef<RigHandle, Props>(function RigCharacter(
   const torsoStyle = useAnimatedStyle(() => ({ transform: pivotBottom(34, torso.value) }));
   const legLStyle = useAnimatedStyle(() => {
     const r = poseMode.value === 1 ? Math.sin(runFrame.value * 6) * 30 : legL.value;
-    return { transform: pivotTop(26, r) };
+    return { transform: pivotTop(28, r) };
   });
   const legRStyle = useAnimatedStyle(() => {
     const r = poseMode.value === 1 ? Math.sin(runFrame.value * 6 + Math.PI) * 30 : legR.value;
-    return { transform: pivotTop(26, r) };
+    return { transform: pivotTop(28, r) };
   });
   const armLStyle = useAnimatedStyle(() => {
     const cheer = poseMode.value === 4;
     const pump = poseMode.value === 1 ? Math.sin(runFrame.value * 6 + Math.PI) * 16 : 0;
-    return { transform: pivotTop(17, cheer ? 158 : armL.value + pump) };
+    return { transform: pivotTop(16, cheer ? 158 : armL.value + pump) };
   });
   const foreLStyle = useAnimatedStyle(() => ({
     transform: pivotTop(14, poseMode.value === 4 ? 0 : foreL.value),
@@ -194,12 +195,12 @@ export const RigCharacter = forwardRef<RigHandle, Props>(function RigCharacter(
   const armRStyle = useAnimatedStyle(() => {
     const cheer = poseMode.value === 4;
     const pump = poseMode.value === 1 ? Math.sin(runFrame.value * 6) * -16 : 0;
-    return { transform: pivotTop(17, cheer ? -158 : armR.value + pump) };
+    return { transform: pivotTop(16, cheer ? -158 : armR.value + pump) };
   });
   const foreRStyle = useAnimatedStyle(() => ({
     transform: pivotTop(14, poseMode.value === 4 ? -10 : foreR.value),
   }));
-  const racketStyle = useAnimatedStyle(() => ({ transform: pivotTop(14, racket.value) }));
+  const racketStyle = useAnimatedStyle(() => ({ transform: pivotTop(16, racket.value) }));
 
   // 정적 파트 스타일 (variant 색만 다름)
   const s = useMemo(() => makeStyles(pal), [pal]);
@@ -209,12 +210,14 @@ export const RigCharacter = forwardRef<RigHandle, Props>(function RigCharacter(
       <View style={s.shadow} />
       <Animated.View style={[StyleSheet.absoluteFill, rootStyle]}>
         {/* 다리 */}
-        <Animated.View style={[s.leg, { left: 27 }, legLStyle]}>
+        <Animated.View style={[s.leg, { left: 26 }, legLStyle]}>
           <View style={s.foot} />
         </Animated.View>
         <Animated.View style={[s.leg, { left: 43 }, legRStyle]}>
           <View style={s.foot} />
         </Animated.View>
+        {/* 목 (머리·몸통 뒤) */}
+        <View style={s.neck} />
         {/* 몸통 */}
         <Animated.View style={[s.torso, torsoStyle]}>
           <View style={s.shorts} />
@@ -233,12 +236,12 @@ export const RigCharacter = forwardRef<RigHandle, Props>(function RigCharacter(
             )}
           </View>
           {/* 왼팔 */}
-          <Animated.View style={[s.arm, { left: -6 }, armLStyle]}>
+          <Animated.View style={[s.arm, { left: -7 }, armLStyle]}>
             <View style={s.sleeve} />
             <Animated.View style={[s.fore, foreLStyle]} />
           </Animated.View>
           {/* 오른팔 + 라켓 */}
-          <Animated.View style={[s.arm, { left: 32 }, armRStyle]}>
+          <Animated.View style={[s.arm, { left: 33 }, armRStyle]}>
             <View style={s.sleeve} />
             <Animated.View style={[s.fore, foreRStyle]}>
               <Animated.View style={[s.racket, racketStyle]}>
@@ -262,69 +265,73 @@ function makeStyles(pal: (typeof PAL)['male']) {
       position: 'absolute', left: 39 - 22, bottom: 0, width: 44, height: 9,
       borderRadius: 22, backgroundColor: 'rgba(10,30,45,0.22)',
     },
+    // 다리를 길게 — 캐릭터가 '서 있는' 실루엣의 핵심
     leg: {
-      position: 'absolute', top: 76, width: 9, height: 26, borderRadius: 5,
+      position: 'absolute', top: 72, width: 9, height: 28, borderRadius: 5,
       backgroundColor: pal.skin,
     },
     foot: {
-      position: 'absolute', bottom: -4, left: -3, width: 15, height: 8,
+      position: 'absolute', bottom: -6, left: -3, width: 15, height: 8,
       borderRadius: 5, backgroundColor: '#FFFFFF',
-      shadowColor: '#000', shadowOpacity: 0.18, shadowOffset: { width: 0, height: 1 }, shadowRadius: 1,
+      borderBottomWidth: 2, borderBottomColor: 'rgba(0,0,0,0.15)',
     },
+    neck: { position: 'absolute', left: 35, top: 37, width: 8, height: 9, backgroundColor: pal.skin },
     torso: {
-      position: 'absolute', left: 22, top: 46, width: 34, height: 34,
+      position: 'absolute', left: 22, top: 42, width: 34, height: 34,
       borderRadius: 11, backgroundColor: pal.jersey,
     },
     shorts: {
-      position: 'absolute', left: 0, right: 0, bottom: 0, height: 11,
+      position: 'absolute', left: 0, right: 0, bottom: 0, height: 10,
       borderBottomLeftRadius: 11, borderBottomRightRadius: 11, backgroundColor: pal.shorts,
     },
     jerseyLine: {
       position: 'absolute', left: 14, top: 3, width: 6, height: 17,
       borderRadius: 3, backgroundColor: pal.jerseyLine,
     },
+    // 머리: 몸통과 같은 폭 — 버섯 실루엣 방지
     head: {
-      position: 'absolute', left: -3, top: -34, width: 40, height: 38,
-      borderRadius: 19, backgroundColor: pal.skin,
+      position: 'absolute', left: 0, top: -30, width: 34, height: 32,
+      borderRadius: 16, backgroundColor: pal.skin,
     },
+    // 뒷모습: 뒤통수 전체가 머리카락 (맨살 노출 = 어색함의 원인)
     hairBack: {
-      position: 'absolute', left: -2, right: -2, top: -2, bottom: 9,
-      borderRadius: 19, backgroundColor: pal.hair,
+      position: 'absolute', left: -2, right: -2, top: -2, bottom: -1,
+      borderRadius: 17, backgroundColor: pal.hair,
     },
     hairFront: {
-      position: 'absolute', left: -2, right: -2, top: -2, height: 16,
-      borderTopLeftRadius: 19, borderTopRightRadius: 19, borderBottomLeftRadius: 6,
-      borderBottomRightRadius: 6, backgroundColor: pal.hair,
+      position: 'absolute', left: -2, right: -2, top: -2, height: 14,
+      borderTopLeftRadius: 17, borderTopRightRadius: 17, borderBottomLeftRadius: 5,
+      borderBottomRightRadius: 5, backgroundColor: pal.hair,
     },
     pony: {
-      position: 'absolute', left: 15, top: 3, width: 11, height: 28,
-      borderRadius: 6, backgroundColor: pal.hair, transform: [{ rotate: '4deg' }], zIndex: -1,
+      position: 'absolute', left: 12, top: 6, width: 11, height: 30,
+      borderRadius: 6, backgroundColor: pal.hair, transform: [{ rotate: '4deg' }], zIndex: 2,
     },
     band: {
-      position: 'absolute', left: -1, right: -1, top: 21, height: 6,
-      borderRadius: 3, backgroundColor: pal.band,
+      position: 'absolute', left: -2, right: -2, top: 12, height: 6,
+      borderRadius: 3, backgroundColor: pal.band, zIndex: 3,
     },
-    bandFront: { top: 7 },
-    face: { position: 'absolute', left: 0, right: 0, top: 17 },
+    bandFront: { top: 6 },
+    face: { position: 'absolute', left: 0, right: 0, top: 13 },
     eye: { position: 'absolute', width: 4.5, height: 6.5, borderRadius: 3, backgroundColor: '#22303B' },
     smile: {
-      position: 'absolute', left: 15.5, top: 9, width: 9, height: 5,
+      position: 'absolute', left: 12.5, top: 9, width: 9, height: 5,
       borderWidth: 1.8, borderColor: '#22303B', borderTopWidth: 0,
       borderBottomLeftRadius: 8, borderBottomRightRadius: 8,
     },
-    arm: { position: 'absolute', top: 5, width: 8, height: 17, borderRadius: 5, backgroundColor: pal.skin },
+    arm: { position: 'absolute', top: 4, width: 8, height: 16, borderRadius: 5, backgroundColor: pal.skin },
     sleeve: {
-      position: 'absolute', left: -1, right: -1, top: -1, height: 9,
+      position: 'absolute', left: -1, right: -1, top: -1, height: 10,
       borderRadius: 5, backgroundColor: pal.jersey,
     },
-    fore: { position: 'absolute', left: 0, top: 13, width: 8, height: 14, borderRadius: 5, backgroundColor: pal.skin },
-    racket: { position: 'absolute', left: 2, top: 10, width: 4, height: 14, borderRadius: 2, backgroundColor: '#B98A4C' },
+    fore: { position: 'absolute', left: 0, top: 12, width: 8, height: 14, borderRadius: 5, backgroundColor: pal.skin },
+    racket: { position: 'absolute', left: 2, top: 10, width: 4, height: 16, borderRadius: 2, backgroundColor: '#B98A4C' },
     racketHead: {
-      position: 'absolute', left: -6.5, top: -18, width: 17, height: 20,
-      borderRadius: 10, borderWidth: 3, borderColor: '#2E4B5E',
-      backgroundColor: 'rgba(255,255,255,0.4)',
+      position: 'absolute', left: -8, top: -21, width: 20, height: 23,
+      borderRadius: 11, borderWidth: 3, borderColor: '#2E4B5E',
+      backgroundColor: 'rgba(255,255,255,0.45)',
     },
-    stringH: { position: 'absolute', left: 1, right: 1, top: 6, height: 1.4, backgroundColor: 'rgba(150,180,200,0.9)' },
-    stringV: { position: 'absolute', top: 1, bottom: 1, left: 5.5, width: 1.4, backgroundColor: 'rgba(150,180,200,0.9)' },
+    stringH: { position: 'absolute', left: 1, right: 1, top: 7.5, height: 1.4, backgroundColor: 'rgba(150,180,200,0.95)' },
+    stringV: { position: 'absolute', top: 1, bottom: 1, left: 6.8, width: 1.4, backgroundColor: 'rgba(150,180,200,0.95)' },
   });
 }

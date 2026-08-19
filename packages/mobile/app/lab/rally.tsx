@@ -487,6 +487,7 @@ export default function RallyGameScreen() {
       },
       net: () => netRef.current, // PvP 검증용 — 숨김 탭에서도 직접 송신 가능
       snap: () => (simRef.current ? makeSnapshot(simRef.current) : null), // 호스트 헤드리스 스냅샷
+      rig: (m: MotionKey) => pRigRef.current?.play(m), // 스윙 클립 시각 검증용
     };
   }
 
