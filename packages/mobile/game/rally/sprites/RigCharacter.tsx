@@ -209,9 +209,9 @@ export const RigCharacter = forwardRef<RigHandle, Props>(function RigCharacter(
     transform: pivotTop(14, poseMode.value === 4 ? 0 : foreL.value),
   }));
   const armRStyle = useAnimatedStyle(() => {
+    // 라켓 팔은 달릴 때도 펌프하지 않는다 — 레디 자세 유지 (라켓이 흔들리며 도는 느낌 방지)
     const cheer = poseMode.value === 4;
-    const pump = poseMode.value === 1 ? Math.sin(runFrame.value * 6) * -16 : 0;
-    return { transform: pivotTop(16, cheer ? -158 : armR.value + pump) };
+    return { transform: pivotTop(16, cheer ? -158 : armR.value) };
   });
   const foreRStyle = useAnimatedStyle(() => ({
     transform: pivotTop(14, poseMode.value === 4 ? -10 : foreR.value),

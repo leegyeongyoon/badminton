@@ -507,10 +507,19 @@ export default function RallyGameScreen() {
     };
   }
 
-  // 조이스틱
+  // 조이스틱 — 플로팅: 왼쪽 영역 아무 데나 터치하면 그 자리에 생긴다.
+  // 고정 스틱이 근경 코트(낙하 지점)를 가리던 문제의 해법 — 평소엔 흐릿한 힌트만.
   const knobX = useSharedValue(0), knobY = useSharedValue(0);
+  const joyBaseX = useSharedValue(0), joyBaseY = useSharedValue(0), joyOn = useSharedValue(0);
   const joyGesture = Gesture.Pan()
     .runOnJS(true)
+    .onBegin((e) => {
+      joyBaseX.value = e.x;
+      joyBaseY.value = e.y;
+      knobX.value = 0;
+      knobY.value = 0;
+      joyOn.value = withTiming(1, { duration: 90 });
+    })
     .onUpdate((e) => {
       const r = 48;
       let dx = e.translationX, dy = e.translationY;
@@ -523,6 +532,7 @@ export default function RallyGameScreen() {
     .onFinalize(() => {
       knobX.value = withTiming(0, { duration: 120 });
       knobY.value = withTiming(0, { duration: 120 });
+      joyOn.value = withTiming(0, { duration: 160 });
       joyRef.current = { dx: 0, dy: 0 };
     });
 
@@ -608,6 +618,11 @@ export default function RallyGameScreen() {
   const knobStyle = useAnimatedStyle(() => ({
     transform: [{ translateX: knobX.value }, { translateY: knobY.value }],
   }));
+  const joyBaseStyle = useAnimatedStyle(() => ({
+    opacity: joyOn.value,
+    transform: [{ translateX: joyBaseX.value - 56 }, { translateY: joyBaseY.value - 56 }],
+  }));
+  const joyHintStyle = useAnimatedStyle(() => ({ opacity: (1 - joyOn.value) * 0.35 }));
   const gaugeStyle = useAnimatedStyle(() => ({ width: `${gauge.value * 100}%` }));
   const laneStyleFor = (lane: -1 | 0 | 1) =>
     useAnimatedStyle(() => ({
@@ -752,14 +767,19 @@ export default function RallyGameScreen() {
             />
           )}
 
-          {/* 조이스틱 */}
+          {/* 플로팅 조이스틱 — 터치한 자리에 생기고, 평소엔 흐릿한 힌트만 (코트 시야 확보) */}
           <GestureDetector gesture={joyGesture}>
             <View style={[styles.joyZone, ui?.phase === 'serve' && { opacity: 0.35 }]}>
-              <ImageBackground source={UI_IMG.joyBase} style={styles.joyBase} imageStyle={{ opacity: 0.55 }}>
-                <Animated.View style={knobStyle}>
-                  <Image source={UI_IMG.joyKnob} style={styles.joyKnob} />
-                </Animated.View>
-              </ImageBackground>
+              <Animated.View style={[styles.joyHint, joyHintStyle]} pointerEvents="none">
+                <MaterialCommunityIcons name="gesture-swipe" size={18} color="#5A6B7E" />
+              </Animated.View>
+              <Animated.View style={[styles.joyFloat, joyBaseStyle]} pointerEvents="none">
+                <ImageBackground source={UI_IMG.joyBase} style={styles.joyBase} imageStyle={{ opacity: 0.55 }}>
+                  <Animated.View style={knobStyle}>
+                    <Image source={UI_IMG.joyKnob} style={styles.joyKnob} />
+                  </Animated.View>
+                </ImageBackground>
+              </Animated.View>
             </View>
           </GestureDetector>
 
@@ -1309,7 +1329,14 @@ const styles = StyleSheet.create({
   char: { position: 'absolute', left: 0, top: 0 },
   fx: { position: 'absolute', left: 0, top: 0 },
 
-  joyZone: { position: 'absolute', left: 0, bottom: 0, width: '44%', height: 210, alignItems: 'center', justifyContent: 'flex-end', paddingBottom: 26 },
+  // 터치 영역은 넓게(왼쪽 46% × 320) — 시각 요소는 터치 전엔 힌트뿐
+  joyZone: { position: 'absolute', left: 0, bottom: 0, width: '46%', height: 320 },
+  joyHint: {
+    position: 'absolute', left: 40, bottom: 46, width: 52, height: 52, borderRadius: 26,
+    borderWidth: 2, borderColor: 'rgba(90,107,126,0.55)', borderStyle: 'dashed',
+    alignItems: 'center', justifyContent: 'center', backgroundColor: 'rgba(255,255,255,0.25)',
+  },
+  joyFloat: { position: 'absolute', left: 0, top: 0, width: 112, height: 112 },
   joyBase: { width: 112, height: 112, alignItems: 'center', justifyContent: 'center' },
   joyKnob: { width: 54, height: 54 },
 

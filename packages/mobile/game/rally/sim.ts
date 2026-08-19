@@ -422,17 +422,21 @@ function afterBanner(s: SimState, now: number) {
 // ─── 스윙(플레이어) ─────────────────────────────────────────────────
 export function swingPlayer(s: SimState, intent: SwingIntent, aim: AimLane, depth: AimDepth = 0): void {
   const now = s.clock;
+  // 스윙 쿨다운 — 모션이 끝나기 전 연타는 무시 (라켓이 쉼 없이 도는 것 방지)
+  if ((s.player.anim === 'swing' || s.player.anim === 'lunge') && now < s.player.animUntil) return;
   if (s.phase !== 'rally' || !s.traj || s.traj.by === 'player') {
     // 칠 공이 없어도 스윙 모션은 나간다(헛스윙)
     s.player.anim = 'swing';
-    s.player.animUntil = now + 220;
+    s.player.animUntil = now + 300;
     s.player.motion = 'drive';
     return;
   }
   const d = dist2(s.shuttle.x, s.shuttle.y, s.player.x, s.player.y);
+  // 스윙 순간 셔틀 쪽으로 몸을 돌린다 (포핸드 방향감)
+  if (Math.abs(s.shuttle.x - s.player.x) > 0.15) s.player.facing = s.shuttle.x > s.player.x ? 1 : -1;
   if (d > REACH_MAX || s.shuttle.z > 3.0 || s.shuttle.y > 0) {
     s.player.anim = 'swing';
-    s.player.animUntil = now + 220;
+    s.player.animUntil = now + 300;
     s.player.motion = 'drive';
     s.lastShot = { shot: 'clear', quality: 'bad', whiff: true };
     s.events.push('whiff');
@@ -731,16 +735,19 @@ function autoAimRemote(s: SimState): -1 | 0 | 1 {
 /** 게스트 스윙을 호스트 sim의 ai 액터에 적용. aim은 이미 월드 프레임(부호 반전 완료). */
 export function swingRemote(s: SimState, intent: SwingIntent, aim: AimLane, depth: AimDepth = 0): void {
   const now = s.clock;
+  // 스윙 쿨다운 — 연타 무시 (플레이어와 동일 규칙)
+  if ((s.ai.anim === 'swing' || s.ai.anim === 'lunge') && now < s.ai.animUntil) return;
   if (s.phase !== 'rally' || !s.traj || s.traj.by === 'ai') {
     s.ai.anim = 'swing';
-    s.ai.animUntil = now + 220;
+    s.ai.animUntil = now + 300;
     s.ai.motion = 'drive';
     return;
   }
   const d = dist2(s.shuttle.x, s.shuttle.y, s.ai.x, s.ai.y);
+  if (Math.abs(s.shuttle.x - s.ai.x) > 0.15) s.ai.facing = s.shuttle.x > s.ai.x ? 1 : -1;
   if (d > REACH_MAX || s.shuttle.z > 3.0 || s.shuttle.y < 0) {
     s.ai.anim = 'swing';
-    s.ai.animUntil = now + 220;
+    s.ai.animUntil = now + 300;
     s.ai.motion = 'drive';
     s.lastShot = { shot: 'clear', quality: 'bad', whiff: true, by: 'ai' };
     s.events.push('remote-whiff');
