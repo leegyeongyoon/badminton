@@ -13,7 +13,6 @@ import Animated, {
   useAnimatedStyle,
   useSharedValue,
   withRepeat,
-  withSequence,
   withTiming,
 } from 'react-native-reanimated';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
@@ -28,7 +27,9 @@ import { Icon } from '../../components/ui/Icon';
 import { MatchConfig, Quality, ShotType, Side, Score } from '../../game/rally/engine';
 import { COURT, makeProjector, Projector } from '../../game/rally/court3d';
 import {
+  AimDepth,
   AimLane,
+  MotionKey,
   ServeSpots,
   SimState,
   SimPhase,
@@ -52,7 +53,7 @@ import { useAuthStore } from '../../store/authStore';
 import { useSocketEvent } from '../../hooks/useSocket';
 import { showError, showInfo } from '../../utils/feedback';
 import { PlayerCard, PlayerCardData } from '../../components/game-board/PlayerCard';
-import { KenneyCharacter } from '../../game/rally/sprites/KenneyCharacter';
+import { RigCharacter, RigHandle } from '../../game/rally/sprites/RigCharacter';
 import { ArenaScene } from '../../game/rally/sprites/ArenaScene';
 import { ShuttleSvg, HitBurstSvg } from '../../game/rally/sprites/ShuttleFx';
 
@@ -64,15 +65,12 @@ const UI_IMG = {
   joyBase: require('../../assets/game/ui/joy_base.png'),
   joyKnob: require('../../assets/game/ui/joy_knob.png'),
 };
-const RESULT_IMG = {
-  male: {
-    win: require('../../assets/game/char/player_cheer.png'),
-    lose: require('../../assets/game/char/player_lunge.png'),
-  },
-  female: {
-    win: require('../../assets/game/char/playerf_cheer.png'),
-    lose: require('../../assets/game/char/playerf_lunge.png'),
-  },
+// 타점 존 → 3버튼의 실제 샷 라벨 (조작은 attack/rally/drop 그대로, 라벨만 상황을 말한다)
+type ShotZone = 'high' | 'mid' | 'net';
+const ZONE_BTNS: Record<ShotZone, { atk: string; ral: string; drp: string }> = {
+  high: { atk: '스매시', ral: '클리어', drp: '커트' },
+  mid: { atk: '드라이브', ral: '리프트', drp: '드롭' },
+  net: { atk: '푸시', ral: '리프트', drp: '헤어핀' },
 };
 
 const SERVE_PERIOD = 1400; // 게이지 왕복 주기 — 사람이 PERFECT를 노릴 수 있는 속도
@@ -105,6 +103,7 @@ interface UiSnap {
   winner: Side | null;
   lastShot: { shot: ShotType; quality: Quality; whiff?: boolean; serve?: boolean } | null;
   stats: { longestRally: number; perfects: number };
+  zone: ShotZone; // 오는 공의 타점 존 — 버튼 라벨이 상황 따라 바뀐다
 }
 
 interface Popup {
@@ -148,6 +147,9 @@ export default function RallyGameScreen() {
   const lastShotKeyRef = useRef('');
   const prevAnimRef = useRef({ p: 'idle', a: 'idle' });
   const shuttleHist = useRef<{ x: number; y: number; t: number }[]>([]);
+  const pRigRef = useRef<RigHandle>(null); // 내 캐릭터 리그 — 샷별 스윙 클립 재생
+  const aRigRef = useRef<RigHandle>(null);
+  const zoneRef = useRef<ShotZone>('high');
 
   // PvP 진입: sim 생성(호스트=권위 pvp sim, 게스트=스냅샷 미러 프레임) + 소켓 룸 연결
   useEffect(() => {
@@ -177,7 +179,7 @@ export default function RallyGameScreen() {
             if (!sim || !msg) return;
             // 게스트는 자기 뷰 프레임으로 보낸다 — 월드로 부호 반전
             if (msg.t === 'joy') remoteJoyRef.current = { dx: -msg.dx, dy: -msg.dy };
-            else if (msg.t === 'swing') swingRemote(sim, msg.intent, msg.aim === 'auto' ? 'auto' : (-msg.aim as -1 | 0 | 1));
+            else if (msg.t === 'swing') swingRemote(sim, msg.intent, msg.aim === 'auto' ? 'auto' : -msg.aim, msg.depth ?? 0);
             else if (msg.t === 'serve') serveRemote(sim, msg.kind, msg.gauge);
             else if (msg.t === 'again' && sim.phase === 'over') {
               const ns = createSim(pvpCfg);
@@ -217,8 +219,8 @@ export default function RallyGameScreen() {
   // ── 공유값 ────────────────────────────────────────────────────────
   const pX = useSharedValue(0), pY = useSharedValue(0), pS = useSharedValue(1);
   const aX = useSharedValue(0), aY = useSharedValue(0), aS = useSharedValue(0.5);
-  const pArm = useSharedValue(0), aArm = useSharedValue(0);
   const pPose = useSharedValue(0), aPose = useSharedValue(0);
+  const overPose = useSharedValue(0), overRun = useSharedValue(0); // 결과 화면 정지 포즈용
   const pRun = useSharedValue(0), aRun = useSharedValue(0);
   const pFace = useSharedValue(1), aFace = useSharedValue(1);
   const shX = useSharedValue(0), shY = useSharedValue(0), shS = useSharedValue(1);
@@ -285,18 +287,15 @@ export default function RallyGameScreen() {
         if (s.banner.winner === 'player') pPose.value = 4;
         else aPose.value = 4;
       }
+      // 샷별 스윙 클립 재생 — sim이 정한 모션(Actor.motion)을 리그에 지시
       if (s.player.anim !== prevAnimRef.current.p) {
-        if (s.player.anim === 'swing' || s.player.anim === 'lunge') {
-          pArm.value = -80;
-          pArm.value = withSequence(withTiming(50, { duration: 120 }), withTiming(0, { duration: 240 }));
-        }
+        if (s.player.anim === 'swing') pRigRef.current?.play(s.player.motion ?? 'overhead');
+        else if (s.player.anim === 'lunge') pRigRef.current?.play('lunge');
         prevAnimRef.current.p = s.player.anim;
       }
       if (s.ai.anim !== prevAnimRef.current.a) {
-        if (s.ai.anim === 'swing' || s.ai.anim === 'lunge') {
-          aArm.value = -80;
-          aArm.value = withSequence(withTiming(50, { duration: 120 }), withTiming(0, { duration: 240 }));
-        }
+        if (s.ai.anim === 'swing') aRigRef.current?.play(s.ai.motion ?? 'overhead');
+        else if (s.ai.anim === 'lunge') aRigRef.current?.play('lunge');
         prevAnimRef.current.a = s.ai.anim;
       }
 
@@ -362,10 +361,18 @@ export default function RallyGameScreen() {
       // 서브 게이지
       if (s.phase === 'serve' && s.server === 'player') gauge.value = servePhase(now);
 
+      // 오는 공의 타점 존 — 버튼 라벨용 (트래젝토리 단위라 깜빡이지 않음)
+      if (s.phase === 'rally' && s.traj && s.traj.by === 'ai') {
+        const tj = s.traj;
+        zoneRef.current = Math.abs(tj.p2.y) <= 2.5 ? 'net' : tj.c.z < 2.3 ? 'mid' : 'high';
+      } else if (s.phase !== 'rally') {
+        zoneRef.current = 'high';
+      }
+
       // 저빈도 UI 동기화
       const key = [
         s.phase, s.score.player, s.score.ai, s.server, s.deuce, s.rallyLen,
-        s.banner ? s.banner.reason : '', s.winner ?? '',
+        s.banner ? s.banner.reason : '', s.winner ?? '', zoneRef.current,
         s.lastShot ? `${s.lastShot.shot}${s.lastShot.quality}${s.lastShot.whiff ? 'w' : ''}` : '',
       ].join('|');
       if (key !== uiKeyRef.current) {
@@ -374,7 +381,7 @@ export default function RallyGameScreen() {
           phase: s.phase, score: { ...s.score }, server: s.server, deuce: s.deuce,
           rallyLen: s.rallyLen, banner: s.banner ? { ...s.banner } : null,
           winner: s.winner, lastShot: s.lastShot ? { ...s.lastShot } : null,
-          stats: { ...s.stats },
+          stats: { ...s.stats }, zone: zoneRef.current,
         });
         if (s.banner) {
           haptic(s.banner.winner === 'player' ? 'success' : 'error');
@@ -430,18 +437,27 @@ export default function RallyGameScreen() {
   }, [screen, isGuest]);
 
   // ── 조작 ──────────────────────────────────────────────────────────
+  // 코스 = 스윙 순간의 스틱 벡터: 좌우는 연속(끝까지 = 사이드라인 와이드),
+  // 앞으로 밀며 치면 짧게 / 당기며 치면 깊게. 중립이면 빈 코트 오토.
   const doSwing = (intent: SwingIntent) => {
     const s = simRef.current;
     if (!s) return;
-    const jdx = joyRef.current.dx;
-    const aim: AimLane = jdx > 0.35 ? 1 : jdx < -0.35 ? -1 : 'auto';
+    const { dx: jdx, dy: jdy } = joyRef.current;
+    const aim: AimLane = Math.abs(jdx) > 0.22 ? Math.max(-1, Math.min(1, jdx * 1.25)) : 'auto';
+    const depth: AimDepth = jdy > 0.45 ? -1 : jdy < -0.45 ? 1 : 0;
     if (isGuest) {
       // 판정은 호스트에서 — 스윙 모션만 즉시(체감), 결과는 스냅샷으로
-      netRef.current?.sendSwing(intent, aim);
+      netRef.current?.sendSwing(intent, aim, depth);
       s.player.anim = 'swing';
       s.player.animUntil = s.clock + 220;
+      // 로컬 모션 추정 — 현재 타점 존으로 근사 (실제 판정 모션은 스냅샷에 실려온다)
+      const z = zoneRef.current;
+      s.player.motion =
+        intent === 'attack' ? (z === 'high' ? 'smashJump' : z === 'mid' ? 'drive' : 'netPush')
+        : intent === 'drop' ? (z === 'high' ? 'overhead' : 'netPush')
+        : z === 'high' ? 'overhead' : 'under';
     } else {
-      swingPlayer(s, intent, aim);
+      swingPlayer(s, intent, aim, depth);
     }
     haptic('light');
   };
@@ -511,9 +527,6 @@ export default function RallyGameScreen() {
       { scaleX: aFace.value },
     ],
   }));
-  // 라켓은 평소 내려 든 각도(-26°)에서 스윙 때 스냅
-  const pArmStyle = useAnimatedStyle(() => ({ transform: [{ rotate: `${-26 + pArm.value * 0.7}deg` }] }));
-  const aArmStyle = useAnimatedStyle(() => ({ transform: [{ rotate: `${-26 + aArm.value * 0.7}deg` }] }));
   const shakeStyle = useAnimatedStyle(() => {
     const t = shakeT.value;
     const amp = 7 * (1 - t);
@@ -641,9 +654,9 @@ export default function RallyGameScreen() {
           {/* 셔틀 그림자 */}
           <Animated.View style={[styles.shuttleShadow, shadowStyle]} pointerEvents="none" />
 
-          {/* AI (원경) */}
+          {/* 상대 (원경) */}
           <Animated.View style={[styles.char, aiStyle]} pointerEvents="none">
-            <KenneyCharacter variant="ai" poseMode={aPose} runFrame={aRun} armStyle={aArmStyle} />
+            <RigCharacter ref={aRigRef} variant="oppo" poseMode={aPose} runFrame={aRun} />
           </Animated.View>
 
           {/* 셔틀 트레일 + 본체 */}
@@ -653,7 +666,7 @@ export default function RallyGameScreen() {
 
           {/* 플레이어 */}
           <Animated.View style={[styles.char, playerStyle]} pointerEvents="none">
-            <KenneyCharacter variant={charSel} poseMode={pPose} runFrame={pRun} armStyle={pArmStyle} />
+            <RigCharacter ref={pRigRef} variant={charSel} poseMode={pPose} runFrame={pRun} />
           </Animated.View>
           </Animated.View>
 
@@ -711,12 +724,12 @@ export default function RallyGameScreen() {
             </View>
           </GestureDetector>
 
-          {/* 샷 버튼 */}
+          {/* 샷 버튼 — 타점 존에 따라 실제 샷 라벨로 바뀐다 (조작은 3버튼 그대로) */}
           {!serving && ui?.phase !== 'over' && (
             <View style={styles.btnCluster} pointerEvents="box-none">
-              <ShotButton size={62} img={UI_IMG.yellow} icon="water" label="드롭" jua={jua} style={{ right: 30, bottom: 132 }} onPress={() => doSwing('drop')} />
-              <ShotButton size={70} img={UI_IMG.green} icon="arrow-up-bold" label="클리어" jua={jua} style={{ right: 116, bottom: 48 }} onPress={() => doSwing('rally')} />
-              <ShotButton size={88} img={UI_IMG.red} icon="flash" label="스매시" jua={jua} style={{ right: 16, bottom: 30 }} onPress={() => doSwing('attack')} />
+              <ShotButton size={62} img={UI_IMG.yellow} icon="water" label={ZONE_BTNS[ui?.zone ?? 'high'].drp} jua={jua} style={{ right: 30, bottom: 132 }} onPress={() => doSwing('drop')} />
+              <ShotButton size={70} img={UI_IMG.green} icon="arrow-up-bold" label={ZONE_BTNS[ui?.zone ?? 'high'].ral} jua={jua} style={{ right: 116, bottom: 48 }} onPress={() => doSwing('rally')} />
+              <ShotButton size={88} img={UI_IMG.red} icon="flash" label={ZONE_BTNS[ui?.zone ?? 'high'].atk} jua={jua} style={{ right: 16, bottom: 30 }} onPress={() => doSwing('attack')} />
             </View>
           )}
 
@@ -777,7 +790,9 @@ export default function RallyGameScreen() {
         <View style={styles.overWrap}>
           <View style={[styles.overCard, { backgroundColor: '#FFFFFF', borderWidth: 1, borderColor: '#D3E8E2' }, shadows.sm]}>
             <View style={styles.overRankRow}>
-              <Image source={ui.winner === 'player' ? RESULT_IMG[charSel].win : RESULT_IMG[charSel].lose} style={styles.overChar} resizeMode="contain" />
+              <View style={styles.overChar}>
+                <RigCharacter variant={charSel} poseMode={overPose} runFrame={overRun} still={ui.winner === 'player' ? 'win' : 'lose'} />
+              </View>
               <View style={{ alignItems: 'center' }}>
                 <Text style={[styles.overRank, juaStyle, { color: ui.winner === 'player' ? '#EAB308' : '#94A3B8' }]}>
                   {ui.winner === 'player' ? (ui.score.player - ui.score.ai >= 5 ? 'S' : 'A') : ui.score.player - ui.score.ai >= -2 ? 'B' : 'C'}
@@ -1306,7 +1321,7 @@ const styles = StyleSheet.create({
   overWrap: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(15, 23, 42, 0.35)', alignItems: 'center', justifyContent: 'center', padding: spacing.lg },
   overCard: { width: '100%', maxWidth: 340, borderRadius: radius.card, padding: spacing.xl, alignItems: 'center', gap: spacing.sm },
   overRankRow: { flexDirection: 'row', alignItems: 'center', gap: 22, marginBottom: 2 },
-  overChar: { width: 72, height: 96 },
+  overChar: { width: 78, height: 112, transform: [{ scale: 0.86 }] },
   overRank: { fontSize: 56, lineHeight: 60, fontWeight: '700' },
   overRankLabel: { fontSize: 11, fontWeight: '700', color: '#64748B', marginTop: -2 },
   overTitle: { ...typography.h2 },

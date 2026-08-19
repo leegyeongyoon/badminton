@@ -1,0 +1,330 @@
+/**
+ * 콕고 랠리 — 리깅 캐릭터 (v4 아트 패스).
+ *
+ * 스프라이트 교체가 아니라 관절(어깨·팔꿈치·라켓·몸통·다리)이 실제로 회전하는
+ * 리그. 샷마다 다른 스윙 클립(백스윙→임팩트→팔로스루)을 재생한다 — 정지 그림에
+ * 라켓만 돌리던 어색함의 해법. 클립은 각도·시간 테이블(CLIPS)이라 손맛 조정이 쉽다.
+ *
+ * 렌더 규약(기존 KenneyCharacter와 동일한 틀):
+ *  - 78×112 박스, 발이 박스 하단. 위치/스케일/좌우반전은 부모(rally.tsx)가 건다.
+ *  - poseMode(0 idle/1 run/2 swing/3 lunge/4 cheer)·runFrame은 공유값 — 리렌더 없음.
+ *  - 샷별 스윙은 ref.play(motion) 명령형 호출 (sim의 Actor.motion 값).
+ */
+import { forwardRef, useEffect, useImperativeHandle, useMemo } from 'react';
+import { View, StyleSheet } from 'react-native';
+import Animated, {
+  Easing,
+  SharedValue,
+  useAnimatedStyle,
+  useSharedValue,
+  withSequence,
+  withTiming,
+} from 'react-native-reanimated';
+import type { MotionKey } from '../sim';
+
+// ─── 리그 상수 ─────────────────────────────────────────────────────
+const JOINTS = ['torso', 'armL', 'foreL', 'armR', 'foreR', 'racket', 'legL', 'legR'] as const;
+type Joint = (typeof JOINTS)[number];
+
+const REST: Record<Joint, number> = {
+  torso: 0, armL: 14, foreL: 10, armR: -16, foreR: -34, racket: 6, legL: 2, legR: -2,
+};
+
+interface Frame {
+  d: number; // ms
+  j: Partial<Record<Joint, number>>; // 명시 안 한 관절은 직전 값 유지, 마지막 프레임은 REST 복귀
+  y?: number; // rootY(점프/크라우치). 마지막 프레임 생략 시 0 복귀
+}
+
+// 샷별 스윙 클립 — 아티팩트 데모(rig-character-demo)와 같은 키프레임
+const CLIPS: Record<string, Frame[]> = {
+  // 클리어/드롭·커트: 백스윙 → 임팩트(팔 쭉) → 팔로스루
+  overhead: [
+    { d: 160, j: { armR: -128, foreR: -108, racket: -52, torso: -7 } },
+    { d: 110, j: { armR: -178, foreR: -4, racket: 14, torso: 4 } },
+    { d: 170, j: { armR: -70, foreR: -30, racket: 10 } },
+    { d: 160, j: {} },
+  ],
+  // 스매시: 크라우치 → 점프 + 내려찍기 → 착지
+  smashJump: [
+    { d: 170, j: { armR: -120, foreR: -118, racket: -58, torso: -10, legL: -16, legR: 14 }, y: 7 },
+    { d: 140, j: { armR: -182, foreR: -2, racket: 18, torso: 9, legL: 4, legR: -4 }, y: -16 },
+    { d: 150, j: { armR: -60, foreR: -24, racket: 40 }, y: -10 },
+    { d: 200, j: {} },
+  ],
+  // 리프트/롱서브: 아래에서 위로 퍼올리기
+  under: [
+    { d: 160, j: { armR: 28, foreR: 18, racket: 40, torso: 6 } },
+    { d: 150, j: { armR: -78, foreR: -30, racket: -24, torso: -4 } },
+    { d: 200, j: {} },
+  ],
+  // 헤어핀·푸시·숏서브: 런지 스텝과 함께 짧게 밀기
+  netPush: [
+    { d: 180, j: { armR: -88, foreR: -6, torso: 9, legR: 24, legL: -14 } },
+    { d: 130, j: { armR: -96, foreR: -2 } },
+    { d: 170, j: {} },
+  ],
+  // 드라이브: 옆에서 평평하게 후려치기
+  drive: [
+    { d: 140, j: { armR: -66, foreR: -96, racket: -70, torso: -6 } },
+    { d: 120, j: { armR: -108, foreR: 6, racket: 64, torso: 7 } },
+    { d: 210, j: {} },
+  ],
+  // 런지: 다리 쫙 뻗고 낮게 리치 (배드 퀄리티 리턴)
+  lunge: [
+    { d: 220, j: { armR: -98, foreR: 0, legR: 38, legL: -26, torso: 13 }, y: 9 },
+    { d: 240, j: { armR: -98, foreR: 0, legR: 38, legL: -26, torso: 13 }, y: 9 },
+    { d: 200, j: {} },
+  ],
+  cheer: [
+    { d: 200, j: { armL: 160, armR: -160, foreR: -8, foreL: 0 } },
+    { d: 250, j: { armL: 146, armR: -146 } },
+    { d: 200, j: { armL: 160, armR: -160 } },
+    { d: 250, j: {} },
+  ],
+};
+
+// 결과 화면용 정지 포즈
+const STILLS: Record<'win' | 'lose', Partial<Record<Joint, number>> & { y?: number }> = {
+  win: { armL: 160, armR: -160, foreR: -8, foreL: 0 },
+  lose: { torso: 13, armR: -98, foreR: 0, legR: 38, legL: -26, y: 9 },
+};
+
+const EASE = Easing.out(Easing.quad);
+
+// ─── 팔레트 ────────────────────────────────────────────────────────
+type Variant = 'male' | 'female' | 'oppo';
+const PAL: Record<Variant, { skin: string; hair: string; jersey: string; jerseyLine: string; shorts: string; band: string }> = {
+  male: { skin: '#F3C89F', hair: '#4C3A2E', jersey: '#12A48E', jerseyLine: '#0C7A69', shorts: '#194A57', band: '#FFFFFF' },
+  female: { skin: '#F6D2AC', hair: '#7B4A33', jersey: '#12A48E', jerseyLine: '#0C7A69', shorts: '#194A57', band: '#FFD34D' },
+  oppo: { skin: '#EFC096', hair: '#33404C', jersey: '#E2695C', jerseyLine: '#B84A3E', shorts: '#33414F', band: '#FFFFFF' },
+};
+
+export interface RigHandle {
+  play: (motion: MotionKey) => void;
+}
+
+interface Props {
+  variant: Variant;
+  /** 0 idle / 1 run / 2 swing / 3 lunge / 4 cheer — 부모 루프가 갱신하는 공유값 */
+  poseMode: SharedValue<number>;
+  /** 러닝 위상 누적값 — 다리·팔 스윙 */
+  runFrame: SharedValue<number>;
+  /** 결과 화면용 정지 포즈 (지정 시 poseMode 무시) */
+  still?: 'win' | 'lose';
+}
+
+// 상단 가장자리를 축으로 회전 (RN 기본은 중심축)
+const pivotTop = (h: number, deg: number) => {
+  'worklet';
+  return [{ translateY: -h / 2 }, { rotate: `${deg}deg` }, { translateY: h / 2 }];
+};
+const pivotBottom = (h: number, deg: number) => {
+  'worklet';
+  return [{ translateY: h / 2 }, { rotate: `${deg}deg` }, { translateY: -h / 2 }];
+};
+
+export const RigCharacter = forwardRef<RigHandle, Props>(function RigCharacter(
+  { variant, poseMode, runFrame, still },
+  ref,
+) {
+  const pal = PAL[variant];
+  const front = variant === 'oppo';
+
+  const torso = useSharedValue(REST.torso);
+  const armL = useSharedValue(REST.armL);
+  const foreL = useSharedValue(REST.foreL);
+  const armR = useSharedValue(REST.armR);
+  const foreR = useSharedValue(REST.foreR);
+  const racket = useSharedValue(REST.racket);
+  const legL = useSharedValue(REST.legL);
+  const legR = useSharedValue(REST.legR);
+  const rootY = useSharedValue(0);
+  const sv: Record<Joint, SharedValue<number>> = { torso, armL, foreL, armR, foreR, racket, legL, legR };
+
+  useImperativeHandle(ref, () => ({
+    play: (motion: MotionKey) => {
+      const clip = CLIPS[motion] ?? CLIPS.overhead;
+      for (const j of JOINTS) {
+        let prev = REST[j];
+        const seq = clip.map((f, i) => {
+          const target = f.j[j] !== undefined ? f.j[j]! : i === clip.length - 1 ? REST[j] : prev;
+          prev = target;
+          return withTiming(target, { duration: f.d, easing: EASE });
+        });
+        sv[j].value = withSequence(seq[0], ...seq.slice(1));
+      }
+      let prevY = 0;
+      const seqY = clip.map((f, i) => {
+        const target = f.y !== undefined ? f.y : i === clip.length - 1 ? 0 : prevY;
+        prevY = target;
+        return withTiming(target, { duration: f.d, easing: EASE });
+      });
+      rootY.value = withSequence(seqY[0], ...seqY.slice(1));
+    },
+  }));
+
+  useEffect(() => {
+    if (!still) return;
+    const pose = STILLS[still];
+    for (const j of JOINTS) sv[j].value = pose[j] ?? REST[j];
+    rootY.value = pose.y ?? 0;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [still]);
+
+  // ── 관절 스타일 — 러닝(다리·팔 펌프)과 cheer(양팔 위)는 공유값 오버라이드
+  const rootStyle = useAnimatedStyle(() => ({ transform: [{ translateY: rootY.value }] }));
+  const torsoStyle = useAnimatedStyle(() => ({ transform: pivotBottom(34, torso.value) }));
+  const legLStyle = useAnimatedStyle(() => {
+    const r = poseMode.value === 1 ? Math.sin(runFrame.value * 6) * 30 : legL.value;
+    return { transform: pivotTop(26, r) };
+  });
+  const legRStyle = useAnimatedStyle(() => {
+    const r = poseMode.value === 1 ? Math.sin(runFrame.value * 6 + Math.PI) * 30 : legR.value;
+    return { transform: pivotTop(26, r) };
+  });
+  const armLStyle = useAnimatedStyle(() => {
+    const cheer = poseMode.value === 4;
+    const pump = poseMode.value === 1 ? Math.sin(runFrame.value * 6 + Math.PI) * 16 : 0;
+    return { transform: pivotTop(17, cheer ? 158 : armL.value + pump) };
+  });
+  const foreLStyle = useAnimatedStyle(() => ({
+    transform: pivotTop(14, poseMode.value === 4 ? 0 : foreL.value),
+  }));
+  const armRStyle = useAnimatedStyle(() => {
+    const cheer = poseMode.value === 4;
+    const pump = poseMode.value === 1 ? Math.sin(runFrame.value * 6) * -16 : 0;
+    return { transform: pivotTop(17, cheer ? -158 : armR.value + pump) };
+  });
+  const foreRStyle = useAnimatedStyle(() => ({
+    transform: pivotTop(14, poseMode.value === 4 ? -10 : foreR.value),
+  }));
+  const racketStyle = useAnimatedStyle(() => ({ transform: pivotTop(14, racket.value) }));
+
+  // 정적 파트 스타일 (variant 색만 다름)
+  const s = useMemo(() => makeStyles(pal), [pal]);
+
+  return (
+    <View style={s.box} pointerEvents="none">
+      <View style={s.shadow} />
+      <Animated.View style={[StyleSheet.absoluteFill, rootStyle]}>
+        {/* 다리 */}
+        <Animated.View style={[s.leg, { left: 27 }, legLStyle]}>
+          <View style={s.foot} />
+        </Animated.View>
+        <Animated.View style={[s.leg, { left: 43 }, legRStyle]}>
+          <View style={s.foot} />
+        </Animated.View>
+        {/* 몸통 */}
+        <Animated.View style={[s.torso, torsoStyle]}>
+          <View style={s.shorts} />
+          <View style={s.jerseyLine} />
+          {/* 머리 */}
+          <View style={s.head}>
+            <View style={front ? s.hairFront : s.hairBack} />
+            {variant === 'female' && <View style={s.pony} />}
+            <View style={[s.band, front && s.bandFront]} />
+            {front && (
+              <View style={s.face}>
+                <View style={[s.eye, { left: 10 }]} />
+                <View style={[s.eye, { right: 10 }]} />
+                <View style={s.smile} />
+              </View>
+            )}
+          </View>
+          {/* 왼팔 */}
+          <Animated.View style={[s.arm, { left: -6 }, armLStyle]}>
+            <View style={s.sleeve} />
+            <Animated.View style={[s.fore, foreLStyle]} />
+          </Animated.View>
+          {/* 오른팔 + 라켓 */}
+          <Animated.View style={[s.arm, { left: 32 }, armRStyle]}>
+            <View style={s.sleeve} />
+            <Animated.View style={[s.fore, foreRStyle]}>
+              <Animated.View style={[s.racket, racketStyle]}>
+                <View style={s.racketHead}>
+                  <View style={s.stringH} />
+                  <View style={s.stringV} />
+                </View>
+              </Animated.View>
+            </Animated.View>
+          </Animated.View>
+        </Animated.View>
+      </Animated.View>
+    </View>
+  );
+});
+
+function makeStyles(pal: (typeof PAL)['male']) {
+  return StyleSheet.create({
+    box: { width: 78, height: 112 },
+    shadow: {
+      position: 'absolute', left: 39 - 22, bottom: 0, width: 44, height: 9,
+      borderRadius: 22, backgroundColor: 'rgba(10,30,45,0.22)',
+    },
+    leg: {
+      position: 'absolute', top: 76, width: 9, height: 26, borderRadius: 5,
+      backgroundColor: pal.skin,
+    },
+    foot: {
+      position: 'absolute', bottom: -4, left: -3, width: 15, height: 8,
+      borderRadius: 5, backgroundColor: '#FFFFFF',
+      shadowColor: '#000', shadowOpacity: 0.18, shadowOffset: { width: 0, height: 1 }, shadowRadius: 1,
+    },
+    torso: {
+      position: 'absolute', left: 22, top: 46, width: 34, height: 34,
+      borderRadius: 11, backgroundColor: pal.jersey,
+    },
+    shorts: {
+      position: 'absolute', left: 0, right: 0, bottom: 0, height: 11,
+      borderBottomLeftRadius: 11, borderBottomRightRadius: 11, backgroundColor: pal.shorts,
+    },
+    jerseyLine: {
+      position: 'absolute', left: 14, top: 3, width: 6, height: 17,
+      borderRadius: 3, backgroundColor: pal.jerseyLine,
+    },
+    head: {
+      position: 'absolute', left: -3, top: -34, width: 40, height: 38,
+      borderRadius: 19, backgroundColor: pal.skin,
+    },
+    hairBack: {
+      position: 'absolute', left: -2, right: -2, top: -2, bottom: 9,
+      borderRadius: 19, backgroundColor: pal.hair,
+    },
+    hairFront: {
+      position: 'absolute', left: -2, right: -2, top: -2, height: 16,
+      borderTopLeftRadius: 19, borderTopRightRadius: 19, borderBottomLeftRadius: 6,
+      borderBottomRightRadius: 6, backgroundColor: pal.hair,
+    },
+    pony: {
+      position: 'absolute', left: 15, top: 3, width: 11, height: 28,
+      borderRadius: 6, backgroundColor: pal.hair, transform: [{ rotate: '4deg' }], zIndex: -1,
+    },
+    band: {
+      position: 'absolute', left: -1, right: -1, top: 21, height: 6,
+      borderRadius: 3, backgroundColor: pal.band,
+    },
+    bandFront: { top: 7 },
+    face: { position: 'absolute', left: 0, right: 0, top: 17 },
+    eye: { position: 'absolute', width: 4.5, height: 6.5, borderRadius: 3, backgroundColor: '#22303B' },
+    smile: {
+      position: 'absolute', left: 15.5, top: 9, width: 9, height: 5,
+      borderWidth: 1.8, borderColor: '#22303B', borderTopWidth: 0,
+      borderBottomLeftRadius: 8, borderBottomRightRadius: 8,
+    },
+    arm: { position: 'absolute', top: 5, width: 8, height: 17, borderRadius: 5, backgroundColor: pal.skin },
+    sleeve: {
+      position: 'absolute', left: -1, right: -1, top: -1, height: 9,
+      borderRadius: 5, backgroundColor: pal.jersey,
+    },
+    fore: { position: 'absolute', left: 0, top: 13, width: 8, height: 14, borderRadius: 5, backgroundColor: pal.skin },
+    racket: { position: 'absolute', left: 2, top: 10, width: 4, height: 14, borderRadius: 2, backgroundColor: '#B98A4C' },
+    racketHead: {
+      position: 'absolute', left: -6.5, top: -18, width: 17, height: 20,
+      borderRadius: 10, borderWidth: 3, borderColor: '#2E4B5E',
+      backgroundColor: 'rgba(255,255,255,0.4)',
+    },
+    stringH: { position: 'absolute', left: 1, right: 1, top: 6, height: 1.4, backgroundColor: 'rgba(150,180,200,0.9)' },
+    stringV: { position: 'absolute', top: 1, bottom: 1, left: 5.5, width: 1.4, backgroundColor: 'rgba(150,180,200,0.9)' },
+  });
+}

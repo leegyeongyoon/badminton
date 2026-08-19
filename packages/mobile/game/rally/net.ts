@@ -7,11 +7,11 @@
  * 좌표 규약: 게스트는 자기 뷰 프레임으로 보내고, 호스트가 월드로 부호 반전한다.
  */
 import { getSocket } from '../../hooks/useSocket';
-import type { AimLane, NetSnapshot, SwingIntent } from './sim';
+import type { AimDepth, AimLane, NetSnapshot, SwingIntent } from './sim';
 
 export type RallyInputMsg =
   | { t: 'joy'; dx: number; dy: number }
-  | { t: 'swing'; intent: SwingIntent; aim: AimLane }
+  | { t: 'swing'; intent: SwingIntent; aim: AimLane; depth?: AimDepth }
   | { t: 'serve'; kind: 'short' | 'long'; gauge: number }
   | { t: 'again' };
 
@@ -20,7 +20,7 @@ const JOY_SEND_MS = 66; // ~15Hz
 export interface RallyNet {
   /** 게스트: 조이스틱 벡터(뷰 프레임) — 스로틀해서 송신. 매 프레임 불러도 된다. */
   sendJoy(dx: number, dy: number): void;
-  sendSwing(intent: SwingIntent, aim: AimLane): void;
+  sendSwing(intent: SwingIntent, aim: AimLane, depth: AimDepth): void;
   sendServe(kind: 'short' | 'long', gauge: number): void;
   sendAgain(): void;
   /** 호스트: 미러 스냅샷 송신 — rally.tsx 루프가 12Hz로 부른다. */
@@ -66,8 +66,8 @@ export function connectRally(
       lastJoy = { dx, dy };
       socket.emit('rally:input', { matchId, payload: { t: 'joy', dx, dy } });
     },
-    sendSwing(intent, aim) {
-      socket.emit('rally:input', { matchId, payload: { t: 'swing', intent, aim } });
+    sendSwing(intent, aim, depth) {
+      socket.emit('rally:input', { matchId, payload: { t: 'swing', intent, aim, depth } });
     },
     sendServe(kind, gauge) {
       socket.emit('rally:input', { matchId, payload: { t: 'serve', kind, gauge } });

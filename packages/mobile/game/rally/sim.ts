@@ -26,6 +26,22 @@ export interface Vec3 {
 
 export type Anim = 'idle' | 'run' | 'swing' | 'lunge';
 
+/** 리깅 캐릭터의 샷별 스윙 클립 키 — 렌더러(RigCharacter)가 이 값으로 모션을 고른다 */
+export type MotionKey = 'overhead' | 'smashJump' | 'under' | 'netPush' | 'drive' | 'lunge' | 'cheer';
+
+export function motionFor(shot: ShotType, serve = false, kind?: 'short' | 'long'): MotionKey {
+  if (serve) return kind === 'short' ? 'netPush' : 'under';
+  switch (shot) {
+    case 'smash': return 'smashJump';
+    case 'clear':
+    case 'drop': return 'overhead';
+    case 'drive': return 'drive';
+    case 'hairpin':
+    case 'block': return 'netPush';
+    default: return 'under'; // lift
+  }
+}
+
 export interface Actor {
   x: number;
   y: number;
@@ -33,6 +49,7 @@ export interface Actor {
   animUntil: number;
   moving: boolean;
   facing: 1 | -1; // 좌우 시선(연출용)
+  motion?: MotionKey; // 마지막 스윙의 모션 클립
 }
 
 export interface Traj {
@@ -118,7 +135,10 @@ export function serveSpots(s: SimState): ServeSpots {
 
 // 게임식 버튼 조작 — 공격(스매시/네트킬)·연결(클리어/헤어핀)·드롭
 export type SwingIntent = 'attack' | 'rally' | 'drop';
-export type AimLane = -1 | 0 | 1 | 'auto';
+/** 좌우 코스 — 연속값(-1..1, 끝까지 기울이면 사이드라인 와이드) 또는 'auto'(빈 코트) */
+export type AimLane = number | 'auto';
+/** 깊이 코스 — 스윙 순간 스틱 앞뒤: -1 짧게(네트 쪽) / 0 기본 / 1 깊게(백라인) */
+export type AimDepth = -1 | 0 | 1;
 
 // ─── 튜닝 상수 ─────────────────────────────────────────────────────
 const PLAYER_SPEED = 4.8; // m/s — 사람이 코트를 커버할 수 있게 넉넉히
@@ -196,10 +216,11 @@ function makeTraj(
   shot: ShotType,
   quality: Quality,
   from: Vec3,
-  aimX: -1 | 0 | 1,
+  aimX: number,
   now: number,
   rallyLen = 0,
   pace = 1,
+  depth: AimDepth = 0,
 ): Traj {
   const spec = SHOT3[shot];
   const dir = by === 'player' ? 1 : -1; // 목표 y 부호
@@ -208,14 +229,24 @@ function makeTraj(
   let chance = false;
   let landing: Traj['landing'] = 'in';
 
-  let ty = dir * rnd(spec.yMin, spec.yMax);
-  let tx = aimX * 1.7 + rnd(-0.35, 0.35);
+  // 깊이 코스 — 샷 고유 사거리 안에서 앞/뒤 1/3 구간을 노린다
+  const span = spec.yMax - spec.yMin;
+  let ty =
+    depth > 0 ? dir * rnd(spec.yMin + span * 0.62, spec.yMax)
+    : depth < 0 ? dir * rnd(spec.yMin, spec.yMin + span * 0.38)
+    : dir * rnd(spec.yMin, spec.yMax);
+  // 좌우 코스 — 연속값. 풀 틸트(≈2.3m)는 사이드라인 근처 = 퍼펙트가 아니면 리스크
+  let tx = aimX * 2.3 + rnd(-0.3, 0.3) * (quality === 'perfect' ? 0.55 : 1);
+  if (Math.abs(aimX) > 0.85 && quality !== 'perfect') tx += rnd(-0.35, 0.35); // 라인 노림 흔들림
   let apex = spec.apex;
 
   if (quality === 'perfect') {
     if (shot === 'smash') dur *= 0.85;
-    if (shot === 'clear' || shot === 'lift') ty = dir * rnd(5.6, 6.4);
-    if (shot === 'drop') ty = dir * rnd(0.7, 1.2);
+    // 깊이를 직접 지정하지 않았을 때만 퍼펙트 기본 코스(깊은 클리어·타이트 드롭)로 벼린다
+    if (depth === 0) {
+      if (shot === 'clear' || shot === 'lift') ty = dir * rnd(5.6, 6.4);
+      if (shot === 'drop') ty = dir * rnd(0.7, 1.2);
+    }
     if (shot === 'hairpin') {
       ty = dir * rnd(0.35, 0.7);
       apex = 1.72; // 네트를 스친다
@@ -357,18 +388,20 @@ function afterBanner(s: SimState, now: number) {
 }
 
 // ─── 스윙(플레이어) ─────────────────────────────────────────────────
-export function swingPlayer(s: SimState, intent: SwingIntent, aim: AimLane): void {
+export function swingPlayer(s: SimState, intent: SwingIntent, aim: AimLane, depth: AimDepth = 0): void {
   const now = s.clock;
   if (s.phase !== 'rally' || !s.traj || s.traj.by === 'player') {
     // 칠 공이 없어도 스윙 모션은 나간다(헛스윙)
     s.player.anim = 'swing';
     s.player.animUntil = now + 220;
+    s.player.motion = 'drive';
     return;
   }
   const d = dist2(s.shuttle.x, s.shuttle.y, s.player.x, s.player.y);
   if (d > REACH_MAX || s.shuttle.z > 3.0 || s.shuttle.y > 0) {
     s.player.anim = 'swing';
     s.player.animUntil = now + 220;
+    s.player.motion = 'drive';
     s.lastShot = { shot: 'clear', quality: 'bad', whiff: true };
     s.events.push('whiff');
     return;
@@ -382,12 +415,13 @@ export function swingPlayer(s: SimState, intent: SwingIntent, aim: AimLane): voi
   const quality: Quality = qn === 2 ? 'perfect' : qn === 1 ? 'good' : 'bad';
   const weak = quality === 'bad' ? (timeQ === 0 ? 'late' as const : 'stretch' as const) : undefined;
   const cut = shot === 'drop' && contact.z >= 1.7 && quality === 'perfect';
-  const aimX: -1 | 0 | 1 = aim === 'auto' ? autoAim(s) : aim;
+  const aimX = aim === 'auto' ? autoAim(s) : Math.max(-1, Math.min(1, aim));
   if (quality === 'perfect') s.stats.perfects += 1;
   s.rallyLen += 1;
   s.player.anim = quality === 'bad' ? 'lunge' : 'swing';
   s.player.animUntil = now + 260;
-  s.traj = makeTraj('player', shot, quality, contact, aimX, now, s.rallyLen, DIFF_PACE[s.config.difficulty]);
+  s.player.motion = motionFor(shot);
+  s.traj = makeTraj('player', shot, quality, contact, aimX, now, s.rallyLen, DIFF_PACE[s.config.difficulty], depth);
   s.lastShot = { shot, quality, cross: s.traj.cross, cut, weak };
   s.events.push(`swing:${shot}:${quality}${s.traj.cross ? ':cross' : ''}${weak ? `:${weak}` : ''}:z${contact.z.toFixed(2)}:d${d.toFixed(2)}`);
 }
@@ -453,6 +487,7 @@ export function servePlayer(s: SimState, kind: 'short' | 'long', gaugePhase: num
   s.lastShot = { shot: kind === 'short' ? 'hairpin' : 'clear', quality, serve: true };
   s.player.anim = 'swing';
   s.player.animUntil = now + 240;
+  s.player.motion = motionFor('clear', true, kind);
   s.traj = makeServeTraj('player', kind, quality, from, spots.targetSign, now, DIFF_PACE[s.config.difficulty]);
   s.events.push(`serve:${kind}:${quality}`);
 }
@@ -467,6 +502,7 @@ function serveAi(s: SimState, now: number) {
   s.phase = 'rally';
   s.ai.anim = 'swing';
   s.ai.animUntil = now + 240;
+  s.ai.motion = motionFor('clear', true, kind);
   s.traj = makeServeTraj('ai', kind, quality, from, spots.targetSign, now, DIFF_PACE[s.config.difficulty]);
   s.events.push(`ai-serve:${kind}:${quality}`);
 }
@@ -492,17 +528,20 @@ function aiSwing(s: SimState, now: number) {
   else if (menu.includes('hairpin') && Math.random() < 0.5) shot = 'hairpin';
   else shot = menu.includes('clear') ? 'clear' : 'lift';
 
-  // 코스: 플레이어가 없는 쪽을 노린다 (난이도가 높을수록 독하게)
-  const open: -1 | 0 | 1 = s.player.x > 0.6 ? -1 : s.player.x < -0.6 ? 1 : Math.random() < 0.5 ? -1 : 1;
-  const aim: -1 | 0 | 1 =
-    Math.random() < (s.config.difficulty === 'hard' ? 0.85 : s.config.difficulty === 'normal' ? 0.65 : 0.4)
-      ? open
-      : ((Math.round(rnd(-1, 1)) as -1 | 0 | 1));
+  // 코스: 플레이어가 없는 쪽을 연속값으로 노린다 (난이도가 높을수록 독하고 와이드하게)
+  const openSign = s.player.x > 0.6 ? -1 : s.player.x < -0.6 ? 1 : Math.random() < 0.5 ? -1 : 1;
+  const smart = Math.random() < (s.config.difficulty === 'hard' ? 0.85 : s.config.difficulty === 'normal' ? 0.65 : 0.4);
+  const aim = smart ? openSign * rnd(0.55, s.config.difficulty === 'hard' ? 1 : 0.85) : rnd(-0.8, 0.8);
+  // 깊이도 섞는다 — 플레이어가 뒤에 있으면 짧게, 앞에 있으면 깊게 노리는 경향
+  const depth: AimDepth = smart
+    ? (Math.abs(s.player.y) > 4.4 ? -1 : Math.abs(s.player.y) < 2.6 ? 1 : 0)
+    : ((Math.round(rnd(-1, 1)) as AimDepth));
 
   s.rallyLen += 1;
   s.ai.anim = quality === 'bad' ? 'lunge' : 'swing';
   s.ai.animUntil = now + 260;
-  s.traj = makeTraj('ai', shot, quality, contact, aim, now, s.rallyLen, DIFF_PACE[s.config.difficulty]);
+  s.ai.motion = motionFor(shot);
+  s.traj = makeTraj('ai', shot, quality, contact, aim, now, s.rallyLen, DIFF_PACE[s.config.difficulty], depth);
   s.events.push(`ai-swing:${shot}:${quality}`);
 }
 
@@ -652,17 +691,19 @@ function autoAimRemote(s: SimState): -1 | 0 | 1 {
 }
 
 /** 게스트 스윙을 호스트 sim의 ai 액터에 적용. aim은 이미 월드 프레임(부호 반전 완료). */
-export function swingRemote(s: SimState, intent: SwingIntent, aim: AimLane): void {
+export function swingRemote(s: SimState, intent: SwingIntent, aim: AimLane, depth: AimDepth = 0): void {
   const now = s.clock;
   if (s.phase !== 'rally' || !s.traj || s.traj.by === 'ai') {
     s.ai.anim = 'swing';
     s.ai.animUntil = now + 220;
+    s.ai.motion = 'drive';
     return;
   }
   const d = dist2(s.shuttle.x, s.shuttle.y, s.ai.x, s.ai.y);
   if (d > REACH_MAX || s.shuttle.z > 3.0 || s.shuttle.y < 0) {
     s.ai.anim = 'swing';
     s.ai.animUntil = now + 220;
+    s.ai.motion = 'drive';
     s.lastShot = { shot: 'clear', quality: 'bad', whiff: true, by: 'ai' };
     s.events.push('remote-whiff');
     return;
@@ -675,12 +716,13 @@ export function swingRemote(s: SimState, intent: SwingIntent, aim: AimLane): voi
   const quality: Quality = qn === 2 ? 'perfect' : qn === 1 ? 'good' : 'bad';
   const weak = quality === 'bad' ? (timeQ === 0 ? 'late' as const : 'stretch' as const) : undefined;
   const cut = shot === 'drop' && contact.z >= 1.7 && quality === 'perfect';
-  const aimX: -1 | 0 | 1 = aim === 'auto' ? autoAimRemote(s) : aim;
+  const aimX = aim === 'auto' ? autoAimRemote(s) : Math.max(-1, Math.min(1, aim));
   if (quality === 'perfect') s.stats.perfectsRemote = (s.stats.perfectsRemote ?? 0) + 1;
   s.rallyLen += 1;
   s.ai.anim = quality === 'bad' ? 'lunge' : 'swing';
   s.ai.animUntil = now + 260;
-  s.traj = makeTraj('ai', shot, quality, contact, aimX, now, s.rallyLen, DIFF_PACE[s.config.difficulty]);
+  s.ai.motion = motionFor(shot);
+  s.traj = makeTraj('ai', shot, quality, contact, aimX, now, s.rallyLen, DIFF_PACE[s.config.difficulty], depth);
   s.lastShot = { shot, quality, cross: s.traj.cross, cut, weak, by: 'ai' };
   s.events.push(`remote-swing:${shot}:${quality}`);
 }
@@ -697,6 +739,7 @@ export function serveRemote(s: SimState, kind: 'short' | 'long', gaugePhase: num
   s.lastShot = { shot: kind === 'short' ? 'hairpin' : 'clear', quality, serve: true, by: 'ai' };
   s.ai.anim = 'swing';
   s.ai.animUntil = now + 240;
+  s.ai.motion = motionFor('clear', true, kind);
   s.traj = makeServeTraj('ai', kind, quality, from, spots.targetSign, now, DIFF_PACE[s.config.difficulty]);
   s.events.push(`remote-serve:${kind}:${quality}`);
 }
@@ -782,6 +825,7 @@ export function applySnapshot(s: SimState, snap: NetSnapshot): void {
   s.ai.animUntil = snap.ai.animUntil;
   s.ai.facing = snap.ai.facing;
   s.ai.moving = snap.ai.moving;
+  s.ai.motion = snap.ai.motion; // 상대 스윙 클립 — 게스트 화면 모션 재생용
 }
 
 /** 게스트 프레임 렌더 틱 — sim 없이 이동 예측 + 셔틀 비행 + 서브 정렬만. */
