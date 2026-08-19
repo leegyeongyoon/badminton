@@ -117,21 +117,24 @@ export type SwingIntent = 'attack' | 'rally' | 'drop';
 export type AimLane = -1 | 0 | 1 | 'auto';
 
 // ─── 튜닝 상수 ─────────────────────────────────────────────────────
-const PLAYER_SPEED = 4.4; // m/s
+const PLAYER_SPEED = 4.8; // m/s — 사람이 코트를 커버할 수 있게 넉넉히
 const AI_SPEED: Record<Difficulty, number> = { easy: 2.9, normal: 3.6, hard: 4.4 };
-const REACH_PERFECT = 0.55;
-const REACH_GOOD = 0.95;
-const REACH_MAX = 1.35; // 런지 한계 — 이 밖이면 헛스윙
+const REACH_PERFECT = 0.6;
+const REACH_GOOD = 1.05;
+const REACH_MAX = 1.45; // 런지 한계 — 이 밖이면 헛스윙
+// 난이도별 셔틀 페이스 — 쉬움은 느긋하게, 어려움은 빠르게
+const DIFF_PACE: Record<Difficulty, number> = { easy: 1.15, normal: 1.0, hard: 0.92 };
 
 // 샷 스펙: 비행시간(ms), 정점 높이(m), 상대 코트 목표 깊이 y 범위
+// 사람 반응속도 기준 페이스 — 랠리가 '만들어질' 여유를 준다
 const SHOT3: Record<ShotType, { dur: number; apex: number; yMin: number; yMax: number }> = {
-  clear: { dur: 1350, apex: 4.6, yMin: 4.6, yMax: 6.2 },
-  lift: { dur: 1500, apex: 5.2, yMin: 4.2, yMax: 6.0 },
-  drop: { dur: 1050, apex: 2.7, yMin: 0.9, yMax: 1.8 },
-  hairpin: { dur: 950, apex: 1.95, yMin: 0.5, yMax: 1.1 },
-  block: { dur: 900, apex: 1.9, yMin: 0.8, yMax: 1.6 },
-  smash: { dur: 560, apex: 0, yMin: 2.2, yMax: 3.6 }, // apex 0 = 직선 강하
-  drive: { dur: 700, apex: 1.95, yMin: 3.0, yMax: 4.6 }, // 네트를 스치는 평평한 속공
+  clear: { dur: 1600, apex: 4.6, yMin: 4.6, yMax: 6.2 },
+  lift: { dur: 1750, apex: 5.2, yMin: 4.2, yMax: 6.0 },
+  drop: { dur: 1300, apex: 2.7, yMin: 0.9, yMax: 1.8 },
+  hairpin: { dur: 1150, apex: 1.95, yMin: 0.5, yMax: 1.1 },
+  block: { dur: 1100, apex: 1.9, yMin: 0.8, yMax: 1.6 },
+  smash: { dur: 680, apex: 0, yMin: 2.2, yMax: 3.6 }, // apex 0 = 직선 강하
+  drive: { dur: 850, apex: 1.95, yMin: 3.0, yMax: 4.6 }, // 네트를 스치는 평평한 속공
 };
 
 // AI 스윙 퀄리티 분포 [perfect, good, bad]
@@ -192,11 +195,12 @@ function makeTraj(
   aimX: -1 | 0 | 1,
   now: number,
   rallyLen = 0,
+  pace = 1,
 ): Traj {
   const spec = SHOT3[shot];
   const dir = by === 'player' ? 1 : -1; // 목표 y 부호
-  // 랠리 가속 — 길어질수록 샷이 빨라져 발이 못 따라가게 되고, 판은 반드시 끝난다
-  let dur = spec.dur * Math.max(0.72, 1 - rallyLen * 0.012);
+  // 랠리 가속은 완만하게 — 판은 끝나되 랠리가 만들어질 시간을 남긴다
+  let dur = spec.dur * Math.max(0.8, 1 - rallyLen * 0.008) * pace;
   let chance = false;
   let landing: Traj['landing'] = 'in';
 
@@ -379,7 +383,7 @@ export function swingPlayer(s: SimState, intent: SwingIntent, aim: AimLane): voi
   s.rallyLen += 1;
   s.player.anim = quality === 'bad' ? 'lunge' : 'swing';
   s.player.animUntil = now + 260;
-  s.traj = makeTraj('player', shot, quality, contact, aimX, now, s.rallyLen);
+  s.traj = makeTraj('player', shot, quality, contact, aimX, now, s.rallyLen, DIFF_PACE[s.config.difficulty]);
   s.lastShot = { shot, quality, cross: s.traj.cross, cut, weak };
   s.events.push(`swing:${shot}:${quality}${s.traj.cross ? ':cross' : ''}${weak ? `:${weak}` : ''}:z${contact.z.toFixed(2)}:d${d.toFixed(2)}`);
 }
@@ -393,6 +397,7 @@ function makeServeTraj(
   from: Vec3,
   targetSign: 1 | -1,
   now: number,
+  pace = 1,
 ): Traj {
   const dir = by === 'player' ? 1 : -1;
   let landing: Traj['landing'] = 'in';
@@ -400,14 +405,15 @@ function makeServeTraj(
   let tx = targetSign * rnd(0.7, 2.3);
   let dur: number, apex: number, ty: number;
   if (kind === 'short') {
-    dur = 950;
+    dur = 1100;
     apex = quality === 'perfect' ? 1.72 : 1.95; // 퍼펙트 숏서브는 네트를 스친다
     ty = dir * rnd(2.05, 2.7);
   } else {
-    dur = 1400;
+    dur = 1600;
     apex = 4.8;
     ty = dir * (quality === 'perfect' ? rnd(5.7, 6.4) : rnd(4.7, 6.0));
   }
+  dur *= pace;
   if (quality === 'bad') {
     if (Math.random() < 0.35) {
       // 서비스 폴트
@@ -443,7 +449,7 @@ export function servePlayer(s: SimState, kind: 'short' | 'long', gaugePhase: num
   s.lastShot = { shot: kind === 'short' ? 'hairpin' : 'clear', quality, serve: true };
   s.player.anim = 'swing';
   s.player.animUntil = now + 240;
-  s.traj = makeServeTraj('player', kind, quality, from, spots.targetSign, now);
+  s.traj = makeServeTraj('player', kind, quality, from, spots.targetSign, now, DIFF_PACE[s.config.difficulty]);
   s.events.push(`serve:${kind}:${quality}`);
 }
 
@@ -457,7 +463,7 @@ function serveAi(s: SimState, now: number) {
   s.phase = 'rally';
   s.ai.anim = 'swing';
   s.ai.animUntil = now + 240;
-  s.traj = makeServeTraj('ai', kind, quality, from, spots.targetSign, now);
+  s.traj = makeServeTraj('ai', kind, quality, from, spots.targetSign, now, DIFF_PACE[s.config.difficulty]);
   s.events.push(`ai-serve:${kind}:${quality}`);
 }
 
@@ -492,7 +498,7 @@ function aiSwing(s: SimState, now: number) {
   s.rallyLen += 1;
   s.ai.anim = quality === 'bad' ? 'lunge' : 'swing';
   s.ai.animUntil = now + 260;
-  s.traj = makeTraj('ai', shot, quality, contact, aim, now, s.rallyLen);
+  s.traj = makeTraj('ai', shot, quality, contact, aim, now, s.rallyLen, DIFF_PACE[s.config.difficulty]);
   s.events.push(`ai-swing:${shot}:${quality}`);
 }
 
