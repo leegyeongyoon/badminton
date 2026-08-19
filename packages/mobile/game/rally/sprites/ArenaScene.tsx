@@ -37,11 +37,6 @@ export const ArenaScene = memo(function ArenaScene({ proj, juaFont }: { proj: Pr
   const adR = proj.x(4.6, 7.55);
   const nearY = proj.y(-COURT.HALF_LEN, 0);
 
-  const netTop = proj.y(0, COURT.NET_H);
-  const netBottom = proj.y(0, 0);
-  const netL = proj.x(-COURT.HALF_W - 0.4, 0);
-  const netR = proj.x(COURT.HALF_W + 0.4, 0);
-
   // 관중 도트 — 밝고 컬러풀하게 (결정적 배치)
   const crowd: { x: number; y: number; c: string; r: number }[] = [];
   const crowdColors = ['#F4A261', '#E76F51', '#2A9D8F', '#E9C46A', '#8AB17D', '#F8F9FA', '#B5838D'];
@@ -54,10 +49,6 @@ export const ArenaScene = memo(function ArenaScene({ proj, juaFont }: { proj: Pr
       r: 2.6 + ((i * 7) % 3) * 0.7,
     });
   }
-
-  // 네트 메쉬 세로줄
-  const meshLines = [];
-  for (let x = netL + 10; x < netR - 4; x += 13) meshLines.push(x);
 
   const lineProps = { stroke: '#FFFFFF', strokeWidth: 2.4, opacity: 1 } as const;
 
@@ -119,9 +110,28 @@ export const ArenaScene = memo(function ArenaScene({ proj, juaFont }: { proj: Pr
       <Line x1={proj.x(0, COURT.SHORT_SERVICE)} y1={proj.y(COURT.SHORT_SERVICE, 0)} x2={proj.x(0, COURT.HALF_LEN)} y2={proj.y(COURT.HALF_LEN, 0)} {...lineProps} opacity={0.7} />
       <Line x1={proj.x(0, -COURT.SHORT_SERVICE)} y1={proj.y(-COURT.SHORT_SERVICE, 0)} x2={proj.x(0, -COURT.HALF_LEN)} y2={proj.y(-COURT.HALF_LEN, 0)} {...lineProps} opacity={0.7} />
 
-      {/* 네트 */}
-      <Rect x={netL} y={netTop} width={netR - netL} height={netBottom - netTop} fill="rgba(38,70,102,0.16)" />
-      <G opacity={0.4} stroke="#FFFFFF" strokeWidth={0.8}>
+      {/* 근경 페이드 */}
+      <Rect x={0} y={nearY + 6} width={W} height={Math.max(0, H - nearY - 6)} fill="url(#nearFade)" />
+    </Svg>
+  );
+});
+
+/**
+ * 네트 — 별도 레이어. 원경(상대·먼 쪽 셔틀) 위, 근경(내 쪽 셔틀·내 캐릭터) 아래에
+ * 끼워 넣어 진짜 깊이를 만든다. 배경에 붙어 있으면 상대가 네트 '앞'에 서고
+ * 셔틀이 네트를 무시하고 그려져서 게임 같지 않아진다.
+ */
+export const CourtNet = memo(function CourtNet({ proj }: { proj: Projector }) {
+  const netTop = proj.y(0, COURT.NET_H);
+  const netBottom = proj.y(0, 0);
+  const netL = proj.x(-COURT.HALF_W - 0.4, 0);
+  const netR = proj.x(COURT.HALF_W + 0.4, 0);
+  const meshLines = [];
+  for (let x = netL + 10; x < netR - 4; x += 13) meshLines.push(x);
+  return (
+    <Svg width={proj.w} height={proj.h} style={{ position: 'absolute', top: 0, left: 0 }} pointerEvents="none">
+      <Rect x={netL} y={netTop} width={netR - netL} height={netBottom - netTop} fill="rgba(38,70,102,0.18)" />
+      <G opacity={0.42} stroke="#FFFFFF" strokeWidth={0.8}>
         {meshLines.map((x) => (
           <Line key={x} x1={x} y1={netTop + 5} x2={x} y2={netBottom} />
         ))}
@@ -132,9 +142,6 @@ export const ArenaScene = memo(function ArenaScene({ proj, juaFont }: { proj: Pr
       <Rect x={netL} y={netTop + 4.5} width={netR - netL} height={1.4} fill="#C3D6E4" />
       <Rect x={netL - 3} y={netTop - 4} width={5} height={netBottom - netTop + 8} rx={2.5} fill="#5A7186" />
       <Rect x={netR - 2} y={netTop - 4} width={5} height={netBottom - netTop + 8} rx={2.5} fill="#5A7186" />
-
-      {/* 근경 페이드 */}
-      <Rect x={0} y={nearY + 6} width={W} height={Math.max(0, H - nearY - 6)} fill="url(#nearFade)" />
     </Svg>
   );
 });

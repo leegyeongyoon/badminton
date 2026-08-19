@@ -54,7 +54,7 @@ import { useSocketEvent } from '../../hooks/useSocket';
 import { showError, showInfo } from '../../utils/feedback';
 import { PlayerCard, PlayerCardData } from '../../components/game-board/PlayerCard';
 import { RigCharacter, RigHandle } from '../../game/rally/sprites/RigCharacter';
-import { ArenaScene } from '../../game/rally/sprites/ArenaScene';
+import { ArenaScene, CourtNet } from '../../game/rally/sprites/ArenaScene';
 import { ShuttleSvg, HitBurstSvg } from '../../game/rally/sprites/ShuttleFx';
 
 // Kenney UI Pack (CC0) — 게임식 버튼·조이스틱
@@ -225,6 +225,7 @@ export default function RallyGameScreen() {
   const pFace = useSharedValue(1), aFace = useSharedValue(1);
   const shX = useSharedValue(0), shY = useSharedValue(0), shS = useSharedValue(1);
   const shRot = useSharedValue(0), shOn = useSharedValue(0);
+  const shFar = useSharedValue(0); // 1 = 셔틀이 상대 코트(네트 뒤에 그린다)
   const g1X = useSharedValue(0), g1Y = useSharedValue(0), g1On = useSharedValue(0);
   const g2X = useSharedValue(0), g2Y = useSharedValue(0), g2On = useSharedValue(0);
   const shadX = useSharedValue(0), shadY = useSharedValue(0), shadO = useSharedValue(0);
@@ -304,8 +305,10 @@ export default function RallyGameScreen() {
       const sy = p.y(s.shuttle.y, s.shuttle.z);
       shX.value = sx;
       shY.value = sy;
-      shS.value = p.scale(s.shuttle.y);
+      // 높이 스케일 — 높이 뜬 셔틀은 카메라에 가까워 살짝 커진다 (아크 가독성)
+      shS.value = p.scale(s.shuttle.y) * (1 + s.shuttle.z * 0.05);
       shOn.value = s.phase === 'rally' || s.phase === 'serve' ? 1 : 0;
+      shFar.value = s.shuttle.y > 0 ? 1 : 0; // 상대 코트에 있으면 네트 뒤 레이어에
       shadX.value = p.x(s.shuttle.x, s.shuttle.y);
       shadY.value = p.y(s.shuttle.y, 0);
       shadO.value = s.phase === 'rally' ? Math.max(0.08, 0.38 - s.shuttle.z * 0.05) : 0;
@@ -534,8 +537,9 @@ export default function RallyGameScreen() {
     return { transform: [{ translateX: Math.sin(t * 34) * amp }, { translateY: Math.cos(t * 27) * amp * 0.6 }] };
   });
   const flashStyle = useAnimatedStyle(() => ({ opacity: flashT.value }));
-  const shuttleStyle = useAnimatedStyle(() => ({
-    opacity: shOn.value,
+  // 셔틀·트레일은 네트 앞/뒤 복제 렌더 — shFar가 어느 쪽을 켤지 정한다 (진짜 깊이)
+  const shuttleFarStyle = useAnimatedStyle(() => ({
+    opacity: shOn.value * shFar.value,
     transform: [
       { translateX: shX.value - 13 },
       { translateY: shY.value - 26 },
@@ -543,12 +547,29 @@ export default function RallyGameScreen() {
       { rotate: `${shRot.value}rad` },
     ],
   }));
-  const ghost1Style = useAnimatedStyle(() => ({
-    opacity: g1On.value * shOn.value,
+  const shuttleNearStyle = useAnimatedStyle(() => ({
+    opacity: shOn.value * (1 - shFar.value),
+    transform: [
+      { translateX: shX.value - 13 },
+      { translateY: shY.value - 26 },
+      { scale: Math.max(0.5, shS.value) },
+      { rotate: `${shRot.value}rad` },
+    ],
+  }));
+  const ghost1FarStyle = useAnimatedStyle(() => ({
+    opacity: g1On.value * shOn.value * shFar.value,
     transform: [{ translateX: g1X.value - 10 }, { translateY: g1Y.value - 20 }, { scale: 0.8 * Math.max(0.5, shS.value) }],
   }));
-  const ghost2Style = useAnimatedStyle(() => ({
-    opacity: g2On.value * shOn.value,
+  const ghost1NearStyle = useAnimatedStyle(() => ({
+    opacity: g1On.value * shOn.value * (1 - shFar.value),
+    transform: [{ translateX: g1X.value - 10 }, { translateY: g1Y.value - 20 }, { scale: 0.8 * Math.max(0.5, shS.value) }],
+  }));
+  const ghost2FarStyle = useAnimatedStyle(() => ({
+    opacity: g2On.value * shOn.value * shFar.value,
+    transform: [{ translateX: g2X.value - 8 }, { translateY: g2Y.value - 17 }, { scale: 0.62 * Math.max(0.5, shS.value) }],
+  }));
+  const ghost2NearStyle = useAnimatedStyle(() => ({
+    opacity: g2On.value * shOn.value * (1 - shFar.value),
     transform: [{ translateX: g2X.value - 8 }, { translateY: g2Y.value - 17 }, { scale: 0.62 * Math.max(0.5, shS.value) }],
   }));
   const shadowStyle = useAnimatedStyle(() => ({
@@ -655,17 +676,21 @@ export default function RallyGameScreen() {
           {/* 셔틀 그림자 */}
           <Animated.View style={[styles.shuttleShadow, shadowStyle]} pointerEvents="none" />
 
-          {/* 상대 (원경) */}
+          {/* ── 원경 레이어: 상대 + 상대 코트의 셔틀 (네트 뒤) ── */}
           <Animated.View style={[styles.char, aiStyle]} pointerEvents="none">
             <RigCharacter ref={aRigRef} variant="oppo" poseMode={aPose} runFrame={aRun} />
           </Animated.View>
+          <Animated.View style={[styles.fx, ghost2FarStyle]} pointerEvents="none"><ShuttleSvg size={20} /></Animated.View>
+          <Animated.View style={[styles.fx, ghost1FarStyle]} pointerEvents="none"><ShuttleSvg size={22} /></Animated.View>
+          <Animated.View style={[styles.fx, shuttleFarStyle]} pointerEvents="none"><ShuttleSvg size={26} /></Animated.View>
 
-          {/* 셔틀 트레일 + 본체 */}
-          <Animated.View style={[styles.fx, ghost2Style]} pointerEvents="none"><ShuttleSvg size={20} /></Animated.View>
-          <Animated.View style={[styles.fx, ghost1Style]} pointerEvents="none"><ShuttleSvg size={22} /></Animated.View>
-          <Animated.View style={[styles.fx, shuttleStyle]} pointerEvents="none"><ShuttleSvg size={26} /></Animated.View>
+          {/* ── 네트 — 원경과 근경 사이 ── */}
+          {proj && <CourtNet proj={proj} />}
 
-          {/* 플레이어 */}
+          {/* ── 근경 레이어: 내 코트의 셔틀 + 나 (네트 앞) ── */}
+          <Animated.View style={[styles.fx, ghost2NearStyle]} pointerEvents="none"><ShuttleSvg size={20} /></Animated.View>
+          <Animated.View style={[styles.fx, ghost1NearStyle]} pointerEvents="none"><ShuttleSvg size={22} /></Animated.View>
+          <Animated.View style={[styles.fx, shuttleNearStyle]} pointerEvents="none"><ShuttleSvg size={26} /></Animated.View>
           <Animated.View style={[styles.char, playerStyle]} pointerEvents="none">
             <RigCharacter ref={pRigRef} variant={charSel} poseMode={pPose} runFrame={pRun} />
           </Animated.View>

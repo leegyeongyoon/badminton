@@ -211,6 +211,32 @@ function easeU(shot: ShotType, u: number): number {
   return 1 - Math.pow(1 - u, 1.45);
 }
 
+// 네트 클리어런스 — '인' 판정 궤적은 시각적으로도 반드시 네트를 넘게 보정.
+// 커브가 y=0(네트)에서 테이프(1.55m)보다 낮게 지나면 정점(c.z)을 끌어올린다.
+// 이게 없으면 낮은 스매시/드라이브가 네트를 '뚫고' 지나가는 것처럼 그려진다.
+function clearNet(t: Traj): void {
+  if (t.landing === 'net') return; // 네트에 꽂히는 샷은 그대로
+  if (Math.sign(t.p0.y || 0.01) === Math.sign(t.p2.y || -0.01)) return;
+  for (let iter = 0; iter < 3; iter++) {
+    // y(u)=0 근처의 u를 샘플링으로 찾는다
+    let bestU = 0.5;
+    let bestAbs = Infinity;
+    for (let i = 1; i < 24; i++) {
+      const u = i / 24;
+      const v = 1 - u;
+      const y = v * v * t.p0.y + 2 * v * u * t.c.y + u * u * t.p2.y;
+      const a = Math.abs(y);
+      if (a < bestAbs) { bestAbs = a; bestU = u; }
+    }
+    const u = bestU;
+    const v = 1 - u;
+    const z = v * v * t.p0.z + 2 * v * u * t.c.z + u * u * t.p2.z;
+    const need = 1.66; // 테이프 + 셔틀 반경 여유
+    if (z >= need) return;
+    t.c.z += (need - z) / Math.max(0.2, 2 * u * v);
+  }
+}
+
 function makeTraj(
   by: Side,
   shot: ShotType,
@@ -304,7 +330,9 @@ function makeTraj(
       ? { x: (from.x + tx) / 2, y: (from.y + ty) / 2, z: (from.z + 0.4) / 2 }
       : { x: (from.x + tx) / 2, y: (from.y + ty) / 2, z: Math.max(from.z, apex) + (quality === 'bad' ? 0.4 : 0) };
 
-  return { by, shot, quality, chance, cross, p0: { ...from }, c, p2, t0: now, dur, landing, aiHandled: false };
+  const t: Traj = { by, shot, quality, chance, cross, p0: { ...from }, c, p2, t0: now, dur, landing, aiHandled: false };
+  clearNet(t);
+  return t;
 }
 
 // ─── 컨택트 상황 → 가능한 샷 ────────────────────────────────────────
@@ -474,7 +502,9 @@ function makeServeTraj(
   }
   const p2: Vec3 = { x: tx, y: ty, z: 0.02 };
   const c: Vec3 = { x: (from.x + tx) / 2, y: (from.y + ty) / 2, z: apex };
-  return { by, shot: kind === 'short' ? 'hairpin' : 'lift', quality, chance, serve: true, p0: { ...from }, c, p2, t0: now, dur, landing, aiHandled: false };
+  const t: Traj = { by, shot: kind === 'short' ? 'hairpin' : 'lift', quality, chance, serve: true, p0: { ...from }, c, p2, t0: now, dur, landing, aiHandled: false };
+  clearNet(t);
+  return t;
 }
 
 export function servePlayer(s: SimState, kind: 'short' | 'long', gaugePhase: number): void {
