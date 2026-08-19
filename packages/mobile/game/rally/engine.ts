@@ -11,7 +11,7 @@
 
 export type Zone = 0 | 1 | 2; // 0=네트 앞, 1=중위, 2=백코트
 export type Side = 'player' | 'ai';
-export type ShotType = 'clear' | 'smash' | 'drop' | 'hairpin' | 'lift' | 'block';
+export type ShotType = 'clear' | 'smash' | 'drop' | 'hairpin' | 'lift' | 'block' | 'drive';
 export type Quality = 'perfect' | 'good' | 'bad';
 export type Posture = 'ready' | 'pushed'; // 여유/밀림 (한계·점프스매시는 v3)
 export type BallKind = 'high' | 'net' | 'smash'; // 받는 쪽이 마주하는 공
@@ -47,6 +47,7 @@ const SHOT_SPEC: Record<ShotType, { ms: number; apex: number; toZone: Zone; kind
   hairpin: { ms: 850, apex: 0.28, toZone: 0, kind: 'net' },
   block: { ms: 800, apex: 0.3, toZone: 0, kind: 'net' },
   smash: { ms: 520, apex: 0.12, toZone: 1, kind: 'smash' },
+  drive: { ms: 640, apex: 0.2, toZone: 1, kind: 'smash' },
 };
 
 // 타이밍 창 반폭(ms) — 퍼펙트/굿/배드. 이 바깥은 미스.

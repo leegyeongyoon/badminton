@@ -40,6 +40,7 @@ export interface Traj {
   shot: ShotType;
   quality: Quality;
   chance: boolean;
+  serve?: boolean; // 서브 궤적 — 폴트 문구 처리용
   p0: Vec3;
   c: Vec3;
   p2: Vec3;
@@ -70,8 +71,36 @@ export interface SimState {
   aiServeAt: number;
   winner: Side | null;
   stats: { longestRally: number; perfects: number };
-  lastShot: { shot: ShotType; quality: Quality; whiff?: boolean } | null;
+  lastShot: { shot: ShotType; quality: Quality; whiff?: boolean; serve?: boolean } | null;
   events: string[];
+}
+
+// ─── 서브 규칙 — 짝수 점수는 오른쪽, 홀수는 왼쪽 서비스 코트에서 대각선으로 ───
+export interface ServeSpots {
+  server: { x: number; y: number };
+  receiver: { x: number; y: number };
+  targetSign: 1 | -1; // 서비스 박스(리시버 코트)의 화면 x 부호
+  right: boolean; // 서버 기준 우측 코트 여부
+}
+
+export function serveSpots(s: SimState): ServeSpots {
+  const even = s.score[s.server] % 2 === 0;
+  if (s.server === 'player') {
+    const sign = even ? 1 : -1; // 플레이어의 오른쪽 = 화면 오른쪽
+    return {
+      server: { x: 1.5 * sign, y: -2.9 },
+      receiver: { x: -1.5 * sign, y: 3.3 },
+      targetSign: (sign * -1) as 1 | -1,
+      right: even,
+    };
+  }
+  const sign = even ? -1 : 1; // AI의 오른쪽 = 화면 왼쪽
+  return {
+    server: { x: 1.5 * sign, y: 2.9 },
+    receiver: { x: -1.5 * sign, y: -3.3 },
+    targetSign: (sign * -1) as 1 | -1,
+    right: even,
+  };
 }
 
 // 게임식 버튼 조작 — 공격(스매시/네트킬)·연결(클리어/헤어핀)·드롭
@@ -93,6 +122,7 @@ const SHOT3: Record<ShotType, { dur: number; apex: number; yMin: number; yMax: n
   hairpin: { dur: 950, apex: 1.95, yMin: 0.5, yMax: 1.1 },
   block: { dur: 900, apex: 1.9, yMin: 0.8, yMax: 1.6 },
   smash: { dur: 560, apex: 0, yMin: 2.2, yMax: 3.6 }, // apex 0 = 직선 강하
+  drive: { dur: 700, apex: 1.95, yMin: 3.0, yMax: 4.6 }, // 네트를 스치는 평평한 속공
 };
 
 // AI 스윙 퀄리티 분포 [perfect, good, bad]
@@ -178,7 +208,7 @@ function makeTraj(
       // 배드 스매시 = 아웃 — 리스크의 대가
       ty = dir * rnd(7.2, 8.2);
       landing = 'out';
-    } else if ((shot === 'hairpin' || shot === 'drop') && Math.random() < 0.45) {
+    } else if ((shot === 'hairpin' || shot === 'drop' || shot === 'drive') && Math.random() < 0.45) {
       // 네트에 꽂힘
       ty = 0;
       apex = 1.2;
@@ -212,22 +242,23 @@ function makeTraj(
 export function contactMenu(contact: Vec3): ShotType[] {
   if (contact.z >= 1.5) return ['clear', 'smash', 'drop'];
   if (Math.abs(contact.y) <= 2.5) return ['hairpin', 'lift'];
+  if (contact.z >= 0.7) return ['drive', 'lift']; // 미드코트 중간 높이 — 드라이브 구간
   return ['lift'];
 }
 
 function shotForIntent(intent: SwingIntent, menu: ShotType[]): ShotType {
   if (intent === 'attack') {
     if (menu.includes('smash')) return 'smash';
+    if (menu.includes('drive')) return 'drive'; // 중간 높이 공격 = 드라이브
     if (menu.includes('hairpin')) return 'hairpin'; // 네트 앞 공격 = 네트 킬
     return 'lift';
   }
   if (intent === 'drop') {
-    if (menu.includes('drop')) return 'drop';
+    if (menu.includes('drop')) return 'drop'; // 퍼펙트 드롭 = 커트
     if (menu.includes('hairpin')) return 'hairpin';
     return 'lift';
   }
   if (menu.includes('clear')) return 'clear';
-  if (menu.includes('hairpin')) return 'hairpin';
   return 'lift';
 }
 
@@ -298,17 +329,65 @@ export function swingPlayer(s: SimState, intent: SwingIntent, aim: AimLane): voi
 }
 
 // ─── 서브 ──────────────────────────────────────────────────────────
+// 대각선 서비스 박스로만 나간다. 배드 서브는 35% 확률로 폴트(네트/롱).
+function makeServeTraj(
+  by: Side,
+  kind: 'short' | 'long',
+  quality: Quality,
+  from: Vec3,
+  targetSign: 1 | -1,
+  now: number,
+): Traj {
+  const dir = by === 'player' ? 1 : -1;
+  let landing: Traj['landing'] = 'in';
+  let chance = false;
+  let tx = targetSign * rnd(0.7, 2.3);
+  let dur: number, apex: number, ty: number;
+  if (kind === 'short') {
+    dur = 950;
+    apex = quality === 'perfect' ? 1.72 : 1.95; // 퍼펙트 숏서브는 네트를 스친다
+    ty = dir * rnd(2.05, 2.7);
+  } else {
+    dur = 1400;
+    apex = 4.8;
+    ty = dir * (quality === 'perfect' ? rnd(5.7, 6.4) : rnd(4.7, 6.0));
+  }
+  if (quality === 'bad') {
+    if (Math.random() < 0.35) {
+      // 서비스 폴트
+      if (kind === 'short') {
+        ty = 0;
+        apex = 1.2;
+        dur = 620;
+        landing = 'net';
+      } else {
+        ty = dir * rnd(7.0, 7.8);
+        landing = 'out';
+      }
+    } else {
+      // 어설픈 서브 — 짧고 높게 떠서 상대 찬스
+      ty = dir * rnd(2.6, 3.4);
+      apex = Math.max(apex, 3.6);
+      dur *= 1.12;
+      chance = true;
+    }
+  }
+  const p2: Vec3 = { x: tx, y: ty, z: 0.02 };
+  const c: Vec3 = { x: (from.x + tx) / 2, y: (from.y + ty) / 2, z: apex };
+  return { by, shot: kind === 'short' ? 'hairpin' : 'lift', quality, chance, serve: true, p0: { ...from }, c, p2, t0: now, dur, landing, aiHandled: false };
+}
+
 export function servePlayer(s: SimState, kind: 'short' | 'long', gaugePhase: number): void {
   const now = s.clock;
   if (s.phase !== 'serve' || s.server !== 'player') return;
   const quality: Quality = gaugePhase > 0.92 ? 'perfect' : gaugePhase > 0.65 ? 'good' : 'bad';
+  const spots = serveSpots(s);
   const from: Vec3 = { x: s.player.x, y: s.player.y, z: 0.9 };
-  const shot: ShotType = kind === 'short' ? 'hairpin' : 'lift';
   s.phase = 'rally';
-  s.lastShot = { shot: kind === 'short' ? 'hairpin' : 'clear', quality };
+  s.lastShot = { shot: kind === 'short' ? 'hairpin' : 'clear', quality, serve: true };
   s.player.anim = 'swing';
   s.player.animUntil = now + 240;
-  s.traj = makeTraj('player', shot, quality, from, (Math.random() < 0.5 ? -1 : 1) as -1 | 1, now);
+  s.traj = makeServeTraj('player', kind, quality, from, spots.targetSign, now);
   s.events.push(`serve:${kind}:${quality}`);
 }
 
@@ -317,12 +396,12 @@ function serveAi(s: SimState, now: number) {
   const lo = s.config.difficulty === 'hard' ? 0.75 : s.config.difficulty === 'normal' ? 0.62 : 0.5;
   const phase = lo + Math.random() * (1 - lo);
   const quality: Quality = phase > 0.92 ? 'perfect' : phase > 0.65 ? 'good' : 'bad';
+  const spots = serveSpots(s);
   const from: Vec3 = { x: s.ai.x, y: s.ai.y, z: 0.9 };
-  const shot: ShotType = kind === 'short' ? 'hairpin' : 'lift';
   s.phase = 'rally';
   s.ai.anim = 'swing';
   s.ai.animUntil = now + 240;
-  s.traj = makeTraj('ai', shot, quality, from, (Math.random() < 0.5 ? -1 : 1) as -1 | 1, now);
+  s.traj = makeServeTraj('ai', kind, quality, from, spots.targetSign, now);
   s.events.push(`ai-serve:${kind}:${quality}`);
 }
 
@@ -342,7 +421,8 @@ function aiSwing(s: SimState, now: number) {
   let shot: ShotType;
   if (menu.includes('smash') && (t.chance || Math.random() < (s.config.difficulty === 'hard' ? 0.5 : 0.32))) {
     shot = 'smash';
-  } else if (menu.includes('drop') && Math.random() < 0.35) shot = 'drop';
+  } else if (menu.includes('drive') && Math.random() < 0.55) shot = 'drive';
+  else if (menu.includes('drop') && Math.random() < 0.35) shot = 'drop';
   else if (menu.includes('hairpin') && Math.random() < 0.5) shot = 'hairpin';
   else shot = menu.includes('clear') ? 'clear' : 'lift';
 
@@ -372,9 +452,9 @@ export function tick(s: SimState, dtMs: number, input: MoveInput): void {
   const now = s.clock;
   const dt = stepMs / 1000;
 
-  // 플레이어 이동
+  // 플레이어 이동 — 서브 준비 중에는 규정 위치에 묶인다(조이스틱 무시)
   const mag = Math.hypot(input.dx, input.dy);
-  if (mag > 0.15 && s.phase !== 'over') {
+  if (mag > 0.15 && s.phase !== 'over' && s.phase !== 'serve') {
     const nx = input.dx / Math.max(1, mag);
     const ny = input.dy / Math.max(1, mag);
     s.player.x = Math.min(3.0, Math.max(-3.0, s.player.x + nx * PLAYER_SPEED * dt));
@@ -390,8 +470,16 @@ export function tick(s: SimState, dtMs: number, input: MoveInput): void {
   // 배너/서브 대기
   if (s.phase === 'point' && now >= s.bannerUntil) afterBanner(s, now);
   if (s.phase === 'serve') {
-    // AI는 서브 준비 위치로
-    moveAiToward(s, s.server === 'ai' ? -1.2 : -0.8, 3.2, dt);
+    // 둘 다 규정 서비스 코트로 정렬 (짝수=우측, 홀수=좌측, 리시버는 대각선 박스)
+    const spots = serveSpots(s);
+    const aiSp = AI_SPEED[s.config.difficulty];
+    if (s.server === 'player') {
+      moveActor(s.player, spots.server.x, spots.server.y, PLAYER_SPEED, dt);
+      moveActor(s.ai, spots.receiver.x, spots.receiver.y, aiSp, dt);
+    } else {
+      moveActor(s.ai, spots.server.x, spots.server.y, aiSp, dt);
+      moveActor(s.player, spots.receiver.x, spots.receiver.y, PLAYER_SPEED, dt);
+    }
     s.shuttle = s.server === 'player'
       ? { x: s.player.x, y: s.player.y - 0.15, z: 0.95 }
       : { x: s.ai.x, y: s.ai.y + 0.15, z: 0.95 };
@@ -411,7 +499,7 @@ export function tick(s: SimState, dtMs: number, input: MoveInput): void {
   // AI 이동: 내 샷이면 낙하점으로, 아니면 홈으로
   if (t.by === 'player') {
     const target = t.landing === 'in' ? t.p2 : { x: 0, y: 3.2, z: 0 }; // 아웃 코스는 지켜본다
-    moveAiToward(s, target.x, Math.max(0.4, target.y), dt);
+    moveActor(s.ai, target.x, Math.max(0.4, target.y), AI_SPEED[s.config.difficulty], dt);
     // AI 스윙 판정
     if (!t.aiHandled && u > 0.5 && s.shuttle.z < 2.8 && s.shuttle.y > 0) {
       const d = dist2(s.shuttle.x, s.shuttle.y, s.ai.x, s.ai.y);
@@ -431,7 +519,7 @@ export function tick(s: SimState, dtMs: number, input: MoveInput): void {
       }
     }
   } else {
-    moveAiToward(s, 0, 3.0, dt);
+    moveActor(s.ai, 0, 3.0, AI_SPEED[s.config.difficulty], dt);
   }
 
   // 착지 판정
@@ -440,10 +528,10 @@ export function tick(s: SimState, dtMs: number, input: MoveInput): void {
     const receiver: Side = hitter === 'player' ? 'ai' : 'player';
     if (t.landing === 'net') {
       s.server = receiver;
-      pointTo(s, receiver, '네트!', now);
+      pointTo(s, receiver, t.serve ? '서비스 폴트!' : '네트!', now);
     } else if (t.landing === 'out') {
       s.server = receiver;
-      pointTo(s, receiver, '아웃!', now);
+      pointTo(s, receiver, t.serve ? '서비스 폴트!' : '아웃!', now);
     } else {
       s.server = hitter;
       pointTo(s, hitter, hitter === 'player' ? '위너!' : '실점 — 못 받았어요', now);
@@ -451,18 +539,17 @@ export function tick(s: SimState, dtMs: number, input: MoveInput): void {
   }
 }
 
-function moveAiToward(s: SimState, tx: number, ty: number, dt: number) {
-  const sp = AI_SPEED[s.config.difficulty];
-  const dx = tx - s.ai.x;
-  const dy = ty - s.ai.y;
+function moveActor(a: Actor, tx: number, ty: number, sp: number, dt: number) {
+  const dx = tx - a.x;
+  const dy = ty - a.y;
   const d = Math.hypot(dx, dy);
   if (d < 0.05) {
-    s.ai.moving = false;
+    a.moving = false;
     return;
   }
   const step = Math.min(d, sp * dt);
-  s.ai.x += (dx / d) * step;
-  s.ai.y += (dy / d) * step;
-  s.ai.moving = true;
-  if (Math.abs(dx) > 0.1) s.ai.facing = dx > 0 ? 1 : -1;
+  a.x += (dx / d) * step;
+  a.y += (dy / d) * step;
+  a.moving = true;
+  if (Math.abs(dx) > 0.1) a.facing = dx > 0 ? 1 : -1;
 }
