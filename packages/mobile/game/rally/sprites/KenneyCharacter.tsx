@@ -11,7 +11,7 @@ import Animated, { SharedValue, useAnimatedStyle } from 'react-native-reanimated
 import Svg, { Ellipse, G, Line } from 'react-native-svg';
 
 const SPRITES = {
-  player: {
+  male: {
     base: require('../../../assets/game/char/player_back.png'),
     run: [
       require('../../../assets/game/char/player_run0.png'),
@@ -21,6 +21,17 @@ const SPRITES = {
     attack: require('../../../assets/game/char/player_attack.png'),
     lunge: require('../../../assets/game/char/player_lunge.png'),
     cheer: require('../../../assets/game/char/player_cheer.png'),
+  },
+  female: {
+    base: require('../../../assets/game/char/playerf_back.png'),
+    run: [
+      require('../../../assets/game/char/playerf_run0.png'),
+      require('../../../assets/game/char/playerf_run1.png'),
+      require('../../../assets/game/char/playerf_run2.png'),
+    ],
+    attack: require('../../../assets/game/char/playerf_attack.png'),
+    lunge: require('../../../assets/game/char/playerf_lunge.png'),
+    cheer: require('../../../assets/game/char/playerf_cheer.png'),
   },
   ai: {
     base: require('../../../assets/game/char/ai_idle.png'),
@@ -54,8 +65,10 @@ function RacketSvg() {
   );
 }
 
+export type SpriteKey = keyof typeof SPRITES;
+
 export interface KenneyCharacterProps {
-  variant: 'player' | 'ai';
+  variant: SpriteKey;
   poseMode: SharedValue<number>;
   runFrame: SharedValue<number>;
   armStyle: object; // 라켓 스윙 회전(부모 공유값)

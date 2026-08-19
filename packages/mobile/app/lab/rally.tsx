@@ -51,8 +51,14 @@ const UI_IMG = {
   joyKnob: require('../../assets/game/ui/joy_knob.png'),
 };
 const RESULT_IMG = {
-  win: require('../../assets/game/char/player_cheer.png'),
-  lose: require('../../assets/game/char/player_lunge.png'),
+  male: {
+    win: require('../../assets/game/char/player_cheer.png'),
+    lose: require('../../assets/game/char/player_lunge.png'),
+  },
+  female: {
+    win: require('../../assets/game/char/playerf_cheer.png'),
+    lose: require('../../assets/game/char/playerf_lunge.png'),
+  },
 };
 
 const SERVE_PERIOD = 1400; // 게이지 왕복 주기 — 사람이 PERFECT를 노릴 수 있는 속도
@@ -102,6 +108,7 @@ export default function RallyGameScreen() {
   const insets = useSafeAreaInsets();
   const [screen, setScreen] = useState<'config' | 'game'>('config');
   const [cfg, setCfg] = useState<MatchConfig>({ target: 11, deuce: true, difficulty: 'normal' });
+  const [charSel, setCharSel] = useState<'male' | 'female'>('male');
   const [area, setArea] = useState({ w: 0, h: 0 });
   const [ui, setUi] = useState<UiSnap | null>(null);
   const [popup, setPopup] = useState<Popup | null>(null);
@@ -454,6 +461,8 @@ export default function RallyGameScreen() {
       <ConfigScreen
         cfg={cfg}
         onChange={setCfg}
+        charSel={charSel}
+        onCharSel={setCharSel}
         onStart={() => {
           simRef.current = createSim(cfg);
           uiKeyRef.current = '';
@@ -530,7 +539,7 @@ export default function RallyGameScreen() {
 
           {/* 플레이어 */}
           <Animated.View style={[styles.char, playerStyle]} pointerEvents="none">
-            <KenneyCharacter variant="player" poseMode={pPose} runFrame={pRun} armStyle={pArmStyle} />
+            <KenneyCharacter variant={charSel} poseMode={pPose} runFrame={pRun} armStyle={pArmStyle} />
           </Animated.View>
           </Animated.View>
 
@@ -653,7 +662,7 @@ export default function RallyGameScreen() {
         <View style={styles.overWrap}>
           <View style={[styles.overCard, { backgroundColor: '#FFFFFF', borderWidth: 1, borderColor: '#D3E8E2' }, shadows.sm]}>
             <View style={styles.overRankRow}>
-              <Image source={ui.winner === 'player' ? RESULT_IMG.win : RESULT_IMG.lose} style={styles.overChar} resizeMode="contain" />
+              <Image source={ui.winner === 'player' ? RESULT_IMG[charSel].win : RESULT_IMG[charSel].lose} style={styles.overChar} resizeMode="contain" />
               <View style={{ alignItems: 'center' }}>
                 <Text style={[styles.overRank, juaStyle, { color: ui.winner === 'player' ? '#EAB308' : '#94A3B8' }]}>
                   {ui.winner === 'player' ? (ui.score.player - ui.score.ai >= 5 ? 'S' : 'A') : ui.score.player - ui.score.ai >= -2 ? 'B' : 'C'}
@@ -814,9 +823,11 @@ function ServiceBoxHighlight({ proj, spots, server }: {
 }
 
 // ─── 대결 설정 ─────────────────────────────────────────────────────
-function ConfigScreen({ cfg, onChange, onStart }: {
+function ConfigScreen({ cfg, onChange, charSel, onCharSel, onStart }: {
   cfg: MatchConfig;
   onChange: (c: MatchConfig) => void;
+  charSel: 'male' | 'female';
+  onCharSel: (c: 'male' | 'female') => void;
   onStart: () => void;
 }) {
   const { colors, shadows } = useTheme();
@@ -854,6 +865,12 @@ function ConfigScreen({ cfg, onChange, onStart }: {
       <ScrollView contentContainerStyle={{ padding: spacing.lg, maxWidth: 560, width: '100%', alignSelf: 'center' }}>
         <View style={[styles.cfgCard, { backgroundColor: colors.surface }, shadows.sm]}>
           <Text style={[styles.cfgTitle, { color: colors.text }]}>대결 설정</Text>
+          <Seg
+            label="내 캐릭터"
+            options={[{ v: 'male' as const, label: '남자' }, { v: 'female' as const, label: '여자' }]}
+            value={charSel}
+            set={onCharSel}
+          />
           <Seg
             label="몇 점 내기"
             options={[{ v: 7 as const, label: '7점' }, { v: 11 as const, label: '11점' }, { v: 21 as const, label: '21점' }]}
