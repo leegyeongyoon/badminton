@@ -3,6 +3,7 @@ import { Server } from 'socket.io';
 import type { ServerToClientEvents, ClientToServerEvents } from '@badminton/shared';
 import { logger } from '../utils/logger';
 import { noteConnect, noteDisconnect, noteSocketUser, registerIO } from '../modules/admin/metrics.service';
+import { isRallyMember } from '../modules/rallyGame/rallyGame.store';
 
 let io: Server<ClientToServerEvents, ServerToClientEvents>;
 
@@ -68,8 +69,57 @@ export function initSocketIO(httpServer: HttpServer) {
       socket.leave(`user:${userId}`);
     });
 
+    // ── 콕고 랠리 PvP — 서버는 릴레이만. matchId 발급·검증은 REST(rallyGame)에서.
+    // 소켓이 무인증이므로 매치 멤버 대조 후에만 룸에 넣고, 이후 릴레이는 룸 소속으로만 판단.
+    socket.on('rally:join', (data) => {
+      try {
+        if (!data?.matchId || !data?.userId || !isRallyMember(data.matchId, data.userId)) return;
+        socket.data.rallyMatchId = data.matchId;
+        socket.data.rallyUserId = data.userId;
+        socket.join(`rally:${data.matchId}`);
+        logger.debug(`Socket ${socket.id} joined rally:${data.matchId}`);
+      } catch (err) {
+        logger.warn(`rally:join failed: ${(err as Error).message}`);
+      }
+    });
+
+    socket.on('rally:leave', (data) => {
+      try {
+        if (!data?.matchId || socket.data.rallyMatchId !== data.matchId) return;
+        socket.leave(`rally:${data.matchId}`);
+        // 상대에게 이탈 통지 + 매치 정리 (지연 import — 순환 방지)
+        const { leaveMatch } = require('../modules/rallyGame/rallyGame.service');
+        leaveMatch(data.matchId, socket.data.rallyUserId as string);
+        socket.data.rallyMatchId = undefined;
+      } catch (err) {
+        logger.warn(`rally:leave failed: ${(err as Error).message}`);
+      }
+    });
+
+    const relayRally = (event: 'rally:input' | 'rally:snapshot' | 'rally:event') => {
+      socket.on(event, (data: { matchId: string; payload: unknown }) => {
+        try {
+          if (!data?.matchId || socket.data.rallyMatchId !== data.matchId) return;
+          socket.to(`rally:${data.matchId}`).emit(event, { payload: data.payload });
+        } catch (err) {
+          logger.warn(`${event} relay failed: ${(err as Error).message}`);
+        }
+      });
+    };
+    relayRally('rally:input');
+    relayRally('rally:snapshot');
+    relayRally('rally:event');
+
     socket.on('disconnect', () => {
       noteDisconnect(socket.id); // 동시접속 집계 + 온라인 사용자 정리
+      try {
+        if (socket.data.rallyMatchId) {
+          const { leaveMatch } = require('../modules/rallyGame/rallyGame.service');
+          leaveMatch(socket.data.rallyMatchId as string, socket.data.rallyUserId as string);
+        }
+      } catch (err) {
+        logger.warn(`rally disconnect cleanup failed: ${(err as Error).message}`);
+      }
       logger.debug(`Socket disconnected: ${socket.id}`);
     });
 

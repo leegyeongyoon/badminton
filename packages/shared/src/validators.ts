@@ -485,3 +485,9 @@ export type CreateQueueGameInput = z.infer<typeof createQueueGameSchema>;
 export type ReorderQueueInput = z.infer<typeof reorderQueueSchema>;
 export type AssignEntryInput = z.infer<typeof assignEntrySchema>;
 export type SendMessageInput = z.infer<typeof sendMessageSchema>;
+
+// 콕고 랠리 PvP — 대결 신청
+export const rallyChallengeSchema = z.object({
+  toUserId: z.string().uuid(),
+});
+export type RallyChallengeInput = z.infer<typeof rallyChallengeSchema>;

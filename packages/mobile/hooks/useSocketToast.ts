@@ -1,10 +1,12 @@
 import { useCallback, useRef } from 'react';
+import { router } from 'expo-router';
 import { useSocketEvent } from './useSocket';
-import { showInfo, showSuccess } from '../utils/feedback';
+import { showError, showInfo, showSuccess } from '../utils/feedback';
 import { useTurnStore } from '../store/turnStore';
 import { useBannerStore } from '../store/bannerStore';
 import { useCheckinStore } from '../store/checkinStore';
 import { useAuthStore } from '../store/authStore';
+import { rallyApi } from '../services/rally';
 
 /**
  * Listens to key socket events and shows toast notifications.
@@ -70,8 +72,31 @@ export function useSocketToast() {
     showInfo('게임 시간이 곧 만료됩니다');
   }, []);
 
+  // 콕고 랠리 대결 신청 수신 — 토스트의 action 버튼으로 바로 수락.
+  // 수락하면 서버가 양측에 rally:matched를 쏘고, 게스트는 여기서 즉시 게임으로 이동.
+  const onRallyInvited = useCallback((data: any) => {
+    const matchId = data?.matchId;
+    if (!matchId) return;
+    const fromName = data?.from?.name || '상대';
+    showInfo(`${fromName}님의 콕고 랠리 대결 신청 🏸`, {
+      duration: 15000,
+      action: {
+        label: '수락',
+        onPress: async () => {
+          try {
+            await rallyApi.accept(matchId);
+            router.push(`/lab/rally?match=${matchId}&role=guest`);
+          } catch (e: any) {
+            showError(e?.message || '대결이 만료됐어요');
+          }
+        },
+      },
+    });
+  }, []);
+
   useSocketEvent('turn:started', onTurnStarted);
   useSocketEvent('turn:promoted', onTurnPromoted);
   useSocketEvent('turn:completed', onTurnCompleted);
   useSocketEvent('game:time_warning', onGameTimeWarning);
+  useSocketEvent('rally:invited', onRallyInvited);
 }

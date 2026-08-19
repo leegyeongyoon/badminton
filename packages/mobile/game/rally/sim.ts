@@ -59,6 +59,9 @@ export interface SimState {
   clock: number;
   phase: SimPhase;
   config: MatchConfig;
+  /** PvP 모드 — AI 자동 행동(서브·이동·스윙)을 끄고 원격 입력이 s.ai를 조종한다.
+   *  호스트만 sim을 돌리고 게스트는 스냅샷 미러를 받는다(호스트 권위). */
+  pvp?: boolean;
   score: Score;
   server: Side;
   rallyLen: number;
@@ -71,7 +74,7 @@ export interface SimState {
   bannerUntil: number;
   aiServeAt: number;
   winner: Side | null;
-  stats: { longestRally: number; perfects: number };
+  stats: { longestRally: number; perfects: number; perfectsRemote?: number };
   lastShot: {
     shot: ShotType;
     quality: Quality;
@@ -80,6 +83,7 @@ export interface SimState {
     cross?: boolean;
     cut?: boolean; // 높은 타점에서 자른 드롭
     weak?: 'late' | 'stretch'; // 배드의 원인 — 낮은 타점 / 밀린 발
+    by?: Side; // PvP: 누구의 스윙인지 — 팝업을 각자 자기 것만 띄우기 위해
   } | null;
   events: string[];
 }
@@ -508,7 +512,7 @@ export interface MoveInput {
   dy: number; // -1..1 (화면 위쪽 + = 네트 방향)
 }
 
-export function tick(s: SimState, dtMs: number, input: MoveInput): void {
+export function tick(s: SimState, dtMs: number, input: MoveInput, remote?: MoveInput): void {
   const stepMs = Math.min(dtMs, 50);
   s.clock += stepMs;
   const now = s.clock;
@@ -525,6 +529,21 @@ export function tick(s: SimState, dtMs: number, input: MoveInput): void {
     if (Math.abs(nx) > 0.2) s.player.facing = nx > 0 ? 1 : -1;
   } else {
     s.player.moving = false;
+  }
+
+  // PvP: 원격(게스트) 조이스틱이 s.ai를 조종 — 월드 프레임으로 이미 반전돼 들어온다
+  if (s.pvp && remote) {
+    const rm = Math.hypot(remote.dx, remote.dy);
+    if (rm > 0.15 && s.phase === 'rally') {
+      const nx = remote.dx / Math.max(1, rm);
+      const ny = remote.dy / Math.max(1, rm);
+      s.ai.x = Math.min(3.0, Math.max(-3.0, s.ai.x + nx * PLAYER_SPEED * dt));
+      s.ai.y = Math.min(6.6, Math.max(0.35, s.ai.y + ny * PLAYER_SPEED * dt));
+      s.ai.moving = true;
+      if (Math.abs(nx) > 0.2) s.ai.facing = nx > 0 ? 1 : -1;
+    } else if (s.phase === 'rally') {
+      s.ai.moving = false;
+    }
   }
   if (s.player.anim !== 'idle' && now > s.player.animUntil) s.player.anim = 'idle';
   if (s.ai.anim !== 'idle' && now > s.ai.animUntil) s.ai.anim = 'idle';
@@ -545,7 +564,7 @@ export function tick(s: SimState, dtMs: number, input: MoveInput): void {
     s.shuttle = s.server === 'player'
       ? { x: s.player.x, y: s.player.y - 0.15, z: 0.95 }
       : { x: s.ai.x, y: s.ai.y + 0.15, z: 0.95 };
-    if (s.server === 'ai' && s.aiServeAt > 0 && now >= s.aiServeAt) {
+    if (!s.pvp && s.server === 'ai' && s.aiServeAt > 0 && now >= s.aiServeAt) {
       s.aiServeAt = 0;
       serveAi(s, now);
     }
@@ -558,8 +577,10 @@ export function tick(s: SimState, dtMs: number, input: MoveInput): void {
   const u = Math.min(1, (now - t.t0) / t.dur);
   s.shuttle = bezier(t, easeU(t.shot, u));
 
-  // AI 이동: 내 샷이면 낙하점으로, 아니면 홈으로
-  if (t.by === 'player') {
+  // AI 이동: 내 샷이면 낙하점으로, 아니면 홈으로 (PvP에선 원격 입력이 조종)
+  if (s.pvp) {
+    // 원격 스윙 판정은 swingRemote가 처리 — 여기선 자동 행동 없음
+  } else if (t.by === 'player') {
     const target = t.landing === 'in' ? t.p2 : { x: 0, y: 3.2, z: 0 }; // 아웃 코스는 지켜본다
     moveActor(s.ai, target.x, Math.max(0.4, target.y), AI_SPEED[s.config.difficulty], dt);
     // AI 스윙 판정
@@ -596,7 +617,8 @@ export function tick(s: SimState, dtMs: number, input: MoveInput): void {
       pointTo(s, receiver, t.serve ? '서비스 폴트!' : '아웃!', now);
     } else {
       s.server = hitter;
-      pointTo(s, hitter, hitter === 'player' ? '위너!' : '실점 — 못 받았어요', now);
+      // PvP는 양쪽 다 사람 — 중립 문구('위너!')로 두고 배너 서브라인이 시점을 붙인다
+      pointTo(s, hitter, s.pvp || hitter === 'player' ? '위너!' : '실점 — 못 받았어요', now);
     }
   }
 }
@@ -614,4 +636,197 @@ function moveActor(a: Actor, tx: number, ty: number, sp: number, dt: number) {
   a.y += (dy / d) * step;
   a.moving = true;
   if (Math.abs(dx) > 0.1) a.facing = dx > 0 ? 1 : -1;
+}
+
+// ═══ PvP (호스트 권위) ══════════════════════════════════════════════
+// 호스트만 이 sim을 돌린다. 게스트의 스윙/서브는 아래 *Remote 함수로
+// s.ai 액터에 적용되고(랜덤은 호스트에서만 굴러 권위 일원화),
+// 게스트 화면은 makeSnapshot이 만든 '게스트 프레임 미러'를 그대로 그린다 —
+// 게스트 입장에선 자기가 player(근경), 호스트가 ai(원경)로 뒤집혀 온다.
+
+// 원격(게스트) 오토에임 — 호스트 플레이어가 없는 쪽
+function autoAimRemote(s: SimState): -1 | 0 | 1 {
+  if (s.player.x > 0.5) return -1;
+  if (s.player.x < -0.5) return 1;
+  return Math.random() < 0.5 ? -1 : 1;
+}
+
+/** 게스트 스윙을 호스트 sim의 ai 액터에 적용. aim은 이미 월드 프레임(부호 반전 완료). */
+export function swingRemote(s: SimState, intent: SwingIntent, aim: AimLane): void {
+  const now = s.clock;
+  if (s.phase !== 'rally' || !s.traj || s.traj.by === 'ai') {
+    s.ai.anim = 'swing';
+    s.ai.animUntil = now + 220;
+    return;
+  }
+  const d = dist2(s.shuttle.x, s.shuttle.y, s.ai.x, s.ai.y);
+  if (d > REACH_MAX || s.shuttle.z > 3.0 || s.shuttle.y < 0) {
+    s.ai.anim = 'swing';
+    s.ai.animUntil = now + 220;
+    s.lastShot = { shot: 'clear', quality: 'bad', whiff: true, by: 'ai' };
+    s.events.push('remote-whiff');
+    return;
+  }
+  const contact: Vec3 = { ...s.shuttle };
+  const shot = shotForContact(intent, contact);
+  const distQ = d <= REACH_PERFECT ? 2 : d <= REACH_GOOD ? 1 : 0;
+  const timeQ = timingQuality(shot, contact.z);
+  const qn = Math.min(distQ, timeQ);
+  const quality: Quality = qn === 2 ? 'perfect' : qn === 1 ? 'good' : 'bad';
+  const weak = quality === 'bad' ? (timeQ === 0 ? 'late' as const : 'stretch' as const) : undefined;
+  const cut = shot === 'drop' && contact.z >= 1.7 && quality === 'perfect';
+  const aimX: -1 | 0 | 1 = aim === 'auto' ? autoAimRemote(s) : aim;
+  if (quality === 'perfect') s.stats.perfectsRemote = (s.stats.perfectsRemote ?? 0) + 1;
+  s.rallyLen += 1;
+  s.ai.anim = quality === 'bad' ? 'lunge' : 'swing';
+  s.ai.animUntil = now + 260;
+  s.traj = makeTraj('ai', shot, quality, contact, aimX, now, s.rallyLen, DIFF_PACE[s.config.difficulty]);
+  s.lastShot = { shot, quality, cross: s.traj.cross, cut, weak, by: 'ai' };
+  s.events.push(`remote-swing:${shot}:${quality}`);
+}
+
+/** 게스트 서브를 호스트 sim에 적용 — 게이지 위상은 게스트 화면에서 잰 값. */
+export function serveRemote(s: SimState, kind: 'short' | 'long', gaugePhase: number): void {
+  const now = s.clock;
+  if (s.phase !== 'serve' || s.server !== 'ai') return;
+  const quality: Quality = gaugePhase > 0.92 ? 'perfect' : gaugePhase > 0.65 ? 'good' : 'bad';
+  const spots = serveSpots(s);
+  const from: Vec3 = { x: s.ai.x, y: s.ai.y, z: 0.9 };
+  s.phase = 'rally';
+  s.aiServeAt = 0;
+  s.lastShot = { shot: kind === 'short' ? 'hairpin' : 'clear', quality, serve: true, by: 'ai' };
+  s.ai.anim = 'swing';
+  s.ai.animUntil = now + 240;
+  s.traj = makeServeTraj('ai', kind, quality, from, spots.targetSign, now, DIFF_PACE[s.config.difficulty]);
+  s.events.push(`remote-serve:${kind}:${quality}`);
+}
+
+// ─── 스냅샷 미러 — 호스트 월드 → 게스트 프레임(x·y 반전 + 역할 스왑) ───
+export interface NetSnapshot {
+  clock: number;
+  phase: SimPhase;
+  score: Score;
+  server: Side;
+  rallyLen: number;
+  deuce: boolean;
+  winner: Side | null;
+  banner: { winner: Side; reason: string } | null;
+  bannerUntil: number;
+  player: Actor;
+  ai: Actor;
+  shuttle: Vec3;
+  traj: Traj | null;
+  stats: { longestRally: number; perfects: number };
+  lastShot: SimState['lastShot'];
+}
+
+const flipSide = (side: Side): Side => (side === 'player' ? 'ai' : 'player');
+const mirrorActor = (a: Actor): Actor => ({ ...a, x: -a.x, y: -a.y, facing: (a.facing * -1) as 1 | -1 });
+const mirrorVec = (v: Vec3): Vec3 => ({ x: -v.x, y: -v.y, z: v.z });
+
+export function makeSnapshot(s: SimState): NetSnapshot {
+  return {
+    clock: s.clock,
+    phase: s.phase,
+    score: { player: s.score.ai, ai: s.score.player },
+    server: flipSide(s.server),
+    rallyLen: s.rallyLen,
+    deuce: s.deuce,
+    winner: s.winner ? flipSide(s.winner) : null,
+    banner: s.banner ? { winner: flipSide(s.banner.winner), reason: s.banner.reason } : null,
+    bannerUntil: s.bannerUntil,
+    player: mirrorActor(s.ai),
+    ai: mirrorActor(s.player),
+    shuttle: mirrorVec(s.shuttle),
+    traj: s.traj
+      ? { ...s.traj, by: flipSide(s.traj.by), p0: mirrorVec(s.traj.p0), c: mirrorVec(s.traj.c), p2: mirrorVec(s.traj.p2) }
+      : null,
+    stats: { longestRally: s.stats.longestRally, perfects: s.stats.perfectsRemote ?? 0 },
+    lastShot: s.lastShot ? { ...s.lastShot, by: flipSide(s.lastShot.by ?? 'player') } : null,
+  };
+}
+
+/** 게스트: 스냅샷 적용. 내 캐릭터(로컬 예측)는 살짝만 보정하고 크게 어긋나면 스냅. */
+export function applySnapshot(s: SimState, snap: NetSnapshot): void {
+  // 클록: 지연 때문에 스냅샷 클록이 약간 뒤처져 온다 — 완만히 수렴, 큰 차이만 스냅
+  const cd = snap.clock - s.clock;
+  if (Math.abs(cd) > 150) s.clock = snap.clock;
+  else s.clock += cd * 0.12;
+  s.phase = snap.phase;
+  s.score = snap.score;
+  s.server = snap.server;
+  s.rallyLen = snap.rallyLen;
+  s.deuce = snap.deuce;
+  s.winner = snap.winner;
+  s.banner = snap.banner;
+  s.bannerUntil = snap.bannerUntil;
+  s.shuttle = snap.shuttle;
+  s.traj = snap.traj;
+  s.stats = { ...s.stats, ...snap.stats };
+  s.lastShot = snap.lastShot;
+  // 내 캐릭터: 위치는 로컬 예측 우선(소프트 보정), lunge 같은 판정 모션만 수용
+  const err = Math.hypot(snap.player.x - s.player.x, snap.player.y - s.player.y);
+  if (err > 1.2) {
+    s.player.x = snap.player.x;
+    s.player.y = snap.player.y;
+  } else {
+    s.player.x += (snap.player.x - s.player.x) * 0.2;
+    s.player.y += (snap.player.y - s.player.y) * 0.2;
+  }
+  if (snap.player.anim === 'lunge') {
+    s.player.anim = 'lunge';
+    s.player.animUntil = snap.player.animUntil;
+  }
+  // 상대 캐릭터: 목표만 갱신 — 실제 이동은 guestTick이 보간(12Hz 점프 방지)
+  s.ai.anim = snap.ai.anim;
+  s.ai.animUntil = snap.ai.animUntil;
+  s.ai.facing = snap.ai.facing;
+  s.ai.moving = snap.ai.moving;
+}
+
+/** 게스트 프레임 렌더 틱 — sim 없이 이동 예측 + 셔틀 비행 + 서브 정렬만. */
+export function guestTick(
+  s: SimState,
+  dtMs: number,
+  input: MoveInput,
+  oppTarget: { x: number; y: number } | null,
+): void {
+  const stepMs = Math.min(dtMs, 50);
+  s.clock += stepMs;
+  const now = s.clock;
+  const dt = stepMs / 1000;
+
+  // 내 이동(로컬 예측) — 랠리 중에만, 서브 중엔 규정 위치 고정
+  const mag = Math.hypot(input.dx, input.dy);
+  if (mag > 0.15 && s.phase === 'rally') {
+    const nx = input.dx / Math.max(1, mag);
+    const ny = input.dy / Math.max(1, mag);
+    s.player.x = Math.min(3.0, Math.max(-3.0, s.player.x + nx * PLAYER_SPEED * dt));
+    s.player.y = Math.min(-0.35, Math.max(-6.6, s.player.y + ny * PLAYER_SPEED * dt));
+    s.player.moving = true;
+    if (Math.abs(nx) > 0.2) s.player.facing = nx > 0 ? 1 : -1;
+  } else {
+    s.player.moving = false;
+  }
+  if (s.player.anim !== 'idle' && now > s.player.animUntil) s.player.anim = 'idle';
+  if (s.ai.anim !== 'idle' && now > s.ai.animUntil) s.ai.anim = 'idle';
+
+  // 상대: 스냅샷 목표로 보간
+  if (oppTarget) moveActor(s.ai, oppTarget.x, oppTarget.y, PLAYER_SPEED * 1.35, dt);
+
+  if (s.phase === 'serve') {
+    const spots = serveSpots(s);
+    const mine = s.server === 'player' ? spots.server : spots.receiver;
+    moveActor(s.player, mine.x, mine.y, PLAYER_SPEED, dt);
+    s.shuttle = s.server === 'player'
+      ? { x: s.player.x, y: s.player.y - 0.15, z: 0.95 }
+      : { x: s.ai.x, y: s.ai.y + 0.15, z: 0.95 };
+    return;
+  }
+  // 셔틀 비행 — traj는 게스트 프레임으로 미러된 결정적 파라미터라 로컬 재생 가능
+  if (s.phase === 'rally' && s.traj) {
+    const t = s.traj;
+    const u = Math.min(1, (now - t.t0) / t.dur);
+    s.shuttle = bezier(t, easeU(t.shot, u));
+  }
 }

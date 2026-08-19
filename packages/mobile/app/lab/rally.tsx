@@ -4,8 +4,9 @@
  * ArenaScene(클럽 나이트 코트), ShuttleFx(셔틀·트레일·히트 버스트), Jua 타이포 HUD.
  * 게임플레이는 game/rally/sim.ts 그대로 — 여기는 tick 결과를 그리기만 한다.
  */
-import { ComponentProps, useEffect, useMemo, useRef, useState } from 'react';
-import { Image, ImageBackground, Platform, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { ComponentProps, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { ActivityIndicator, Image, ImageBackground, Platform, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { router, useLocalSearchParams } from 'expo-router';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import Animated, {
   Easing,
@@ -32,12 +33,25 @@ import {
   SimState,
   SimPhase,
   SwingIntent,
+  applySnapshot,
   createSim,
+  guestTick,
+  makeSnapshot,
   servePlayer,
+  serveRemote,
   serveSpots,
   swingPlayer,
+  swingRemote,
   tick,
 } from '../../game/rally/sim';
+import { connectRally, RallyNet } from '../../game/rally/net';
+import { rallyApi } from '../../services/rally';
+import { clubSessionApi } from '../../services/clubSession';
+import { profileApi } from '../../services/profile';
+import { useAuthStore } from '../../store/authStore';
+import { useSocketEvent } from '../../hooks/useSocket';
+import { showError, showInfo } from '../../utils/feedback';
+import { PlayerCard, PlayerCardData } from '../../components/game-board/PlayerCard';
 import { KenneyCharacter } from '../../game/rally/sprites/KenneyCharacter';
 import { ArenaScene } from '../../game/rally/sprites/ArenaScene';
 import { ShuttleSvg, HitBurstSvg } from '../../game/rally/sprites/ShuttleFx';
@@ -116,12 +130,82 @@ export default function RallyGameScreen() {
   const [fontsLoaded] = useFonts({ Jua_400Regular });
   const jua = fontsLoaded ? 'Jua_400Regular' : undefined;
 
+  // ── PvP — /lab/rally?match=<id>&role=host|guest 로 진입하면 네트워크 대전 ──
+  const params = useLocalSearchParams<{ match?: string; role?: string }>();
+  const pvpMatch = typeof params.match === 'string' && params.match ? params.match : undefined;
+  const isPvp = !!pvpMatch;
+  const isGuest = isPvp && params.role === 'guest';
+  const oppLabel = isPvp ? '상대' : 'AI';
+  const [oppLeft, setOppLeft] = useState(false);
+  const netRef = useRef<RallyNet | null>(null);
+  const remoteJoyRef = useRef({ dx: 0, dy: 0 }); // 호스트가 받는 게스트 스틱(월드 프레임)
+  const oppTargetRef = useRef<{ x: number; y: number } | null>(null); // 게스트의 상대 보간 목표
+  const lastSnapSentRef = useRef(0);
+
   const simRef = useRef<SimState | null>(null);
   const joyRef = useRef({ dx: 0, dy: 0 });
   const uiKeyRef = useRef('');
   const lastShotKeyRef = useRef('');
   const prevAnimRef = useRef({ p: 'idle', a: 'idle' });
   const shuttleHist = useRef<{ x: number; y: number; t: number }[]>([]);
+
+  // PvP 진입: sim 생성(호스트=권위 pvp sim, 게스트=스냅샷 미러 프레임) + 소켓 룸 연결
+  useEffect(() => {
+    if (!pvpMatch) return;
+    const userId = useAuthStore.getState().user?.id;
+    if (!userId) return;
+    const pvpCfg: MatchConfig = { target: 11, deuce: true, difficulty: 'normal' };
+    setCfg(pvpCfg);
+    const s = createSim(pvpCfg);
+    if (isGuest) {
+      s.server = 'ai'; // 첫 서브는 호스트 — 게스트 프레임에선 상대(ai)
+    } else {
+      s.pvp = true;
+    }
+    simRef.current = s;
+    uiKeyRef.current = '';
+    setUi(null);
+    setOppLeft(false);
+    setGuideOpen(true);
+    setScreen('game');
+
+    const net = connectRally(pvpMatch, userId, {
+      onInput: isGuest
+        ? undefined
+        : (msg) => {
+            const sim = simRef.current;
+            if (!sim || !msg) return;
+            // 게스트는 자기 뷰 프레임으로 보낸다 — 월드로 부호 반전
+            if (msg.t === 'joy') remoteJoyRef.current = { dx: -msg.dx, dy: -msg.dy };
+            else if (msg.t === 'swing') swingRemote(sim, msg.intent, msg.aim === 'auto' ? 'auto' : (-msg.aim as -1 | 0 | 1));
+            else if (msg.t === 'serve') serveRemote(sim, msg.kind, msg.gauge);
+            else if (msg.t === 'again' && sim.phase === 'over') {
+              const ns = createSim(pvpCfg);
+              ns.pvp = true;
+              simRef.current = ns;
+              uiKeyRef.current = '';
+            }
+          },
+      onSnapshot: isGuest
+        ? (snap) => {
+            const sim = simRef.current;
+            if (!sim || !snap) return;
+            applySnapshot(sim, snap);
+            oppTargetRef.current = { x: snap.ai.x, y: snap.ai.y };
+          }
+        : undefined,
+      // 게임이 이미 끝났으면 정상 이탈 — 결과 화면 위에 배너를 덮지 않는다
+      onOpponentLeft: () => {
+        if (simRef.current?.phase !== 'over') setOppLeft(true);
+      },
+    });
+    netRef.current = net;
+    return () => {
+      net.dispose();
+      netRef.current = null;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pvpMatch, isGuest]);
 
   const proj: Projector | null = useMemo(
     () => (area.w > 0 ? makeProjector(area.w, area.h) : null),
@@ -170,7 +254,17 @@ export default function RallyGameScreen() {
       const now = Date.now();
       const dt = now - last;
       last = now;
-      tick(s, dt, joyRef.current);
+      if (isGuest) {
+        // 게스트: sim 미실행 — 로컬 예측(내 이동) + 스냅샷 재생만
+        guestTick(s, dt, joyRef.current, oppTargetRef.current);
+        netRef.current?.sendJoy(joyRef.current.dx, joyRef.current.dy);
+      } else {
+        tick(s, dt, joyRef.current, s.pvp ? remoteJoyRef.current : undefined);
+        if (s.pvp && netRef.current && now - lastSnapSentRef.current >= 83) {
+          lastSnapSentRef.current = now; // ~12Hz — 지연은 셔틀 비행시간에 숨는다
+          netRef.current.sendSnapshot(makeSnapshot(s));
+        }
+      }
 
       // 캐릭터 위치·모션
       pX.value = p.x(s.player.x, s.player.y);
@@ -289,7 +383,8 @@ export default function RallyGameScreen() {
           shakeT.value = withTiming(1, { duration: 450, easing: Easing.out(Easing.quad) });
         }
         const lsKey = s.lastShot ? `${s.rallyLen}|${s.lastShot.shot}|${s.lastShot.quality}|${s.lastShot.whiff ? 'w' : ''}` : '';
-        if (s.lastShot && lsKey !== lastShotKeyRef.current && s.phase === 'rally') {
+        const myShot = !s.lastShot?.by || s.lastShot.by === 'player'; // PvP: 팝업은 내 스윙만
+        if (s.lastShot && myShot && lsKey !== lastShotKeyRef.current && s.phase === 'rally') {
           lastShotKeyRef.current = lsKey;
           const q = s.lastShot.quality;
           const base = s.lastShot.cut ? '커트' : SHOT_KO[s.lastShot.shot];
@@ -332,7 +427,7 @@ export default function RallyGameScreen() {
     raf = requestAnimationFrame(loop);
     return () => cancelAnimationFrame(raf);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [screen]);
+  }, [screen, isGuest]);
 
   // ── 조작 ──────────────────────────────────────────────────────────
   const doSwing = (intent: SwingIntent) => {
@@ -340,13 +435,27 @@ export default function RallyGameScreen() {
     if (!s) return;
     const jdx = joyRef.current.dx;
     const aim: AimLane = jdx > 0.35 ? 1 : jdx < -0.35 ? -1 : 'auto';
-    swingPlayer(s, intent, aim);
+    if (isGuest) {
+      // 판정은 호스트에서 — 스윙 모션만 즉시(체감), 결과는 스냅샷으로
+      netRef.current?.sendSwing(intent, aim);
+      s.player.anim = 'swing';
+      s.player.animUntil = s.clock + 220;
+    } else {
+      swingPlayer(s, intent, aim);
+    }
     haptic('light');
   };
   const doServe = (kind: 'short' | 'long') => {
     const s = simRef.current;
     if (!s) return;
-    servePlayer(s, kind, servePhase(Date.now()));
+    const phase = servePhase(Date.now());
+    if (isGuest) {
+      netRef.current?.sendServe(kind, phase);
+      s.player.anim = 'swing';
+      s.player.animUntil = s.clock + 240;
+    } else {
+      servePlayer(s, kind, phase);
+    }
     haptic('light');
   };
 
@@ -356,7 +465,12 @@ export default function RallyGameScreen() {
       swing: doSwing,
       serve: doServe,
       setJoy: (dx: number, dy: number) => { joyRef.current = { dx, dy }; },
-      step: (dt: number) => { if (simRef.current) tick(simRef.current, dt, joyRef.current); },
+      step: (dt: number) => {
+        const s = simRef.current;
+        if (s) tick(s, dt, joyRef.current, s.pvp ? remoteJoyRef.current : undefined);
+      },
+      net: () => netRef.current, // PvP 검증용 — 숨김 탭에서도 직접 송신 가능
+      snap: () => (simRef.current ? makeSnapshot(simRef.current) : null), // 호스트 헤드리스 스냅샷
     };
   }
 
@@ -485,7 +599,7 @@ export default function RallyGameScreen() {
       <View style={[styles.topBar, { paddingTop: insets.top + 6 }]}>
         <BackButton />
         <View style={{ flex: 1 }} />
-        <Pressable onPress={() => setScreen('config')} hitSlop={8}>
+        <Pressable onPress={() => (isPvp ? router.back() : setScreen('config'))} hitSlop={8}>
           <Icon name="close" size={22} color="#5A6B7E" />
         </Pressable>
       </View>
@@ -559,7 +673,7 @@ export default function RallyGameScreen() {
               <Text style={[styles.scoreBig, juaStyle]}>{ui?.score.ai ?? 0}</Text>
               <View style={styles.scoreSide}>
                 {ui?.server === 'ai' && <MaterialCommunityIcons name="badminton" size={12} color="#FACC15" />}
-                <Text style={styles.sideName}>AI</Text>
+                <Text style={styles.sideName}>{oppLabel}</Text>
                 <View style={[styles.sideDot, { backgroundColor: '#E2695C' }]} />
               </View>
             </View>
@@ -581,6 +695,7 @@ export default function RallyGameScreen() {
               key={`${ui.score.player}-${ui.score.ai}`}
               text={ui.banner.reason}
               mine={ui.banner.winner === 'player'}
+              oppLabel={oppLabel}
               jua={jua}
             />
           )}
@@ -630,7 +745,7 @@ export default function RallyGameScreen() {
           )}
           {ui?.phase === 'serve' && ui.server === 'ai' && (
             <View style={styles.aiServeToast} pointerEvents="none">
-              <Text style={styles.aiServeText}>AI 서브…</Text>
+              <Text style={styles.aiServeText}>{oppLabel} 서브…</Text>
             </View>
           )}
 
@@ -682,15 +797,35 @@ export default function RallyGameScreen() {
             <Pressable
               style={[styles.againBtn, { backgroundColor: colors.primary }]}
               onPress={() => {
-                simRef.current = createSim(cfg);
+                if (isGuest) {
+                  // 재시작 권위도 호스트 — 요청만 보내고 스냅샷으로 따라간다
+                  netRef.current?.sendAgain();
+                  showInfo('한 판 더 요청을 보냈어요');
+                  return;
+                }
+                const ns = createSim(cfg);
+                if (isPvp) ns.pvp = true;
+                simRef.current = ns;
                 uiKeyRef.current = '';
                 setUi(null);
               }}
             >
               <Text style={styles.againBtnText}>한 판 더</Text>
             </Pressable>
-            <Pressable onPress={() => setScreen('config')} hitSlop={8}>
-              <Text style={[styles.exitText, { color: '#64748B' }]}>대결 설정으로</Text>
+            <Pressable onPress={() => (isPvp ? router.back() : setScreen('config'))} hitSlop={8}>
+              <Text style={[styles.exitText, { color: '#64748B' }]}>{isPvp ? '나가기' : '대결 설정으로'}</Text>
+            </Pressable>
+          </View>
+        </View>
+      )}
+
+      {/* PvP: 상대 이탈 */}
+      {oppLeft && (
+        <View style={styles.overWrap}>
+          <View style={[styles.overCard, { backgroundColor: '#FFFFFF', borderWidth: 1, borderColor: '#D3E8E2' }, shadows.sm]}>
+            <Text style={[styles.overTitle, { color: '#0F172A' }, juaStyle]}>상대가 나갔어요</Text>
+            <Pressable style={[styles.againBtn, { backgroundColor: colors.primary }]} onPress={() => router.back()}>
+              <Text style={styles.againBtnText}>나가기</Text>
             </Pressable>
           </View>
         </View>
@@ -765,7 +900,7 @@ function QualityPopup({ popup, jua }: { popup: Popup; jua?: string }) {
 }
 
 // ─── 득점 배너 ─────────────────────────────────────────────────────
-function BigBanner({ text, mine, jua }: { text: string; mine: boolean; jua?: string }) {
+function BigBanner({ text, mine, oppLabel = 'AI', jua }: { text: string; mine: boolean; oppLabel?: string; jua?: string }) {
   const t = useSharedValue(0);
   useEffect(() => {
     t.value = 0;
@@ -780,7 +915,7 @@ function BigBanner({ text, mine, jua }: { text: string; mine: boolean; jua?: str
     <View style={styles.bannerWrap} pointerEvents="none">
       <Animated.View style={style}>
         <Text style={[styles.bannerBig, { color: mine ? '#FFFFFF' : '#FFE1DC' }, jua ? { fontFamily: jua, fontStyle: 'normal' } : null]}>{text}</Text>
-        <Text style={styles.bannerSub}>{mine ? '내 득점!' : 'AI 득점'}</Text>
+        <Text style={styles.bannerSub}>{mine ? '내 득점!' : `${oppLabel} 득점`}</Text>
       </Animated.View>
     </View>
   );
@@ -832,6 +967,7 @@ function ConfigScreen({ cfg, onChange, charSel, onCharSel, onStart }: {
 }) {
   const { colors, shadows } = useTheme();
   const insets = useSafeAreaInsets();
+  const [mode, setMode] = useState<'ai' | 'pvp'>('ai');
   const Seg = <T,>({ options, value, set, label }: {
     options: { v: T; label: string }[];
     value: T;
@@ -863,6 +999,23 @@ function ConfigScreen({ cfg, onChange, charSel, onCharSel, onStart }: {
         </View>
       </View>
       <ScrollView contentContainerStyle={{ padding: spacing.lg, maxWidth: 560, width: '100%', alignSelf: 'center' }}>
+        {/* 모드 탭 — vs AI / 같은 정모 사람에게 대결 신청 */}
+        <View style={[styles.seg, { borderColor: colors.border, marginBottom: spacing.lg }]}>
+          {([{ v: 'ai' as const, label: 'vs AI' }, { v: 'pvp' as const, label: '대결 신청' }]).map((o) => (
+            <Pressable
+              key={o.v}
+              style={[styles.segItem, mode === o.v && { backgroundColor: colors.primary }]}
+              onPress={() => setMode(o.v)}
+            >
+              <Text style={[styles.segText, { color: mode === o.v ? '#fff' : colors.textSecondary }]}>{o.label}</Text>
+            </Pressable>
+          ))}
+        </View>
+
+        {mode === 'pvp' ? (
+          <PvpLobby />
+        ) : (
+        <>
         <View style={[styles.cfgCard, { backgroundColor: colors.surface }, shadows.sm]}>
           <Text style={[styles.cfgTitle, { color: colors.text }]}>대결 설정</Text>
           <Seg
@@ -897,7 +1050,153 @@ function ConfigScreen({ cfg, onChange, charSel, onCharSel, onStart }: {
           왼손 조이스틱으로 뛰고, 오른손 버튼으로 스매시·클리어·드롭.{'\n'}
           조이스틱을 기울인 채 치면 그 방향 코스, 중립이면 빈 코트를 자동으로 노려요.
         </Text>
+        </>
+        )}
       </ScrollView>
+    </View>
+  );
+}
+
+// ─── PvP 로비 — 같은 정모 대기자에게 대결 신청 ──────────────────────
+function PvpLobby() {
+  const { colors, shadows } = useTheme();
+  // 내 정모: /users/me/status — 체크인 스토어와 달리 clubSessionId를 항상 준다
+  const [clubSessionId, setClubSessionId] = useState<string | null>(null);
+  const [statusLoaded, setStatusLoaded] = useState(false);
+  useEffect(() => {
+    profileApi
+      .getMyStatus()
+      .then((res) => setClubSessionId(res.data?.clubSessionId ?? null))
+      .catch(() => setClubSessionId(null))
+      .finally(() => setStatusLoaded(true));
+  }, []);
+  const myId = useAuthStore((st) => st.user?.id);
+  const [players, setPlayers] = useState<PlayerCardData[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [waiting, setWaiting] = useState<{ matchId: string; name: string } | null>(null);
+  const waitingRef = useRef(waiting);
+  waitingRef.current = waiting;
+
+  const load = useCallback(async () => {
+    if (!clubSessionId) return;
+    setLoading(true);
+    try {
+      const res = await clubSessionApi.getPlayers(clubSessionId);
+      const list = (res.data ?? []) as PlayerCardData[];
+      // 나 제외, 대기(AVAILABLE) 우선 정렬 — 게임 중인 사람은 뒤로
+      list.sort((a, b) => (a.status === 'AVAILABLE' ? 0 : 1) - (b.status === 'AVAILABLE' ? 0 : 1));
+      setPlayers(list.filter((p) => p.userId !== myId));
+    } catch {
+      setPlayers([]);
+    } finally {
+      setLoading(false);
+    }
+  }, [clubSessionId, myId]);
+  useEffect(() => {
+    load();
+  }, [load]);
+
+  const challenge = async (p: PlayerCardData) => {
+    const name = p.userName || p.name || '상대';
+    try {
+      const res = await rallyApi.challenge(p.userId);
+      setWaiting({ matchId: res.data.matchId, name });
+    } catch (e: any) {
+      showError(e?.message || '신청에 실패했어요');
+    }
+  };
+
+  // 수락되면 서버가 rally:matched를 쏜다(전역 user 룸) → 호스트로 게임 진입
+  useSocketEvent(
+    'rally:matched',
+    useCallback((data: any) => {
+      const w = waitingRef.current;
+      if (!w || data?.matchId !== w.matchId) return;
+      setWaiting(null);
+      router.push(`/lab/rally?match=${data.matchId}&role=host`);
+    }, []),
+  );
+  useSocketEvent(
+    'rally:declined',
+    useCallback((data: any) => {
+      const w = waitingRef.current;
+      if (!w || data?.matchId !== w.matchId) return;
+      setWaiting(null);
+      showInfo(`${w.name}님이 응하지 않았어요`);
+    }, []),
+  );
+
+  if (!clubSessionId) {
+    return (
+      <View style={[styles.cfgCard, { backgroundColor: colors.surface, alignItems: 'center', gap: spacing.sm }, shadows.sm]}>
+        {!statusLoaded ? (
+          <ActivityIndicator color={colors.primary} />
+        ) : (
+          <>
+            <MaterialCommunityIcons name="qrcode-scan" size={30} color={colors.textLight} />
+            <Text style={{ ...typography.body1, color: colors.textSecondary, textAlign: 'center' }}>
+              정모에 체크인하면{'\n'}같은 정모 사람에게 대결을 신청할 수 있어요
+            </Text>
+          </>
+        )}
+      </View>
+    );
+  }
+
+  return (
+    <View style={[styles.cfgCard, { backgroundColor: colors.surface }, shadows.sm]}>
+      <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: spacing.md }}>
+        <Text style={[styles.cfgTitle, { color: colors.text, marginBottom: 0 }]}>정모 대기자</Text>
+        <Pressable onPress={load} hitSlop={8}>
+          <MaterialCommunityIcons name="refresh" size={20} color={colors.textSecondary} />
+        </Pressable>
+      </View>
+      {loading ? (
+        <ActivityIndicator style={{ marginVertical: spacing.xl }} color={colors.primary} />
+      ) : players.length === 0 ? (
+        <Text style={{ ...typography.body1, color: colors.textLight, textAlign: 'center', marginVertical: spacing.lg }}>
+          대결할 수 있는 사람이 아직 없어요
+        </Text>
+      ) : (
+        <View style={{ gap: spacing.sm }}>
+          {players.map((p) => (
+            <View key={p.userId} style={{ flexDirection: 'row', alignItems: 'center', gap: spacing.sm }}>
+              <View style={{ flex: 1 }}>
+                <PlayerCard player={p} showGames={false} />
+              </View>
+              <Pressable
+                style={[styles.challengeBtn, { backgroundColor: colors.primary }]}
+                onPress={() => challenge(p)}
+              >
+                <MaterialCommunityIcons name="sword-cross" size={14} color="#fff" />
+                <Text style={styles.challengeBtnText}>대결 신청</Text>
+              </Pressable>
+            </View>
+          ))}
+        </View>
+      )}
+      <Text style={{ ...typography.caption, color: colors.textLight, marginTop: spacing.md }}>
+        11점 · 듀스 — 상대가 60초 안에 수락하면 바로 시작돼요
+      </Text>
+
+      {/* 수락 대기 오버레이 */}
+      {waiting && (
+        <View style={styles.waitingWrap}>
+          <ActivityIndicator color="#fff" size="large" />
+          <Text style={styles.waitingText}>{waiting.name}님의 수락 대기 중…</Text>
+          <Text style={styles.waitingSub}>60초 안에 응답이 없으면 자동 취소돼요</Text>
+          <Pressable
+            style={styles.waitingCancel}
+            onPress={() => {
+              const w = waitingRef.current;
+              setWaiting(null);
+              if (w) rallyApi.decline(w.matchId).catch(() => {});
+            }}
+          >
+            <Text style={styles.waitingCancelText}>취소</Text>
+          </Pressable>
+        </View>
+      )}
     </View>
   );
 }
@@ -1026,4 +1325,25 @@ const styles = StyleSheet.create({
   segItem: { flex: 1, alignItems: 'center', paddingVertical: spacing.sm },
   segText: { fontSize: 14, fontWeight: '700' },
   cfgHint: { ...typography.caption, marginTop: spacing.md, textAlign: 'center', lineHeight: 18 },
+
+  // PvP 로비
+  challengeBtn: {
+    flexDirection: 'row', alignItems: 'center', gap: 4,
+    paddingHorizontal: spacing.md, paddingVertical: spacing.sm, borderRadius: radius.lg,
+  },
+  challengeBtnText: { color: '#fff', fontSize: 12, fontWeight: '700' },
+  waitingWrap: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: 'rgba(13,18,26,0.88)',
+    borderRadius: radius.card,
+    alignItems: 'center', justifyContent: 'center', gap: spacing.sm,
+    padding: spacing.xl,
+  },
+  waitingText: { color: '#F8FAFC', fontSize: 16, fontWeight: '700', marginTop: spacing.sm },
+  waitingSub: { color: '#94A3B8', fontSize: 12 },
+  waitingCancel: {
+    marginTop: spacing.md, paddingHorizontal: spacing.xl, paddingVertical: spacing.sm,
+    borderRadius: radius.pill, borderWidth: 1, borderColor: 'rgba(148,163,184,0.5)',
+  },
+  waitingCancelText: { color: '#E2E8F0', fontSize: 13, fontWeight: '700' },
 });

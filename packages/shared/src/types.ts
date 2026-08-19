@@ -744,6 +744,14 @@ export interface ServerToClientEvents {
   'gameBoard:entryPushed': (data: GameBoardEntryResponse) => void;
   'gameBoard:reordered': (data: { boardId: string; entryIds: string[] }) => void;
   'clubMessage:new': (data: ClubMessageResponse) => void;
+  // 콕고 랠리 PvP — 서버는 릴레이만 (게임 로직 없음)
+  'rally:invited': (data: { matchId: string; from: { id: string; name: string } }) => void;
+  'rally:matched': (data: { matchId: string }) => void;
+  'rally:declined': (data: { matchId: string }) => void;
+  'rally:opponentLeft': (data: { matchId: string }) => void;
+  'rally:input': (data: { payload: unknown }) => void;
+  'rally:snapshot': (data: { payload: unknown }) => void;
+  'rally:event': (data: { payload: unknown }) => void;
 }
 
 export interface ClientToServerEvents {
@@ -757,6 +765,12 @@ export interface ClientToServerEvents {
   'club:leave': (clubId: string) => void;
   'user:join': (userId: string) => void;
   'user:leave': (userId: string) => void;
+  // 콕고 랠리 PvP — matchId는 REST(대결 신청)에서 발급, 소켓은 매치 멤버만 릴레이
+  'rally:join': (data: { matchId: string; userId: string }) => void;
+  'rally:leave': (data: { matchId: string }) => void;
+  'rally:input': (data: { matchId: string; payload: unknown }) => void;
+  'rally:snapshot': (data: { matchId: string; payload: unknown }) => void;
+  'rally:event': (data: { matchId: string; payload: unknown }) => void;
 }
 
 // ─────────────────────────────────────────────────────────────
