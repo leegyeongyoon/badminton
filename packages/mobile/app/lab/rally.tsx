@@ -5,7 +5,7 @@
  * 게임플레이는 game/rally/sim.ts 그대로 — 여기는 tick 결과를 그리기만 한다.
  */
 import { ComponentProps, useEffect, useMemo, useRef, useState } from 'react';
-import { Platform, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Image, ImageBackground, Platform, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import Animated, {
   Easing,
@@ -38,9 +38,18 @@ import {
   swingPlayer,
   tick,
 } from '../../game/rally/sim';
-import { SportyPlayer } from '../../game/rally/sprites/SportyPlayer';
+import { KenneyCharacter } from '../../game/rally/sprites/KenneyCharacter';
 import { ArenaScene } from '../../game/rally/sprites/ArenaScene';
 import { ShuttleSvg, HitBurstSvg } from '../../game/rally/sprites/ShuttleFx';
+
+// Kenney UI Pack (CC0) — 게임식 버튼·조이스틱
+const UI_IMG = {
+  red: require('../../assets/game/ui/btn_red.png'),
+  green: require('../../assets/game/ui/btn_green.png'),
+  yellow: require('../../assets/game/ui/btn_yellow.png'),
+  joyBase: require('../../assets/game/ui/joy_base.png'),
+  joyKnob: require('../../assets/game/ui/joy_knob.png'),
+};
 
 const SERVE_PERIOD = 1100;
 const servePhase = (now: number) => Math.abs(Math.sin((Math.PI * (now % SERVE_PERIOD)) / SERVE_PERIOD));
@@ -114,7 +123,9 @@ export default function RallyGameScreen() {
   const pX = useSharedValue(0), pY = useSharedValue(0), pS = useSharedValue(1);
   const aX = useSharedValue(0), aY = useSharedValue(0), aS = useSharedValue(0.5);
   const pArm = useSharedValue(0), aArm = useSharedValue(0);
-  const pLeg = useSharedValue(0), aLeg = useSharedValue(0);
+  const pPose = useSharedValue(0), aPose = useSharedValue(0);
+  const pRun = useSharedValue(0), aRun = useSharedValue(0);
+  const pFace = useSharedValue(1), aFace = useSharedValue(1);
   const shX = useSharedValue(0), shY = useSharedValue(0), shS = useSharedValue(1);
   const shRot = useSharedValue(0), shOn = useSharedValue(0);
   const g1X = useSharedValue(0), g1Y = useSharedValue(0), g1On = useSharedValue(0);
@@ -153,8 +164,12 @@ export default function RallyGameScreen() {
       aY.value = p.y(s.ai.y, 0);
       aS.value = p.scale(s.ai.y);
       const step = Math.min(dt, 50);
-      pLeg.value = s.player.moving ? (pLeg.value + step * 0.016) % (Math.PI * 2) : pLeg.value * 0.8;
-      aLeg.value = s.ai.moving ? (aLeg.value + step * 0.014) % (Math.PI * 2) : aLeg.value * 0.8;
+      pPose.value = s.player.anim === 'swing' ? 2 : s.player.anim === 'lunge' ? 3 : s.player.moving ? 1 : 0;
+      aPose.value = s.ai.anim === 'swing' ? 2 : s.ai.anim === 'lunge' ? 3 : s.ai.moving ? 1 : 0;
+      if (s.player.moving) pRun.value += step * 0.009;
+      if (s.ai.moving) aRun.value += step * 0.008;
+      pFace.value = s.player.facing;
+      aFace.value = s.ai.facing;
       if (s.player.anim !== prevAnimRef.current.p) {
         if (s.player.anim === 'swing' || s.player.anim === 'lunge') {
           pArm.value = -80;
@@ -309,17 +324,23 @@ export default function RallyGameScreen() {
 
   // ── 애니메이티드 스타일 ───────────────────────────────────────────
   const playerStyle = useAnimatedStyle(() => ({
-    transform: [{ translateX: pX.value - 32 }, { translateY: pY.value - 122 }, { scale: pS.value }],
+    transform: [
+      { translateX: pX.value - 39 },
+      { translateY: pY.value - 102 },
+      { scale: pS.value },
+      { scaleX: pFace.value },
+    ],
   }));
   const aiStyle = useAnimatedStyle(() => ({
-    transform: [{ translateX: aX.value - 32 }, { translateY: aY.value - 122 }, { scale: aS.value }],
+    transform: [
+      { translateX: aX.value - 39 },
+      { translateY: aY.value - 102 },
+      { scale: aS.value },
+      { scaleX: aFace.value },
+    ],
   }));
-  const pArmStyle = useAnimatedStyle(() => ({ transform: [{ rotate: `${pArm.value}deg` }] }));
-  const aArmStyle = useAnimatedStyle(() => ({ transform: [{ rotate: `${aArm.value}deg` }] }));
-  const pLegLStyle = useAnimatedStyle(() => ({ transform: [{ rotate: `${Math.sin(pLeg.value) * 24}deg` }] }));
-  const pLegRStyle = useAnimatedStyle(() => ({ transform: [{ rotate: `${-Math.sin(pLeg.value) * 24}deg` }] }));
-  const aLegLStyle = useAnimatedStyle(() => ({ transform: [{ rotate: `${Math.sin(aLeg.value) * 24}deg` }] }));
-  const aLegRStyle = useAnimatedStyle(() => ({ transform: [{ rotate: `${-Math.sin(aLeg.value) * 24}deg` }] }));
+  const pArmStyle = useAnimatedStyle(() => ({ transform: [{ rotate: `${pArm.value * 0.7}deg` }] }));
+  const aArmStyle = useAnimatedStyle(() => ({ transform: [{ rotate: `${aArm.value * 0.7}deg` }] }));
   const shuttleStyle = useAnimatedStyle(() => ({
     opacity: shOn.value,
     transform: [
@@ -428,7 +449,7 @@ export default function RallyGameScreen() {
 
           {/* AI (원경) */}
           <Animated.View style={[styles.char, aiStyle]} pointerEvents="none">
-            <SportyPlayer kit="#E2695C" variant="front" juaFont={jua} armStyle={aArmStyle} legLStyle={aLegLStyle} legRStyle={aLegRStyle} />
+            <KenneyCharacter variant="ai" poseMode={aPose} runFrame={aRun} armStyle={aArmStyle} />
           </Animated.View>
 
           {/* 셔틀 트레일 + 본체 */}
@@ -438,7 +459,7 @@ export default function RallyGameScreen() {
 
           {/* 플레이어 */}
           <Animated.View style={[styles.char, playerStyle]} pointerEvents="none">
-            <SportyPlayer kit="#14B8A6" variant="back" juaFont={jua} armStyle={pArmStyle} legLStyle={pLegLStyle} legRStyle={pLegRStyle} />
+            <KenneyCharacter variant="player" poseMode={pPose} runFrame={pRun} armStyle={pArmStyle} />
           </Animated.View>
 
           {/* 스코어보드 */}
@@ -483,22 +504,20 @@ export default function RallyGameScreen() {
           {/* 조이스틱 */}
           <GestureDetector gesture={joyGesture}>
             <View style={[styles.joyZone, ui?.phase === 'serve' && { opacity: 0.35 }]}>
-              <View style={styles.joyBase}>
-                <View style={[styles.joyTick, { top: 6, left: 50 }]} />
-                <View style={[styles.joyTick, { bottom: 6, left: 50 }]} />
-                <View style={[styles.joyTick, { left: 6, top: 50 }]} />
-                <View style={[styles.joyTick, { right: 6, top: 50 }]} />
-                <Animated.View style={[styles.joyKnob, knobStyle]} />
-              </View>
+              <ImageBackground source={UI_IMG.joyBase} style={styles.joyBase} imageStyle={{ opacity: 0.55 }}>
+                <Animated.View style={knobStyle}>
+                  <Image source={UI_IMG.joyKnob} style={styles.joyKnob} />
+                </Animated.View>
+              </ImageBackground>
             </View>
           </GestureDetector>
 
           {/* 샷 버튼 */}
           {!serving && ui?.phase !== 'over' && (
             <View style={styles.btnCluster} pointerEvents="box-none">
-              <ShotButton size={62} color="#E5A63C" icon="water" label="드롭" jua={jua} style={{ right: 30, bottom: 132 }} onPress={() => doSwing('drop')} />
-              <ShotButton size={70} color="#1FA98C" icon="arrow-up-bold" label="클리어" jua={jua} style={{ right: 116, bottom: 48 }} onPress={() => doSwing('rally')} />
-              <ShotButton size={88} color="#E2544A" icon="flash" label="스매시" jua={jua} style={{ right: 16, bottom: 30 }} onPress={() => doSwing('attack')} />
+              <ShotButton size={62} img={UI_IMG.yellow} icon="water" label="드롭" jua={jua} style={{ right: 30, bottom: 132 }} onPress={() => doSwing('drop')} />
+              <ShotButton size={70} img={UI_IMG.green} icon="arrow-up-bold" label="클리어" jua={jua} style={{ right: 116, bottom: 48 }} onPress={() => doSwing('rally')} />
+              <ShotButton size={88} img={UI_IMG.red} icon="flash" label="스매시" jua={jua} style={{ right: 16, bottom: 30 }} onPress={() => doSwing('attack')} />
             </View>
           )}
 
@@ -588,10 +607,10 @@ export default function RallyGameScreen() {
   );
 }
 
-// ─── 샷 버튼 ───────────────────────────────────────────────────────
-function ShotButton({ size, color, icon, label, jua, style, onPress }: {
+// ─── 샷 버튼 — Kenney UI Pack depth-gloss 라운드 버튼 ────────────────
+function ShotButton({ size, img, icon, label, jua, style, onPress }: {
   size: number;
-  color: string;
+  img: number;
   icon: ComponentProps<typeof MaterialCommunityIcons>['name'];
   label: string;
   jua?: string;
@@ -603,16 +622,14 @@ function ShotButton({ size, color, icon, label, jua, style, onPress }: {
       onPressIn={onPress}
       style={({ pressed }) => [
         styles.shotBtn,
-        {
-          width: size, height: size, borderRadius: size / 2,
-          backgroundColor: color, right: style.right, bottom: style.bottom,
-        },
-        pressed && { transform: [{ scale: 0.9 }], opacity: 0.9 },
+        { width: size, height: size, right: style.right, bottom: style.bottom },
+        pressed && { transform: [{ scale: 0.9 }, { translateY: 2 }] },
       ]}
     >
-      <View style={{ position: 'absolute', top: size * 0.08, width: size * 0.52, height: size * 0.2, borderRadius: size * 0.26, backgroundColor: 'rgba(255,255,255,0.3)' }} />
-      <MaterialCommunityIcons name={icon} size={size * 0.36} color="#fff" />
-      <Text style={[styles.shotBtnLabel, { fontSize: size * 0.15 }, jua ? { fontFamily: jua } : null]}>{label}</Text>
+      <ImageBackground source={img} style={{ width: size, height: size, alignItems: 'center', justifyContent: 'center', paddingBottom: size * 0.08 }} resizeMode="stretch">
+        <MaterialCommunityIcons name={icon} size={size * 0.34} color="#fff" style={{ textShadowColor: 'rgba(0,0,0,0.35)', textShadowRadius: 2, textShadowOffset: { width: 0, height: 1 } }} />
+        <Text style={[styles.shotBtnLabel, { fontSize: size * 0.15 }, jua ? { fontFamily: jua } : null]}>{label}</Text>
+      </ImageBackground>
     </Pressable>
   );
 }
@@ -831,24 +848,15 @@ const styles = StyleSheet.create({
   fx: { position: 'absolute', left: 0, top: 0 },
 
   joyZone: { position: 'absolute', left: 0, bottom: 0, width: '44%', height: 210, alignItems: 'center', justifyContent: 'flex-end', paddingBottom: 26 },
-  joyBase: {
-    width: 112, height: 112, borderRadius: 56, backgroundColor: 'rgba(148,163,184,0.14)',
-    borderWidth: 1.5, borderColor: 'rgba(148,163,184,0.4)', alignItems: 'center', justifyContent: 'center',
-  },
-  joyTick: { position: 'absolute', width: 8, height: 3, borderRadius: 2, backgroundColor: 'rgba(148,163,184,0.5)', marginLeft: -4 },
-  joyKnob: {
-    width: 52, height: 52, borderRadius: 26, backgroundColor: 'rgba(241,245,249,0.9)',
-    borderWidth: 2, borderColor: 'rgba(148,163,184,0.6)',
-  },
+  joyBase: { width: 112, height: 112, alignItems: 'center', justifyContent: 'center' },
+  joyKnob: { width: 54, height: 54 },
 
   btnCluster: { ...StyleSheet.absoluteFillObject },
-  shotBtn: {
-    position: 'absolute', alignItems: 'center', justifyContent: 'center',
-    borderWidth: 3, borderColor: 'rgba(255,255,255,0.35)',
-    shadowColor: '#000', shadowOpacity: 0.35, shadowRadius: 6, shadowOffset: { width: 0, height: 3 },
-    elevation: 6,
+  shotBtn: { position: 'absolute' },
+  shotBtnLabel: {
+    color: '#fff', fontWeight: '700', marginTop: 0,
+    textShadowColor: 'rgba(0,0,0,0.4)', textShadowRadius: 2, textShadowOffset: { width: 0, height: 1 },
   },
-  shotBtnLabel: { color: '#fff', fontWeight: '700', marginTop: 1 },
 
   popup: { position: 'absolute', width: 140, alignItems: 'center' },
   popupText: {
