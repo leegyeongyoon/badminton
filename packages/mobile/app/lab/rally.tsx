@@ -55,7 +55,7 @@ const RESULT_IMG = {
   lose: require('../../assets/game/char/player_lunge.png'),
 };
 
-const SERVE_PERIOD = 1100;
+const SERVE_PERIOD = 1400; // 게이지 왕복 주기 — 사람이 PERFECT를 노릴 수 있는 속도
 const servePhase = (now: number) => Math.abs(Math.sin((Math.PI * (now % SERVE_PERIOD)) / SERVE_PERIOD));
 
 const SHOT_KO: Record<ShotType, string> = {
@@ -138,6 +138,8 @@ export default function RallyGameScreen() {
   const mkX = useSharedValue(0), mkY = useSharedValue(0), mkS = useSharedValue(1), mkOn = useSharedValue(0);
   const mk2X = useSharedValue(0), mk2Y = useSharedValue(0), mk2S = useSharedValue(1), mk2On = useSharedValue(0);
   const mkPulse = useSharedValue(0);
+  const chanceOn = useSharedValue(0);
+  const bobT = useSharedValue(0);
   const laneOn = useSharedValue(0), aimLaneSV = useSharedValue(0);
   const gauge = useSharedValue(0);
   const shakeT = useSharedValue(1), flashT = useSharedValue(0);
@@ -236,9 +238,12 @@ export default function RallyGameScreen() {
         mkX.value = p.x(s.traj.p2.x, s.traj.p2.y);
         mkY.value = p.y(s.traj.p2.y, 0);
         mkS.value = p.scale(s.traj.p2.y);
+        chanceOn.value = s.traj.chance ? 1 : 0; // 뜬공 = 스매시 찬스 알림
       } else {
         mkOn.value = 0;
+        chanceOn.value = 0;
       }
+      bobT.value += step * 0.005; // 아이들 숨쉬기
       if (s.phase === 'rally' && s.traj && s.traj.by === 'player' && s.traj.landing === 'in') {
         mk2On.value = 1;
         mk2X.value = p.x(s.traj.p2.x, s.traj.p2.y);
@@ -368,19 +373,20 @@ export default function RallyGameScreen() {
     });
 
   // ── 애니메이티드 스타일 ───────────────────────────────────────────
+  // 캐릭터 1.2배 확대(가독·귀여움) + 아이들 때 숨쉬기 바운스
   const playerStyle = useAnimatedStyle(() => ({
     transform: [
       { translateX: pX.value - 39 },
-      { translateY: pY.value - 102 },
-      { scale: pS.value },
+      { translateY: pY.value - 112 + (pPose.value === 0 ? Math.sin(bobT.value) * 2.2 : 0) },
+      { scale: pS.value * 1.2 },
       { scaleX: pFace.value },
     ],
   }));
   const aiStyle = useAnimatedStyle(() => ({
     transform: [
       { translateX: aX.value - 39 },
-      { translateY: aY.value - 102 },
-      { scale: aS.value },
+      { translateY: aY.value - 112 + (aPose.value === 0 ? Math.sin(bobT.value + 1.7) * 2.2 : 0) },
+      { scale: aS.value * 1.2 },
       { scaleX: aFace.value },
     ],
   }));
@@ -425,6 +431,10 @@ export default function RallyGameScreen() {
   const marker2Style = useAnimatedStyle(() => ({
     opacity: mk2On.value * 0.75,
     transform: [{ translateX: mk2X.value - 14 }, { translateY: mk2Y.value - 6 }, { scale: mk2S.value }],
+  }));
+  const chanceStyle = useAnimatedStyle(() => ({
+    opacity: chanceOn.value * mkOn.value,
+    transform: [{ translateX: mkX.value - 30 }, { translateY: mkY.value - 34 }, { scale: 1 + mkPulse.value * 0.12 }],
   }));
   const knobStyle = useAnimatedStyle(() => ({
     transform: [{ translateX: knobX.value }, { translateY: knobY.value }],
@@ -501,6 +511,9 @@ export default function RallyGameScreen() {
           {/* 낙하 마커 */}
           <Animated.View style={[styles.marker, markerStyle]} pointerEvents="none" />
           <Animated.View style={[styles.marker2, marker2Style]} pointerEvents="none" />
+          <Animated.View style={[styles.chanceTag, chanceStyle]} pointerEvents="none">
+            <Text style={[styles.chanceTagText, juaStyle]}>찬스!</Text>
+          </Animated.View>
 
           {/* 셔틀 그림자 */}
           <Animated.View style={[styles.shuttleShadow, shadowStyle]} pointerEvents="none" />
@@ -914,6 +927,11 @@ const styles = StyleSheet.create({
     position: 'absolute', width: 28, height: 11, borderRadius: 14,
     borderWidth: 2, borderColor: 'rgba(255,255,255,0.95)', backgroundColor: 'rgba(255,255,255,0.22)',
   },
+  chanceTag: {
+    position: 'absolute', width: 60, paddingVertical: 2, borderRadius: 10,
+    backgroundColor: '#F59E0B', alignItems: 'center',
+  },
+  chanceTagText: { color: '#fff', fontSize: 13, fontWeight: '700' },
   shuttleShadow: {
     position: 'absolute', width: 20, height: 8, borderRadius: 10, backgroundColor: '#000',
   },
@@ -945,7 +963,7 @@ const styles = StyleSheet.create({
   },
   bannerSub: { fontSize: 14, fontWeight: '700', color: '#CBD5E1', textAlign: 'center', marginTop: 4 },
 
-  serveWrap: { position: 'absolute', bottom: 26, alignSelf: 'center', alignItems: 'center', gap: spacing.sm, width: 260 },
+  serveWrap: { position: 'absolute', bottom: 26, right: 14, alignItems: 'center', gap: spacing.sm, width: 240 },
   gaugeTrack: { width: '100%', height: 16, borderRadius: 8, overflow: 'hidden', backgroundColor: 'rgba(255,255,255,0.7)', borderWidth: 1, borderColor: '#B9D2E4' },
   gaugeFill: { height: '100%', backgroundColor: '#14B8A6' },
   gaugePerfect: { position: 'absolute', right: 0, top: 0, bottom: 0, width: '8%', backgroundColor: 'rgba(250,204,21,0.55)' },
