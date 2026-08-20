@@ -26,9 +26,9 @@ import type { MotionKey } from '../sim';
 const JOINTS = ['torso', 'armL', 'foreL', 'armR', 'foreR', 'racket', 'legL', 'legR'] as const;
 type Joint = (typeof JOINTS)[number];
 
-// 준비 자세: 라켓 헤드가 위로 서는 배드민턴 레디 스탠스 (손은 가슴 앞, 라켓은 얼굴 옆)
+// 준비 자세: 라켓을 몸 앞 중앙에 들고 헤드가 위로 — 클래식 배드민턴 레디
 const REST: Record<Joint, number> = {
-  torso: 0, armL: 7, foreL: 9, armR: -24, foreR: -70, racket: -55, legL: 2, legR: -2,
+  torso: 0, armL: 7, foreL: 9, armR: 22, foreR: -100, racket: 60, legL: 2, legR: -2,
 };
 
 interface Frame {

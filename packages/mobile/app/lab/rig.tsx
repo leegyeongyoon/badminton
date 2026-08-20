@@ -22,11 +22,32 @@ const STRIPS: { m: RigClip; label: string; times: number[] }[] = [
   { m: 'lunge', label: '런지', times: [0, 130, 260, 390, 590] },
 ];
 
+// 레디 포즈 후보 스윕 — freeze로 직접 관절값을 넣어 비교
+const READY_CANDIDATES: { name: string; j: Record<string, number> }[] = [
+  { name: 'A', j: { armR: 22, foreR: -100, racket: -60 } },
+  { name: 'B', j: { armR: 22, foreR: -100, racket: 60 } },
+  { name: 'C', j: { armR: 22, foreR: -100, racket: 130 } },
+  { name: 'D', j: { armR: 30, foreR: -125, racket: 0 } },
+  { name: 'E', j: { armR: 12, foreR: -80, racket: 30 } },
+  { name: 'F', j: { armR: 35, foreR: -140, racket: 80 } },
+];
+
 export default function RigFilmstrip() {
   const zeroPose = useSharedValue(0);
   const zeroRun = useSharedValue(0);
   return (
     <ScrollView style={{ flex: 1, backgroundColor: '#DFF0E6' }} contentContainerStyle={{ padding: 12 }}>
+      <View style={s.row}>
+        <Text style={s.label}>레디 후보</Text>
+        <View style={s.cells}>
+          {READY_CANDIDATES.map((c) => (
+            <View key={c.name} style={s.cell}>
+              <RigCharacter variant="male" poseMode={zeroPose} runFrame={zeroRun} freeze={{ j: c.j, y: 0 }} />
+              <Text style={s.t}>{c.name}</Text>
+            </View>
+          ))}
+        </View>
+      </View>
       {STRIPS.map((row) => (
         <View key={row.m} style={s.row}>
           <Text style={s.label}>{row.label}</Text>
