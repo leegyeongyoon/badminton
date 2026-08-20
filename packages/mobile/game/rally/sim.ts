@@ -27,7 +27,33 @@ export interface Vec3 {
 export type Anim = 'idle' | 'run' | 'swing' | 'lunge';
 
 /** 리깅 캐릭터의 샷별 스윙 클립 키 — 렌더러(RigCharacter)가 이 값으로 모션을 고른다 */
-export type MotionKey = 'overhead' | 'smashJump' | 'under' | 'netPush' | 'drive' | 'lunge' | 'cheer';
+export type MotionKey =
+  | 'overhead' | 'smashJump' | 'under' | 'netPush' | 'drive' | 'lunge' | 'cheer'
+  | 'backOverhead' | 'backDrive' | 'backUnder' | 'backNet' | 'round';
+
+/** 스윙 손 — 포핸드 / 백핸드 / 라운드(백 쪽 높은 공을 포핸드로 돌아 침) */
+export type SwingHand = 'fore' | 'back' | 'round';
+
+/** 컨택 위치×손잡이 → 스윙 손. 라켓 반대쪽 높은 공은 발이 갔으면 라운드, 아니면 백핸드 */
+function handFor(racketSign: 1 | -1, dxBall: number, z: number, distQ: number): SwingHand {
+  if (dxBall * racketSign >= -0.15) return 'fore';
+  if (z >= 1.55 && distQ >= 1) return 'round';
+  return 'back';
+}
+
+/** 백핸드 모션 매핑 */
+function motionForHand(base: MotionKey, hand: SwingHand): MotionKey {
+  if (hand === 'round') return 'round';
+  if (hand !== 'back') return base;
+  switch (base) {
+    case 'overhead':
+    case 'smashJump': return 'backOverhead';
+    case 'drive': return 'backDrive';
+    case 'under': return 'backUnder';
+    case 'netPush': return 'backNet';
+    default: return base;
+  }
+}
 
 export function motionFor(shot: ShotType, serve = false, kind?: 'short' | 'long'): MotionKey {
   if (serve) return kind === 'short' ? 'netPush' : 'under';
@@ -81,6 +107,8 @@ export interface SimState {
   /** PvP 모드 — AI 자동 행동(서브·이동·스윙)을 끄고 원격 입력이 s.ai를 조종한다.
    *  호스트만 sim을 돌리고 게스트는 스냅샷 미러를 받는다(호스트 권위). */
   pvp?: boolean;
+  /** 플레이어 왼손잡이 — 백핸드/라운드 판정과 AI의 백핸드 공략 방향이 바뀐다 */
+  leftHand?: boolean;
   score: Score;
   server: Side;
   rallyLen: number;
@@ -103,6 +131,7 @@ export interface SimState {
     cut?: boolean; // 높은 타점에서 자른 드롭
     weak?: 'late' | 'stretch'; // 배드의 원인 — 낮은 타점 / 밀린 발
     by?: Side; // PvP: 누구의 스윙인지 — 팝업을 각자 자기 것만 띄우기 위해
+    hand?: SwingHand; // 백핸드/라운드 — 팝업 표기용
   } | null;
   events: string[];
 }
@@ -144,7 +173,7 @@ export type AimDepth = -1 | 0 | 1;
 
 // ─── 튜닝 상수 ─────────────────────────────────────────────────────
 const PLAYER_SPEED = 4.8; // m/s — 사람이 코트를 커버할 수 있게 넉넉히
-const AI_SPEED: Record<Difficulty, number> = { easy: 2.55, normal: 3.1, hard: 4.4 };
+const AI_SPEED: Record<Difficulty, number> = { easy: 2.55, normal: 3.0, hard: 4.4 };
 const REACH_PERFECT = 0.6;
 const REACH_GOOD = 1.05;
 const REACH_MAX = 1.45; // 런지 한계 — 이 밖이면 헛스윙 (AI 캐치 판정용)
@@ -172,7 +201,7 @@ const SHOT3: Record<ShotType, { dur: number; apex: number; yMin: number; yMax: n
 // AI 스윙 퀄리티 분포 [perfect, good, bad]
 const AI_Q: Record<Difficulty, [number, number, number]> = {
   easy: [0.08, 0.42, 0.5],
-  normal: [0.2, 0.52, 0.28],
+  normal: [0.18, 0.51, 0.31],
   hard: [0.45, 0.48, 0.07],
 };
 
@@ -446,8 +475,6 @@ export function swingPlayer(s: SimState, intent: SwingIntent, aim: AimLane, dept
   }
   const d = dist2(s.shuttle.x, s.shuttle.y, s.player.x, s.player.y);
   const reach = REACH_BY_DIFF[s.config.difficulty];
-  // 스윙 순간 셔틀 쪽으로 몸을 돌린다 (포핸드 방향감)
-  if (Math.abs(s.shuttle.x - s.player.x) > 0.15) s.player.facing = s.shuttle.x > s.player.x ? 1 : -1;
   if (d > reach.m || s.shuttle.z > 3.0 || s.shuttle.y > 0) {
     s.player.anim = 'swing';
     s.player.animUntil = now + 300;
@@ -457,11 +484,15 @@ export function swingPlayer(s: SimState, intent: SwingIntent, aim: AimLane, dept
     return;
   }
   const contact: Vec3 = { ...s.shuttle };
-  const shot = shotForContact(intent, contact);
-  // 퀄리티 = 발(거리) × 타점(높이) — 둘 중 나쁜 쪽이 결과를 정한다
   const distQ = d <= reach.p ? 2 : d <= reach.g ? 1 : 0;
+  // 포핸드/백핸드/라운드 — 라켓 손 반대쪽 공은 약해진다 (배드민턴의 핵심 비대칭)
+  const racketSign: 1 | -1 = s.leftHand ? -1 : 1;
+  const hand = handFor(racketSign, contact.x - s.player.x, contact.z, distQ);
+  let shot = shotForContact(intent, contact);
+  // 백핸드 오버헤드: 스매시 불가(드라이브로), 파워 다운(퍼펙트 불가)
+  if (hand === 'back' && contact.z >= 1.2 && shot === 'smash') shot = 'drive';
   const timeQ = timingQuality(shot, contact.z);
-  const qn = Math.min(distQ, timeQ);
+  const qn = Math.min(distQ, timeQ, hand === 'back' && contact.z >= 1.5 ? 1 : 2);
   const quality: Quality = qn === 2 ? 'perfect' : qn === 1 ? 'good' : 'bad';
   const weak = quality === 'bad' ? (timeQ === 0 ? 'late' as const : 'stretch' as const) : undefined;
   const cut = shot === 'drop' && contact.z >= 1.7 && quality === 'perfect';
@@ -469,12 +500,15 @@ export function swingPlayer(s: SimState, intent: SwingIntent, aim: AimLane, dept
   if (quality === 'perfect') s.stats.perfects += 1;
   s.rallyLen += 1;
   stepIntoShot(s.player, contact.x, contact.y, -6.6, -0.35);
+  // 라운드는 몸이 백 쪽으로 흘러간다 — 코스 회복 페널티
+  if (hand === 'round') s.player.x = Math.max(-3, Math.min(3, s.player.x - racketSign * 0.4));
+  s.player.facing = racketSign; // 스윙 중엔 잡이 손 고정 — 미러로 손이 바뀌지 않게
   s.player.anim = quality === 'bad' ? 'lunge' : 'swing';
   s.player.animUntil = now + 260;
-  s.player.motion = motionFor(shot);
+  s.player.motion = motionForHand(motionFor(shot), hand);
   s.traj = makeTraj('player', shot, quality, contact, aimX, now, s.rallyLen, DIFF_PACE[s.config.difficulty], depth);
-  s.lastShot = { shot, quality, cross: s.traj.cross, cut, weak };
-  s.events.push(`swing:${shot}:${quality}${s.traj.cross ? ':cross' : ''}${weak ? `:${weak}` : ''}:z${contact.z.toFixed(2)}:d${d.toFixed(2)}`);
+  s.lastShot = { shot, quality, cross: s.traj.cross, cut, weak, hand };
+  s.events.push(`swing:${shot}:${quality}:${hand}${s.traj.cross ? ':cross' : ''}${weak ? `:${weak}` : ''}:z${contact.z.toFixed(2)}:d${d.toFixed(2)}`);
 }
 
 // ─── 서브 ──────────────────────────────────────────────────────────
@@ -572,6 +606,9 @@ function aiSwing(s: SimState, now: number) {
   if (t.chance && quality === 'bad' && s.config.difficulty !== 'easy') quality = 'good'; // 뜬공 구제 — easy는 찬스도 놓친다
 
   const contact: Vec3 = { ...s.shuttle };
+  // AI(정면 뷰)의 라켓 방향 = 월드 -x. 백핸드 하이는 AI도 약해진다
+  const aiHand = handFor(-1, contact.x - s.ai.x, contact.z, d <= REACH_PERFECT ? 2 : d <= REACH_GOOD ? 1 : 0);
+  if (aiHand === 'back' && contact.z >= 1.5 && quality === 'perfect') quality = 'good';
   const menu = contactMenu(contact);
   let shot: ShotType;
   if (menu.includes('smash') && (t.chance || Math.random() < (s.config.difficulty === 'hard' ? 0.5 : s.config.difficulty === 'normal' ? 0.3 : 0.16))) {
@@ -584,19 +621,26 @@ function aiSwing(s: SimState, now: number) {
   // 코스: 플레이어가 없는 쪽을 연속값으로 노린다 (난이도가 높을수록 독하고 와이드하게)
   const openSign = s.player.x > 0.6 ? -1 : s.player.x < -0.6 ? 1 : Math.random() < 0.5 ? -1 : 1;
   const smart = Math.random() < (s.config.difficulty === 'hard' ? 0.85 : s.config.difficulty === 'normal' ? 0.55 : 0.28);
-  const aim = smart ? openSign * rnd(0.55, s.config.difficulty === 'hard' ? 1 : 0.85) : rnd(-0.8, 0.8);
+  let aim = smart ? openSign * rnd(0.55, s.config.difficulty === 'hard' ? 1 : 0.85) : rnd(-0.8, 0.8);
   // 깊이도 섞는다 — 플레이어가 뒤에 있으면 짧게, 앞에 있으면 깊게 노리는 경향
-  const depth: AimDepth = smart
+  let depth: AimDepth = smart
     ? (Math.abs(s.player.y) > 4.4 ? -1 : Math.abs(s.player.y) < 2.6 ? 1 : 0)
     : ((Math.round(rnd(-1, 1)) as AimDepth));
+  // 배드민턴 공략: 상대 백핸드 하이 코스 노리기 (normal 15% / hard 30%)
+  const bhProb = s.config.difficulty === 'hard' ? 0.3 : s.config.difficulty === 'normal' ? 0.08 : 0;
+  if ((shot === 'clear' || shot === 'lift' || shot === 'drive') && Math.random() < bhProb) {
+    aim = (s.leftHand ? 1 : -1) * rnd(0.5, 0.9);
+    depth = 1;
+  }
 
   s.rallyLen += 1;
   stepIntoShot(s.ai, contact.x, contact.y, 0.35, 6.6);
+  s.ai.facing = -1;
   s.ai.anim = quality === 'bad' ? 'lunge' : 'swing';
   s.ai.animUntil = now + 260;
-  s.ai.motion = motionFor(shot);
+  s.ai.motion = motionForHand(motionFor(shot), aiHand);
   s.traj = makeTraj('ai', shot, quality, contact, aim, now, s.rallyLen, DIFF_PACE[s.config.difficulty], depth);
-  s.events.push(`ai-swing:${shot}:${quality}`);
+  s.events.push(`ai-swing:${shot}:${quality}:${aiHand}`);
 }
 
 // ─── 메인 틱 ───────────────────────────────────────────────────────
@@ -689,7 +733,7 @@ export function tick(s: SimState, dtMs: number, input: MoveInput, remote?: MoveI
       } else if (u > 0.82 && d < REACH_MAX) {
         // 겨우 닿는 런지 — 40%는 라켓이 빗나간다
         t.aiHandled = true;
-        const whiffP = s.config.difficulty === 'hard' ? 0.3 : s.config.difficulty === 'normal' ? 0.45 : 0.58;
+        const whiffP = s.config.difficulty === 'hard' ? 0.3 : s.config.difficulty === 'normal' ? 0.5 : 0.58;
         if (Math.random() < whiffP) {
           s.ai.anim = 'lunge';
           s.ai.animUntil = now + 300;
@@ -762,7 +806,6 @@ export function swingRemote(s: SimState, intent: SwingIntent, aim: AimLane, dept
   }
   const d = dist2(s.shuttle.x, s.shuttle.y, s.ai.x, s.ai.y);
   const reach = REACH_BY_DIFF[s.config.difficulty];
-  if (Math.abs(s.shuttle.x - s.ai.x) > 0.15) s.ai.facing = s.shuttle.x > s.ai.x ? 1 : -1;
   if (d > reach.m || s.shuttle.z > 3.0 || s.shuttle.y < 0) {
     s.ai.anim = 'swing';
     s.ai.animUntil = now + 300;
@@ -772,10 +815,14 @@ export function swingRemote(s: SimState, intent: SwingIntent, aim: AimLane, dept
     return;
   }
   const contact: Vec3 = { ...s.shuttle };
-  const shot = shotForContact(intent, contact);
   const distQ = d <= reach.p ? 2 : d <= reach.g ? 1 : 0;
+  // 게스트도 오른손 기준 백핸드/라운드 판정 (원격 캐릭터의 라켓 방향 = 월드 -x)
+  const remoteSign: 1 | -1 = -1;
+  const hand = handFor(remoteSign, contact.x - s.ai.x, contact.z, distQ);
+  let shot = shotForContact(intent, contact);
+  if (hand === 'back' && contact.z >= 1.2 && shot === 'smash') shot = 'drive';
   const timeQ = timingQuality(shot, contact.z);
-  const qn = Math.min(distQ, timeQ);
+  const qn = Math.min(distQ, timeQ, hand === 'back' && contact.z >= 1.5 ? 1 : 2);
   const quality: Quality = qn === 2 ? 'perfect' : qn === 1 ? 'good' : 'bad';
   const weak = quality === 'bad' ? (timeQ === 0 ? 'late' as const : 'stretch' as const) : undefined;
   const cut = shot === 'drop' && contact.z >= 1.7 && quality === 'perfect';
@@ -783,12 +830,13 @@ export function swingRemote(s: SimState, intent: SwingIntent, aim: AimLane, dept
   if (quality === 'perfect') s.stats.perfectsRemote = (s.stats.perfectsRemote ?? 0) + 1;
   s.rallyLen += 1;
   stepIntoShot(s.ai, contact.x, contact.y, 0.35, 6.6);
+  s.ai.facing = remoteSign;
   s.ai.anim = quality === 'bad' ? 'lunge' : 'swing';
   s.ai.animUntil = now + 260;
-  s.ai.motion = motionFor(shot);
+  s.ai.motion = motionForHand(motionFor(shot), hand);
   s.traj = makeTraj('ai', shot, quality, contact, aimX, now, s.rallyLen, DIFF_PACE[s.config.difficulty], depth);
-  s.lastShot = { shot, quality, cross: s.traj.cross, cut, weak, by: 'ai' };
-  s.events.push(`remote-swing:${shot}:${quality}`);
+  s.lastShot = { shot, quality, cross: s.traj.cross, cut, weak, by: 'ai', hand };
+  s.events.push(`remote-swing:${shot}:${quality}:${hand}`);
 }
 
 /** 게스트 서브를 호스트 sim에 적용 — 게이지 위상은 게스트 화면에서 잰 값. */

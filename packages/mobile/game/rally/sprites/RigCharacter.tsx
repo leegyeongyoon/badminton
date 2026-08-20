@@ -82,6 +82,39 @@ const CLIPS: Record<string, Clip> = {
     { d: 80, j: { armR: -108, foreR: 6, racket: 64, torso: 7 } },
     { d: 210, j: {} },
   ] },
+  // ── 백핸드 — 미러가 아니라 몸 앞을 가로지르는 전용 스윙 (양수 회전 = 몸 건너편) ──
+  // 백 오버헤드(백클리어·백드롭): 라켓을 반대 어깨로 감았다가 위로 크로스
+  backOverhead: { f: [
+    { d: 70, j: { armR: 35, foreR: 85, racket: 45, torso: 8 } },
+    { d: 80, j: { armR: 128, foreR: 8, racket: -22, torso: -6 } },
+    { d: 180, j: { armR: 60, foreR: 30, racket: 0, torso: 0 } },
+    { d: 160, j: {} },
+  ] },
+  // 백 드라이브: 몸 앞 낮게 감았다가 평평하게 후려치기
+  backDrive: { f: [
+    { d: 70, j: { armR: 50, foreR: 95, racket: 62, torso: 7 } },
+    { d: 80, j: { armR: 96, foreR: -8, racket: -58, torso: -6 } },
+    { d: 210, j: {} },
+  ] },
+  // 백 언더(백 리프트): 반대쪽 아래에서 퍼올리기
+  backUnder: { f: [
+    { d: 70, j: { armR: 55, foreR: 40, racket: 30, torso: 7 } },
+    { d: 100, j: { armR: 115, foreR: 10, racket: -30, torso: -4 } },
+    { d: 210, j: {} },
+  ] },
+  // 백 네트(백 헤어핀/푸시): 반대쪽으로 짧게 밀기
+  backNet: { f: [
+    { d: 80, j: { armR: 78, foreR: 18, racket: 5, torso: 8, legL: 24, legR: -14 } },
+    { d: 110, j: { armR: 88, foreR: 10 } },
+    { d: 180, j: {} },
+  ] },
+  // 라운드 더 헤드: 백 쪽 높은 공을 머리 위로 돌아 포핸드로 — 몸이 기울며 강타
+  round: { f: [
+    { d: 80, j: { armR: -130, foreR: -110, racket: -50, torso: 6 } },
+    { d: 80, j: { armR: -198, foreR: -8, racket: 20, torso: 13, legL: 12 } },
+    { d: 170, j: { armR: -80, foreR: -30, torso: 5 } },
+    { d: 160, j: {} },
+  ] },
   // 런지: 다리 쫙 뻗고 낮게 리치 (배드 퀄리티 리턴)
   lunge: { f: [
     { d: 130, j: { armR: -98, foreR: 0, racket: 10, legR: 38, legL: -26, torso: 13 }, y: 9 },

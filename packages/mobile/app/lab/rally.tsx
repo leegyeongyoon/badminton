@@ -127,7 +127,10 @@ export default function RallyGameScreen() {
   const [ui, setUi] = useState<UiSnap | null>(null);
   const [popup, setPopup] = useState<Popup | null>(null);
   const [guideOpen, setGuideOpen] = useState(true);
-  const [lefty, setLefty] = useState(false); // 왼손 모드 — 조이스틱↔버튼 좌우 교체
+  const [lefty, setLefty] = useState(false); // 왼손 모드 — 조작 배치 + 왼손잡이 캐릭터(백핸드 방향)
+  useEffect(() => {
+    if (simRef.current) simRef.current.leftHand = lefty;
+  }, [lefty]);
   const [fontsLoaded] = useFonts({ Jua_400Regular });
   const jua = fontsLoaded ? 'Jua_400Regular' : undefined;
 
@@ -161,6 +164,7 @@ export default function RallyGameScreen() {
     const pvpCfg: MatchConfig = { target: 11, deuce: true, difficulty: 'normal' };
     setCfg(pvpCfg);
     const s = createSim(pvpCfg);
+    s.leftHand = false; // PvP는 우선 오른손 기준(프로토콜 확장 전)
     if (isGuest) {
       s.server = 'ai'; // 첫 서브는 호스트 — 게스트 프레임에선 상대(ai)
     } else {
@@ -420,7 +424,8 @@ export default function RallyGameScreen() {
         if (s.lastShot && myShot && lsKey !== lastShotKeyRef.current && s.phase === 'rally') {
           lastShotKeyRef.current = lsKey;
           const q = s.lastShot.quality;
-          const base = s.lastShot.cut ? '커트' : SHOT_KO[s.lastShot.shot];
+          const handKo = s.lastShot.hand === 'back' ? '백핸드 ' : s.lastShot.hand === 'round' ? '라운드 ' : '';
+          const base = handKo + (s.lastShot.cut ? '커트' : SHOT_KO[s.lastShot.shot]);
           const shotName = s.lastShot.cross ? `크로스 ${base}` : base;
           const badText = s.lastShot.shot === 'smash'
             ? s.lastShot.weak === 'late' ? '타점 낮음!' : '밀린 스매시!'
@@ -652,6 +657,7 @@ export default function RallyGameScreen() {
         onCharSel={setCharSel}
         onStart={() => {
           simRef.current = createSim(cfg);
+          simRef.current.leftHand = lefty;
           uiKeyRef.current = '';
           setUi(null);
           setGuideOpen(true);
@@ -903,6 +909,7 @@ export default function RallyGameScreen() {
                 }
                 const ns = createSim(cfg);
                 if (isPvp) ns.pvp = true;
+                else ns.leftHand = lefty;
                 simRef.current = ns;
                 uiKeyRef.current = '';
                 setUi(null);
