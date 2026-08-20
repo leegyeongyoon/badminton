@@ -47,7 +47,7 @@ import {
   tick,
 } from '../../game/rally/sim';
 import { connectRally, RallyNet } from '../../game/rally/net';
-import { initSfx, playSfx } from '../../game/rally/sound';
+import { initSfx, playSfx, setSfxMuted } from '../../game/rally/sound';
 import { rallyApi } from '../../services/rally';
 import { clubSessionApi } from '../../services/clubSession';
 import { profileApi } from '../../services/profile';
@@ -133,6 +133,7 @@ export default function RallyGameScreen() {
   const [popup, setPopup] = useState<Popup | null>(null);
   const [guideOpen, setGuideOpen] = useState(true);
   const [lefty, setLefty] = useState(false); // 왼손 모드 — 조작 배치 + 왼손잡이 캐릭터(백핸드 방향)
+  const [soundOn, setSoundOn] = useState(false); // 사운드 기본 꺼짐 — 토글로
   useEffect(() => {
     if (simRef.current) simRef.current.leftHand = lefty;
   }, [lefty]);
@@ -696,6 +697,14 @@ export default function RallyGameScreen() {
       <View style={[styles.topBar, { paddingTop: insets.top + 6 }]}>
         <BackButton />
         <View style={{ flex: 1 }} />
+        {/* 사운드 토글 (기본 꺼짐) */}
+        <Pressable
+          onPress={() => setSoundOn((v) => { setSfxMuted(v); return !v; })}
+          hitSlop={8}
+          style={{ marginRight: spacing.md }}
+        >
+          <MaterialCommunityIcons name={soundOn ? 'volume-high' : 'volume-off'} size={21} color="#5A6B7E" />
+        </Pressable>
         {/* 왼손/오른손 전환 — 조이스틱과 샷 버튼 좌우 교체 */}
         <Pressable onPress={() => setLefty((v) => !v)} hitSlop={8} style={{ marginRight: spacing.md }}>
           <MaterialCommunityIcons
@@ -862,7 +871,7 @@ export default function RallyGameScreen() {
                 </Pressable>
                 <Pressable style={({ pressed }) => [styles.serveBtn, pressed && { transform: [{ scale: 0.94 }] }]} onPress={() => doServe('flick')}>
                   <MaterialCommunityIcons name="lightning-bolt-outline" size={18} color="#0F172A" />
-                  <Text style={styles.serveBtnText}>플릭</Text>
+                  <Text style={styles.serveBtnText}>기습서브</Text>
                 </Pressable>
                 <Pressable style={({ pressed }) => [styles.serveBtn, pressed && { transform: [{ scale: 0.94 }] }]} onPress={() => doServe('long')}>
                   <MaterialCommunityIcons name="arrow-up-bold" size={18} color="#0F172A" />
@@ -887,6 +896,7 @@ export default function RallyGameScreen() {
                 <Text style={styles.guideRow}>⬆  클리어/언더 — 높고 깊게 올려 시간 벌기</Text>
                 <Text style={styles.guideRow}>💧  높은 타점 커트 · 낮은 공 블록 · 네트 앞 헤어핀</Text>
                 <Text style={styles.guideRow}>🏸  서브 — 짝수 점수 우측 · 홀수 좌측, 빛나는 대각선 박스로</Text>
+                <Text style={styles.guideRow}>⚡  기습서브 — 숏서브인 척하다 빠르게 깊이 꽂는 서브. 상대가 네트 앞에 붙었을 때!</Text>
                 <Pressable style={styles.guideBtn} onPress={() => setGuideOpen(false)}>
                   <Text style={[styles.guideBtnText, juaStyle]}>시작하기</Text>
                 </Pressable>

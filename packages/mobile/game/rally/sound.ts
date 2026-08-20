@@ -19,6 +19,14 @@ const VOL: Record<SfxKey, number> = { hit: 0.5, smash: 0.75, smashBig: 0.9, net:
 
 let players: Partial<Record<SfxKey, AudioPlayer>> = {};
 let ready = false;
+let muted = true; // 기본 꺼짐 — 게임 상단 토글로 켠다
+
+export function setSfxMuted(m: boolean): void {
+  muted = m;
+}
+export function isSfxMuted(): boolean {
+  return muted;
+}
 
 export function initSfx(): void {
   if (ready) return;
@@ -36,6 +44,7 @@ export function initSfx(): void {
 }
 
 export function playSfx(k: SfxKey): void {
+  if (muted) return;
   const p = players[k];
   if (!p) return;
   try {
