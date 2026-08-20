@@ -149,7 +149,7 @@ const REACH_PERFECT = 0.6;
 const REACH_GOOD = 1.05;
 const REACH_MAX = 1.45; // 런지 한계 — 이 밖이면 헛스윙
 // 난이도별 셔틀 페이스 — 쉬움은 느긋하게, 어려움은 빠르게
-const DIFF_PACE: Record<Difficulty, number> = { easy: 1.15, normal: 1.0, hard: 0.92 };
+const DIFF_PACE: Record<Difficulty, number> = { easy: 1.3, normal: 1.12, hard: 1.0 };
 
 // 샷 스펙: 비행시간(ms), 정점 높이(m), 상대 코트 목표 깊이 y 범위
 // 사람 반응속도 기준 페이스 — 랠리가 '만들어질' 여유를 준다
@@ -264,7 +264,7 @@ function makeTraj(
     : depth < 0 ? dir * rnd(spec.yMin, spec.yMin + span * 0.38)
     : dir * rnd(spec.yMin, spec.yMax);
   // 좌우 코스 — 연속값. 풀 틸트(≈2.3m)는 사이드라인 근처 = 퍼펙트가 아니면 리스크
-  let tx = aimX * 2.3 + rnd(-0.3, 0.3) * (quality === 'perfect' ? 0.55 : 1);
+  let tx = aimX * 2.6 + rnd(-0.3, 0.3) * (quality === 'perfect' ? 0.55 : 1);
   if (Math.abs(aimX) > 0.85 && quality !== 'perfect') tx += rnd(-0.35, 0.35); // 라인 노림 흔들림
   let apex = spec.apex;
 
@@ -324,7 +324,7 @@ function makeTraj(
     dur *= 1.1;
     if (quality !== 'perfect') tx += rnd(-0.3, 0.3);
   }
-  if (landing === 'in' && Math.abs(tx) > COURT.SINGLES_W) landing = 'out';
+  if (landing === 'in' && Math.abs(tx) > COURT.HALF_W) landing = 'out'; // 복식 라인 판정 — 코트를 넓게 쓴다
 
   const p2: Vec3 = { x: tx, y: ty, z: 0.02 };
   const c: Vec3 =
@@ -358,8 +358,8 @@ function shotForContact(intent: SwingIntent, contact: Vec3): ShotType {
   }
   if (intent === 'drop') {
     if (z >= 1.4 && !nearNet) return 'drop';
-    if (nearNet || z < 1.4) return 'hairpin';
-    return 'lift';
+    if (nearNet) return 'hairpin';
+    return 'block'; // 미드코트 낮은 타점의 커트 — 스매시 수비용 짧은 블록
   }
   if (z >= 1.3 && !nearNet) return 'clear';
   return 'lift';

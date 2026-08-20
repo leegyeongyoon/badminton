@@ -66,11 +66,12 @@ const UI_IMG = {
   joyKnob: require('../../assets/game/ui/joy_knob.png'),
 };
 // 타점 존 → 3버튼의 실제 샷 라벨 (조작은 attack/rally/drop 그대로, 라벨만 상황을 말한다)
+// mid = 수비 존: 깔려 오는 공(스매시·드라이브)을 받아치는 드라이브/언더/블록
 type ShotZone = 'high' | 'mid' | 'net';
 const ZONE_BTNS: Record<ShotZone, { atk: string; ral: string; drp: string }> = {
   high: { atk: '스매시', ral: '클리어', drp: '커트' },
-  mid: { atk: '드라이브', ral: '리프트', drp: '드롭' },
-  net: { atk: '푸시', ral: '리프트', drp: '헤어핀' },
+  mid: { atk: '드라이브', ral: '언더', drp: '블록' },
+  net: { atk: '푸시', ral: '언더', drp: '헤어핀' },
 };
 
 const SERVE_PERIOD = 1400; // 게이지 왕복 주기 — 사람이 PERFECT를 노릴 수 있는 속도
@@ -126,6 +127,7 @@ export default function RallyGameScreen() {
   const [ui, setUi] = useState<UiSnap | null>(null);
   const [popup, setPopup] = useState<Popup | null>(null);
   const [guideOpen, setGuideOpen] = useState(true);
+  const [lefty, setLefty] = useState(false); // 왼손 모드 — 조이스틱↔버튼 좌우 교체
   const [fontsLoaded] = useFonts({ Jua_400Regular });
   const jua = fontsLoaded ? 'Jua_400Regular' : undefined;
 
@@ -377,10 +379,18 @@ export default function RallyGameScreen() {
       // 서브 게이지
       if (s.phase === 'serve' && s.server === 'player') gauge.value = servePhase(now);
 
-      // 오는 공의 타점 존 — 버튼 라벨용 (트래젝토리 단위라 깜빡이지 않음)
+      // 타점 존 — 버튼 라벨용. 공이 내 코트로 넘어오면 '실제 셔틀 높이' 기준으로
+      // 실시간 갱신 (라벨과 실제 샷이 어긋나던 문제 해소: 높을 때만 스매시,
+      // 깔려 오면 수비 존 = 드라이브/언더/블록). 넘어오기 전엔 궤적으로 예보.
       if (s.phase === 'rally' && s.traj && s.traj.by === 'ai') {
-        const tj = s.traj;
-        zoneRef.current = Math.abs(tj.p2.y) <= 2.5 ? 'net' : tj.c.z < 2.3 ? 'mid' : 'high';
+        const sh = s.shuttle;
+        if (sh.y < 0.5) {
+          zoneRef.current =
+            Math.abs(sh.y) <= 2.5 && sh.z < 1.5 ? 'net' : sh.z >= 1.5 ? 'high' : 'mid';
+        } else {
+          const tj = s.traj;
+          zoneRef.current = Math.abs(tj.p2.y) <= 2.5 ? 'net' : tj.c.z < 2.3 ? 'mid' : 'high';
+        }
       } else if (s.phase !== 'rally') {
         zoneRef.current = 'high';
       }
@@ -662,6 +672,14 @@ export default function RallyGameScreen() {
       <View style={[styles.topBar, { paddingTop: insets.top + 6 }]}>
         <BackButton />
         <View style={{ flex: 1 }} />
+        {/* 왼손/오른손 전환 — 조이스틱과 샷 버튼 좌우 교체 */}
+        <Pressable onPress={() => setLefty((v) => !v)} hitSlop={8} style={{ marginRight: spacing.md }}>
+          <MaterialCommunityIcons
+            name={lefty ? 'hand-back-left' : 'hand-back-right'}
+            size={21}
+            color="#5A6B7E"
+          />
+        </Pressable>
         <Pressable onPress={() => (isPvp ? router.back() : setScreen('config'))} hitSlop={8}>
           <Icon name="close" size={22} color="#5A6B7E" />
         </Pressable>
@@ -708,17 +726,23 @@ export default function RallyGameScreen() {
           <Animated.View style={[styles.char, aiStyle]} pointerEvents="none">
             <RigCharacter ref={aRigRef} variant="oppo" poseMode={aPose} runFrame={aRun} />
           </Animated.View>
-          <Animated.View style={[styles.fx, ghost2FarStyle]} pointerEvents="none"><ShuttleSvg size={20} /></Animated.View>
-          <Animated.View style={[styles.fx, ghost1FarStyle]} pointerEvents="none"><ShuttleSvg size={22} /></Animated.View>
-          <Animated.View style={[styles.fx, shuttleFarStyle]} pointerEvents="none"><ShuttleSvg size={26} /></Animated.View>
+          <Animated.View style={[styles.fx, ghost2FarStyle]} pointerEvents="none"><ShuttleSvg size={23} /></Animated.View>
+          <Animated.View style={[styles.fx, ghost1FarStyle]} pointerEvents="none"><ShuttleSvg size={26} /></Animated.View>
+          <Animated.View style={[styles.fx, shuttleFarStyle]} pointerEvents="none">
+            <View style={styles.shuttleHalo} />
+            <ShuttleSvg size={31} />
+          </Animated.View>
 
           {/* ── 네트 — 원경과 근경 사이 ── */}
           {proj && <CourtNet proj={proj} />}
 
           {/* ── 근경 레이어: 내 코트의 셔틀 + 나 (네트 앞) ── */}
-          <Animated.View style={[styles.fx, ghost2NearStyle]} pointerEvents="none"><ShuttleSvg size={20} /></Animated.View>
-          <Animated.View style={[styles.fx, ghost1NearStyle]} pointerEvents="none"><ShuttleSvg size={22} /></Animated.View>
-          <Animated.View style={[styles.fx, shuttleNearStyle]} pointerEvents="none"><ShuttleSvg size={26} /></Animated.View>
+          <Animated.View style={[styles.fx, ghost2NearStyle]} pointerEvents="none"><ShuttleSvg size={23} /></Animated.View>
+          <Animated.View style={[styles.fx, ghost1NearStyle]} pointerEvents="none"><ShuttleSvg size={26} /></Animated.View>
+          <Animated.View style={[styles.fx, shuttleNearStyle]} pointerEvents="none">
+            <View style={styles.shuttleHalo} />
+            <ShuttleSvg size={31} />
+          </Animated.View>
           <Animated.View style={[styles.char, playerStyle]} pointerEvents="none">
             <RigCharacter ref={pRigRef} variant={charSel} poseMode={pPose} runFrame={pRun} />
           </Animated.View>
@@ -769,8 +793,8 @@ export default function RallyGameScreen() {
 
           {/* 플로팅 조이스틱 — 터치한 자리에 생기고, 평소엔 흐릿한 힌트만 (코트 시야 확보) */}
           <GestureDetector gesture={joyGesture}>
-            <View style={[styles.joyZone, ui?.phase === 'serve' && { opacity: 0.35 }]}>
-              <Animated.View style={[styles.joyHint, joyHintStyle]} pointerEvents="none">
+            <View style={[styles.joyZone, lefty ? { right: 0 } : { left: 0 }, ui?.phase === 'serve' && { opacity: 0.35 }]}>
+              <Animated.View style={[styles.joyHint, lefty ? { right: 40 } : { left: 40 }, joyHintStyle]} pointerEvents="none">
                 <MaterialCommunityIcons name="gesture-swipe" size={18} color="#5A6B7E" />
               </Animated.View>
               <Animated.View style={[styles.joyFloat, joyBaseStyle]} pointerEvents="none">
@@ -786,15 +810,15 @@ export default function RallyGameScreen() {
           {/* 샷 버튼 — 타점 존에 따라 실제 샷 라벨로 바뀐다 (조작은 3버튼 그대로) */}
           {!serving && ui?.phase !== 'over' && (
             <View style={styles.btnCluster} pointerEvents="box-none">
-              <ShotButton size={62} img={UI_IMG.yellow} icon="water" label={ZONE_BTNS[ui?.zone ?? 'high'].drp} jua={jua} style={{ right: 30, bottom: 132 }} onPress={() => doSwing('drop')} />
-              <ShotButton size={70} img={UI_IMG.green} icon="arrow-up-bold" label={ZONE_BTNS[ui?.zone ?? 'high'].ral} jua={jua} style={{ right: 116, bottom: 48 }} onPress={() => doSwing('rally')} />
-              <ShotButton size={88} img={UI_IMG.red} icon="flash" label={ZONE_BTNS[ui?.zone ?? 'high'].atk} jua={jua} style={{ right: 16, bottom: 30 }} onPress={() => doSwing('attack')} />
+              <ShotButton size={62} img={UI_IMG.yellow} icon="water" label={ZONE_BTNS[ui?.zone ?? 'high'].drp} jua={jua} style={lefty ? { left: 30, bottom: 132 } : { right: 30, bottom: 132 }} onPress={() => doSwing('drop')} />
+              <ShotButton size={70} img={UI_IMG.green} icon="arrow-up-bold" label={ZONE_BTNS[ui?.zone ?? 'high'].ral} jua={jua} style={lefty ? { left: 116, bottom: 48 } : { right: 116, bottom: 48 }} onPress={() => doSwing('rally')} />
+              <ShotButton size={88} img={UI_IMG.red} icon="flash" label={ZONE_BTNS[ui?.zone ?? 'high'].atk} jua={jua} style={lefty ? { left: 16, bottom: 30 } : { right: 16, bottom: 30 }} onPress={() => doSwing('attack')} />
             </View>
           )}
 
           {/* 서브 UI */}
           {serving && (
-            <View style={styles.serveWrap}>
+            <View style={[styles.serveWrap, lefty ? { left: 14, right: undefined } : null]}>
               <Text style={styles.serveCourtText}>
                 {spots?.right ? '우측' : '좌측'} 서비스 · 대각선 박스로
               </Text>
@@ -827,9 +851,9 @@ export default function RallyGameScreen() {
               <View style={styles.guideCard}>
                 <Text style={[styles.guideTitle, juaStyle]}>조작법</Text>
                 <Text style={styles.guideRow}>🕹  왼손 조이스틱 — 이동 · 기울인 채 치면 그 방향 코스</Text>
-                <Text style={styles.guideRow}>⚡  스매시 — 셔틀이 높을 때! 낮게 잡으면 뜬공이 돼요 · 중간 높이는 드라이브</Text>
-                <Text style={styles.guideRow}>⬆  클리어 — 높고 깊게 올려 시간 벌기</Text>
-                <Text style={styles.guideRow}>💧  드롭 — 높은 타점에서 자르면 커트 · 네트 앞은 헤어핀</Text>
+                <Text style={styles.guideRow}>⚡  공이 높으면 스매시 — 깔려 오면 버튼이 수비(드라이브/언더/블록)로 바뀌어요</Text>
+                <Text style={styles.guideRow}>⬆  클리어/언더 — 높고 깊게 올려 시간 벌기</Text>
+                <Text style={styles.guideRow}>💧  높은 타점 커트 · 낮은 공 블록 · 네트 앞 헤어핀</Text>
                 <Text style={styles.guideRow}>🏸  서브 — 짝수 점수 우측 · 홀수 좌측, 빛나는 대각선 박스로</Text>
                 <Pressable style={styles.guideBtn} onPress={() => setGuideOpen(false)}>
                   <Text style={[styles.guideBtnText, juaStyle]}>시작하기</Text>
@@ -915,7 +939,7 @@ function ShotButton({ size, img, icon, label, jua, style, onPress }: {
   icon: ComponentProps<typeof MaterialCommunityIcons>['name'];
   label: string;
   jua?: string;
-  style: { right: number; bottom: number };
+  style: { right?: number; left?: number; bottom: number };
   onPress: () => void;
 }) {
   return (
@@ -923,7 +947,7 @@ function ShotButton({ size, img, icon, label, jua, style, onPress }: {
       onPressIn={onPress}
       style={({ pressed }) => [
         styles.shotBtn,
-        { width: size, height: size, right: style.right, bottom: style.bottom },
+        { width: size, height: size, right: style.right, left: style.left, bottom: style.bottom },
         pressed && { transform: [{ scale: 0.9 }, { translateY: 2 }] },
       ]}
     >
@@ -1004,8 +1028,9 @@ function ServiceBoxHighlight({ proj, spots, server }: {
   const dir = server === 'player' ? 1 : -1;
   const yLo = dir === 1 ? COURT.SHORT_SERVICE : -(COURT.HALF_LEN - 0.15);
   const yHi = dir === 1 ? COURT.HALF_LEN - 0.15 : -COURT.SHORT_SERVICE;
-  const xA = Math.min(spots.targetSign * 0.12, spots.targetSign * COURT.SINGLES_W);
-  const xB = Math.max(spots.targetSign * 0.12, spots.targetSign * COURT.SINGLES_W);
+  // 코트 판정과 동일하게 복식(바깥) 라인까지 — 폰 화면에서 코트를 넓게 쓴다
+  const xA = Math.min(spots.targetSign * 0.12, spots.targetSign * COURT.HALF_W);
+  const xB = Math.max(spots.targetSign * 0.12, spots.targetSign * COURT.HALF_W);
   const N = 10;
   const strips = [];
   for (let i = 0; i < N; i++) {
@@ -1325,14 +1350,19 @@ const styles = StyleSheet.create({
   shuttleShadow: {
     position: 'absolute', width: 20, height: 8, borderRadius: 10, backgroundColor: '#000',
   },
+  // 셔틀 뒤 흰 광륜 — 초록 코트 위 가독성 (콕이 잘 안 보인다는 피드백)
+  shuttleHalo: {
+    position: 'absolute', left: -6, top: -6, width: 43, height: 43,
+    borderRadius: 22, backgroundColor: 'rgba(255,255,255,0.38)',
+  },
 
   char: { position: 'absolute', left: 0, top: 0 },
   fx: { position: 'absolute', left: 0, top: 0 },
 
-  // 터치 영역은 넓게(왼쪽 46% × 320) — 시각 요소는 터치 전엔 힌트뿐
-  joyZone: { position: 'absolute', left: 0, bottom: 0, width: '46%', height: 320 },
+  // 터치 영역은 넓게(46% × 320) — 시각 요소는 터치 전엔 힌트뿐. 좌우는 lefty로 결정
+  joyZone: { position: 'absolute', bottom: 0, width: '46%', height: 320 },
   joyHint: {
-    position: 'absolute', left: 40, bottom: 46, width: 52, height: 52, borderRadius: 26,
+    position: 'absolute', bottom: 46, width: 52, height: 52, borderRadius: 26,
     borderWidth: 2, borderColor: 'rgba(90,107,126,0.55)', borderStyle: 'dashed',
     alignItems: 'center', justifyContent: 'center', backgroundColor: 'rgba(255,255,255,0.25)',
   },
