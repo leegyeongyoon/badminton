@@ -1002,3 +1002,18 @@ model CoachMessage {
 
   @@index([threadId, createdAt])
 }
+
+// 콕고 랠리 PvP 전적 — 정모별 랠리왕 리더보드용 (호스트가 게임 종료 시 보고)
+model RallyResult {
+  id            String   @id @default(uuid())
+  clubSessionId String
+  hostId        String
+  guestId       String
+  hostScore     Int
+  guestScore    Int
+  winnerId      String
+  longestRally  Int      @default(0)
+  createdAt     DateTime @default(now())
+
+  @@index([clubSessionId])
+}

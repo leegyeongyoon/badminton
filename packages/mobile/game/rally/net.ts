@@ -13,6 +13,7 @@ export type RallyInputMsg =
   | { t: 'joy'; dx: number; dy: number }
   | { t: 'swing'; intent: SwingIntent; aim: AimLane; depth?: AimDepth }
   | { t: 'serve'; kind: ServeKind; gauge: number }
+  | { t: 'hand'; left: boolean }
   | { t: 'again' };
 
 const JOY_SEND_MS = 66; // ~15Hz
@@ -23,6 +24,8 @@ export interface RallyNet {
   sendSwing(intent: SwingIntent, aim: AimLane, depth: AimDepth): void;
   sendServe(kind: ServeKind, gauge: number): void;
   sendAgain(): void;
+  /** 게스트: 손잡이 통지 — 호스트의 백핸드 판정 방향에 반영 */
+  sendHand(left: boolean): void;
   /** 호스트: 미러 스냅샷 송신 — rally.tsx 루프가 12Hz로 부른다. */
   sendSnapshot(snap: NetSnapshot): void;
   dispose(): void;
@@ -74,6 +77,9 @@ export function connectRally(
     },
     sendAgain() {
       socket.emit('rally:input', { matchId, payload: { t: 'again' } });
+    },
+    sendHand(left) {
+      socket.emit('rally:input', { matchId, payload: { t: 'hand', left } });
     },
     sendSnapshot(snap) {
       socket.emit('rally:snapshot', { matchId, payload: snap });

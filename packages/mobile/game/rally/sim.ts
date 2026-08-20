@@ -115,6 +115,8 @@ export interface SimState {
   pvp?: boolean;
   /** 플레이어 왼손잡이 — 백핸드/라운드 판정과 AI의 백핸드 공략 방향이 바뀐다 */
   leftHand?: boolean;
+  /** PvP 게스트 손잡이 (호스트 sim에서 원격 스윙 판정에 사용) */
+  remoteLeftHand?: boolean;
   score: Score;
   server: Side;
   rallyLen: number;
@@ -893,8 +895,8 @@ export function swingRemote(s: SimState, intent: SwingIntent, aim: AimLane, dept
   const contact: Vec3 = { ...s.shuttle };
   const wasChance = !!s.traj.chance;
   const distQ = d <= reach.p ? 2 : d <= reach.g ? 1 : 0;
-  // 게스트도 오른손 기준 백핸드/라운드 판정 (원격 캐릭터의 라켓 방향 = 월드 -x)
-  const remoteSign: 1 | -1 = -1;
+  // 게스트 손잡이 반영 — 오른손잡이 게스트의 라켓 방향 = 월드 -x
+  const remoteSign: 1 | -1 = s.remoteLeftHand ? 1 : -1;
   const hand = handFor(remoteSign, contact.x - s.ai.x, contact.z, distQ);
   let shot = shotForContact(intent, contact);
   if (hand === 'back' && contact.z >= 1.2 && shot === 'smash') shot = 'drive';

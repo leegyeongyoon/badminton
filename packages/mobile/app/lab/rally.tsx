@@ -48,7 +48,7 @@ import {
 } from '../../game/rally/sim';
 import { connectRally, RallyNet } from '../../game/rally/net';
 import { initSfx, playSfx, setSfxMuted } from '../../game/rally/sound';
-import { rallyApi } from '../../services/rally';
+import { rallyApi, RallyLeaderboard } from '../../services/rally';
 import { clubSessionApi } from '../../services/clubSession';
 import { profileApi } from '../../services/profile';
 import { useAuthStore } from '../../store/authStore';
@@ -136,6 +136,8 @@ export default function RallyGameScreen() {
   const [soundOn, setSoundOn] = useState(false); // 사운드 기본 꺼짐 — 토글로
   useEffect(() => {
     if (simRef.current) simRef.current.leftHand = lefty;
+    if (isGuest) netRef.current?.sendHand(lefty);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [lefty]);
   const [fontsLoaded] = useFonts({ Jua_400Regular });
   const jua = fontsLoaded ? 'Jua_400Regular' : undefined;
@@ -148,6 +150,7 @@ export default function RallyGameScreen() {
   const oppLabel = isPvp ? '상대' : 'AI';
   const [oppLeft, setOppLeft] = useState(false);
   const netRef = useRef<RallyNet | null>(null);
+  const reportedRef = useRef(''); // 결과 보고 중복 방지 (matchId|score)
   const remoteJoyRef = useRef({ dx: 0, dy: 0 }); // 호스트가 받는 게스트 스틱(월드 프레임)
   const oppTargetRef = useRef<{ x: number; y: number } | null>(null); // 게스트의 상대 보간 목표
   const lastSnapSentRef = useRef(0);
@@ -194,6 +197,7 @@ export default function RallyGameScreen() {
             if (msg.t === 'joy') remoteJoyRef.current = { dx: -msg.dx, dy: -msg.dy };
             else if (msg.t === 'swing') swingRemote(sim, msg.intent, msg.aim === 'auto' ? 'auto' : -msg.aim, msg.depth ?? 0);
             else if (msg.t === 'serve') serveRemote(sim, msg.kind, msg.gauge);
+            else if (msg.t === 'hand') sim.remoteLeftHand = msg.left;
             else if (msg.t === 'again' && sim.phase === 'over') {
               const ns = createSim(pvpCfg);
               ns.pvp = true;
@@ -215,6 +219,7 @@ export default function RallyGameScreen() {
       },
     });
     netRef.current = net;
+    if (isGuest) net.sendHand(lefty); // 손잡이 통지 — 호스트 백핸드 판정에 반영
     return () => {
       net.dispose();
       netRef.current = null;
@@ -429,6 +434,20 @@ export default function RallyGameScreen() {
           winner: s.winner, lastShot: s.lastShot ? { ...s.lastShot } : null,
           stats: { ...s.stats }, zone: zoneRef.current, pSt, aSt,
         });
+        // PvP 호스트: 게임이 끝나면 결과 보고 → 정모 랠리왕 리더보드
+        if (isPvp && !isGuest && s.phase === 'over' && pvpMatch) {
+          const rk = `${pvpMatch}|${s.score.player}-${s.score.ai}`;
+          if (reportedRef.current !== rk) {
+            reportedRef.current = rk;
+            rallyApi
+              .reportResult(pvpMatch, {
+                hostScore: s.score.player,
+                guestScore: s.score.ai,
+                longestRally: s.stats.longestRally,
+              })
+              .catch(() => {});
+          }
+        }
         if (s.banner) {
           if (s.banner.reason === '네트!' || s.banner.reason === '서비스 폴트!') playSfx('net');
           playSfx(s.banner.winner === 'player' ? 'score' : 'lose');
@@ -1222,6 +1241,7 @@ function PvpLobby() {
   }, []);
   const myId = useAuthStore((st) => st.user?.id);
   const [players, setPlayers] = useState<PlayerCardData[]>([]);
+  const [board, setBoard] = useState<RallyLeaderboard | null>(null);
   const [loading, setLoading] = useState(false);
   const [waiting, setWaiting] = useState<{ matchId: string; name: string } | null>(null);
   const waitingRef = useRef(waiting);
@@ -1230,6 +1250,7 @@ function PvpLobby() {
   const load = useCallback(async () => {
     if (!clubSessionId) return;
     setLoading(true);
+    rallyApi.leaderboard(clubSessionId).then((r) => setBoard(r.data)).catch(() => {});
     try {
       const res = await clubSessionApi.getPlayers(clubSessionId);
       const list = (res.data ?? []) as PlayerCardData[];
@@ -1328,6 +1349,23 @@ function PvpLobby() {
       <Text style={{ ...typography.caption, color: colors.textLight, marginTop: spacing.md }}>
         11점 · 듀스 — 상대가 60초 안에 수락하면 바로 시작돼요
       </Text>
+
+      {/* 오늘의 랠리왕 */}
+      {board && board.games > 0 && (
+        <View style={{ marginTop: spacing.lg, paddingTop: spacing.md, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.border }}>
+          <Text style={[styles.cfgLabel, { color: colors.textSecondary }]}>🏆 오늘의 랠리왕 ({board.games}판)</Text>
+          {board.kings.slice(0, 3).map((k, i) => (
+            <Text key={k.userId} style={{ ...typography.body1, color: colors.text, marginTop: 2 }}>
+              {i === 0 ? '👑 ' : `${i + 1}. `}{k.name} — {k.wins}승 {k.losses}패
+            </Text>
+          ))}
+          {board.longestRally && (
+            <Text style={{ ...typography.caption, color: colors.textLight, marginTop: 4 }}>
+              최장 랠리 {board.longestRally.len}구 ({board.longestRally.name})
+            </Text>
+          )}
+        </View>
+      )}
 
       {/* 수락 대기 오버레이 */}
       {waiting && (

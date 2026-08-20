@@ -14,6 +14,12 @@ export interface RallyAcceptResponse {
   guestId: string;
 }
 
+export interface RallyLeaderboard {
+  games: number;
+  kings: { userId: string; name: string; wins: number; losses: number }[];
+  longestRally: { userId: string; name: string; len: number } | null;
+}
+
 export const rallyApi = {
   // 같은 정모 대기자에게 대결 신청 → 상대에게 rally:invited 소켓 + 푸시
   challenge: (toUserId: string) =>
@@ -24,4 +30,12 @@ export const rallyApi = {
 
   decline: (matchId: string) =>
     api.post<{ ok: boolean }>(`/rally/matches/${matchId}/decline`),
+
+  // 호스트의 결과 보고 (게임 종료 시 1회)
+  reportResult: (matchId: string, body: { hostScore: number; guestScore: number; longestRally: number }) =>
+    api.post<{ id: string }>(`/rally/matches/${matchId}/result`, body),
+
+  // 오늘 이 정모의 랠리왕
+  leaderboard: (clubSessionId: string) =>
+    api.get<RallyLeaderboard>(`/rally/leaderboard/${clubSessionId}`),
 };

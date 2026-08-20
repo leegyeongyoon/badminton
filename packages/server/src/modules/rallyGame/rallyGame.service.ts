@@ -97,3 +97,90 @@ export function leaveMatch(matchId: string, userId: string) {
   const other = m.hostId === userId ? m.guestId : m.hostId;
   getIO().to(`user:${other}`).emit('rally:opponentLeft', { matchId });
 }
+
+// ─── 재접속 유예 — 순간 끊김(백그라운드 전환·리로드)으로 매치가 즉사하지 않게 ───
+const pendingLeaves = new Map<string, ReturnType<typeof setTimeout>>(); // `${matchId}:${userId}`
+
+export function scheduleLeave(matchId: string, userId: string, graceMs = 20_000) {
+  const key = `${matchId}:${userId}`;
+  if (pendingLeaves.has(key)) return;
+  pendingLeaves.set(
+    key,
+    setTimeout(() => {
+      pendingLeaves.delete(key);
+      leaveMatch(matchId, userId);
+    }, graceMs),
+  );
+}
+
+export function cancelLeave(matchId: string, userId: string) {
+  const key = `${matchId}:${userId}`;
+  const t = pendingLeaves.get(key);
+  if (t) {
+    clearTimeout(t);
+    pendingLeaves.delete(key);
+  }
+}
+
+/** 호스트가 게임 종료 시 결과 보고 — 정모별 랠리왕 리더보드의 재료 */
+export async function reportResult(
+  matchId: string,
+  reporterId: string,
+  body: { hostScore: number; guestScore: number; longestRally: number },
+) {
+  const m = getRallyMatch(matchId);
+  if (!m) throw new NotFoundError('만료됐거나 없는 대결이에요');
+  if (m.hostId !== reporterId) throw new ForbiddenError('호스트만 결과를 보고할 수 있어요');
+  if (m.state !== 'ACTIVE') throw new ConflictError('시작되지 않은 대결이에요');
+  const hostScore = Math.max(0, Math.min(99, Math.floor(body.hostScore)));
+  const guestScore = Math.max(0, Math.min(99, Math.floor(body.guestScore)));
+  const winnerId = hostScore >= guestScore ? m.hostId : m.guestId;
+  const row = await prisma.rallyResult.create({
+    data: {
+      clubSessionId: m.clubSessionId,
+      hostId: m.hostId,
+      guestId: m.guestId,
+      hostScore,
+      guestScore,
+      winnerId,
+      longestRally: Math.max(0, Math.min(999, Math.floor(body.longestRally ?? 0))),
+    },
+  });
+  logger.info(`rally result: ${m.hostId} ${hostScore}:${guestScore} ${m.guestId} (${matchId})`);
+  return { id: row.id };
+}
+
+/** 정모별 랠리왕 리더보드 — 승수 순 + 최장 랠리 */
+export async function leaderboard(clubSessionId: string) {
+  const rows = await prisma.rallyResult.findMany({
+    where: { clubSessionId },
+    orderBy: { createdAt: 'desc' },
+    take: 200,
+  });
+  const stat = new Map<string, { wins: number; losses: number }>();
+  let longest: { userId: string; len: number } | null = null;
+  for (const r of rows) {
+    const loserId = r.winnerId === r.hostId ? r.guestId : r.hostId;
+    const w = stat.get(r.winnerId) ?? { wins: 0, losses: 0 };
+    w.wins += 1;
+    stat.set(r.winnerId, w);
+    const l = stat.get(loserId) ?? { wins: 0, losses: 0 };
+    l.losses += 1;
+    stat.set(loserId, l);
+    if (r.longestRally > (longest?.len ?? 0)) longest = { userId: r.winnerId, len: r.longestRally };
+  }
+  const ids = [...stat.keys()];
+  const users = ids.length
+    ? await prisma.user.findMany({ where: { id: { in: ids } }, select: { id: true, name: true } })
+    : [];
+  const nameOf = (id: string) => users.find((u) => u.id === id)?.name ?? '?';
+  const kings = ids
+    .map((id) => ({ userId: id, name: nameOf(id), ...stat.get(id)! }))
+    .sort((a, b) => b.wins - a.wins || a.losses - b.losses)
+    .slice(0, 10);
+  return {
+    games: rows.length,
+    kings,
+    longestRally: longest ? { ...longest, name: nameOf(longest.userId) } : null,
+  };
+}

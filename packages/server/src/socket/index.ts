@@ -77,6 +77,9 @@ export function initSocketIO(httpServer: HttpServer) {
         socket.data.rallyMatchId = data.matchId;
         socket.data.rallyUserId = data.userId;
         socket.join(`rally:${data.matchId}`);
+        // 재접속이면 이탈 유예 취소 — 순간 끊김으로 매치가 죽지 않는다
+        const { cancelLeave } = require('../modules/rallyGame/rallyGame.service');
+        cancelLeave(data.matchId, data.userId);
         logger.debug(`Socket ${socket.id} joined rally:${data.matchId}`);
       } catch (err) {
         logger.warn(`rally:join failed: ${(err as Error).message}`);
@@ -114,8 +117,9 @@ export function initSocketIO(httpServer: HttpServer) {
       noteDisconnect(socket.id); // 동시접속 집계 + 온라인 사용자 정리
       try {
         if (socket.data.rallyMatchId) {
-          const { leaveMatch } = require('../modules/rallyGame/rallyGame.service');
-          leaveMatch(socket.data.rallyMatchId as string, socket.data.rallyUserId as string);
+          // 즉시 종료 대신 20초 유예 — 재조인하면 매치 유지 (백그라운드 전환·리로드 보호)
+          const { scheduleLeave } = require('../modules/rallyGame/rallyGame.service');
+          scheduleLeave(socket.data.rallyMatchId as string, socket.data.rallyUserId as string);
         }
       } catch (err) {
         logger.warn(`rally disconnect cleanup failed: ${(err as Error).message}`);

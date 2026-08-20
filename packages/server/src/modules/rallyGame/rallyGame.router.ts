@@ -36,4 +36,22 @@ router.post('/matches/:id/decline', authenticate, async (req, res, next) => {
   }
 });
 
+// 호스트의 결과 보고 — 정모별 랠리왕 리더보드 재료
+router.post('/matches/:id/result', authenticate, async (req, res, next) => {
+  try {
+    res.json(await rallyService.reportResult(req.params.id as string, req.user!.userId, req.body ?? {}));
+  } catch (err) {
+    next(err);
+  }
+});
+
+// 오늘 이 정모의 랠리왕 리더보드
+router.get('/leaderboard/:clubSessionId', authenticate, async (req, res, next) => {
+  try {
+    res.json(await rallyService.leaderboard(req.params.clubSessionId as string));
+  } catch (err) {
+    next(err);
+  }
+});
+
 export default router;
