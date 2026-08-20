@@ -107,6 +107,8 @@ interface UiSnap {
   lastShot: { shot: ShotType; quality: Quality; whiff?: boolean; serve?: boolean } | null;
   stats: { longestRally: number; perfects: number };
   zone: ShotZone; // 오는 공의 타점 존 — 버튼 라벨이 상황 따라 바뀐다
+  pSt: number; // 내 체력 (0..1, 5% 단위)
+  aSt: number; // 상대 체력
 }
 
 interface Popup {
@@ -125,6 +127,7 @@ export default function RallyGameScreen() {
   const [screen, setScreen] = useState<'config' | 'game'>('config');
   const [cfg, setCfg] = useState<MatchConfig>({ target: 11, deuce: true, difficulty: 'normal' });
   const [charSel, setCharSel] = useState<'male' | 'female'>('male');
+  const [uniform, setUniform] = useState<'teal' | 'blue' | 'amber'>('teal');
   const [area, setArea] = useState({ w: 0, h: 0 });
   const [ui, setUi] = useState<UiSnap | null>(null);
   const [popup, setPopup] = useState<Popup | null>(null);
@@ -410,9 +413,11 @@ export default function RallyGameScreen() {
       }
 
       // 저빈도 UI 동기화
+      const pSt = Math.round((s.player.stamina ?? 1) * 20) / 20;
+      const aSt = Math.round((s.ai.stamina ?? 1) * 20) / 20;
       const key = [
         s.phase, s.score.player, s.score.ai, s.server, s.deuce, s.rallyLen,
-        s.banner ? s.banner.reason : '', s.winner ?? '', zoneRef.current,
+        s.banner ? s.banner.reason : '', s.winner ?? '', zoneRef.current, pSt, aSt,
         s.lastShot ? `${s.lastShot.shot}${s.lastShot.quality}${s.lastShot.whiff ? 'w' : ''}` : '',
       ].join('|');
       if (key !== uiKeyRef.current) {
@@ -421,7 +426,7 @@ export default function RallyGameScreen() {
           phase: s.phase, score: { ...s.score }, server: s.server, deuce: s.deuce,
           rallyLen: s.rallyLen, banner: s.banner ? { ...s.banner } : null,
           winner: s.winner, lastShot: s.lastShot ? { ...s.lastShot } : null,
-          stats: { ...s.stats }, zone: zoneRef.current,
+          stats: { ...s.stats }, zone: zoneRef.current, pSt, aSt,
         });
         if (s.banner) {
           if (s.banner.reason === '네트!' || s.banner.reason === '서비스 폴트!') playSfx('net');
@@ -665,6 +670,8 @@ export default function RallyGameScreen() {
         onChange={setCfg}
         charSel={charSel}
         onCharSel={setCharSel}
+        uniform={uniform}
+        onUniform={setUniform}
         onStart={() => {
           initSfx();
           simRef.current = createSim(cfg);
@@ -761,7 +768,7 @@ export default function RallyGameScreen() {
             <ShuttleSvg size={31} />
           </Animated.View>
           <Animated.View style={[styles.char, playerStyle]} pointerEvents="none">
-            <RigCharacter ref={pRigRef} variant={charSel} poseMode={pPose} runFrame={pRun} />
+            <RigCharacter ref={pRigRef} variant={charSel} poseMode={pPose} runFrame={pRun} uniform={uniform} />
           </Animated.View>
           </Animated.View>
 
@@ -784,6 +791,10 @@ export default function RallyGameScreen() {
                 <Text style={styles.sideName}>{oppLabel}</Text>
                 <View style={[styles.sideDot, { backgroundColor: '#E2695C' }]} />
               </View>
+            </View>
+            <View style={styles.stRow}>
+              <View style={styles.stTrack}><View style={[styles.stFill, { width: `${(ui?.pSt ?? 1) * 100}%`, backgroundColor: (ui?.pSt ?? 1) < 0.3 ? '#F87171' : '#2DD4BF' }]} /></View>
+              <View style={styles.stTrack}><View style={[styles.stFill, { alignSelf: 'flex-end', width: `${(ui?.aSt ?? 1) * 100}%`, backgroundColor: (ui?.aSt ?? 1) < 0.3 ? '#F87171' : '#FCA5A5' }]} /></View>
             </View>
             <View style={styles.scoreSub}>
               <View style={styles.subChip}><Text style={styles.subChipText}>{cfg.target}점</Text></View>
@@ -895,7 +906,7 @@ export default function RallyGameScreen() {
           <View style={[styles.overCard, { backgroundColor: '#FFFFFF', borderWidth: 1, borderColor: '#D3E8E2' }, shadows.sm]}>
             <View style={styles.overRankRow}>
               <View style={styles.overChar}>
-                <RigCharacter variant={charSel} poseMode={overPose} runFrame={overRun} still={ui.winner === 'player' ? 'win' : 'lose'} />
+                <RigCharacter variant={charSel} poseMode={overPose} runFrame={overRun} still={ui.winner === 'player' ? 'win' : 'lose'} uniform={uniform} />
               </View>
               <View style={{ alignItems: 'center' }}>
                 <Text style={[styles.overRank, juaStyle, { color: ui.winner === 'player' ? '#EAB308' : '#94A3B8' }]}>
@@ -1079,11 +1090,13 @@ function ServiceBoxHighlight({ proj, spots, server }: {
 }
 
 // ─── 대결 설정 ─────────────────────────────────────────────────────
-function ConfigScreen({ cfg, onChange, charSel, onCharSel, onStart }: {
+function ConfigScreen({ cfg, onChange, charSel, onCharSel, uniform, onUniform, onStart }: {
   cfg: MatchConfig;
   onChange: (c: MatchConfig) => void;
   charSel: 'male' | 'female';
   onCharSel: (c: 'male' | 'female') => void;
+  uniform: 'teal' | 'blue' | 'amber';
+  onUniform: (u: 'teal' | 'blue' | 'amber') => void;
   onStart: () => void;
 }) {
   const { colors, shadows } = useTheme();
@@ -1144,6 +1157,12 @@ function ConfigScreen({ cfg, onChange, charSel, onCharSel, onStart }: {
             options={[{ v: 'male' as const, label: '남자' }, { v: 'female' as const, label: '여자' }]}
             value={charSel}
             set={onCharSel}
+          />
+          <Seg
+            label="유니폼"
+            options={[{ v: 'teal' as const, label: '틸' }, { v: 'blue' as const, label: '블루' }, { v: 'amber' as const, label: '앰버' }]}
+            value={uniform}
+            set={onUniform}
           />
           <Seg
             label="몇 점 내기"
@@ -1349,6 +1368,9 @@ const styles = StyleSheet.create({
   scoreBig: { color: '#F8FAFC', fontSize: 26, fontWeight: '700', fontVariant: ['tabular-nums'], minWidth: 26, textAlign: 'center' },
   scoreColon: { color: '#64748B', fontSize: 20, fontWeight: '700' },
   scoreSub: { flexDirection: 'row', gap: 6 },
+  stRow: { flexDirection: 'row', gap: 8, width: 172 },
+  stTrack: { flex: 1, height: 4, borderRadius: 2, backgroundColor: 'rgba(13,18,26,0.35)', overflow: 'hidden' },
+  stFill: { height: 4, borderRadius: 2 },
   subChip: { backgroundColor: 'rgba(13,18,26,0.7)', paddingHorizontal: 8, paddingVertical: 2, borderRadius: radius.pill },
   subChipText: { fontSize: 10, fontWeight: '700', color: '#94A3B8' },
 

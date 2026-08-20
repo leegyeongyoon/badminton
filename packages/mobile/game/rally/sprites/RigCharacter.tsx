@@ -154,6 +154,12 @@ const SWOOSH: Record<string, { cx: number; cy: number; start: number; sweep: num
 
 // ─── 팔레트 ────────────────────────────────────────────────────────
 type Variant = 'male' | 'female' | 'oppo';
+export type Uniform = 'teal' | 'blue' | 'amber';
+const UNIFORMS: Record<Uniform, { jersey: string; jerseyLine: string; shorts: string }> = {
+  teal: { jersey: '#12A48E', jerseyLine: '#0C7A69', shorts: '#194A57' },
+  blue: { jersey: '#4A7DDC', jerseyLine: '#3560B4', shorts: '#22355E' },
+  amber: { jersey: '#E8A93A', jerseyLine: '#C08322', shorts: '#5C4520' },
+};
 const PAL: Record<Variant, { skin: string; hair: string; jersey: string; jerseyLine: string; shorts: string; band: string }> = {
   male: { skin: '#F3C89F', hair: '#4C3A2E', jersey: '#12A48E', jerseyLine: '#0C7A69', shorts: '#194A57', band: '#FFFFFF' },
   female: { skin: '#F6D2AC', hair: '#7B4A33', jersey: '#12A48E', jerseyLine: '#0C7A69', shorts: '#194A57', band: '#FFD34D' },
@@ -195,6 +201,8 @@ export function poseAt(motion: RigClip, tMs: number): { j: Record<string, number
 
 interface Props {
   variant: Variant;
+  /** 유니폼 컬러 (male/female만 — 상대는 코랄 고정) */
+  uniform?: Uniform;
   /** 0 idle / 1 run / 2 swing / 3 lunge / 4 cheer — 부모 루프가 갱신하는 공유값 */
   poseMode: SharedValue<number>;
   /** 러닝 위상 누적값 — 다리·팔 스윙 */
@@ -216,10 +224,13 @@ const pivotBottom = (h: number, deg: number) => {
 };
 
 export const RigCharacter = forwardRef<RigHandle, Props>(function RigCharacter(
-  { variant, poseMode, runFrame, still, freeze },
+  { variant, poseMode, runFrame, still, freeze, uniform },
   ref,
 ) {
-  const pal = PAL[variant];
+  const pal = useMemo(
+    () => (uniform && variant !== 'oppo' ? { ...PAL[variant], ...UNIFORMS[uniform] } : PAL[variant]),
+    [variant, uniform],
+  );
   const front = variant === 'oppo';
 
   const torso = useSharedValue(REST.torso);

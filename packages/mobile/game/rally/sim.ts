@@ -78,6 +78,10 @@ export interface Actor {
   motion?: MotionKey; // 마지막 스윙의 모션 클립
   /** 오는 공이 가까움 — 렌더러가 백스윙을 미리 젖힌다(임팩트 타이밍 체감) */
   windup?: boolean;
+  /** 체력 0..1 — 뛰고 휘두르면 닳고, 포인트 사이·서브 대기에 회복.
+   *  낮으면 이동이 느려지고 스매시 퍼펙트가 안 나온다 — 클리어로 상대를
+   *  뛰게 만들어 지치게 하는 실제 배드민턴 운영이 성립한다. */
+  stamina?: number;
 }
 
 export interface Traj {
@@ -177,7 +181,7 @@ export type AimDepth = -1 | 0 | 1;
 
 // ─── 튜닝 상수 ─────────────────────────────────────────────────────
 const PLAYER_SPEED = 4.8; // m/s — 사람이 코트를 커버할 수 있게 넉넉히
-const AI_SPEED: Record<Difficulty, number> = { easy: 2.55, normal: 3.0, hard: 4.4 };
+const AI_SPEED: Record<Difficulty, number> = { easy: 2.55, normal: 3.15, hard: 4.4 };
 const REACH_PERFECT = 0.6;
 const REACH_GOOD = 1.05;
 const REACH_MAX = 1.45; // 런지 한계 — 이 밖이면 헛스윙 (AI 캐치 판정용)
@@ -219,6 +223,12 @@ const AI_Q: Record<Difficulty, [number, number, number]> = {
 const rnd = (a: number, b: number) => a + Math.random() * (b - a);
 const dist2 = (ax: number, ay: number, bx: number, by: number) => Math.hypot(ax - bx, ay - by);
 
+// 체력 → 이동속도 배율 (바닥이어도 72%는 유지 — 답답하지 않게)
+const spMult = (st?: number) => 0.72 + 0.28 * Math.max(0, Math.min(1, st ?? 1));
+const drain = (a: Actor, amt: number) => {
+  a.stamina = Math.max(0, Math.min(1, (a.stamina ?? 1) - amt));
+};
+
 // 타격 스텝 — 스윙 순간 몸을 컨택 지점 쪽으로 붙인다 (라켓·셔틀이 떨어져 보이는
 // '치는 모션 부정확' 해소). 리치 안 거리의 70%를 즉시 좁힌다.
 function stepIntoShot(a: Actor, cx: number, cy: number, yMin: number, yMax: number): void {
@@ -236,8 +246,8 @@ export function createSim(config: MatchConfig): SimState {
     server: 'player',
     rallyLen: 0,
     deuce: false,
-    player: { x: 1.2, y: -3.2, anim: 'idle', animUntil: 0, moving: false, facing: 1 },
-    ai: { x: -1.2, y: 3.2, anim: 'idle', animUntil: 0, moving: false, facing: -1 },
+    player: { x: 1.2, y: -3.2, anim: 'idle', animUntil: 0, moving: false, facing: 1, stamina: 1 },
+    ai: { x: -1.2, y: 3.2, anim: 'idle', animUntil: 0, moving: false, facing: -1, stamina: 1 },
     shuttle: { x: 1.2, y: -3.0, z: 1.0 },
     traj: null,
     banner: null,
@@ -510,12 +520,15 @@ export function swingPlayer(s: SimState, intent: SwingIntent, aim: AimLane, dept
   // 백핸드 오버헤드: 스매시 불가(드라이브로), 파워 다운(퍼펙트 불가)
   if (hand === 'back' && contact.z >= 1.2 && shot === 'smash') shot = 'drive';
   const timeQ = timingQuality(shot, contact.z);
-  const qn = Math.min(distQ, timeQ, hand === 'back' && contact.z >= 1.5 ? 1 : 2);
+  // 지치면(체력<28%) 스매시 퍼펙트가 안 나온다 — 체력 운영의 이유
+  const gassed = (s.player.stamina ?? 1) < 0.28 && shot === 'smash' ? 1 : 2;
+  const qn = Math.min(distQ, timeQ, hand === 'back' && contact.z >= 1.5 ? 1 : 2, gassed);
   const quality: Quality = qn === 2 ? 'perfect' : qn === 1 ? 'good' : 'bad';
   let weak = quality === 'bad' ? (timeQ === 0 ? 'late' as const : 'stretch' as const) : undefined;
   // 런지(밀린 발) 리턴 — 실수 연발이 아니라 '수비 리턴': 공격 의도여도
   // 깊으면 언더클리어, 네트 근처면 블록으로 강등되고 뜬공(상대 찬스)이 된다
   if (weak === 'stretch') shot = Math.abs(contact.y) <= 2.5 ? 'block' : 'lift';
+  drain(s.player, shot === 'smash' ? 0.05 : 0.015);
   const cut = shot === 'drop' && contact.z >= 1.7 && quality === 'perfect';
   const aimX = aim === 'auto' ? autoAim(s) : Math.max(-1, Math.min(1, aim));
   if (quality === 'perfect') s.stats.perfects += 1;
@@ -629,7 +642,7 @@ function aiSwing(s: SimState, now: number) {
   const t = s.traj!;
   const d = dist2(s.shuttle.x, s.shuttle.y, s.ai.x, s.ai.y);
   const [p, g] = AI_Q[s.config.difficulty];
-  const fatigue = Math.min(0.22, s.rallyLen * 0.011); // 긴 랠리 — AI도 지친다
+  const fatigue = (1 - (s.ai.stamina ?? 1)) * 0.16; // 지친 만큼 실수가 는다
   const roll = Math.random();
   let quality: Quality = roll < p ? 'perfect' : roll < p + g - fatigue ? 'good' : 'bad';
   const aiStretch = d > REACH_GOOD;
@@ -671,6 +684,7 @@ function aiSwing(s: SimState, now: number) {
 
   s.rallyLen += 1;
   stepIntoShot(s.ai, contact.x, contact.y, 0.35, 6.6);
+  drain(s.ai, shot === 'smash' ? 0.05 : 0.015);
   s.ai.facing = -1;
   s.ai.anim = quality === 'bad' ? 'lunge' : 'swing';
   s.ai.animUntil = now + 260;
@@ -692,14 +706,25 @@ export function tick(s: SimState, dtMs: number, input: MoveInput, remote?: MoveI
   const now = s.clock;
   const dt = stepMs / 1000;
 
+  // 체력 회복 — 포인트 사이·서브 대기에 크게, 랠리 중 멈춰 있으면 조금
+  if (s.phase === 'point' || s.phase === 'serve') {
+    drain(s.player, -0.12 * dt);
+    drain(s.ai, -0.12 * dt);
+  } else if (s.phase === 'rally') {
+    if (!s.player.moving) drain(s.player, -0.015 * dt);
+    if (!s.ai.moving) drain(s.ai, -0.015 * dt);
+  }
+
   // 플레이어 이동 — 서브 준비 중에는 규정 위치에 묶인다(조이스틱 무시)
   const mag = Math.hypot(input.dx, input.dy);
   if (mag > 0.15 && s.phase !== 'over' && s.phase !== 'serve') {
     const nx = input.dx / Math.max(1, mag);
     const ny = input.dy / Math.max(1, mag);
-    s.player.x = Math.min(3.0, Math.max(-3.0, s.player.x + nx * PLAYER_SPEED * dt));
-    s.player.y = Math.min(-0.35, Math.max(-6.6, s.player.y + ny * PLAYER_SPEED * dt));
+    const psp = PLAYER_SPEED * spMult(s.player.stamina);
+    s.player.x = Math.min(3.0, Math.max(-3.0, s.player.x + nx * psp * dt));
+    s.player.y = Math.min(-0.35, Math.max(-6.6, s.player.y + ny * psp * dt));
     s.player.moving = true;
+    drain(s.player, psp * dt * 0.012);
     if (Math.abs(nx) > 0.2) s.player.facing = nx > 0 ? 1 : -1;
   } else {
     s.player.moving = false;
@@ -711,9 +736,11 @@ export function tick(s: SimState, dtMs: number, input: MoveInput, remote?: MoveI
     if (rm > 0.15 && s.phase === 'rally') {
       const nx = remote.dx / Math.max(1, rm);
       const ny = remote.dy / Math.max(1, rm);
-      s.ai.x = Math.min(3.0, Math.max(-3.0, s.ai.x + nx * PLAYER_SPEED * dt));
-      s.ai.y = Math.min(6.6, Math.max(0.35, s.ai.y + ny * PLAYER_SPEED * dt));
+      const rsp = PLAYER_SPEED * spMult(s.ai.stamina);
+      s.ai.x = Math.min(3.0, Math.max(-3.0, s.ai.x + nx * rsp * dt));
+      s.ai.y = Math.min(6.6, Math.max(0.35, s.ai.y + ny * rsp * dt));
       s.ai.moving = true;
+      drain(s.ai, rsp * dt * 0.012);
       if (Math.abs(nx) > 0.2) s.ai.facing = nx > 0 ? 1 : -1;
     } else if (s.phase === 'rally') {
       s.ai.moving = false;
@@ -765,7 +792,8 @@ export function tick(s: SimState, dtMs: number, input: MoveInput, remote?: MoveI
     const reactU = smashDef ? (t.punish ? def.react + 0.14 : def.react) : 0;
     if (u >= reactU) {
       const target = t.landing === 'in' ? t.p2 : { x: 0, y: 3.2, z: 0 }; // 아웃 코스는 지켜본다
-      moveActor(s.ai, target.x, Math.max(0.4, target.y), AI_SPEED[s.config.difficulty], dt);
+      const mv = moveActor(s.ai, target.x, Math.max(0.4, target.y), AI_SPEED[s.config.difficulty] * spMult(s.ai.stamina), dt);
+      drain(s.ai, mv * 0.005);
     }
     // AI 스윙 판정 — 스매시는 캐치 반경 축소 (응징이면 거의 못 받는다)
     if (!t.aiHandled && u > 0.5 && s.shuttle.z < 2.8 && s.shuttle.y > 0) {
@@ -791,7 +819,8 @@ export function tick(s: SimState, dtMs: number, input: MoveInput, remote?: MoveI
   } else {
     // 스매시 후엔 전진(넷대시) — 짧은 블록 리턴을 푸시로 마무리하러 들어간다
     const homeY = t.shot === 'smash' ? 2.0 : 3.0;
-    moveActor(s.ai, 0, homeY, AI_SPEED[s.config.difficulty], dt);
+    const mv = moveActor(s.ai, 0, homeY, AI_SPEED[s.config.difficulty] * spMult(s.ai.stamina), dt);
+    drain(s.ai, mv * 0.005);
   }
 
   // 착지 판정
@@ -812,19 +841,20 @@ export function tick(s: SimState, dtMs: number, input: MoveInput, remote?: MoveI
   }
 }
 
-function moveActor(a: Actor, tx: number, ty: number, sp: number, dt: number) {
+function moveActor(a: Actor, tx: number, ty: number, sp: number, dt: number): number {
   const dx = tx - a.x;
   const dy = ty - a.y;
   const d = Math.hypot(dx, dy);
   if (d < 0.05) {
     a.moving = false;
-    return;
+    return 0;
   }
   const step = Math.min(d, sp * dt);
   a.x += (dx / d) * step;
   a.y += (dy / d) * step;
   a.moving = true;
   if (Math.abs(dx) > 0.1) a.facing = dx > 0 ? 1 : -1;
+  return step;
 }
 
 // ═══ PvP (호스트 권위) ══════════════════════════════════════════════
@@ -878,6 +908,7 @@ export function swingRemote(s: SimState, intent: SwingIntent, aim: AimLane, dept
   if (quality === 'perfect') s.stats.perfectsRemote = (s.stats.perfectsRemote ?? 0) + 1;
   s.rallyLen += 1;
   stepIntoShot(s.ai, contact.x, contact.y, 0.35, 6.6);
+  drain(s.ai, shot === 'smash' ? 0.05 : 0.015);
   s.ai.facing = remoteSign;
   s.ai.anim = quality === 'bad' ? 'lunge' : 'swing';
   s.ai.animUntil = now + 260;
@@ -981,6 +1012,7 @@ export function applySnapshot(s: SimState, snap: NetSnapshot): void {
     s.player.animUntil = snap.player.animUntil;
   }
   s.player.windup = snap.player.windup; // 백스윙 준비 신호도 미러
+  s.player.stamina = snap.player.stamina; // 체력은 호스트 권위
   // 상대 캐릭터: 목표만 갱신 — 실제 이동은 guestTick이 보간(12Hz 점프 방지)
   s.ai.anim = snap.ai.anim;
   s.ai.animUntil = snap.ai.animUntil;
@@ -988,6 +1020,7 @@ export function applySnapshot(s: SimState, snap: NetSnapshot): void {
   s.ai.moving = snap.ai.moving;
   s.ai.motion = snap.ai.motion; // 상대 스윙 클립 — 게스트 화면 모션 재생용
   s.ai.windup = snap.ai.windup;
+  s.ai.stamina = snap.ai.stamina;
 }
 
 /** 게스트 프레임 렌더 틱 — sim 없이 이동 예측 + 셔틀 비행 + 서브 정렬만. */
