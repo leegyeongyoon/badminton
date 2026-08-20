@@ -61,7 +61,7 @@ const CLIPS: Record<string, Clip> = {
   smashJump: { f: [
     { d: 90, j: { armR: -120, foreR: -118, racket: -58, torso: -10, legL: -16, legR: 14 }, y: 7 },
     { d: 90, j: { armR: -182, foreR: -2, racket: 18, torso: 9, legL: 4, legR: -4 }, y: -16 },
-    { d: 160, j: { armR: -60, foreR: -24, racket: 40 }, y: -10 },
+    { d: 160, j: { armR: -60, foreR: -24, racket: 26 }, y: -10 },
     { d: 200, j: {} },
   ] },
   // 리프트/롱서브: 아래에서 위로 퍼올리기
@@ -79,7 +79,7 @@ const CLIPS: Record<string, Clip> = {
   // 드라이브: 옆에서 평평하게 후려치기
   drive: { f: [
     { d: 70, j: { armR: -66, foreR: -96, racket: -70, torso: -6 } },
-    { d: 80, j: { armR: -108, foreR: 6, racket: 64, torso: 7 } },
+    { d: 80, j: { armR: -108, foreR: 6, racket: 36, torso: 7 } },
     { d: 210, j: {} },
   ] },
   // ── 백핸드 — 미러가 아니라 몸 앞을 가로지르는 전용 스윙 (양수 회전 = 몸 건너편) ──
@@ -137,6 +137,21 @@ const STILLS: Record<'win' | 'lose', Partial<Record<Joint, number>> & { y?: numb
 
 const EASE = Easing.out(Easing.quad);
 
+// 스윙 스우시 — 라켓 궤적을 따라 번쩍이는 호. 스윙이 '휘둘러진다'고 읽히게 하는 핵심.
+// start=시작 각도(deg), sweep=쓸고 가는 각도, cx/cy=호 중심(캐릭터 박스 기준)
+const SWOOSH: Record<string, { cx: number; cy: number; start: number; sweep: number; r: number }> = {
+  overhead: { cx: 39, cy: 26, start: -60, sweep: 150, r: 34 },
+  smashJump: { cx: 39, cy: 22, start: -70, sweep: 170, r: 38 },
+  under: { cx: 46, cy: 62, start: 150, sweep: -140, r: 30 },
+  netPush: { cx: 52, cy: 52, start: 20, sweep: 70, r: 26 },
+  drive: { cx: 48, cy: 46, start: -30, sweep: 120, r: 30 },
+  round: { cx: 34, cy: 22, start: -80, sweep: 185, r: 38 },
+  backOverhead: { cx: 30, cy: 28, start: 240, sweep: -150, r: 32 },
+  backDrive: { cx: 30, cy: 46, start: 210, sweep: -120, r: 30 },
+  backUnder: { cx: 30, cy: 60, start: 30, sweep: 140, r: 30 },
+  backNet: { cx: 26, cy: 52, start: 160, sweep: -70, r: 26 },
+};
+
 // ─── 팔레트 ────────────────────────────────────────────────────────
 type Variant = 'male' | 'female' | 'oppo';
 const PAL: Record<Variant, { skin: string; hair: string; jersey: string; jerseyLine: string; shorts: string; band: string }> = {
@@ -188,6 +203,13 @@ export const RigCharacter = forwardRef<RigHandle, Props>(function RigCharacter(
   const legL = useSharedValue(REST.legL);
   const legR = useSharedValue(REST.legR);
   const rootY = useSharedValue(0);
+  // 스우시 — 진행도(0→1)와 클립별 파라미터
+  const swT = useSharedValue(1);
+  const swStart = useSharedValue(0);
+  const swSweep = useSharedValue(0);
+  const swCx = useSharedValue(39);
+  const swCy = useSharedValue(30);
+  const swR = useSharedValue(32);
   const sv: Record<Joint, SharedValue<number>> = { torso, armL, foreL, armR, foreR, racket, legL, legR };
 
   useImperativeHandle(ref, () => ({
@@ -211,6 +233,17 @@ export const RigCharacter = forwardRef<RigHandle, Props>(function RigCharacter(
         return withTiming(target, { duration: f.d, easing: EASE });
       });
       rootY.value = seqY.length === 1 ? seqY[0] : withSequence(seqY[0], ...seqY.slice(1));
+      // 스우시 발동 — 백스윙 직후 임팩트 구간을 쓸고 간다
+      const sw = SWOOSH[motion];
+      if (sw) {
+        swStart.value = sw.start;
+        swSweep.value = sw.sweep;
+        swCx.value = sw.cx;
+        swCy.value = sw.cy;
+        swR.value = sw.r;
+        swT.value = 0;
+        swT.value = withTiming(1, { duration: 260, easing: Easing.out(Easing.cubic) });
+      }
     },
   }));
 
@@ -250,6 +283,15 @@ export const RigCharacter = forwardRef<RigHandle, Props>(function RigCharacter(
     transform: pivotTop(14, poseMode.value === 4 ? -10 : foreR.value),
   }));
   const racketStyle = useAnimatedStyle(() => ({ transform: pivotTop(16, racket.value) }));
+  const swooshStyle = useAnimatedStyle(() => ({
+    opacity: swT.value >= 1 ? 0 : (1 - swT.value) * 0.85,
+    left: swCx.value - swR.value,
+    top: swCy.value - swR.value,
+    width: swR.value * 2,
+    height: swR.value * 2,
+    borderRadius: swR.value,
+    transform: [{ rotate: `${swStart.value + swSweep.value * swT.value}deg` }],
+  }));
 
   // 정적 파트 스타일 (variant 색만 다름)
   const s = useMemo(() => makeStyles(pal), [pal]);
@@ -302,6 +344,8 @@ export const RigCharacter = forwardRef<RigHandle, Props>(function RigCharacter(
             </Animated.View>
           </Animated.View>
         </Animated.View>
+        {/* 스윙 스우시 — 라켓이 쓸고 간 궤적 */}
+        <Animated.View style={[s.swoosh, swooshStyle]} pointerEvents="none" />
       </Animated.View>
     </View>
   );
@@ -382,5 +426,14 @@ function makeStyles(pal: (typeof PAL)['male']) {
     },
     stringH: { position: 'absolute', left: 1, right: 1, top: 7.5, height: 1.4, backgroundColor: 'rgba(150,180,200,0.95)' },
     stringV: { position: 'absolute', top: 1, bottom: 1, left: 6.8, width: 1.4, backgroundColor: 'rgba(150,180,200,0.95)' },
+    // 상단+우측 보더만 칠한 원 → 회전하면 호가 궤적을 쓸고 간다
+    swoosh: {
+      position: 'absolute',
+      borderWidth: 4.5,
+      borderTopColor: 'rgba(255,255,255,0.95)',
+      borderRightColor: 'rgba(255,255,255,0.7)',
+      borderBottomColor: 'transparent',
+      borderLeftColor: 'transparent',
+    },
   });
 }

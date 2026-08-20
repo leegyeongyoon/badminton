@@ -94,6 +94,8 @@ export interface Traj {
   dur: number; // ms
   landing: 'in' | 'out' | 'net';
   aiHandled: boolean;
+  /** 뜬공 응징 스매시 — 수비자의 캐치 반경이 반토막 난다 */
+  punish?: boolean;
 }
 
 export type SimPhase = 'serve' | 'rally' | 'point' | 'over';
@@ -185,6 +187,13 @@ const REACH_BY_DIFF: Record<Difficulty, { p: number; g: number; m: number }> = {
 };
 // 난이도별 셔틀 페이스 — 쉬움은 느긋하게, 어려움은 빠르게
 const DIFF_PACE: Record<Difficulty, number> = { easy: 1.3, normal: 1.12, hard: 1.0 };
+
+// 스매시 수비 — 반응 지연(u)과 캐치 반경 배율. 응징(뜬공) 스매시는 거의 못 받는다
+const SMASH_DEF: Record<Difficulty, { react: number; catchR: number; punishR: number }> = {
+  easy: { react: 0.42, catchR: 0.75, punishR: 0.28 },
+  normal: { react: 0.36, catchR: 0.85, punishR: 0.4 },
+  hard: { react: 0.28, catchR: 1.0, punishR: 0.58 },
+};
 
 // 샷 스펙: 비행시간(ms), 정점 높이(m), 상대 코트 목표 깊이 y 범위
 // 사람 반응속도 기준 페이스 — 랠리가 '만들어질' 여유를 준다
@@ -291,6 +300,7 @@ function makeTraj(
   rallyLen = 0,
   pace = 1,
   depth: AimDepth = 0,
+  punish = false,
 ): Traj {
   const spec = SHOT3[shot];
   const dir = by === 'player' ? 1 : -1; // 목표 y 부호
@@ -310,6 +320,10 @@ function makeTraj(
   if (Math.abs(aimX) > 0.85 && quality !== 'perfect') tx += rnd(-0.35, 0.35); // 라인 노림 흔들림
   let apex = spec.apex;
 
+  if (punish && shot === 'smash' && quality !== 'bad') {
+    dur *= 0.86; // 뜬공 응징 — 더 빠르고
+    ty = dir * rnd(1.7, 2.9); // 더 가파르게 꽂힌다
+  }
   if (quality === 'perfect') {
     if (shot === 'smash') dur *= 0.85;
     // 깊이를 직접 지정하지 않았을 때만 퍼펙트 기본 코스(깊은 클리어·타이트 드롭)로 벼린다
@@ -374,7 +388,7 @@ function makeTraj(
       ? { x: (from.x + tx) / 2, y: (from.y + ty) / 2, z: (from.z + 0.4) / 2 }
       : { x: (from.x + tx) / 2, y: (from.y + ty) / 2, z: Math.max(from.z, apex) + (quality === 'bad' ? 0.4 : 0) };
 
-  const t: Traj = { by, shot, quality, chance, cross, p0: { ...from }, c, p2, t0: now, dur, landing, aiHandled: false };
+  const t: Traj = { by, shot, quality, chance, cross, punish: punish && shot === 'smash' && quality !== 'bad', p0: { ...from }, c, p2, t0: now, dur, landing, aiHandled: false };
   clearNet(t);
   return t;
 }
@@ -484,6 +498,7 @@ export function swingPlayer(s: SimState, intent: SwingIntent, aim: AimLane, dept
     return;
   }
   const contact: Vec3 = { ...s.shuttle };
+  const wasChance = !!s.traj.chance; // 뜬공을 응징하는 스매시는 거의 못 받는다
   const distQ = d <= reach.p ? 2 : d <= reach.g ? 1 : 0;
   // 포핸드/백핸드/라운드 — 라켓 손 반대쪽 공은 약해진다 (배드민턴의 핵심 비대칭)
   const racketSign: 1 | -1 = s.leftHand ? -1 : 1;
@@ -506,7 +521,7 @@ export function swingPlayer(s: SimState, intent: SwingIntent, aim: AimLane, dept
   s.player.anim = quality === 'bad' ? 'lunge' : 'swing';
   s.player.animUntil = now + 260;
   s.player.motion = motionForHand(motionFor(shot), hand);
-  s.traj = makeTraj('player', shot, quality, contact, aimX, now, s.rallyLen, DIFF_PACE[s.config.difficulty], depth);
+  s.traj = makeTraj('player', shot, quality, contact, aimX, now, s.rallyLen, DIFF_PACE[s.config.difficulty], depth, wasChance);
   s.lastShot = { shot, quality, cross: s.traj.cross, cut, weak, hand };
   s.events.push(`swing:${shot}:${quality}:${hand}${s.traj.cross ? ':cross' : ''}${weak ? `:${weak}` : ''}:z${contact.z.toFixed(2)}:d${d.toFixed(2)}`);
 }
@@ -609,6 +624,11 @@ function aiSwing(s: SimState, now: number) {
   // AI(정면 뷰)의 라켓 방향 = 월드 -x. 백핸드 하이는 AI도 약해진다
   const aiHand = handFor(-1, contact.x - s.ai.x, contact.z, d <= REACH_PERFECT ? 2 : d <= REACH_GOOD ? 1 : 0);
   if (aiHand === 'back' && contact.z >= 1.5 && quality === 'perfect') quality = 'good';
+  // 스매시 리시브는 카운터가 아니라 버티는 수비 — 퀄리티 하향, 응징 스매시는 절반이 배드
+  if (t.shot === 'smash') {
+    if (quality === 'perfect') quality = 'good';
+    if (t.punish && Math.random() < 0.5) quality = 'bad';
+  }
   const menu = contactMenu(contact);
   let shot: ShotType;
   if (menu.includes('smash') && (t.chance || Math.random() < (s.config.difficulty === 'hard' ? 0.5 : s.config.difficulty === 'normal' ? 0.3 : 0.16))) {
@@ -639,7 +659,8 @@ function aiSwing(s: SimState, now: number) {
   s.ai.anim = quality === 'bad' ? 'lunge' : 'swing';
   s.ai.animUntil = now + 260;
   s.ai.motion = motionForHand(motionFor(shot), aiHand);
-  s.traj = makeTraj('ai', shot, quality, contact, aim, now, s.rallyLen, DIFF_PACE[s.config.difficulty], depth);
+  const aiPunish = t.chance && s.config.difficulty !== 'easy';
+  s.traj = makeTraj('ai', shot, quality, contact, aim, now, s.rallyLen, DIFF_PACE[s.config.difficulty], depth, aiPunish);
   s.events.push(`ai-swing:${shot}:${quality}:${aiHand}`);
 }
 
@@ -722,18 +743,26 @@ export function tick(s: SimState, dtMs: number, input: MoveInput, remote?: MoveI
   if (s.pvp) {
     // 원격 스윙 판정은 swingRemote가 처리 — 여기선 자동 행동 없음
   } else if (t.by === 'player') {
-    const target = t.landing === 'in' ? t.p2 : { x: 0, y: 3.2, z: 0 }; // 아웃 코스는 지켜본다
-    moveActor(s.ai, target.x, Math.max(0.4, target.y), AI_SPEED[s.config.difficulty], dt);
-    // AI 스윙 판정
+    const def = SMASH_DEF[s.config.difficulty];
+    const smashDef = t.shot === 'smash';
+    // 스매시는 반응 지연 — 빠른 공엔 늦게 출발한다 (응징 스매시는 더 늦게)
+    const reactU = smashDef ? (t.punish ? def.react + 0.14 : def.react) : 0;
+    if (u >= reactU) {
+      const target = t.landing === 'in' ? t.p2 : { x: 0, y: 3.2, z: 0 }; // 아웃 코스는 지켜본다
+      moveActor(s.ai, target.x, Math.max(0.4, target.y), AI_SPEED[s.config.difficulty], dt);
+    }
+    // AI 스윙 판정 — 스매시는 캐치 반경 축소 (응징이면 거의 못 받는다)
     if (!t.aiHandled && u > 0.5 && s.shuttle.z < 2.8 && s.shuttle.y > 0) {
       const d = dist2(s.shuttle.x, s.shuttle.y, s.ai.x, s.ai.y);
-      if (d < REACH_GOOD) {
+      const catchR = REACH_GOOD * (smashDef ? (t.punish ? def.punishR : def.catchR) : 1);
+      if (d < catchR) {
         t.aiHandled = true;
         if (t.landing === 'in') aiSwing(s, now);
-      } else if (u > 0.82 && d < REACH_MAX) {
-        // 겨우 닿는 런지 — 40%는 라켓이 빗나간다
+      } else if (u > 0.82 && d < REACH_MAX * (smashDef ? 0.75 : 1)) {
+        // 겨우 닿는 런지 — 스매시 수비는 더 자주 빗나간다
         t.aiHandled = true;
-        const whiffP = s.config.difficulty === 'hard' ? 0.3 : s.config.difficulty === 'normal' ? 0.5 : 0.58;
+        const whiffBase = s.config.difficulty === 'hard' ? 0.3 : s.config.difficulty === 'normal' ? 0.5 : 0.58;
+        const whiffP = whiffBase + (smashDef ? (t.punish ? 0.35 : 0.2) : 0);
         if (Math.random() < whiffP) {
           s.ai.anim = 'lunge';
           s.ai.animUntil = now + 300;
@@ -815,6 +844,7 @@ export function swingRemote(s: SimState, intent: SwingIntent, aim: AimLane, dept
     return;
   }
   const contact: Vec3 = { ...s.shuttle };
+  const wasChance = !!s.traj.chance;
   const distQ = d <= reach.p ? 2 : d <= reach.g ? 1 : 0;
   // 게스트도 오른손 기준 백핸드/라운드 판정 (원격 캐릭터의 라켓 방향 = 월드 -x)
   const remoteSign: 1 | -1 = -1;
@@ -834,7 +864,7 @@ export function swingRemote(s: SimState, intent: SwingIntent, aim: AimLane, dept
   s.ai.anim = quality === 'bad' ? 'lunge' : 'swing';
   s.ai.animUntil = now + 260;
   s.ai.motion = motionForHand(motionFor(shot), hand);
-  s.traj = makeTraj('ai', shot, quality, contact, aimX, now, s.rallyLen, DIFF_PACE[s.config.difficulty], depth);
+  s.traj = makeTraj('ai', shot, quality, contact, aimX, now, s.rallyLen, DIFF_PACE[s.config.difficulty], depth, wasChance);
   s.lastShot = { shot, quality, cross: s.traj.cross, cut, weak, by: 'ai', hand };
   s.events.push(`remote-swing:${shot}:${quality}:${hand}`);
 }
