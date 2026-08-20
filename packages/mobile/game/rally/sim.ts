@@ -144,10 +144,16 @@ export type AimDepth = -1 | 0 | 1;
 
 // ─── 튜닝 상수 ─────────────────────────────────────────────────────
 const PLAYER_SPEED = 4.8; // m/s — 사람이 코트를 커버할 수 있게 넉넉히
-const AI_SPEED: Record<Difficulty, number> = { easy: 2.9, normal: 3.6, hard: 4.4 };
+const AI_SPEED: Record<Difficulty, number> = { easy: 2.55, normal: 3.1, hard: 4.4 };
 const REACH_PERFECT = 0.6;
 const REACH_GOOD = 1.05;
-const REACH_MAX = 1.45; // 런지 한계 — 이 밖이면 헛스윙
+const REACH_MAX = 1.45; // 런지 한계 — 이 밖이면 헛스윙 (AI 캐치 판정용)
+// 사람 쪽 리치는 난이도별로 관대하게 — easy가 '진짜 쉬움'이 되는 핵심 레버
+const REACH_BY_DIFF: Record<Difficulty, { p: number; g: number; m: number }> = {
+  easy: { p: 0.8, g: 1.32, m: 1.78 },
+  normal: { p: 0.7, g: 1.18, m: 1.6 },
+  hard: { p: 0.6, g: 1.05, m: 1.45 },
+};
 // 난이도별 셔틀 페이스 — 쉬움은 느긋하게, 어려움은 빠르게
 const DIFF_PACE: Record<Difficulty, number> = { easy: 1.3, normal: 1.12, hard: 1.0 };
 
@@ -165,13 +171,20 @@ const SHOT3: Record<ShotType, { dur: number; apex: number; yMin: number; yMax: n
 
 // AI 스윙 퀄리티 분포 [perfect, good, bad]
 const AI_Q: Record<Difficulty, [number, number, number]> = {
-  easy: [0.15, 0.5, 0.35],
-  normal: [0.3, 0.55, 0.15],
+  easy: [0.08, 0.42, 0.5],
+  normal: [0.2, 0.52, 0.28],
   hard: [0.45, 0.48, 0.07],
 };
 
 const rnd = (a: number, b: number) => a + Math.random() * (b - a);
 const dist2 = (ax: number, ay: number, bx: number, by: number) => Math.hypot(ax - bx, ay - by);
+
+// 타격 스텝 — 스윙 순간 몸을 컨택 지점 쪽으로 붙인다 (라켓·셔틀이 떨어져 보이는
+// '치는 모션 부정확' 해소). 리치 안 거리의 70%를 즉시 좁힌다.
+function stepIntoShot(a: Actor, cx: number, cy: number, yMin: number, yMax: number): void {
+  a.x += Math.max(-0.6, Math.min(0.6, (cx - a.x) * 0.7));
+  a.y = Math.min(yMax, Math.max(yMin, a.y + Math.max(-0.45, Math.min(0.45, (cy - a.y) * 0.7))));
+}
 
 // ─── 상태 생성 ─────────────────────────────────────────────────────
 export function createSim(config: MatchConfig): SimState {
@@ -432,9 +445,10 @@ export function swingPlayer(s: SimState, intent: SwingIntent, aim: AimLane, dept
     return;
   }
   const d = dist2(s.shuttle.x, s.shuttle.y, s.player.x, s.player.y);
+  const reach = REACH_BY_DIFF[s.config.difficulty];
   // 스윙 순간 셔틀 쪽으로 몸을 돌린다 (포핸드 방향감)
   if (Math.abs(s.shuttle.x - s.player.x) > 0.15) s.player.facing = s.shuttle.x > s.player.x ? 1 : -1;
-  if (d > REACH_MAX || s.shuttle.z > 3.0 || s.shuttle.y > 0) {
+  if (d > reach.m || s.shuttle.z > 3.0 || s.shuttle.y > 0) {
     s.player.anim = 'swing';
     s.player.animUntil = now + 300;
     s.player.motion = 'drive';
@@ -445,7 +459,7 @@ export function swingPlayer(s: SimState, intent: SwingIntent, aim: AimLane, dept
   const contact: Vec3 = { ...s.shuttle };
   const shot = shotForContact(intent, contact);
   // 퀄리티 = 발(거리) × 타점(높이) — 둘 중 나쁜 쪽이 결과를 정한다
-  const distQ = d <= REACH_PERFECT ? 2 : d <= REACH_GOOD ? 1 : 0;
+  const distQ = d <= reach.p ? 2 : d <= reach.g ? 1 : 0;
   const timeQ = timingQuality(shot, contact.z);
   const qn = Math.min(distQ, timeQ);
   const quality: Quality = qn === 2 ? 'perfect' : qn === 1 ? 'good' : 'bad';
@@ -454,6 +468,7 @@ export function swingPlayer(s: SimState, intent: SwingIntent, aim: AimLane, dept
   const aimX = aim === 'auto' ? autoAim(s) : Math.max(-1, Math.min(1, aim));
   if (quality === 'perfect') s.stats.perfects += 1;
   s.rallyLen += 1;
+  stepIntoShot(s.player, contact.x, contact.y, -6.6, -0.35);
   s.player.anim = quality === 'bad' ? 'lunge' : 'swing';
   s.player.animUntil = now + 260;
   s.player.motion = motionFor(shot);
@@ -532,7 +547,7 @@ export function servePlayer(s: SimState, kind: 'short' | 'long', gaugePhase: num
 
 function serveAi(s: SimState, now: number) {
   const kind = Math.random() < 0.55 ? 'long' : 'short';
-  const lo = s.config.difficulty === 'hard' ? 0.75 : s.config.difficulty === 'normal' ? 0.62 : 0.5;
+  const lo = s.config.difficulty === 'hard' ? 0.75 : s.config.difficulty === 'normal' ? 0.56 : 0.4;
   const phase = lo + Math.random() * (1 - lo);
   const quality: Quality = phase > 0.92 ? 'perfect' : phase > 0.65 ? 'good' : 'bad';
   const spots = serveSpots(s);
@@ -554,12 +569,12 @@ function aiSwing(s: SimState, now: number) {
   const roll = Math.random();
   let quality: Quality = roll < p ? 'perfect' : roll < p + g - fatigue ? 'good' : 'bad';
   if (d > REACH_GOOD) quality = 'bad'; // 런지 리턴
-  if (t.chance && quality === 'bad') quality = 'good'; // 뜬공은 살린다
+  if (t.chance && quality === 'bad' && s.config.difficulty !== 'easy') quality = 'good'; // 뜬공 구제 — easy는 찬스도 놓친다
 
   const contact: Vec3 = { ...s.shuttle };
   const menu = contactMenu(contact);
   let shot: ShotType;
-  if (menu.includes('smash') && (t.chance || Math.random() < (s.config.difficulty === 'hard' ? 0.5 : 0.32))) {
+  if (menu.includes('smash') && (t.chance || Math.random() < (s.config.difficulty === 'hard' ? 0.5 : s.config.difficulty === 'normal' ? 0.3 : 0.16))) {
     shot = 'smash';
   } else if (menu.includes('drive') && Math.random() < 0.55) shot = 'drive';
   else if (menu.includes('drop') && Math.random() < 0.35) shot = 'drop';
@@ -568,7 +583,7 @@ function aiSwing(s: SimState, now: number) {
 
   // 코스: 플레이어가 없는 쪽을 연속값으로 노린다 (난이도가 높을수록 독하고 와이드하게)
   const openSign = s.player.x > 0.6 ? -1 : s.player.x < -0.6 ? 1 : Math.random() < 0.5 ? -1 : 1;
-  const smart = Math.random() < (s.config.difficulty === 'hard' ? 0.85 : s.config.difficulty === 'normal' ? 0.65 : 0.4);
+  const smart = Math.random() < (s.config.difficulty === 'hard' ? 0.85 : s.config.difficulty === 'normal' ? 0.55 : 0.28);
   const aim = smart ? openSign * rnd(0.55, s.config.difficulty === 'hard' ? 1 : 0.85) : rnd(-0.8, 0.8);
   // 깊이도 섞는다 — 플레이어가 뒤에 있으면 짧게, 앞에 있으면 깊게 노리는 경향
   const depth: AimDepth = smart
@@ -576,6 +591,7 @@ function aiSwing(s: SimState, now: number) {
     : ((Math.round(rnd(-1, 1)) as AimDepth));
 
   s.rallyLen += 1;
+  stepIntoShot(s.ai, contact.x, contact.y, 0.35, 6.6);
   s.ai.anim = quality === 'bad' ? 'lunge' : 'swing';
   s.ai.animUntil = now + 260;
   s.ai.motion = motionFor(shot);
@@ -673,7 +689,8 @@ export function tick(s: SimState, dtMs: number, input: MoveInput, remote?: MoveI
       } else if (u > 0.82 && d < REACH_MAX) {
         // 겨우 닿는 런지 — 40%는 라켓이 빗나간다
         t.aiHandled = true;
-        if (Math.random() < 0.4) {
+        const whiffP = s.config.difficulty === 'hard' ? 0.3 : s.config.difficulty === 'normal' ? 0.45 : 0.58;
+        if (Math.random() < whiffP) {
           s.ai.anim = 'lunge';
           s.ai.animUntil = now + 300;
           s.events.push('ai-whiff');
@@ -744,8 +761,9 @@ export function swingRemote(s: SimState, intent: SwingIntent, aim: AimLane, dept
     return;
   }
   const d = dist2(s.shuttle.x, s.shuttle.y, s.ai.x, s.ai.y);
+  const reach = REACH_BY_DIFF[s.config.difficulty];
   if (Math.abs(s.shuttle.x - s.ai.x) > 0.15) s.ai.facing = s.shuttle.x > s.ai.x ? 1 : -1;
-  if (d > REACH_MAX || s.shuttle.z > 3.0 || s.shuttle.y < 0) {
+  if (d > reach.m || s.shuttle.z > 3.0 || s.shuttle.y < 0) {
     s.ai.anim = 'swing';
     s.ai.animUntil = now + 300;
     s.ai.motion = 'drive';
@@ -755,7 +773,7 @@ export function swingRemote(s: SimState, intent: SwingIntent, aim: AimLane, dept
   }
   const contact: Vec3 = { ...s.shuttle };
   const shot = shotForContact(intent, contact);
-  const distQ = d <= REACH_PERFECT ? 2 : d <= REACH_GOOD ? 1 : 0;
+  const distQ = d <= reach.p ? 2 : d <= reach.g ? 1 : 0;
   const timeQ = timingQuality(shot, contact.z);
   const qn = Math.min(distQ, timeQ);
   const quality: Quality = qn === 2 ? 'perfect' : qn === 1 ? 'good' : 'bad';
@@ -764,6 +782,7 @@ export function swingRemote(s: SimState, intent: SwingIntent, aim: AimLane, dept
   const aimX = aim === 'auto' ? autoAimRemote(s) : Math.max(-1, Math.min(1, aim));
   if (quality === 'perfect') s.stats.perfectsRemote = (s.stats.perfectsRemote ?? 0) + 1;
   s.rallyLen += 1;
+  stepIntoShot(s.ai, contact.x, contact.y, 0.35, 6.6);
   s.ai.anim = quality === 'bad' ? 'lunge' : 'swing';
   s.ai.animUntil = now + 260;
   s.ai.motion = motionFor(shot);

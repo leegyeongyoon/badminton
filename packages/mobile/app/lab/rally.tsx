@@ -547,12 +547,12 @@ export default function RallyGameScreen() {
     });
 
   // ── 애니메이티드 스타일 ───────────────────────────────────────────
-  // 캐릭터 1.2배 확대(가독·귀여움) + 아이들 때 숨쉬기 바운스
+  // 캐릭터 스케일 1.05 — 코트 대비 너무 크지 않게(셔틀·코트 가독) + 아이들 숨쉬기
   const playerStyle = useAnimatedStyle(() => ({
     transform: [
       { translateX: pX.value - 39 },
       { translateY: pY.value - 112 + (pPose.value === 0 ? Math.sin(bobT.value) * 2.2 : 0) },
-      { scale: pS.value * 1.2 },
+      { scale: pS.value * 1.05 },
       { scaleX: pFace.value },
     ],
   }));
@@ -560,7 +560,7 @@ export default function RallyGameScreen() {
     transform: [
       { translateX: aX.value - 39 },
       { translateY: aY.value - 112 + (aPose.value === 0 ? Math.sin(bobT.value + 1.7) * 2.2 : 0) },
-      { scale: aS.value * 1.2 },
+      { scale: aS.value * 1.05 },
       { scaleX: aFace.value },
     ],
   }));
@@ -1350,10 +1350,10 @@ const styles = StyleSheet.create({
   shuttleShadow: {
     position: 'absolute', width: 20, height: 8, borderRadius: 10, backgroundColor: '#000',
   },
-  // 셔틀 뒤 흰 광륜 — 초록 코트 위 가독성 (콕이 잘 안 보인다는 피드백)
+  // 셔틀 뒤 웜 옐로 글로우 — 초록 코트 위 가독성 (콕이 잘 안 보인다는 피드백)
   shuttleHalo: {
     position: 'absolute', left: -6, top: -6, width: 43, height: 43,
-    borderRadius: 22, backgroundColor: 'rgba(255,255,255,0.38)',
+    borderRadius: 22, backgroundColor: 'rgba(255,215,80,0.42)',
   },
 
   char: { position: 'absolute', left: 0, top: 0 },

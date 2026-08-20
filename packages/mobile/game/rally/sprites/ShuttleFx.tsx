@@ -6,17 +6,19 @@ import Svg, { Circle, Ellipse, Path, G } from 'react-native-svg';
 
 // 코르크가 아래(진행 방향), 깃털이 위로 뻗는 기본 자세.
 // 부모가 진행 방향에 맞춰 회전시킨다.
+// 게임식 고가시성: 노란 깃털 + 굵은 다크 아웃라인 — 밝은 초록 코트 위에서
+// 흰 깃털은 씻겨 보인다("셔틀이 안 보여" 피드백).
 export function ShuttleSvg({ size = 26 }: { size?: number }) {
   return (
     <Svg width={size} height={size * 1.3} viewBox="0 0 26 34">
-      {/* 깃털 3장 */}
-      <Path d="M13 20 L4 3 Q8 6 10 4 L13 16 Z" fill="#F1F5F9" stroke="#CBD5E1" strokeWidth={0.8} />
-      <Path d="M13 20 L13 1 Q15 4 17 3 L15 17 Z" fill="#FFFFFF" stroke="#CBD5E1" strokeWidth={0.8} />
-      <Path d="M13 20 L22 3 Q18 6 16 4 L13 16 Z" fill="#E8EDF3" stroke="#CBD5E1" strokeWidth={0.8} />
+      {/* 깃털 3장 — 옐로 톤 + 다크 아웃라인 */}
+      <Path d="M13 20 L4 3 Q8 6 10 4 L13 16 Z" fill="#FFE082" stroke="#3A4A5A" strokeWidth={1.5} strokeLinejoin="round" />
+      <Path d="M13 20 L22 3 Q18 6 16 4 L13 16 Z" fill="#FFD54F" stroke="#3A4A5A" strokeWidth={1.5} strokeLinejoin="round" />
+      <Path d="M13 20 L13 1 Q15 4 17 3 L15 17 Z" fill="#FFF3C4" stroke="#3A4A5A" strokeWidth={1.5} strokeLinejoin="round" />
       {/* 밴드 + 코르크 */}
-      <Ellipse cx={13} cy={21.5} rx={5.2} ry={3.2} fill="#F8FAFC" stroke="#CBD5E1" strokeWidth={0.8} />
-      <Ellipse cx={13} cy={26.5} rx={4.6} ry={5} fill="#E11D48" />
-      <Ellipse cx={11.4} cy={25} rx={1.6} ry={2} fill="#F87171" opacity={0.7} />
+      <Ellipse cx={13} cy={21.5} rx={5.4} ry={3.2} fill="#FFFFFF" stroke="#3A4A5A" strokeWidth={1.5} />
+      <Ellipse cx={13} cy={26.5} rx={4.8} ry={5.2} fill="#E8443A" stroke="#3A4A5A" strokeWidth={1.5} />
+      <Ellipse cx={11.3} cy={24.8} rx={1.7} ry={2.1} fill="#FF8A7A" opacity={0.85} />
     </Svg>
   );
 }
