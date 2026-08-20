@@ -317,7 +317,7 @@ export const RigCharacter = forwardRef<RigHandle, Props>(function RigCharacter(
   const foreRStyle = useAnimatedStyle(() => ({
     transform: pivotTop(18, poseMode.value === 4 ? -10 : foreR.value),
   }));
-  const racketStyle = useAnimatedStyle(() => ({ transform: pivotTop(20, racket.value) }));
+  const racketStyle = useAnimatedStyle(() => ({ transform: pivotTop(7, racket.value) }));
   const swooshStyle = useAnimatedStyle(() => ({
     opacity: swT.value >= 1 ? 0 : (1 - swT.value) * 0.85,
     left: swCx.value - swR.value,
@@ -364,18 +364,22 @@ export const RigCharacter = forwardRef<RigHandle, Props>(function RigCharacter(
           {/* 왼팔 */}
           <Animated.View style={[s.arm, { left: -7 }, armLStyle]}>
             <View style={s.sleeve} />
-            <Animated.View style={[s.fore, foreLStyle]} />
+            <Animated.View style={[s.fore, foreLStyle]}>
+              <View style={s.hand} />
+            </Animated.View>
           </Animated.View>
           {/* 오른팔 + 라켓 */}
           <Animated.View style={[s.arm, { left: 33 }, armRStyle]}>
             <View style={s.sleeve} />
             <Animated.View style={[s.fore, foreRStyle]}>
               <Animated.View style={[s.racket, racketStyle]}>
+                <View style={s.shaft} />
                 <View style={s.racketHead}>
                   <View style={s.stringH} />
                   <View style={s.stringV} />
                 </View>
               </Animated.View>
+              <View style={s.hand} />
             </Animated.View>
           </Animated.View>
         </Animated.View>
@@ -453,9 +457,14 @@ function makeStyles(pal: (typeof PAL)['male']) {
       borderRadius: 5, backgroundColor: pal.jersey,
     },
     fore: { position: 'absolute', left: 0, top: 16, width: 8, height: 18, borderRadius: 5, backgroundColor: pal.skin },
-    racket: { position: 'absolute', left: 2, top: 13, width: 4, height: 20, borderRadius: 2, backgroundColor: '#B98A4C' },
+    racket: { position: 'absolute', left: 2, top: 16, width: 4, height: 7, borderRadius: 2, backgroundColor: '#8A6236' },
+    shaft: { position: 'absolute', left: 0.5, top: -14, width: 3, height: 15, backgroundColor: '#B98A4C' },
+    hand: {
+      position: 'absolute', left: -2, top: 12, width: 12, height: 12, borderRadius: 6,
+      backgroundColor: pal.skin, borderWidth: 1, borderColor: 'rgba(0,0,0,0.10)',
+    },
     racketHead: {
-      position: 'absolute', left: -9.5, top: -25, width: 23, height: 27,
+      position: 'absolute', left: -9.5, top: -39, width: 23, height: 27,
       borderRadius: 13, borderWidth: 3, borderColor: '#2E4B5E',
       backgroundColor: 'rgba(255,255,255,0.5)',
     },
