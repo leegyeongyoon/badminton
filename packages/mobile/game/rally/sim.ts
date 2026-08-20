@@ -168,6 +168,8 @@ export function serveSpots(s: SimState): ServeSpots {
 
 // 게임식 버튼 조작 — 공격(스매시/네트킬)·연결(클리어/헤어핀)·드롭
 export type SwingIntent = 'attack' | 'rally' | 'drop';
+/** 서브 종류 — 플릭은 숏서브와 같은 모션으로 시작해 깊게 튕기는 기습(심리전) */
+export type ServeKind = 'short' | 'long' | 'flick';
 /** 좌우 코스 — 연속값(-1..1, 끝까지 기울이면 사이드라인 와이드) 또는 'auto'(빈 코트) */
 export type AimLane = number | 'auto';
 /** 깊이 코스 — 스윙 순간 스틱 앞뒤: -1 짧게(네트 쪽) / 0 기본 / 1 깊게(백라인) */
@@ -534,7 +536,7 @@ export function swingPlayer(s: SimState, intent: SwingIntent, aim: AimLane, dept
 // 대각선 서비스 박스로만 나간다. 배드 서브는 35% 확률로 폴트(네트/롱).
 function makeServeTraj(
   by: Side,
-  kind: 'short' | 'long',
+  kind: ServeKind,
   quality: Quality,
   from: Vec3,
   targetSign: 1 | -1,
@@ -550,6 +552,11 @@ function makeServeTraj(
     dur = 1100;
     apex = quality === 'perfect' ? 1.72 : 1.95; // 퍼펙트 숏서브는 네트를 스친다
     ty = dir * rnd(2.05, 2.7);
+  } else if (kind === 'flick') {
+    // 플릭: 숏서브인 척하다 마지막에 튕겨 깊게 — 빠르고 낮은 궤적
+    dur = 980;
+    apex = quality === 'perfect' ? 2.3 : 2.7;
+    ty = dir * (quality === 'perfect' ? rnd(5.2, 6.0) : rnd(4.5, 5.6));
   } else {
     dur = 1600;
     apex = 4.8;
@@ -569,7 +576,7 @@ function makeServeTraj(
         landing = 'out';
       }
     } else {
-      // 어설픈 서브 — 짧고 높게 떠서 상대 찬스
+      // 어설픈 서브 — 짧고 높게 떠서 상대 찬스 (플릭 실패는 특히 위험)
       ty = dir * rnd(2.6, 3.4);
       apex = Math.max(apex, 3.6);
       dur *= 1.12;
@@ -578,28 +585,32 @@ function makeServeTraj(
   }
   const p2: Vec3 = { x: tx, y: ty, z: 0.02 };
   const c: Vec3 = { x: (from.x + tx) / 2, y: (from.y + ty) / 2, z: apex };
-  const t: Traj = { by, shot: kind === 'short' ? 'hairpin' : 'lift', quality, chance, serve: true, p0: { ...from }, c, p2, t0: now, dur, landing, aiHandled: false };
+  const shot: ShotType = kind === 'short' ? 'hairpin' : kind === 'flick' ? 'drive' : 'lift';
+  const t: Traj = { by, shot, quality, chance, serve: true, p0: { ...from }, c, p2, t0: now, dur, landing, aiHandled: false };
   clearNet(t);
   return t;
 }
 
-export function servePlayer(s: SimState, kind: 'short' | 'long', gaugePhase: number): void {
+export function servePlayer(s: SimState, kind: ServeKind, gaugePhase: number): void {
   const now = s.clock;
   if (s.phase !== 'serve' || s.server !== 'player') return;
   const quality: Quality = gaugePhase > 0.92 ? 'perfect' : gaugePhase > 0.65 ? 'good' : 'bad';
   const spots = serveSpots(s);
   const from: Vec3 = { x: s.player.x, y: s.player.y, z: 0.9 };
   s.phase = 'rally';
-  s.lastShot = { shot: kind === 'short' ? 'hairpin' : 'clear', quality, serve: true };
+  s.lastShot = { shot: kind === 'short' ? 'hairpin' : kind === 'flick' ? 'drive' : 'clear', quality, serve: true };
   s.player.anim = 'swing';
   s.player.animUntil = now + 240;
-  s.player.motion = motionFor('clear', true, kind);
+  s.player.motion = kind === 'long' ? 'under' : 'netPush'; // 플릭은 숏서브와 같은 모션 — 속임수
   s.traj = makeServeTraj('player', kind, quality, from, spots.targetSign, now, DIFF_PACE[s.config.difficulty]);
   s.events.push(`serve:${kind}:${quality}`);
 }
 
 function serveAi(s: SimState, now: number) {
-  const kind = Math.random() < 0.55 ? 'long' : 'short';
+  // 서브 심리전 — 난이도 높을수록 플릭 기습 비중 상승
+  const flickP = s.config.difficulty === 'hard' ? 0.3 : s.config.difficulty === 'normal' ? 0.22 : 0.08;
+  const r = Math.random();
+  const kind: ServeKind = r < flickP ? 'flick' : r < flickP + 0.4 ? 'long' : 'short';
   const lo = s.config.difficulty === 'hard' ? 0.75 : s.config.difficulty === 'normal' ? 0.56 : 0.4;
   const phase = lo + Math.random() * (1 - lo);
   const quality: Quality = phase > 0.92 ? 'perfect' : phase > 0.65 ? 'good' : 'bad';
@@ -608,7 +619,7 @@ function serveAi(s: SimState, now: number) {
   s.phase = 'rally';
   s.ai.anim = 'swing';
   s.ai.animUntil = now + 240;
-  s.ai.motion = motionFor('clear', true, kind);
+  s.ai.motion = kind === 'long' ? 'under' : 'netPush';
   s.traj = makeServeTraj('ai', kind, quality, from, spots.targetSign, now, DIFF_PACE[s.config.difficulty]);
   s.events.push(`ai-serve:${kind}:${quality}`);
 }
@@ -778,7 +789,9 @@ export function tick(s: SimState, dtMs: number, input: MoveInput, remote?: MoveI
       }
     }
   } else {
-    moveActor(s.ai, 0, 3.0, AI_SPEED[s.config.difficulty], dt);
+    // 스매시 후엔 전진(넷대시) — 짧은 블록 리턴을 푸시로 마무리하러 들어간다
+    const homeY = t.shot === 'smash' ? 2.0 : 3.0;
+    moveActor(s.ai, 0, homeY, AI_SPEED[s.config.difficulty], dt);
   }
 
   // 착지 판정
@@ -875,7 +888,7 @@ export function swingRemote(s: SimState, intent: SwingIntent, aim: AimLane, dept
 }
 
 /** 게스트 서브를 호스트 sim에 적용 — 게이지 위상은 게스트 화면에서 잰 값. */
-export function serveRemote(s: SimState, kind: 'short' | 'long', gaugePhase: number): void {
+export function serveRemote(s: SimState, kind: ServeKind, gaugePhase: number): void {
   const now = s.clock;
   if (s.phase !== 'serve' || s.server !== 'ai') return;
   const quality: Quality = gaugePhase > 0.92 ? 'perfect' : gaugePhase > 0.65 ? 'good' : 'bad';
@@ -883,10 +896,10 @@ export function serveRemote(s: SimState, kind: 'short' | 'long', gaugePhase: num
   const from: Vec3 = { x: s.ai.x, y: s.ai.y, z: 0.9 };
   s.phase = 'rally';
   s.aiServeAt = 0;
-  s.lastShot = { shot: kind === 'short' ? 'hairpin' : 'clear', quality, serve: true, by: 'ai' };
+  s.lastShot = { shot: kind === 'short' ? 'hairpin' : kind === 'flick' ? 'drive' : 'clear', quality, serve: true, by: 'ai' };
   s.ai.anim = 'swing';
   s.ai.animUntil = now + 240;
-  s.ai.motion = motionFor('clear', true, kind);
+  s.ai.motion = kind === 'long' ? 'under' : 'netPush';
   s.traj = makeServeTraj('ai', kind, quality, from, spots.targetSign, now, DIFF_PACE[s.config.difficulty]);
   s.events.push(`remote-serve:${kind}:${quality}`);
 }

@@ -30,6 +30,7 @@ import {
   AimDepth,
   AimLane,
   MotionKey,
+  ServeKind,
   ServeSpots,
   SimState,
   SimPhase,
@@ -46,6 +47,7 @@ import {
   tick,
 } from '../../game/rally/sim';
 import { connectRally, RallyNet } from '../../game/rally/net';
+import { initSfx, playSfx } from '../../game/rally/sound';
 import { rallyApi } from '../../services/rally';
 import { clubSessionApi } from '../../services/clubSession';
 import { profileApi } from '../../services/profile';
@@ -163,6 +165,7 @@ export default function RallyGameScreen() {
     if (!userId) return;
     const pvpCfg: MatchConfig = { target: 11, deuce: true, difficulty: 'normal' };
     setCfg(pvpCfg);
+    initSfx();
     const s = createSim(pvpCfg);
     s.leftHand = false; // PvP는 우선 오른손 기준(프로토콜 확장 전)
     if (isGuest) {
@@ -295,14 +298,21 @@ export default function RallyGameScreen() {
         else aPose.value = 4;
       }
       // 샷별 스윙 클립 재생 — sim이 정한 모션(Actor.motion)을 리그에 지시
+      const hitSfx = (by: 'player' | 'ai') => {
+        const tj = s.traj;
+        if (!tj || tj.by !== by || s.clock - tj.t0 > 150) return; // 방금 그 액터가 친 궤적일 때만
+        playSfx(tj.shot === 'smash' ? (tj.punish ? 'smashBig' : 'smash') : 'hit');
+      };
       if (s.player.anim !== prevAnimRef.current.p) {
         if (s.player.anim === 'swing') pRigRef.current?.play(s.player.motion ?? 'overhead');
         else if (s.player.anim === 'lunge') pRigRef.current?.play('lunge');
+        if (s.player.anim !== 'idle') hitSfx('player');
         prevAnimRef.current.p = s.player.anim;
       }
       if (s.ai.anim !== prevAnimRef.current.a) {
         if (s.ai.anim === 'swing') aRigRef.current?.play(s.ai.motion ?? 'overhead');
         else if (s.ai.anim === 'lunge') aRigRef.current?.play('lunge');
+        if (s.ai.anim !== 'idle') hitSfx('ai');
         prevAnimRef.current.a = s.ai.anim;
       }
       // 백스윙 준비 — 오는 공이 가까우면 미리 젖히고, 스윙 없이 지나가면 풀기
@@ -414,6 +424,8 @@ export default function RallyGameScreen() {
           stats: { ...s.stats }, zone: zoneRef.current,
         });
         if (s.banner) {
+          if (s.banner.reason === '네트!' || s.banner.reason === '서비스 폴트!') playSfx('net');
+          playSfx(s.banner.winner === 'player' ? 'score' : 'lose');
           haptic(s.banner.winner === 'player' ? 'success' : 'error');
           // 득점 순간 — 강한 셰이크
           shakeT.value = 0;
@@ -490,7 +502,7 @@ export default function RallyGameScreen() {
     }
     haptic('light');
   };
-  const doServe = (kind: 'short' | 'long') => {
+  const doServe = (kind: ServeKind) => {
     const s = simRef.current;
     if (!s) return;
     const phase = servePhase(Date.now());
@@ -654,6 +666,7 @@ export default function RallyGameScreen() {
         charSel={charSel}
         onCharSel={setCharSel}
         onStart={() => {
+          initSfx();
           simRef.current = createSim(cfg);
           simRef.current.leftHand = lefty;
           uiKeyRef.current = '';
@@ -835,6 +848,10 @@ export default function RallyGameScreen() {
                 <Pressable style={({ pressed }) => [styles.serveBtn, pressed && { transform: [{ scale: 0.94 }] }]} onPress={() => doServe('short')}>
                   <MaterialCommunityIcons name="arrow-collapse-down" size={18} color="#0F172A" />
                   <Text style={styles.serveBtnText}>숏서브</Text>
+                </Pressable>
+                <Pressable style={({ pressed }) => [styles.serveBtn, pressed && { transform: [{ scale: 0.94 }] }]} onPress={() => doServe('flick')}>
+                  <MaterialCommunityIcons name="lightning-bolt-outline" size={18} color="#0F172A" />
+                  <Text style={styles.serveBtnText}>플릭</Text>
                 </Pressable>
                 <Pressable style={({ pressed }) => [styles.serveBtn, pressed && { transform: [{ scale: 0.94 }] }]} onPress={() => doServe('long')}>
                   <MaterialCommunityIcons name="arrow-up-bold" size={18} color="#0F172A" />
