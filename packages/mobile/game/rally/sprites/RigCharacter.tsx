@@ -53,14 +53,14 @@ const CLIPS: Record<string, Clip> = {
   // 클리어/드롭·커트: (짧은) 백스윙 → 임팩트(팔 쭉) → 팔로스루
   overhead: { f: [
     { d: 60, j: { armR: -128, foreR: -108, racket: -52, torso: -7 } },
-    { d: 70, j: { armR: -178, foreR: -4, racket: 14, torso: 4 } },
-    { d: 180, j: { armR: -70, foreR: -30, racket: 10 } },
+    { d: 70, j: { armR: -158, foreR: -6, racket: 10, torso: 8 } },
+    { d: 180, j: { armR: -42, foreR: -24, racket: 14 } },
     { d: 160, j: {} },
   ] },
   // 스매시: 크라우치 → 점프 + 내려찍기 → 착지
   smashJump: { f: [
     { d: 90, j: { armR: -120, foreR: -118, racket: -58, torso: -10, legL: -16, legR: 14 }, y: 7 },
-    { d: 90, j: { armR: -182, foreR: -2, racket: 18, torso: 9, legL: 4, legR: -4 }, y: -16 },
+    { d: 90, j: { armR: -162, foreR: -4, racket: 14, torso: 11, legL: 4, legR: -4 }, y: -16 },
     { d: 160, j: { armR: -60, foreR: -24, racket: 26 }, y: -10 },
     { d: 200, j: {} },
   ] },
@@ -111,7 +111,7 @@ const CLIPS: Record<string, Clip> = {
   // 라운드 더 헤드: 백 쪽 높은 공을 머리 위로 돌아 포핸드로 — 몸이 기울며 강타
   round: { f: [
     { d: 80, j: { armR: -130, foreR: -110, racket: -50, torso: 6 } },
-    { d: 80, j: { armR: -198, foreR: -8, racket: 20, torso: 13, legL: 12 } },
+    { d: 80, j: { armR: -190, foreR: -10, racket: 16, torso: 14, legL: 12 } },
     { d: 170, j: { armR: -80, foreR: -30, torso: 5 } },
     { d: 160, j: {} },
   ] },
@@ -167,6 +167,32 @@ export interface RigHandle {
   play: (motion: RigClip) => void;
 }
 
+/** 클립의 tMs 시점 포즈 — 필름스트립 디버그(/lab/rig)용. play()와 동일한 보간 시맨틱 */
+export function poseAt(motion: RigClip, tMs: number): { j: Record<string, number>; y: number } {
+  const def = CLIPS[motion] ?? CLIPS.overhead;
+  const clip = def.f;
+  let prevJ: Record<Joint, number> = { ...REST };
+  let prevY = 0;
+  let acc = 0;
+  for (let i = 0; i < clip.length; i++) {
+    const f = clip[i];
+    const isLast = i === clip.length - 1;
+    const tgtJ = {} as Record<Joint, number>;
+    for (const j of JOINTS) tgtJ[j] = f.j[j] !== undefined ? f.j[j]! : isLast && !def.hold ? REST[j] : prevJ[j];
+    const tgtY = f.y !== undefined ? f.y : isLast && !def.hold ? 0 : prevY;
+    if (tMs <= acc + f.d) {
+      const k = Math.max(0, Math.min(1, (tMs - acc) / f.d));
+      const pose = {} as Record<Joint, number>;
+      for (const j of JOINTS) pose[j] = prevJ[j] + (tgtJ[j] - prevJ[j]) * k;
+      return { j: pose, y: prevY + (tgtY - prevY) * k };
+    }
+    prevJ = tgtJ;
+    prevY = tgtY;
+    acc += f.d;
+  }
+  return { j: prevJ, y: prevY };
+}
+
 interface Props {
   variant: Variant;
   /** 0 idle / 1 run / 2 swing / 3 lunge / 4 cheer — 부모 루프가 갱신하는 공유값 */
@@ -175,6 +201,8 @@ interface Props {
   runFrame: SharedValue<number>;
   /** 결과 화면용 정지 포즈 (지정 시 poseMode 무시) */
   still?: 'win' | 'lose';
+  /** 임의 포즈 동결 — 필름스트립 디버그용 (poseAt 결과를 그대로) */
+  freeze?: { j: Record<string, number>; y: number };
 }
 
 // 상단 가장자리를 축으로 회전 (RN 기본은 중심축)
@@ -188,7 +216,7 @@ const pivotBottom = (h: number, deg: number) => {
 };
 
 export const RigCharacter = forwardRef<RigHandle, Props>(function RigCharacter(
-  { variant, poseMode, runFrame, still },
+  { variant, poseMode, runFrame, still, freeze },
   ref,
 ) {
   const pal = PAL[variant];
@@ -255,6 +283,13 @@ export const RigCharacter = forwardRef<RigHandle, Props>(function RigCharacter(
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [still]);
 
+  useEffect(() => {
+    if (!freeze) return;
+    for (const j of JOINTS) sv[j].value = freeze.j[j] ?? REST[j];
+    rootY.value = freeze.y ?? 0;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [freeze]);
+
   // ── 관절 스타일 — 러닝(다리·팔 펌프)과 cheer(양팔 위)는 공유값 오버라이드
   const rootStyle = useAnimatedStyle(() => ({ transform: [{ translateY: rootY.value }] }));
   const torsoStyle = useAnimatedStyle(() => ({ transform: pivotBottom(34, torso.value) }));
@@ -269,20 +304,20 @@ export const RigCharacter = forwardRef<RigHandle, Props>(function RigCharacter(
   const armLStyle = useAnimatedStyle(() => {
     const cheer = poseMode.value === 4;
     const pump = poseMode.value === 1 ? Math.sin(runFrame.value * 6 + Math.PI) * 16 : 0;
-    return { transform: pivotTop(16, cheer ? 158 : armL.value + pump) };
+    return { transform: pivotTop(20, cheer ? 158 : armL.value + pump) };
   });
   const foreLStyle = useAnimatedStyle(() => ({
-    transform: pivotTop(14, poseMode.value === 4 ? 0 : foreL.value),
+    transform: pivotTop(18, poseMode.value === 4 ? 0 : foreL.value),
   }));
   const armRStyle = useAnimatedStyle(() => {
     // 라켓 팔은 달릴 때도 펌프하지 않는다 — 레디 자세 유지 (라켓이 흔들리며 도는 느낌 방지)
     const cheer = poseMode.value === 4;
-    return { transform: pivotTop(16, cheer ? -158 : armR.value) };
+    return { transform: pivotTop(20, cheer ? -158 : armR.value) };
   });
   const foreRStyle = useAnimatedStyle(() => ({
-    transform: pivotTop(14, poseMode.value === 4 ? -10 : foreR.value),
+    transform: pivotTop(18, poseMode.value === 4 ? -10 : foreR.value),
   }));
-  const racketStyle = useAnimatedStyle(() => ({ transform: pivotTop(16, racket.value) }));
+  const racketStyle = useAnimatedStyle(() => ({ transform: pivotTop(20, racket.value) }));
   const swooshStyle = useAnimatedStyle(() => ({
     opacity: swT.value >= 1 ? 0 : (1 - swT.value) * 0.85,
     left: swCx.value - swR.value,
@@ -412,20 +447,20 @@ function makeStyles(pal: (typeof PAL)['male']) {
       borderWidth: 1.8, borderColor: '#22303B', borderTopWidth: 0,
       borderBottomLeftRadius: 8, borderBottomRightRadius: 8,
     },
-    arm: { position: 'absolute', top: 4, width: 8, height: 16, borderRadius: 5, backgroundColor: pal.skin },
+    arm: { position: 'absolute', top: 4, width: 8, height: 20, borderRadius: 5, backgroundColor: pal.skin },
     sleeve: {
       position: 'absolute', left: -1, right: -1, top: -1, height: 10,
       borderRadius: 5, backgroundColor: pal.jersey,
     },
-    fore: { position: 'absolute', left: 0, top: 12, width: 8, height: 14, borderRadius: 5, backgroundColor: pal.skin },
-    racket: { position: 'absolute', left: 2, top: 10, width: 4, height: 16, borderRadius: 2, backgroundColor: '#B98A4C' },
+    fore: { position: 'absolute', left: 0, top: 16, width: 8, height: 18, borderRadius: 5, backgroundColor: pal.skin },
+    racket: { position: 'absolute', left: 2, top: 13, width: 4, height: 20, borderRadius: 2, backgroundColor: '#B98A4C' },
     racketHead: {
-      position: 'absolute', left: -8, top: -21, width: 20, height: 23,
-      borderRadius: 11, borderWidth: 3, borderColor: '#2E4B5E',
-      backgroundColor: 'rgba(255,255,255,0.45)',
+      position: 'absolute', left: -9.5, top: -25, width: 23, height: 27,
+      borderRadius: 13, borderWidth: 3, borderColor: '#2E4B5E',
+      backgroundColor: 'rgba(255,255,255,0.5)',
     },
-    stringH: { position: 'absolute', left: 1, right: 1, top: 7.5, height: 1.4, backgroundColor: 'rgba(150,180,200,0.95)' },
-    stringV: { position: 'absolute', top: 1, bottom: 1, left: 6.8, width: 1.4, backgroundColor: 'rgba(150,180,200,0.95)' },
+    stringH: { position: 'absolute', left: 1, right: 1, top: 9, height: 1.4, backgroundColor: 'rgba(150,180,200,0.95)' },
+    stringV: { position: 'absolute', top: 1, bottom: 1, left: 8, width: 1.4, backgroundColor: 'rgba(150,180,200,0.95)' },
     // 상단+우측 보더만 칠한 원 → 회전하면 호가 궤적을 쓸고 간다
     swoosh: {
       position: 'absolute',

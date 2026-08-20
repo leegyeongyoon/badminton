@@ -345,7 +345,7 @@ function makeTraj(
         apex = 3.2;
         dur = 1150;
         chance = true;
-      } else if (r < 0.85) {
+      } else if (r < 0.88) {
         ty = 0;
         apex = 1.2;
         dur = 480;
@@ -360,7 +360,7 @@ function makeTraj(
       apex = 1.2;
       landing = 'net';
       dur *= 0.6;
-    } else if ((shot === 'clear' || shot === 'lift') && Math.random() < 0.4) {
+    } else if ((shot === 'clear' || shot === 'lift') && Math.random() < 0.25) {
       // 밀린 깊은 샷이 라인을 넘는다 — 뜬공만으로는 랠리가 영원히 안 끝난다
       ty = dir * rnd(6.9, 7.9);
       landing = 'out';
@@ -438,11 +438,11 @@ function timingQuality(shot: ShotType, z: number): 0 | 1 | 2 {
   }
 }
 
-// 오토에임 — 상대가 없는 쪽을 노린다
-export function autoAim(s: SimState): -1 | 0 | 1 {
-  if (s.ai.x > 0.5) return -1;
-  if (s.ai.x < -0.5) return 1;
-  return Math.random() < 0.5 ? -1 : 1;
+// 오토에임 — 상대가 없는 쪽의 '안전한' 빈 코스. 라인 노림(풀틸트)은
+// 스틱을 직접 끝까지 기울였을 때만 — 오토가 라인을 긁으면 억울한 아웃이 쏟아진다
+export function autoAim(s: SimState): number {
+  const sign = s.ai.x > 0.5 ? -1 : s.ai.x < -0.5 ? 1 : Math.random() < 0.5 ? -1 : 1;
+  return sign * rnd(0.55, 0.78);
 }
 
 // ─── 득점 처리 ─────────────────────────────────────────────────────
@@ -641,7 +641,7 @@ function aiSwing(s: SimState, now: number) {
   // 코스: 플레이어가 없는 쪽을 연속값으로 노린다 (난이도가 높을수록 독하고 와이드하게)
   const openSign = s.player.x > 0.6 ? -1 : s.player.x < -0.6 ? 1 : Math.random() < 0.5 ? -1 : 1;
   const smart = Math.random() < (s.config.difficulty === 'hard' ? 0.85 : s.config.difficulty === 'normal' ? 0.55 : 0.28);
-  let aim = smart ? openSign * rnd(0.55, s.config.difficulty === 'hard' ? 1 : 0.85) : rnd(-0.8, 0.8);
+  let aim = smart ? openSign * rnd(0.5, s.config.difficulty === 'hard' ? 0.95 : 0.75) : rnd(-0.7, 0.7);
   // 깊이도 섞는다 — 플레이어가 뒤에 있으면 짧게, 앞에 있으면 깊게 노리는 경향
   let depth: AimDepth = smart
     ? (Math.abs(s.player.y) > 4.4 ? -1 : Math.abs(s.player.y) < 2.6 ? 1 : 0)
@@ -815,11 +815,10 @@ function moveActor(a: Actor, tx: number, ty: number, sp: number, dt: number) {
 // 게스트 화면은 makeSnapshot이 만든 '게스트 프레임 미러'를 그대로 그린다 —
 // 게스트 입장에선 자기가 player(근경), 호스트가 ai(원경)로 뒤집혀 온다.
 
-// 원격(게스트) 오토에임 — 호스트 플레이어가 없는 쪽
-function autoAimRemote(s: SimState): -1 | 0 | 1 {
-  if (s.player.x > 0.5) return -1;
-  if (s.player.x < -0.5) return 1;
-  return Math.random() < 0.5 ? -1 : 1;
+// 원격(게스트) 오토에임 — 호스트 플레이어가 없는 쪽의 안전한 코스
+function autoAimRemote(s: SimState): number {
+  const sign = s.player.x > 0.5 ? -1 : s.player.x < -0.5 ? 1 : Math.random() < 0.5 ? -1 : 1;
+  return sign * rnd(0.55, 0.78);
 }
 
 /** 게스트 스윙을 호스트 sim의 ai 액터에 적용. aim은 이미 월드 프레임(부호 반전 완료). */
