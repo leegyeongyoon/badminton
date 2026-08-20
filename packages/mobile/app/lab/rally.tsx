@@ -82,7 +82,7 @@ const SHOT_KO: Record<ShotType, string> = {
   smash: '스매시',
   drop: '드롭',
   hairpin: '헤어핀',
-  lift: '리프트',
+  lift: '언더클리어',
   block: '블록',
   drive: '드라이브',
 };
@@ -427,9 +427,7 @@ export default function RallyGameScreen() {
           const handKo = s.lastShot.hand === 'back' ? '백핸드 ' : s.lastShot.hand === 'round' ? '라운드 ' : '';
           const base = handKo + (s.lastShot.cut ? '커트' : SHOT_KO[s.lastShot.shot]);
           const shotName = s.lastShot.cross ? `크로스 ${base}` : base;
-          const badText = s.lastShot.shot === 'smash'
-            ? s.lastShot.weak === 'late' ? '타점 낮음!' : '밀린 스매시!'
-            : '런지!';
+          const badText = s.lastShot.weak === 'late' ? '타점 낮음!' : '겨우 받았다!';
           // 퍼펙트 콤보 스트릭
           if (!s.lastShot.whiff && !s.lastShot.serve && q === 'perfect') streakRef.current += 1;
           else streakRef.current = 0;

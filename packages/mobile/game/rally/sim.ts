@@ -301,6 +301,7 @@ function makeTraj(
   pace = 1,
   depth: AimDepth = 0,
   punish = false,
+  stretchSafe = false, // 밀린 발(런지) 리턴 — 실수 대신 뜬공(수비 리턴) 위주
 ): Traj {
   const spec = SHOT3[shot];
   const dir = by === 'player' ? 1 : -1; // 목표 y 부호
@@ -354,13 +355,13 @@ function makeTraj(
         ty = dir * rnd(7.0, 7.9);
         landing = 'out';
       }
-    } else if ((shot === 'hairpin' || shot === 'drop' || shot === 'drive') && Math.random() < 0.45) {
+    } else if ((shot === 'hairpin' || shot === 'drop' || shot === 'drive' || shot === 'block') && Math.random() < (stretchSafe ? 0.2 : 0.45)) {
       // 네트에 꽂힘
       ty = 0;
       apex = 1.2;
       landing = 'net';
       dur *= 0.6;
-    } else if ((shot === 'clear' || shot === 'lift') && Math.random() < 0.25) {
+    } else if ((shot === 'clear' || shot === 'lift') && Math.random() < (stretchSafe ? 0.1 : 0.25)) {
       // 밀린 깊은 샷이 라인을 넘는다 — 뜬공만으로는 랠리가 영원히 안 끝난다
       ty = dir * rnd(6.9, 7.9);
       landing = 'out';
@@ -509,7 +510,10 @@ export function swingPlayer(s: SimState, intent: SwingIntent, aim: AimLane, dept
   const timeQ = timingQuality(shot, contact.z);
   const qn = Math.min(distQ, timeQ, hand === 'back' && contact.z >= 1.5 ? 1 : 2);
   const quality: Quality = qn === 2 ? 'perfect' : qn === 1 ? 'good' : 'bad';
-  const weak = quality === 'bad' ? (timeQ === 0 ? 'late' as const : 'stretch' as const) : undefined;
+  let weak = quality === 'bad' ? (timeQ === 0 ? 'late' as const : 'stretch' as const) : undefined;
+  // 런지(밀린 발) 리턴 — 실수 연발이 아니라 '수비 리턴': 공격 의도여도
+  // 깊으면 언더클리어, 네트 근처면 블록으로 강등되고 뜬공(상대 찬스)이 된다
+  if (weak === 'stretch') shot = Math.abs(contact.y) <= 2.5 ? 'block' : 'lift';
   const cut = shot === 'drop' && contact.z >= 1.7 && quality === 'perfect';
   const aimX = aim === 'auto' ? autoAim(s) : Math.max(-1, Math.min(1, aim));
   if (quality === 'perfect') s.stats.perfects += 1;
@@ -521,7 +525,7 @@ export function swingPlayer(s: SimState, intent: SwingIntent, aim: AimLane, dept
   s.player.anim = quality === 'bad' ? 'lunge' : 'swing';
   s.player.animUntil = now + 260;
   s.player.motion = motionForHand(motionFor(shot), hand);
-  s.traj = makeTraj('player', shot, quality, contact, aimX, now, s.rallyLen, DIFF_PACE[s.config.difficulty], depth, wasChance);
+  s.traj = makeTraj('player', shot, quality, contact, aimX, now, s.rallyLen, DIFF_PACE[s.config.difficulty], depth, wasChance, weak === 'stretch');
   s.lastShot = { shot, quality, cross: s.traj.cross, cut, weak, hand };
   s.events.push(`swing:${shot}:${quality}:${hand}${s.traj.cross ? ':cross' : ''}${weak ? `:${weak}` : ''}:z${contact.z.toFixed(2)}:d${d.toFixed(2)}`);
 }
@@ -617,7 +621,8 @@ function aiSwing(s: SimState, now: number) {
   const fatigue = Math.min(0.22, s.rallyLen * 0.011); // 긴 랠리 — AI도 지친다
   const roll = Math.random();
   let quality: Quality = roll < p ? 'perfect' : roll < p + g - fatigue ? 'good' : 'bad';
-  if (d > REACH_GOOD) quality = 'bad'; // 런지 리턴
+  const aiStretch = d > REACH_GOOD;
+  if (aiStretch) quality = 'bad'; // 런지 리턴 — 수비적 뜬공
   if (t.chance && quality === 'bad' && s.config.difficulty !== 'easy') quality = 'good'; // 뜬공 구제 — easy는 찬스도 놓친다
 
   const contact: Vec3 = { ...s.shuttle };
@@ -660,7 +665,7 @@ function aiSwing(s: SimState, now: number) {
   s.ai.animUntil = now + 260;
   s.ai.motion = motionForHand(motionFor(shot), aiHand);
   const aiPunish = t.chance && s.config.difficulty !== 'easy';
-  s.traj = makeTraj('ai', shot, quality, contact, aim, now, s.rallyLen, DIFF_PACE[s.config.difficulty], depth, aiPunish);
+  s.traj = makeTraj('ai', shot, quality, contact, aim, now, s.rallyLen, DIFF_PACE[s.config.difficulty], depth, aiPunish, aiStretch);
   s.events.push(`ai-swing:${shot}:${quality}:${aiHand}`);
 }
 
@@ -853,7 +858,8 @@ export function swingRemote(s: SimState, intent: SwingIntent, aim: AimLane, dept
   const timeQ = timingQuality(shot, contact.z);
   const qn = Math.min(distQ, timeQ, hand === 'back' && contact.z >= 1.5 ? 1 : 2);
   const quality: Quality = qn === 2 ? 'perfect' : qn === 1 ? 'good' : 'bad';
-  const weak = quality === 'bad' ? (timeQ === 0 ? 'late' as const : 'stretch' as const) : undefined;
+  let weak = quality === 'bad' ? (timeQ === 0 ? 'late' as const : 'stretch' as const) : undefined;
+  if (weak === 'stretch') shot = Math.abs(contact.y) <= 2.5 ? 'block' : 'lift';
   const cut = shot === 'drop' && contact.z >= 1.7 && quality === 'perfect';
   const aimX = aim === 'auto' ? autoAimRemote(s) : Math.max(-1, Math.min(1, aim));
   if (quality === 'perfect') s.stats.perfectsRemote = (s.stats.perfectsRemote ?? 0) + 1;
@@ -863,7 +869,7 @@ export function swingRemote(s: SimState, intent: SwingIntent, aim: AimLane, dept
   s.ai.anim = quality === 'bad' ? 'lunge' : 'swing';
   s.ai.animUntil = now + 260;
   s.ai.motion = motionForHand(motionFor(shot), hand);
-  s.traj = makeTraj('ai', shot, quality, contact, aimX, now, s.rallyLen, DIFF_PACE[s.config.difficulty], depth, wasChance);
+  s.traj = makeTraj('ai', shot, quality, contact, aimX, now, s.rallyLen, DIFF_PACE[s.config.difficulty], depth, wasChance, weak === 'stretch');
   s.lastShot = { shot, quality, cross: s.traj.cross, cut, weak, by: 'ai', hand };
   s.events.push(`remote-swing:${shot}:${quality}:${hand}`);
 }
