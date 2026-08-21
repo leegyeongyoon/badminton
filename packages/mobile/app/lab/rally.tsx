@@ -874,7 +874,7 @@ export default function RallyGameScreen() {
 
           {/* 서브 UI */}
           {serving && (
-            <View style={[styles.serveWrap, lefty ? { left: 14, right: undefined } : null]}>
+            <View style={styles.serveWrap}>
               <Text style={styles.serveCourtText}>
                 {spots?.right ? '우측' : '좌측'} 서비스 · 대각선 박스로
               </Text>
@@ -1482,18 +1482,18 @@ const styles = StyleSheet.create({
   },
   bannerSub: { fontSize: 14, fontWeight: '700', color: '#CBD5E1', textAlign: 'center', marginTop: 4 },
 
-  serveWrap: { position: 'absolute', bottom: 26, right: 14, alignItems: 'center', gap: spacing.sm, width: 240 },
-  gaugeTrack: { width: '100%', height: 16, borderRadius: 8, overflow: 'hidden', backgroundColor: 'rgba(255,255,255,0.7)', borderWidth: 1, borderColor: '#B9D2E4' },
+  serveWrap: { position: 'absolute', bottom: 26, left: 14, right: 14, alignItems: 'center', gap: spacing.sm },
+  gaugeTrack: { width: 240, height: 16, borderRadius: 8, overflow: 'hidden', backgroundColor: 'rgba(255,255,255,0.7)', borderWidth: 1, borderColor: '#B9D2E4' },
   gaugeFill: { height: '100%', backgroundColor: '#14B8A6' },
   gaugePerfect: { position: 'absolute', right: 0, top: 0, bottom: 0, width: '8%', backgroundColor: 'rgba(250,204,21,0.55)' },
   gaugePerfectLabel: { position: 'absolute', right: 4, top: 1, fontSize: 8, fontWeight: '700', color: '#0F172A' },
-  serveBtns: { flexDirection: 'row', gap: spacing.md },
+  serveBtns: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'center', gap: spacing.sm },
   serveBtn: {
-    flexDirection: 'row', alignItems: 'center', gap: 6,
-    paddingHorizontal: spacing.lg, paddingVertical: spacing.sm, borderRadius: radius.pill,
+    flexDirection: 'row', alignItems: 'center', gap: 5,
+    paddingHorizontal: spacing.md, paddingVertical: spacing.sm, borderRadius: radius.pill,
     backgroundColor: '#F1F5F9', borderWidth: 2, borderColor: '#CBD5E1',
   },
-  serveBtnText: { fontSize: 14, fontWeight: '700', color: '#0F172A' },
+  serveBtnText: { fontSize: 13, fontWeight: '700', color: '#0F172A' },
   aiServeToast: { position: 'absolute', bottom: 40, alignSelf: 'center' },
   aiServeText: { color: '#3D5A73', fontSize: 13, fontWeight: '700' },
   serveCourtText: { color: '#0F766E', fontSize: 12, fontWeight: '700' },
