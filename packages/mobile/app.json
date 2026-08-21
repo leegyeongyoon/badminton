@@ -2,7 +2,7 @@
   "expo": {
     "name": "콕고",
     "slug": "badminton-court",
-    "version": "1.0.4",
+    "version": "1.0.5",
     "orientation": "default",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "light",
@@ -20,7 +20,7 @@
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "com.gylee.badminton",
-      "buildNumber": "37",
+      "buildNumber": "38",
       "associatedDomains": [
         "applinks:badmintoncourt.store"
       ],
@@ -33,7 +33,7 @@
     "android": {
       "package": "com.gylee.badminton",
       "googleServicesFile": "./google-services.json",
-      "versionCode": 31,
+      "versionCode": 32,
       "intentFilters": [
         {
           "action": "VIEW",
@@ -159,6 +159,12 @@
         }
       ]
     ],
-    "owner": "leegyoungyoon"
+    "owner": "leegyoungyoon",
+    "updates": {
+      "url": "https://u.expo.dev/ad8ee9b9-c892-4ebe-bfec-b8df01ea405b"
+    },
+    "runtimeVersion": {
+      "policy": "appVersion"
+    }
   }
 }
