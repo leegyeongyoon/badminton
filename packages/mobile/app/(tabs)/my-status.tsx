@@ -314,9 +314,9 @@ export default function MyStatusScreen() {
             <Text style={{ fontSize: 22 }}>🏸</Text>
           </View>
           <View style={{ flex: 1, minWidth: 0 }}>
-            <Text style={[styles.rallyTitle, { color: colors.text }]}>콕고 랠리</Text>
+            <Text style={[styles.rallyTitle, { color: colors.text }]}>배드민턴 게임 하기</Text>
             <Text style={[styles.rallySub, { color: colors.textSecondary }]} numberOfLines={1}>
-              대기시간엔 1:1 미니게임 — 같은 정모 사람에게 대결 신청!
+              대기시간에 한 판! 같은 정모 사람과 1:1 대결도 돼요
             </Text>
           </View>
           <Icon name="chevronRight" size={18} color={colors.textLight} />
