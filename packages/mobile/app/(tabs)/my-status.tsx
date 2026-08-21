@@ -38,7 +38,7 @@ export default function MyStatusScreen() {
   const { colors, shadows } = useTheme();
   const { myTurns, isLoading, fetchMyTurns } = useTurnStore();
   const { user } = useAuthStore();
-  const { status: checkinStatus } = useCheckinStore();
+  const { status: checkinStatus, fetchStatus: fetchCheckin } = useCheckinStore();
   const { clubs, fetchClubs } = useClubStore();
 
   const [activeBoards, setActiveBoards] = useState<ActiveBoard[]>([]);
@@ -93,6 +93,7 @@ export default function MyStatusScreen() {
   useEffect(() => {
     fetchMyTurns();
     fetchMyStatus();
+    fetchCheckin(); // 게임 진입 카드 등 체크인 조건 UI를 위해 스토어를 직접 채운다
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -299,8 +300,8 @@ export default function MyStatusScreen() {
         </View>
       )}
 
-      {/* 대기시간 콕고 랠리 — 체크인 상태일 때 같은 정모 사람과 미니게임 대결 진입 */}
-      {checkinStatus && (
+      {/* 대기시간 배드민턴 게임 — 체크인·대기·게임중 어느 상태든 진입 가능 */}
+      {state !== 'idle' && (
         <Pressable
           onPress={() => router.push('/lab/rally')}
           style={({ pressed }) => [
