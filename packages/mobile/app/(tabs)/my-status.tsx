@@ -300,29 +300,29 @@ export default function MyStatusScreen() {
         </View>
       )}
 
-      {/* 대기시간 배드민턴 게임 — 체크인·대기·게임중 어느 상태든 진입 가능 */}
-      {state !== 'idle' && (
-        <Pressable
-          onPress={() => router.push('/lab/rally')}
-          style={({ pressed }) => [
-            styles.rallyBtn,
-            { backgroundColor: colors.surface, borderColor: colors.border },
-            shadows.sm,
-            pressed && { opacity: 0.92 },
-          ]}
-        >
-          <View style={styles.rallyEmoji}>
-            <Text style={{ fontSize: 22 }}>🏸</Text>
-          </View>
-          <View style={{ flex: 1, minWidth: 0 }}>
-            <Text style={[styles.rallyTitle, { color: colors.text }]}>배드민턴 게임 하기</Text>
-            <Text style={[styles.rallySub, { color: colors.textSecondary }]} numberOfLines={1}>
-              대기시간에 한 판! 같은 정모 사람과 1:1 대결도 돼요
-            </Text>
-          </View>
-          <Icon name="chevronRight" size={18} color={colors.textLight} />
-        </Pressable>
-      )}
+      {/* 배드민턴 게임 — 언제든 AI 대전 가능하므로 항상 노출, 정모 중이면 1:1 대결 문구 */}
+      <Pressable
+        onPress={() => router.push('/lab/rally')}
+        style={({ pressed }) => [
+          styles.rallyBtn,
+          { backgroundColor: colors.surface, borderColor: colors.border },
+          shadows.sm,
+          pressed && { opacity: 0.92 },
+        ]}
+      >
+        <View style={styles.rallyEmoji}>
+          <Text style={{ fontSize: 22 }}>🏸</Text>
+        </View>
+        <View style={{ flex: 1, minWidth: 0 }}>
+          <Text style={[styles.rallyTitle, { color: colors.text }]}>배드민턴 게임 하기</Text>
+          <Text style={[styles.rallySub, { color: colors.textSecondary }]} numberOfLines={1}>
+            {state !== 'idle'
+              ? '대기시간에 한 판! 같은 정모 사람과 1:1 대결도 돼요'
+              : '심심할 때 한 판! 정모에서는 1:1 대결도 돼요'}
+          </Text>
+        </View>
+        <Icon name="chevronRight" size={18} color={colors.textLight} />
+      </Pressable>
 
       {/* My active game — lets me end/extend my own turn */}
       {playingTurn && (
