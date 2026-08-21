@@ -299,6 +299,30 @@ export default function MyStatusScreen() {
         </View>
       )}
 
+      {/* 대기시간 콕고 랠리 — 체크인 상태일 때 같은 정모 사람과 미니게임 대결 진입 */}
+      {checkinStatus && (
+        <Pressable
+          onPress={() => router.push('/lab/rally')}
+          style={({ pressed }) => [
+            styles.rallyBtn,
+            { backgroundColor: colors.surface, borderColor: colors.border },
+            shadows.sm,
+            pressed && { opacity: 0.92 },
+          ]}
+        >
+          <View style={styles.rallyEmoji}>
+            <Text style={{ fontSize: 22 }}>🏸</Text>
+          </View>
+          <View style={{ flex: 1, minWidth: 0 }}>
+            <Text style={[styles.rallyTitle, { color: colors.text }]}>콕고 랠리</Text>
+            <Text style={[styles.rallySub, { color: colors.textSecondary }]} numberOfLines={1}>
+              대기시간엔 1:1 미니게임 — 같은 정모 사람에게 대결 신청!
+            </Text>
+          </View>
+          <Icon name="chevronRight" size={18} color={colors.textLight} />
+        </Pressable>
+      )}
+
       {/* My active game — lets me end/extend my own turn */}
       {playingTurn && (
         <PlayingTurnCard
@@ -375,6 +399,26 @@ const styles = StyleSheet.create({
     borderRadius: radius.card,
   },
   boardBtnText: { color: palette.white, ...typography.button, fontSize: 17 },
+
+  // 콕고 랠리 진입 카드 — 체크인 상태에서만 노출
+  rallyBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.md,
+    padding: spacing.lg,
+    borderRadius: radius.card,
+    borderWidth: 1,
+  },
+  rallyEmoji: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: '#E6F6F2',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  rallyTitle: { fontSize: 16, fontWeight: '700' },
+  rallySub: { ...typography.caption, marginTop: 1 },
 
   // 진행 중 정모가 여러 개일 때: 모임별 보드 목록.
   boardsWrap: { gap: spacing.sm, marginBottom: spacing.md },
