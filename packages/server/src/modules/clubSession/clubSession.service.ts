@@ -265,7 +265,9 @@ export async function getSessionQr(
   // WEB_BASE_URL points at the web app that serves /attend (defaults to local
   // dev), mirroring the club join-QR (<WEB_BASE_URL>/join?code=...).
   const webBaseUrl = process.env.WEB_BASE_URL || 'http://localhost:8081';
-  const payload = `${webBaseUrl}/attend?session=${session.id}`;
+  // 장애 우회(1.0.5 시작 크래시): /attend는 유니버설 링크라 QR 스캔이 깨진 앱을
+  // 열어버린다. /attend-web은 AASA에 없어 브라우저로 열린다. 1.0.6 안정화 후 원복.
+  const payload = `${webBaseUrl}/attend-web?session=${session.id}`;
   const qr = await QRCode.toDataURL(payload);
   return { clubSessionId: session.id, payload, qr };
 }
