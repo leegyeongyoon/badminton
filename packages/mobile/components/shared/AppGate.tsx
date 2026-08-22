@@ -32,6 +32,10 @@ function isPhoneWeb(): boolean {
   return isIPhone || isAndroidPhone;
 }
 
+// 스토어 1.0.5 시작 크래시 장애 대응: 앱이 열리지 않는 동안 폰 웹을 막으면
+// 회원이 아무것도 못 쓴다. 1.0.6 배포 확인 후 false로 되돌릴 것.
+const OUTAGE_BYPASS = true;
+
 export function AppGate() {
   const { colors } = useTheme();
   const router = useRouter();
@@ -42,6 +46,7 @@ export function AppGate() {
 
   useEffect(() => { setPhone(isPhoneWeb()); }, []);
 
+  if (OUTAGE_BYPASS) return null;
   if (!phone) return null;
   if (EXEMPT_PREFIXES.some((p) => pathname === p || pathname.startsWith(`${p}?`) || pathname.startsWith(`${p}/`))) return null;
 
