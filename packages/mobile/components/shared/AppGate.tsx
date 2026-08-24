@@ -32,9 +32,9 @@ function isPhoneWeb(): boolean {
   return isIPhone || isAndroidPhone;
 }
 
-// 스토어 1.0.5 시작 크래시 장애 대응: 앱이 열리지 않는 동안 폰 웹을 막으면
-// 회원이 아무것도 못 쓴다. 1.0.6 배포 확인 후 false로 되돌릴 것.
-const OUTAGE_BYPASS = true;
+// 스토어 앱이 열리지 않는 장애 때 true로 — 폰 웹 하드 게이트를 즉시 해제하는
+// 킬스위치 (1.0.5 시작 크래시 때 사용, 1.0.6 라이브 확인 후 원복).
+const OUTAGE_BYPASS = false;
 
 export function AppGate() {
   const { colors } = useTheme();
