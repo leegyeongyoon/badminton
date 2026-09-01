@@ -1,14 +1,15 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { View, Text, StyleSheet, ScrollView, Pressable, Image, TextInput, ActivityIndicator, RefreshControl } from 'react-native';
+import { View, Text, StyleSheet, ScrollView, Pressable, Image, TextInput, ActivityIndicator, RefreshControl, Share } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useTheme } from '../../../../hooks/useTheme';
 import { typography, spacing } from '../../../../constants/theme';
 import { BackButton } from '../../../../components/ui/BackButton';
-import { lessonDetailApi, type LessonDetail, type LessonStudentRow, type LessonBilling } from '../../../../services/coach';
+import { lessonDetailApi, type LessonDetail, type LessonStudentRow, type LessonBilling, type LessonFeesView } from '../../../../services/coach';
 import { absolutizeUploadUrl } from '../../../../services/upload';
 import { showSuccess } from '../../../../utils/feedback';
+import { copyToClipboard } from '../../../../utils/clipboard';
 import { COACH_MARKET_ENABLED } from '../../../../constants/features';
 // (대기 풀기·정산 요약도 이 화면에서 처리)
 
@@ -29,6 +30,10 @@ function ymd(d: Date): string {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 }
 
+function ym(d: Date): string {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+}
+
 export default function LessonDetailScreen() {
   const { id: clubId, offerId } = useLocalSearchParams<{ id: string; offerId: string }>();
   const { colors, shadows } = useTheme();
@@ -39,7 +44,7 @@ export default function LessonDetailScreen() {
   const [billing, setBilling] = useState<LessonBilling | null>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
-  const [tab, setTab] = useState<'roster' | 'attendance'>('roster');
+  const [tab, setTab] = useState<'roster' | 'attendance' | 'fees'>('roster');
 
   // 로스터 편집(펼침) 상태
   const [openStudentId, setOpenStudentId] = useState<string | null>(null);
@@ -86,6 +91,95 @@ export default function LessonDetailScreen() {
     const d = new Date(`${date}T12:00:00`);
     d.setDate(d.getDate() + delta);
     setDate(ymd(d));
+  };
+
+  // ── 수납(월 레슨비) ──
+  const [feesPeriod, setFeesPeriod] = useState(() => ym(new Date()));
+  const [fees, setFees] = useState<LessonFeesView | null>(null);
+  const [feesLoading, setFeesLoading] = useState(false);
+  const [busyFeeId, setBusyFeeId] = useState<string | null>(null);
+  const [newStudent, setNewStudent] = useState('');
+  const [addingStudent, setAddingStudent] = useState(false);
+
+  const loadFees = useCallback(async () => {
+    if (!clubId || !offerId) return;
+    setFeesLoading(true);
+    try {
+      setFees(await lessonDetailApi.fees(clubId, offerId, feesPeriod));
+    } catch {
+      /* noop */
+    } finally {
+      setFeesLoading(false);
+    }
+  }, [clubId, offerId, feesPeriod]);
+  useEffect(() => {
+    if (tab === 'fees') loadFees();
+  }, [tab, loadFees]);
+
+  const shiftPeriod = (delta: number) => {
+    const [y, m] = feesPeriod.split('-').map(Number);
+    const d = new Date(y, m - 1 + delta, 15);
+    setFeesPeriod(ym(d));
+  };
+
+  const toggleFee = async (applicationId: string, status: string) => {
+    if (!clubId || !offerId || busyFeeId) return;
+    setBusyFeeId(applicationId);
+    try {
+      if (status === 'CONFIRMED') await lessonDetailApi.unconfirmFee(clubId, offerId, applicationId, feesPeriod);
+      else await lessonDetailApi.confirmFee(clubId, offerId, applicationId, feesPeriod);
+      await loadFees();
+      load(); // 로스터의 입금 배지(feePaid)도 동기화
+    } catch {
+      /* 토스트는 인터셉터 */
+    } finally {
+      setBusyFeeId(null);
+    }
+  };
+
+  const shareFeeLink = async () => {
+    if (!clubId || !offerId) return;
+    try {
+      const { url } = await lessonDetailApi.shareLink(clubId, offerId);
+      await copyToClipboard(url);
+      showSuccess('납부 링크를 복사했어요');
+      await Share.share({
+        message: `[${detail?.offer.clubName ?? '콕고'}] ${detail?.offer.coachName} 코치 레슨비 납부 페이지예요.\n입금 후 "입금했어요"를 눌러주세요 🙏\n${url}`,
+      });
+    } catch {
+      /* 공유 시트 취소 포함 무시 */
+    }
+  };
+
+  const remindFees = async () => {
+    if (!clubId || !offerId) return;
+    try {
+      const r = await lessonDetailApi.remindFees(clubId, offerId, feesPeriod);
+      if (r.unpaidCount === 0) {
+        showSuccess('미납자가 없어요 🎉');
+        return;
+      }
+      if (r.notifiedCount > 0) showSuccess(`앱 회원 ${r.notifiedCount}명에게 알림을 보냈어요`);
+      await Share.share({ message: r.message });
+    } catch {
+      /* noop */
+    }
+  };
+
+  const addStudent = async () => {
+    const name = newStudent.trim();
+    if (!clubId || !offerId || !name || addingStudent) return;
+    setAddingStudent(true);
+    try {
+      await lessonDetailApi.addStudent(clubId, offerId, { name });
+      setNewStudent('');
+      showSuccess(`${name}님을 수강생에 추가했어요`);
+      await Promise.all([load(), loadFees()]);
+    } catch {
+      /* noop */
+    } finally {
+      setAddingStudent(false);
+    }
   };
 
   const toggleAttend = async (appId: string) => {
@@ -255,6 +349,7 @@ export default function LessonDetailScreen() {
           {([
             { key: 'roster', label: `수강생 ${confirmed.length}` },
             { key: 'attendance', label: '출석 체크' },
+            { key: 'fees', label: '수납' },
           ] as const).map((t) => {
             const on = tab === t.key;
             return (
@@ -374,7 +469,7 @@ export default function LessonDetailScreen() {
               </>
             )}
           </>
-        ) : (
+        ) : tab === 'attendance' ? (
           <>
             {/* 날짜 이동 */}
             <View style={[styles.dateBar, { backgroundColor: colors.surface }, shadows.md]}>
@@ -430,6 +525,112 @@ export default function LessonDetailScreen() {
               })
             )}
           </>
+        ) : (
+          <>
+            {/* 월 이동 */}
+            <View style={[styles.dateBar, { backgroundColor: colors.surface }, shadows.md]}>
+              <Pressable onPress={() => shiftPeriod(-1)} hitSlop={8} style={styles.dateArrow}>
+                <Ionicons name="chevron-back" size={20} color={colors.text} />
+              </Pressable>
+              <View style={{ alignItems: 'center' }}>
+                <Text style={[styles.dateText, { color: colors.text }]}>{feesPeriod}</Text>
+                <Text style={[styles.dateHint, { color: colors.textLight }]}>
+                  {fees
+                    ? `확인 ${fees.confirmedCount} · 대기 ${fees.reportedCount} · 미납 ${fees.unpaidCount}${fees.totalConfirmed ? ` · ${fees.totalConfirmed.toLocaleString()}원` : ''}`
+                    : '월 레슨비 수납'}
+                </Text>
+              </View>
+              <Pressable onPress={() => shiftPeriod(1)} hitSlop={8} style={styles.dateArrow}>
+                <Ionicons name="chevron-forward" size={20} color={colors.text} />
+              </Pressable>
+            </View>
+
+            {/* 링크 공유 · 독촉 */}
+            <View style={styles.feeActions}>
+              <Pressable onPress={shareFeeLink} style={[styles.feeActionBtn, { backgroundColor: colors.primary }]}>
+                <Ionicons name="link-outline" size={15} color="#fff" />
+                <Text style={styles.feeActionText}>납부 링크 공유</Text>
+              </Pressable>
+              <Pressable onPress={remindFees} style={[styles.feeActionBtn, { backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border }]}>
+                <Ionicons name="megaphone-outline" size={15} color={colors.text} />
+                <Text style={[styles.feeActionText, { color: colors.text }]}>미납 독촉</Text>
+              </Pressable>
+            </View>
+
+            {feesLoading && !fees ? (
+              <View style={{ paddingVertical: spacing.xxl, alignItems: 'center' }}>
+                <ActivityIndicator color={colors.primary} />
+              </View>
+            ) : !fees || fees.rows.length === 0 ? (
+              <View style={styles.emptyBox}>
+                <Ionicons name="cash-outline" size={32} color={colors.textLight} />
+                <Text style={[styles.emptyText, { color: colors.textLight }]}>수납 대상 수강생이 없어요{'\n'}아래에서 반원을 직접 추가할 수 있어요</Text>
+              </View>
+            ) : (
+              fees.rows.map((r) => {
+                const isConfirmed = r.status === 'CONFIRMED';
+                const isReported = r.status === 'REPORTED';
+                const busy = busyFeeId === r.applicationId;
+                return (
+                  <View key={r.applicationId} style={[styles.attendRow, { backgroundColor: colors.surface }, shadows.md]}>
+                    <View style={{ flex: 1, minWidth: 0 }}>
+                      <View style={styles.studentNameRow}>
+                        <Text style={[styles.studentName, { color: colors.text }]} numberOfLines={1}>{r.name}</Text>
+                        {r.enrollState === 'PAUSED' && <Text style={[styles.stateTag, { color: colors.textLight }]}>휴식</Text>}
+                        {isReported && (
+                          <View style={[styles.feeBadge, { backgroundColor: colors.warning + '20' }]}>
+                            <Text style={[styles.feeBadgeText, { color: colors.warning }]}>입금 신고 — 확인해 주세요</Text>
+                          </View>
+                        )}
+                      </View>
+                      <Text style={[styles.studentMeta, { color: colors.textLight }]}>
+                        {isConfirmed
+                          ? `확인 완료${r.amount ? ` · ${r.amount.toLocaleString()}원` : ''}`
+                          : isReported
+                            ? '수강생이 입금했다고 알렸어요'
+                            : '미납'}
+                      </Text>
+                    </View>
+                    <Pressable
+                      onPress={() => toggleFee(r.applicationId, r.status)}
+                      disabled={busy}
+                      style={[
+                        styles.promoteBtn,
+                        isConfirmed
+                          ? { backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border }
+                          : { backgroundColor: colors.primary },
+                        busy && { opacity: 0.5 },
+                      ]}
+                    >
+                      <Text style={[styles.promoteBtnText, isConfirmed && { color: colors.textSecondary }]}>
+                        {isConfirmed ? '확인 해제' : '입금 확인'}
+                      </Text>
+                    </Pressable>
+                  </View>
+                );
+              })
+            )}
+
+            {/* 수기 수강생 추가 — 앱 미가입 반원 */}
+            <View style={styles.noteRow}>
+              <TextInput
+                style={[styles.noteInput, { color: colors.text, backgroundColor: colors.surface, borderColor: colors.border }]}
+                value={newStudent}
+                onChangeText={setNewStudent}
+                placeholder="앱 미가입 반원 이름 추가"
+                placeholderTextColor={colors.textLight}
+                maxLength={20}
+                onSubmitEditing={addStudent}
+              />
+              <Pressable onPress={addStudent} disabled={addingStudent || !newStudent.trim()} style={[styles.noteSave, { backgroundColor: colors.primary, opacity: addingStudent || !newStudent.trim() ? 0.5 : 1 }]}>
+                <Text style={styles.noteSaveText}>추가</Text>
+              </Pressable>
+            </View>
+
+            <Text style={[styles.feeFootnote, { color: colors.textLight }]}>
+              계산·청구·추적만 해요 — 돈은 기존 계좌로 받고, 입금이 보이면 원클릭 확인.
+            </Text>
+          </>
         )}
       </ScrollView>
     </View>
@@ -453,6 +654,10 @@ const styles = StyleSheet.create({
   coachIntro: { ...typography.body2, marginTop: 2 },
   coachMeta: { fontSize: 12, fontWeight: '600', marginTop: 3 },
   segment: { flexDirection: 'row', borderRadius: 12, borderWidth: 1, padding: 3, marginBottom: spacing.md },
+  feeActions: { flexDirection: 'row', gap: spacing.sm, marginBottom: spacing.md },
+  feeActionBtn: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, paddingVertical: 11, borderRadius: 12 },
+  feeActionText: { color: '#fff', fontSize: 13.5, fontWeight: '800' },
+  feeFootnote: { ...typography.caption, textAlign: 'center', marginTop: spacing.lg },
   segmentBtn: { flex: 1, paddingVertical: 9, borderRadius: 9, alignItems: 'center' },
   segmentText: { fontSize: 13.5, fontWeight: '800' },
   emptyBox: { alignItems: 'center', gap: spacing.sm, paddingVertical: spacing.xxl },

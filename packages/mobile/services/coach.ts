@@ -252,4 +252,41 @@ export const lessonDetailApi = {
     api.post(`/clubs/${clubId}/money/lessons/${offerId}/waitlist/${appId}/promote`).then((r) => r.data),
   billing: (clubId: string, offerId: string) =>
     api.get<LessonBilling>(`/clubs/${clubId}/money/lessons/${offerId}/billing`).then((r) => r.data),
+  // ── 월 수납(수동 입금확인) ──
+  fees: (clubId: string, offerId: string, period: string) =>
+    api.get<LessonFeesView>(`/clubs/${clubId}/money/lessons/${offerId}/fees`, { params: { period } }).then((r) => r.data),
+  confirmFee: (clubId: string, offerId: string, applicationId: string, period: string) =>
+    api.post(`/clubs/${clubId}/money/lessons/${offerId}/fees/confirm`, { applicationId, period }).then((r) => r.data),
+  unconfirmFee: (clubId: string, offerId: string, applicationId: string, period: string) =>
+    api.delete(`/clubs/${clubId}/money/lessons/${offerId}/fees/confirm`, { data: { applicationId, period } }).then((r) => r.data),
+  shareLink: (clubId: string, offerId: string, regenerate = false) =>
+    api.post<{ url: string }>(`/clubs/${clubId}/money/lessons/${offerId}/share-link`, { regenerate }).then((r) => r.data),
+  addStudent: (clubId: string, offerId: string, input: { name: string; phone?: string }) =>
+    api.post<{ id: string }>(`/clubs/${clubId}/money/lessons/${offerId}/students`, input).then((r) => r.data),
+  remindFees: (clubId: string, offerId: string, period: string) =>
+    api
+      .post<{ message: string; unpaidCount: number; notifiedCount: number }>(`/clubs/${clubId}/money/lessons/${offerId}/fees/remind`, { period })
+      .then((r) => r.data),
 };
+
+export interface LessonFeeRow {
+  applicationId: string;
+  name: string;
+  isAppUser: boolean;
+  enrollState: string; // ACTIVE | PAUSED
+  status: 'UNPAID' | 'REPORTED' | 'CONFIRMED';
+  amount: number | null;
+  reportedAt: string | null;
+  confirmedAt: string | null;
+}
+
+export interface LessonFeesView {
+  offerId: string;
+  period: string;
+  fee: number | null;
+  rows: LessonFeeRow[];
+  confirmedCount: number;
+  reportedCount: number;
+  unpaidCount: number;
+  totalConfirmed: number;
+}

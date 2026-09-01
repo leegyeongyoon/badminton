@@ -22,6 +22,7 @@ import adminRouter from './modules/admin/admin.router';
 import labRouter from './modules/lab/lab.router';
 import guestApplyRouter from './modules/guestApply/guestApply.router';
 import guestChatRouter from './modules/guestChat/guestChat.router';
+import { lessonPayRouter } from './modules/lessonPay/lessonPay.router';
 import clubMoneyRouter from './modules/club/clubMoney.router';
 import uploadRouter, { UPLOAD_DIR } from './modules/upload/upload.router';
 import coachRouter from './modules/coach/coach.router';
@@ -92,6 +93,7 @@ app.use('/api/v1/admin', adminRouter);                 // /admin/metrics (슈퍼
 app.use('/api/v1/lab', labRouter);                     // /lab/* (실험실 — 최고관리자 전용 상용 프로토타입)
 app.use('/api/v1/guest-apply', guestApplyRouter);      // 게스트 사전 신청(공개, rate-limit)
 app.use('/api/v1/guest-chat', guestChatRouter);        // 게스트 문의 채팅(공개, rate-limit)
+app.use('/api/v1/lesson-pay', lessonPayRouter);        // 레슨비 무설치 납부 페이지(공개, rate-limit)
 app.use('/api/v1/uploads', uploadRouter);              // 이미지 업로드(인증, rate-limit)
 app.use('/api/v1/coaches', coachRouter);               // 코치 마켓(목록/상세 공개, me/인증 관리)
 app.use('/api/v1/coach-chat', coachChatRouter);        // 코치 문의 채팅(인증)

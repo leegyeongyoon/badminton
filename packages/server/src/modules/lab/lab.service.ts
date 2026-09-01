@@ -1,3 +1,4 @@
+import { randomUUID } from 'crypto';
 import { prisma } from '../../utils/prisma';
 import { BadRequestError, NotFoundError } from '../../utils/errors';
 import { sendPushToUser } from '../notification/notification.service';
@@ -1025,18 +1026,27 @@ export async function promoteFromWaitlist(offerId: string, applicationId: string
 }
 
 /** 레슨 신청 갱신(운영자) — 상태 변경·레슨비 입금확인. CONFIRMED 전환 시 신청자 푸시. */
-export async function updateLessonApplication(id: string, patch: { status?: string; feePaid?: boolean }): Promise<void> {
+export async function updateLessonApplication(
+  id: string,
+  patch: { status?: string; feePaid?: boolean },
+  byUserId?: string,
+): Promise<void> {
   const data: Record<string, unknown> = {};
   if (patch.status !== undefined) {
     if (!['PENDING', 'CONFIRMED', 'CANCELLED'].includes(patch.status)) throw new BadRequestError('잘못된 상태예요.');
     data.status = patch.status;
   }
-  if (patch.feePaid !== undefined) data.feePaid = !!patch.feePaid;
   const updated = await prisma.lessonApplication.update({
     where: { id },
     data,
     include: { offer: { include: { club: { select: { name: true } } } } },
   });
+  // 레거시 feePaid 토글 → 당월 수납 기록(LessonFeeRecord)으로 위임.
+  // feePaid 컬럼 자체는 syncFeePaidFlag가 파생값으로 갱신한다(이중 소스 방지).
+  if (patch.feePaid !== undefined) {
+    if (patch.feePaid) await confirmLessonFee(updated.offerId, id, currentPeriod(), byUserId ?? 'legacy-toggle');
+    else await unconfirmLessonFee(updated.offerId, id, currentPeriod());
+  }
   const status = patch.status;
   // 확정자가 취소되면 자리가 생긴 것 — 대기 1순위에게 알림.
   if (status === 'CANCELLED') notifyWaitlistSeat(updated.offerId);
@@ -1216,6 +1226,271 @@ export async function setLessonAttendance(
       }),
     );
   await prisma.$transaction(ops);
+}
+
+// ─── 레슨비 월 수납(수동 입금확인) — LessonFeeRecord ─────────
+// 계좌이체 기반 "수강생 입금 신고 → 운영진·반장 원터치 확인" 원장. 미납 = 행 없음.
+// LessonPayment(카드결제, PAYMENTS_MOCK 게이트)와 분리돼 게이트 밖에서 항상 동작.
+// LessonApplication.feePaid 는 "당월 CONFIRMED 여부"의 파생값으로 동기화한다.
+
+const PERIOD_RE = /^\d{4}-(0[1-9]|1[0-2])$/;
+
+export interface LessonFeeRow {
+  applicationId: string;
+  name: string;
+  isAppUser: boolean;
+  enrollState: string; // ACTIVE | PAUSED
+  status: 'UNPAID' | 'REPORTED' | 'CONFIRMED';
+  amount: number | null; // 기록된 금액(미납이면 null)
+  reportedAt: string | null;
+  confirmedAt: string | null;
+}
+
+export interface LessonFeesView {
+  offerId: string;
+  period: string;
+  fee: number | null; // 현재 월 레슨비(안내용)
+  rows: LessonFeeRow[];
+  confirmedCount: number;
+  reportedCount: number;
+  unpaidCount: number;
+  totalConfirmed: number;
+}
+
+/** 수납 대상 로스터 — 확정 수강생(종료 제외). */
+async function lessonFeeRoster(offerId: string) {
+  return prisma.lessonApplication.findMany({
+    where: { offerId, status: 'CONFIRMED', enrollState: { not: 'ENDED' } },
+    orderBy: { createdAt: 'asc' },
+    select: { id: true, name: true, userId: true, enrollState: true },
+  });
+}
+
+/** 월별 수납 현황(운영진·담당코치). */
+export async function getLessonFees(offerId: string, period: string): Promise<LessonFeesView> {
+  if (!PERIOD_RE.test(period)) throw new BadRequestError('기간 형식은 YYYY-MM 이에요.');
+  const offer = await prisma.lessonOffer.findUnique({ where: { id: offerId }, select: { fee: true } });
+  if (!offer) throw new NotFoundError('레슨');
+  const [roster, records] = await Promise.all([
+    lessonFeeRoster(offerId),
+    prisma.lessonFeeRecord.findMany({ where: { offerId, period } }),
+  ]);
+  const byApp = new Map(records.map((r) => [r.applicationId, r]));
+  const rows: LessonFeeRow[] = roster.map((a) => {
+    const rec = byApp.get(a.id);
+    return {
+      applicationId: a.id,
+      name: a.name,
+      isAppUser: !!a.userId,
+      enrollState: a.enrollState,
+      status: rec ? (rec.status as 'REPORTED' | 'CONFIRMED') : 'UNPAID',
+      amount: rec?.amount ?? null,
+      reportedAt: rec?.reportedAt?.toISOString() ?? null,
+      confirmedAt: rec?.confirmedAt?.toISOString() ?? null,
+    };
+  });
+  const confirmed = rows.filter((r) => r.status === 'CONFIRMED');
+  return {
+    offerId,
+    period,
+    fee: offer.fee ?? null,
+    rows,
+    confirmedCount: confirmed.length,
+    reportedCount: rows.filter((r) => r.status === 'REPORTED').length,
+    unpaidCount: rows.filter((r) => r.status === 'UNPAID').length,
+    totalConfirmed: confirmed.reduce((s, r) => s + (r.amount ?? 0), 0),
+  };
+}
+
+/** 당월이면 레거시 feePaid(단일 boolean)를 파생값으로 동기화. */
+async function syncFeePaidFlag(applicationId: string, period: string): Promise<void> {
+  if (period !== currentPeriod()) return;
+  const rec = await prisma.lessonFeeRecord.findUnique({
+    where: { applicationId_period: { applicationId, period } },
+    select: { status: true },
+  });
+  await prisma.lessonApplication.update({
+    where: { id: applicationId },
+    data: { feePaid: rec?.status === 'CONFIRMED' },
+  });
+}
+
+/** 입금 확인(확정) — 운영진·담당코치. 신고 없이도 바로 확정 가능. */
+export async function confirmLessonFee(
+  offerId: string,
+  applicationId: string,
+  period: string,
+  byUserId: string,
+): Promise<void> {
+  if (!PERIOD_RE.test(period)) throw new BadRequestError('기간 형식은 YYYY-MM 이에요.');
+  const app = await prisma.lessonApplication.findUnique({
+    where: { id: applicationId },
+    include: { offer: { select: { id: true, fee: true } } },
+  });
+  if (!app || app.offerId !== offerId) throw new NotFoundError('수강생');
+  await prisma.lessonFeeRecord.upsert({
+    where: { applicationId_period: { applicationId, period } },
+    create: {
+      offerId,
+      applicationId,
+      period,
+      amount: app.offer.fee ?? 0,
+      status: 'CONFIRMED',
+      confirmedAt: new Date(),
+      confirmedById: byUserId,
+    },
+    update: { status: 'CONFIRMED', confirmedAt: new Date(), confirmedById: byUserId },
+  });
+  await syncFeePaidFlag(applicationId, period);
+}
+
+/** 확인 해제 — 기록 삭제(미납으로 원복). */
+export async function unconfirmLessonFee(offerId: string, applicationId: string, period: string): Promise<void> {
+  if (!PERIOD_RE.test(period)) throw new BadRequestError('기간 형식은 YYYY-MM 이에요.');
+  await prisma.lessonFeeRecord.deleteMany({ where: { offerId, applicationId, period } });
+  await syncFeePaidFlag(applicationId, period);
+}
+
+/** 무설치 납부 페이지 링크 발급(재발급 시 이전 링크 무효). */
+export async function issueLessonShareLink(offerId: string, regenerate = false): Promise<{ url: string }> {
+  const offer = await prisma.lessonOffer.findUnique({ where: { id: offerId }, select: { publicToken: true } });
+  if (!offer) throw new NotFoundError('레슨');
+  let token = offer.publicToken;
+  if (!token || regenerate) {
+    token = randomUUID();
+    await prisma.lessonOffer.update({ where: { id: offerId }, data: { publicToken: token } });
+  }
+  const webBaseUrl = process.env.WEB_BASE_URL || 'http://localhost:8081';
+  return { url: `${webBaseUrl}/lesson-pay?t=${token}` };
+}
+
+export interface LessonPayPublicView {
+  offerId: string;
+  clubName: string;
+  coachName: string;
+  summary: string; // "월·수 19:00~20:00"
+  period: string; // 당월 고정
+  fee: number | null;
+  accountInfo: string | null; // 입금 안내 계좌(클럽 회비 계좌)
+  rows: { applicationId: string; name: string; status: 'UNPAID' | 'REPORTED' | 'CONFIRMED' }[];
+}
+
+/** 무설치 납부 페이지 데이터(공개, 토큰 필요). 당월 고정. */
+export async function getLessonPayPublicView(token: string): Promise<LessonPayPublicView> {
+  const offer = await prisma.lessonOffer.findUnique({
+    where: { publicToken: token },
+    include: { club: { select: { name: true, duesAccountInfo: true } } },
+  });
+  if (!offer || !offer.enabled) throw new NotFoundError('납부 페이지');
+  const period = currentPeriod();
+  const view = await getLessonFees(offer.id, period);
+  return {
+    offerId: offer.id,
+    clubName: offer.club.name,
+    coachName: offer.coachName,
+    summary: lessonSummary(offer),
+    period,
+    fee: offer.fee ?? null,
+    accountInfo: offer.club.duesAccountInfo ?? null,
+    rows: view.rows.map((r) => ({ applicationId: r.applicationId, name: r.name, status: r.status })),
+  };
+}
+
+/** 수강생 입금 신고(공개, 토큰 필요) — 당월 고정. 이미 확정이면 그대로 둔다. */
+export async function reportLessonFee(token: string, applicationId: string): Promise<{ status: string }> {
+  const offer = await prisma.lessonOffer.findUnique({
+    where: { publicToken: token },
+    include: { club: { select: { id: true, name: true } } },
+  });
+  if (!offer || !offer.enabled) throw new NotFoundError('납부 페이지');
+  const app = await prisma.lessonApplication.findUnique({ where: { id: applicationId } });
+  if (!app || app.offerId !== offer.id || app.status !== 'CONFIRMED' || app.enrollState === 'ENDED') {
+    throw new NotFoundError('수강생');
+  }
+  const period = currentPeriod();
+  const existing = await prisma.lessonFeeRecord.findUnique({
+    where: { applicationId_period: { applicationId, period } },
+  });
+  if (existing?.status === 'CONFIRMED') return { status: 'CONFIRMED' };
+  await prisma.lessonFeeRecord.upsert({
+    where: { applicationId_period: { applicationId, period } },
+    create: { offerId: offer.id, applicationId, period, amount: offer.fee ?? 0, status: 'REPORTED', reportedAt: new Date() },
+    update: { status: 'REPORTED', reportedAt: new Date() },
+  });
+  // 운영진에게 신고 접수 푸시(실패해도 신고는 성공).
+  try {
+    const staff = await prisma.clubMember.findMany({
+      where: { clubId: offer.club.id, role: { in: ['LEADER', 'STAFF'] } },
+      select: { userId: true },
+    });
+    const { sendPushToUsers } = await import('../notification/notification.service');
+    await sendPushToUsers(staff.map((s) => s.userId), {
+      title: '레슨비 입금 신고 💸',
+      body: `${app.name}님이 ${offer.coachName} 코치 레슨 ${period} 레슨비 입금을 신고했어요 — 확인해 주세요`,
+      data: { type: 'lessonFeeReported', offerId: offer.id },
+    });
+  } catch {
+    /* 알림 실패 무시 */
+  }
+  return { status: 'REPORTED' };
+}
+
+/** 운영진 수기 수강생 추가 — 앱 미가입 반원 등록(정원 무시: 현장 사실의 기록). */
+export async function addLessonStudent(offerId: string, input: { name?: string; phone?: string }): Promise<{ id: string }> {
+  const name = String(input.name ?? '').trim();
+  if (!name) throw new BadRequestError('이름을 입력해 주세요.');
+  if (name.length > 20) throw new BadRequestError('이름은 20자 이내로 입력해 주세요.');
+  const offer = await prisma.lessonOffer.findUnique({ where: { id: offerId }, select: { id: true } });
+  if (!offer) throw new NotFoundError('레슨');
+  const phone = String(input.phone ?? '').replace(/[^0-9]/g, '') || null;
+  const app = await prisma.lessonApplication.create({
+    data: { offerId, name, phone, status: 'CONFIRMED', enrollState: 'ACTIVE' },
+  });
+  return { id: app.id };
+}
+
+/** 미납 독촉 — 회원 연결 수강생에게 푸시 + 단톡 공유용 문구 반환. */
+export async function remindLessonFees(
+  offerId: string,
+  period: string,
+): Promise<{ message: string; unpaidCount: number; notifiedCount: number }> {
+  const offer = await prisma.lessonOffer.findUnique({
+    where: { id: offerId },
+    include: { club: { select: { name: true, duesAccountInfo: true } } },
+  });
+  if (!offer) throw new NotFoundError('레슨');
+  const view = await getLessonFees(offerId, period);
+  const unpaid = view.rows.filter((r) => r.status === 'UNPAID');
+  const fee = offer.fee ?? 0;
+
+  // 회원 연결 수강생에게만 푸시(비회원은 공유 문구로).
+  const unpaidApps = await prisma.lessonApplication.findMany({
+    where: { id: { in: unpaid.map((r) => r.applicationId) }, userId: { not: null } },
+    select: { userId: true },
+  });
+  let notifiedCount = 0;
+  try {
+    const { sendPushToUsers } = await import('../notification/notification.service');
+    const ids = unpaidApps.map((a) => a.userId!).filter(Boolean);
+    if (ids.length > 0) {
+      await sendPushToUsers(ids, {
+        title: '레슨비 안내 🏸',
+        body: `${offer.club.name} ${offer.coachName} 코치 ${period} 레슨비${fee ? ` ${fee.toLocaleString()}원` : ''} 입금 부탁드려요`,
+        data: { type: 'lessonFeeReminder', offerId },
+      });
+      notifiedCount = ids.length;
+    }
+  } catch {
+    /* 알림 실패 무시 */
+  }
+
+  const lines = [
+    `[${offer.club.name}] ${offer.coachName} 코치 ${period} 레슨비 안내`,
+    ...unpaid.map((r) => `· ${r.name}${fee ? `: ${fee.toLocaleString()}원` : ''}`),
+    offer.club.duesAccountInfo ? `입금계좌: ${offer.club.duesAccountInfo}` : null,
+    '입금 후 납부 페이지에서 "입금했어요"를 눌러주세요 🙏',
+  ].filter(Boolean);
+  return { message: lines.join('\n'), unpaidCount: unpaid.length, notifiedCount };
 }
 
 // ─── 레슨 정산 원장(PG 이전 시뮬레이션) ─────────────────────

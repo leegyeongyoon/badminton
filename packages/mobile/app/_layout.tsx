@@ -108,7 +108,8 @@ function RootLayoutInner() {
     // 로그인 없이 볼 수 있는 공개 페이지(개인정보처리방침·계정삭제 안내). 아래 게이트
     // 조건들이 모두 !inPrivacy 로 예외 처리하므로 여기에 추가하면 한 번에 허용된다.
     // guest-apply: 게스트 사전 신청(공개 링크 — 비회원이 로그인 없이 연다).
-    const inPrivacy = seg[0] === 'privacy' || seg[0] === 'delete-account' || seg[0] === 'guest-apply' || seg[0] === 'guest-chat' || seg[0] === 'discover' || seg[0] === 'map';
+    // lesson-pay: 레슨비 무설치 납부 페이지(공개 링크 — 수강생이 로그인 없이 연다).
+    const inPrivacy = seg[0] === 'privacy' || seg[0] === 'delete-account' || seg[0] === 'guest-apply' || seg[0] === 'guest-chat' || seg[0] === 'discover' || seg[0] === 'map' || seg[0] === 'lesson-pay';
 
     // Onboarding gate: first-time users see the onboarding flow
     if (hasCompletedOnboarding === false && !inOnboarding && !inPrivacy) {
@@ -285,6 +286,7 @@ function RootLayoutInner() {
           <Stack.Screen name="lab/money" options={transitions.slideFromRight} />
           <Stack.Screen name="lab/lessons" options={transitions.slideFromRight} />
           <Stack.Screen name="guest-apply" options={transitions.fadeScale} />
+          <Stack.Screen name="lesson-pay" options={transitions.fadeScale} />
           <Stack.Screen name="discover" options={transitions.slideFromRight} />
           <Stack.Screen name="club/[id]" options={transitions.slideFromRight} />
           <Stack.Screen name="club/[id]/session" options={transitions.slideFromRight} />

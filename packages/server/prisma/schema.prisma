@@ -623,12 +623,16 @@ model LessonOffer {
   fee         Int? // 월 레슨비(안내용)
   capacity    Int? // 정원(null=무제한)
   enabled   Boolean  @default(true)
+  // 무설치 납부 페이지(/lesson-pay?t=...)의 capability 토큰 — 운영진이 발급/재발급.
+  // null이면 링크 미발급 상태(페이지 접근 불가).
+  publicToken String? @unique
   createdAt DateTime @default(now())
 
   club         Club                @relation(fields: [clubId], references: [id], onDelete: Cascade)
   coachProfile CoachProfile?       @relation(fields: [coachProfileId], references: [id], onDelete: SetNull)
   applications LessonApplication[]
   attendance   LessonAttendance[]
+  feeRecords   LessonFeeRecord[]
 
   @@index([clubId])
   @@index([coachProfileId])
@@ -651,8 +655,32 @@ model LessonApplication {
   offer      LessonOffer        @relation(fields: [offerId], references: [id], onDelete: Cascade)
   attendance LessonAttendance[]
   payments   LessonPayment[]
+  feeRecords LessonFeeRecord[]
 
   @@index([offerId, createdAt])
+}
+
+// 레슨비 수동 수납 기록 — 월(period) 단위. 계좌이체 기반 "입금 신고→확인" 흐름의 원장.
+// LessonPayment(카드결제, PAYMENTS_MOCK 게이트)와 의도적으로 분리 — 이 테이블은 게이트 밖에서
+// 항상 동작한다(회비 DuesPayment 패턴 + 상태). 미납 = 행 없음.
+// LessonApplication.feePaid 는 "당월 CONFIRMED 여부"의 파생값으로 동기화된다.
+model LessonFeeRecord {
+  id            String    @id @default(uuid())
+  offerId       String
+  applicationId String
+  period        String // "YYYY-MM"
+  amount        Int // 청구액 스냅샷(기록 시점 offer.fee)
+  status        String    @default("REPORTED") // REPORTED(수강생 입금 신고) | CONFIRMED(운영진·반장 확인)
+  reportedAt    DateTime?
+  confirmedAt   DateTime?
+  confirmedById String?
+  createdAt     DateTime  @default(now())
+
+  offer       LessonOffer       @relation(fields: [offerId], references: [id], onDelete: Cascade)
+  application LessonApplication @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+
+  @@unique([applicationId, period])
+  @@index([offerId, period])
 }
 
 // 레슨비 결제 원장 — 월(period) 단위 수납 기록.

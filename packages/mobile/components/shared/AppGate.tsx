@@ -22,7 +22,7 @@ const APP_STORE_URL = 'https://apps.apple.com/app/id6788656869';
 const PLAY_STORE_URL = 'https://play.google.com/store/apps/details?id=com.gylee.badminton';
 
 // 웹을 계속 열어둘 경로(prefix) — 공개 유입/법적 페이지 + 로그인(운영자 우회 진입로).
-const EXEMPT_PREFIXES = ['/guest-apply', '/guest-chat', '/discover', '/map', '/privacy', '/delete-account', '/login'];
+const EXEMPT_PREFIXES = ['/guest-apply', '/guest-chat', '/lesson-pay', '/discover', '/map', '/privacy', '/delete-account', '/login'];
 
 function isPhoneWeb(): boolean {
   if (Platform.OS !== 'web' || typeof navigator === 'undefined') return false;

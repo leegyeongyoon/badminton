@@ -30,6 +30,12 @@ import {
   setLessonAttendance,
   promoteFromWaitlist,
   getLessonBilling,
+  getLessonFees,
+  confirmLessonFee,
+  unconfirmLessonFee,
+  issueLessonShareLink,
+  addLessonStudent,
+  remindLessonFees,
 } from '../lab/lab.service';
 import { payLessonFee, cancelLessonPayment } from '../payment/payment.service';
 import * as guestChat from '../guestChat/guestChat.service';
@@ -283,8 +289,59 @@ router.put('/:clubId/money/lesson-applications/:appId', authenticate, staffGuard
     if (!app || app.offer.clubId !== String(req.params.clubId)) throw new NotFoundError('레슨 신청');
     const { status, feePaid } = req.body as { status?: string; feePaid?: boolean };
     if (status === undefined && feePaid === undefined) throw new BadRequestError('status 또는 feePaid 필요');
-    await updateLessonApplication(String(req.params.appId), { status, feePaid });
+    await updateLessonApplication(String(req.params.appId), { status, feePaid }, req.user!.userId);
     res.json({ ok: true });
+  } catch (err) { next(err); }
+});
+
+// ─── 레슨비 월 수납(수동 입금확인) — 운영진 또는 담당 코치 ───
+
+// GET /clubs/:clubId/money/lessons/:offerId/fees?period=YYYY-MM — 월별 수납 현황
+router.get('/:clubId/money/lessons/:offerId/fees', authenticate, staffOrLessonCoach, async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    res.json(await getLessonFees(String(req.params.offerId), String(req.query.period || '')));
+  } catch (err) { next(err); }
+});
+
+// POST /clubs/:clubId/money/lessons/:offerId/fees/confirm {applicationId, period} — 입금 확인
+router.post('/:clubId/money/lessons/:offerId/fees/confirm', authenticate, staffOrLessonCoach, async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { applicationId, period } = req.body as { applicationId?: string; period?: string };
+    await confirmLessonFee(String(req.params.offerId), String(applicationId || ''), String(period || ''), req.user!.userId);
+    res.json({ ok: true });
+  } catch (err) { next(err); }
+});
+
+// DELETE /clubs/:clubId/money/lessons/:offerId/fees/confirm {applicationId, period} — 확인 해제
+router.delete('/:clubId/money/lessons/:offerId/fees/confirm', authenticate, staffOrLessonCoach, async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { applicationId, period } = req.body as { applicationId?: string; period?: string };
+    await unconfirmLessonFee(String(req.params.offerId), String(applicationId || ''), String(period || ''));
+    res.json({ ok: true });
+  } catch (err) { next(err); }
+});
+
+// POST /clubs/:clubId/money/lessons/:offerId/share-link {regenerate?} — 무설치 납부 페이지 링크
+router.post('/:clubId/money/lessons/:offerId/share-link', authenticate, staffOrLessonCoach, async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { regenerate } = req.body as { regenerate?: boolean };
+    res.json(await issueLessonShareLink(String(req.params.offerId), !!regenerate));
+  } catch (err) { next(err); }
+});
+
+// POST /clubs/:clubId/money/lessons/:offerId/students {name, phone?} — 수기 수강생 추가(앱 미가입 반원)
+router.post('/:clubId/money/lessons/:offerId/students', authenticate, staffOrLessonCoach, async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { name, phone } = req.body as { name?: string; phone?: string };
+    res.json(await addLessonStudent(String(req.params.offerId), { name, phone }));
+  } catch (err) { next(err); }
+});
+
+// POST /clubs/:clubId/money/lessons/:offerId/fees/remind {period} — 미납 독촉(회원 푸시 + 공유 문구)
+router.post('/:clubId/money/lessons/:offerId/fees/remind', authenticate, staffOrLessonCoach, async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { period } = req.body as { period?: string };
+    res.json(await remindLessonFees(String(req.params.offerId), String(period || '')));
   } catch (err) { next(err); }
 });
 

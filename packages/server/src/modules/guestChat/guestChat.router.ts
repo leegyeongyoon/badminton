@@ -1,6 +1,6 @@
 import { Router, Request, Response, NextFunction } from 'express';
-import jwt from 'jsonwebtoken';
 import { rateLimit } from '../../middleware/rateLimit';
+import { optionalUserId } from '../../middleware/optionalAuth';
 import { BadRequestError } from '../../utils/errors';
 import * as svc from './guestChat.service';
 
@@ -16,17 +16,7 @@ const router = Router();
 const startLimiter = rateLimit({ windowMs: 60 * 60 * 1000, max: 20, keyPrefix: 'guestchat:start' });
 const msgLimiter = rateLimit({ windowMs: 60 * 1000, max: 30, keyPrefix: 'guestchat:msg' });
 
-/** 로그인 상태면 userId 추출(선택적 — 실패해도 익명으로 진행). */
-function optionalUserId(req: Request): string | null {
-  const header = req.headers.authorization;
-  if (!header?.startsWith('Bearer ')) return null;
-  try {
-    const payload = jwt.verify(header.slice(7), process.env.JWT_SECRET || 'dev-secret') as { userId?: string };
-    return payload.userId ?? null;
-  } catch {
-    return null;
-  }
-}
+// optionalUserId는 공용 미들웨어로 추출됨 — src/middleware/optionalAuth.ts
 
 router.post('/start', startLimiter, async (req: Request, res: Response, next: NextFunction) => {
   try {

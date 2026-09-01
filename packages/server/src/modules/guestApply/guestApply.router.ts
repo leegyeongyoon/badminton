@@ -1,7 +1,7 @@
 import { Router, Request, Response, NextFunction } from 'express';
-import jwt from 'jsonwebtoken';
 import { prisma } from '../../utils/prisma';
 import { rateLimit } from '../../middleware/rateLimit';
+import { optionalUserId } from '../../middleware/optionalAuth';
 import { NotFoundError, BadRequestError } from '../../utils/errors';
 import { sendPushToUsers } from '../notification/notification.service';
 
@@ -165,17 +165,7 @@ async function findPublicById(clubId: string) {
   return club && club.visibility === 'PUBLIC' ? club : null;
 }
 
-/** 로그인 상태면 userId 추출(선택적 — 실패해도 익명 신청으로 진행). */
-function optionalUserId(req: Request): string | null {
-  const header = req.headers.authorization;
-  if (!header?.startsWith('Bearer ')) return null;
-  try {
-    const payload = jwt.verify(header.slice(7), process.env.JWT_SECRET || 'dev-secret') as { userId?: string };
-    return payload.userId ?? null;
-  } catch {
-    return null;
-  }
-}
+// optionalUserId는 공용 미들웨어로 추출됨 — src/middleware/optionalAuth.ts
 
 async function handleApply(club: ClubPreviewRow, req: Request, res: Response) {
   const { name, phone, note, skillLevel, gender, visitDate } = req.body as {
