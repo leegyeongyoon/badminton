@@ -142,12 +142,38 @@ export default function LessonDetailScreen() {
     try {
       const { url } = await lessonDetailApi.shareLink(clubId, offerId);
       await copyToClipboard(url);
-      showSuccess('납부 링크를 복사했어요');
+      showSuccess('납부 링크를 복사했어요 — 반 단톡에 공유하세요');
       await Share.share({
         message: `[${detail?.offer.clubName ?? '콕고'}] ${detail?.offer.coachName} 코치 레슨비 납부 페이지예요.\n입금 후 "입금했어요"를 눌러주세요 🙏\n${url}`,
       });
     } catch {
       /* 공유 시트 취소 포함 무시 */
+    }
+  };
+
+  // 반장 전용 관리 링크 — 확인/해제 권한이 있으니 개인 전달만.
+  const shareManageLink = async () => {
+    if (!clubId || !offerId) return;
+    try {
+      const { manageUrl } = await lessonDetailApi.shareLink(clubId, offerId);
+      await copyToClipboard(manageUrl);
+      showSuccess('반장용 관리 링크를 복사했어요 — 반장님께만 보내세요');
+      await Share.share({
+        message: `[${detail?.offer.clubName ?? '콕고'}] ${detail?.offer.coachName} 코치 레슨반 — 반장님 전용 관리 링크예요.\n입금 확인/해제가 가능하니 단톡에 올리지 말고 개인적으로만 써주세요.\n${manageUrl}`,
+      });
+    } catch {
+      /* noop */
+    }
+  };
+
+  // 링크 유출 시 재발급 — 기존 납부/관리 링크가 모두 무효화된다.
+  const regenerateLinks = async () => {
+    if (!clubId || !offerId) return;
+    try {
+      await lessonDetailApi.shareLink(clubId, offerId, true);
+      showSuccess('링크를 재발급했어요 — 이전 링크는 더 이상 열리지 않아요');
+    } catch {
+      /* noop */
     }
   };
 
@@ -556,6 +582,15 @@ export default function LessonDetailScreen() {
                 <Text style={[styles.feeActionText, { color: colors.text }]}>미납 독촉</Text>
               </Pressable>
             </View>
+            <View style={styles.feeSubActions}>
+              <Pressable onPress={shareManageLink} hitSlop={6}>
+                <Text style={[typography.caption, { color: colors.primary, fontWeight: '700' }]}>반장용 관리 링크 보내기</Text>
+              </Pressable>
+              <Text style={[typography.caption, { color: colors.textLight }]}> · </Text>
+              <Pressable onPress={regenerateLinks} hitSlop={6}>
+                <Text style={[typography.caption, { color: colors.textLight }]}>링크 재발급(유출 시)</Text>
+              </Pressable>
+            </View>
 
             {feesLoading && !fees ? (
               <View style={{ paddingVertical: spacing.xxl, alignItems: 'center' }}>
@@ -654,7 +689,8 @@ const styles = StyleSheet.create({
   coachIntro: { ...typography.body2, marginTop: 2 },
   coachMeta: { fontSize: 12, fontWeight: '600', marginTop: 3 },
   segment: { flexDirection: 'row', borderRadius: 12, borderWidth: 1, padding: 3, marginBottom: spacing.md },
-  feeActions: { flexDirection: 'row', gap: spacing.sm, marginBottom: spacing.md },
+  feeActions: { flexDirection: 'row', gap: spacing.sm, marginBottom: spacing.xs },
+  feeSubActions: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', marginBottom: spacing.md, paddingVertical: 4 },
   feeActionBtn: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, paddingVertical: 11, borderRadius: 12 },
   feeActionText: { color: '#fff', fontSize: 13.5, fontWeight: '800' },
   feeFootnote: { ...typography.caption, textAlign: 'center', marginTop: spacing.lg },

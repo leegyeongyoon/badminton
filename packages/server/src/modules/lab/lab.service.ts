@@ -1351,17 +1351,42 @@ export async function unconfirmLessonFee(offerId: string, applicationId: string,
   await syncFeePaidFlag(applicationId, period);
 }
 
-/** 무설치 납부 페이지 링크 발급(재발급 시 이전 링크 무효). */
-export async function issueLessonShareLink(offerId: string, regenerate = false): Promise<{ url: string }> {
-  const offer = await prisma.lessonOffer.findUnique({ where: { id: offerId }, select: { publicToken: true } });
+/** 무설치 납부 페이지 링크 발급(재발급 시 두 링크 모두 무효화 후 새로 발급).
+ *  url = 반원 공유용(단톡), manageUrl = 반장 전용(확인/해제 가능 — 개인 전달만). */
+export async function issueLessonShareLink(
+  offerId: string,
+  regenerate = false,
+): Promise<{ url: string; manageUrl: string }> {
+  const offer = await prisma.lessonOffer.findUnique({
+    where: { id: offerId },
+    select: { publicToken: true, manageToken: true },
+  });
   if (!offer) throw new NotFoundError('레슨');
-  let token = offer.publicToken;
-  if (!token || regenerate) {
-    token = randomUUID();
-    await prisma.lessonOffer.update({ where: { id: offerId }, data: { publicToken: token } });
+  let pub = offer.publicToken;
+  let mng = offer.manageToken;
+  if (!pub || !mng || regenerate) {
+    pub = randomUUID();
+    mng = randomUUID();
+    await prisma.lessonOffer.update({ where: { id: offerId }, data: { publicToken: pub, manageToken: mng } });
   }
   const webBaseUrl = process.env.WEB_BASE_URL || 'http://localhost:8081';
-  return { url: `${webBaseUrl}/lesson-pay?t=${token}` };
+  return { url: `${webBaseUrl}/lesson-pay?t=${pub}`, manageUrl: `${webBaseUrl}/lesson-pay?t=${mng}` };
+}
+
+/** 공개/관리 토큰 공용 리졸버 — 어느 쪽이든 offer를 찾고 관리 모드 여부를 알려준다. */
+async function findOfferByAnyToken(token: string) {
+  if (!token) throw new NotFoundError('납부 페이지');
+  const byPublic = await prisma.lessonOffer.findUnique({
+    where: { publicToken: token },
+    include: { club: { select: { id: true, name: true, duesAccountInfo: true } } },
+  });
+  if (byPublic) return { offer: byPublic, isManage: false };
+  const byManage = await prisma.lessonOffer.findUnique({
+    where: { manageToken: token },
+    include: { club: { select: { id: true, name: true, duesAccountInfo: true } } },
+  });
+  if (byManage) return { offer: byManage, isManage: true };
+  throw new NotFoundError('납부 페이지');
 }
 
 export interface LessonPayPublicView {
@@ -1372,16 +1397,14 @@ export interface LessonPayPublicView {
   period: string; // 당월 고정
   fee: number | null;
   accountInfo: string | null; // 입금 안내 계좌(클럽 회비 계좌)
+  mode: 'pay' | 'manage'; // manage = 반장 링크(확인/해제 가능)
   rows: { applicationId: string; name: string; status: 'UNPAID' | 'REPORTED' | 'CONFIRMED' }[];
 }
 
 /** 무설치 납부 페이지 데이터(공개, 토큰 필요). 당월 고정. */
 export async function getLessonPayPublicView(token: string): Promise<LessonPayPublicView> {
-  const offer = await prisma.lessonOffer.findUnique({
-    where: { publicToken: token },
-    include: { club: { select: { name: true, duesAccountInfo: true } } },
-  });
-  if (!offer || !offer.enabled) throw new NotFoundError('납부 페이지');
+  const { offer, isManage } = await findOfferByAnyToken(token);
+  if (!offer.enabled) throw new NotFoundError('납부 페이지');
   const period = currentPeriod();
   const view = await getLessonFees(offer.id, period);
   return {
@@ -1392,17 +1415,33 @@ export async function getLessonPayPublicView(token: string): Promise<LessonPayPu
     period,
     fee: offer.fee ?? null,
     accountInfo: offer.club.duesAccountInfo ?? null,
+    mode: isManage ? 'manage' : 'pay',
     rows: view.rows.map((r) => ({ applicationId: r.applicationId, name: r.name, status: r.status })),
   };
 }
 
+/** 반장 링크로 입금 확인/해제(무로그인) — 관리 토큰만 허용. */
+export async function confirmLessonFeeByToken(token: string, applicationId: string, confirm: boolean): Promise<void> {
+  const { offer, isManage } = await findOfferByAnyToken(token);
+  if (!offer.enabled || !isManage) throw new NotFoundError('납부 페이지');
+  if (confirm) await confirmLessonFee(offer.id, applicationId, currentPeriod(), 'manager-link');
+  else await unconfirmLessonFee(offer.id, applicationId, currentPeriod());
+}
+
+/** 입금 신고 취소(수강생 실수 복구) — 신고(REPORTED) 상태만 되돌린다. 확정은 불가. */
+export async function cancelLessonFeeReport(token: string, applicationId: string): Promise<void> {
+  const { offer } = await findOfferByAnyToken(token);
+  if (!offer.enabled) throw new NotFoundError('납부 페이지');
+  const period = currentPeriod();
+  await prisma.lessonFeeRecord.deleteMany({
+    where: { offerId: offer.id, applicationId, period, status: 'REPORTED' },
+  });
+}
+
 /** 수강생 입금 신고(공개, 토큰 필요) — 당월 고정. 이미 확정이면 그대로 둔다. */
 export async function reportLessonFee(token: string, applicationId: string): Promise<{ status: string }> {
-  const offer = await prisma.lessonOffer.findUnique({
-    where: { publicToken: token },
-    include: { club: { select: { id: true, name: true } } },
-  });
-  if (!offer || !offer.enabled) throw new NotFoundError('납부 페이지');
+  const { offer } = await findOfferByAnyToken(token);
+  if (!offer.enabled) throw new NotFoundError('납부 페이지');
   const app = await prisma.lessonApplication.findUnique({ where: { id: applicationId } });
   if (!app || app.offerId !== offer.id || app.status !== 'CONFIRMED' || app.enrollState === 'ENDED') {
     throw new NotFoundError('수강생');

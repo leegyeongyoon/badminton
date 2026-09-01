@@ -260,7 +260,7 @@ export const lessonDetailApi = {
   unconfirmFee: (clubId: string, offerId: string, applicationId: string, period: string) =>
     api.delete(`/clubs/${clubId}/money/lessons/${offerId}/fees/confirm`, { data: { applicationId, period } }).then((r) => r.data),
   shareLink: (clubId: string, offerId: string, regenerate = false) =>
-    api.post<{ url: string }>(`/clubs/${clubId}/money/lessons/${offerId}/share-link`, { regenerate }).then((r) => r.data),
+    api.post<{ url: string; manageUrl: string }>(`/clubs/${clubId}/money/lessons/${offerId}/share-link`, { regenerate }).then((r) => r.data),
   addStudent: (clubId: string, offerId: string, input: { name: string; phone?: string }) =>
     api.post<{ id: string }>(`/clubs/${clubId}/money/lessons/${offerId}/students`, input).then((r) => r.data),
   remindFees: (clubId: string, offerId: string, period: string) =>

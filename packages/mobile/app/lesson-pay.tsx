@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import { View, Text, StyleSheet, ScrollView, Pressable, ActivityIndicator } from 'react-native';
+import { View, Text, StyleSheet, ScrollView, Pressable, ActivityIndicator, Linking } from 'react-native';
 import { useLocalSearchParams } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -23,8 +23,12 @@ interface PayView {
   period: string; // "YYYY-MM"
   fee: number | null;
   accountInfo: string | null;
+  mode: 'pay' | 'manage'; // manage = 반장 링크(확인/해제 가능)
   rows: { applicationId: string; name: string; status: 'UNPAID' | 'REPORTED' | 'CONFIRMED' }[];
 }
+
+const APP_STORE_URL = 'https://apps.apple.com/app/id6788656869';
+const PLAY_STORE_URL = 'https://play.google.com/store/apps/details?id=com.gylee.badminton';
 
 const STATUS_META: Record<PayView['rows'][number]['status'], { label: string; icon: string }> = {
   CONFIRMED: { label: '확인 완료', icon: 'checkmark-circle' },
@@ -79,6 +83,40 @@ export default function LessonPay() {
     }
   };
 
+  // 신고 취소(실수 복구) — REPORTED 상태만 서버에서 되돌려준다.
+  const cancelReport = async () => {
+    if (!t || !selected || busy) return;
+    setBusy(true);
+    try {
+      await api.post(`/lesson-pay/${t}/report/cancel`, { applicationId: selected }, { _silent: true } as any);
+      setSelected(null);
+      await load();
+    } catch {
+      setError('취소에 실패했어요. 잠시 후 다시 시도해 주세요.');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  // 반장 모드: 확인/해제 원터치.
+  const [busyRowId, setBusyRowId] = useState<string | null>(null);
+  const manageToggle = async (applicationId: string, status: string) => {
+    if (!t || busyRowId) return;
+    setBusyRowId(applicationId);
+    try {
+      if (status === 'CONFIRMED') {
+        await api.delete(`/lesson-pay/${t}/confirm`, { data: { applicationId }, _silent: true } as any);
+      } else {
+        await api.post(`/lesson-pay/${t}/confirm`, { applicationId }, { _silent: true } as any);
+      }
+      await load();
+    } catch {
+      setError('처리에 실패했어요. 잠시 후 다시 시도해 주세요.');
+    } finally {
+      setBusyRowId(null);
+    }
+  };
+
   const copyAccount = async () => {
     if (!view?.accountInfo) return;
     const ok = await copyToClipboard(view.accountInfo);
@@ -105,7 +143,14 @@ export default function LessonPay() {
       ) : view ? (
         <>
           {/* 헤더 — 반 정보 */}
-          <Text style={[styles.club, { color: colors.textSecondary }]}>{view.clubName}</Text>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+            <Text style={[styles.club, { color: colors.textSecondary }]}>{view.clubName}</Text>
+            {view.mode === 'manage' && (
+              <View style={[styles.manageBadge, { backgroundColor: colors.primaryBg }]}>
+                <Text style={[styles.manageBadgeText, { color: colors.primary }]}>반장 모드</Text>
+              </View>
+            )}
+          </View>
           <Text style={[styles.title, { color: colors.text }]}>
             {view.coachName} 코치 레슨 · {Number(month)}월 레슨비
           </Text>
@@ -142,7 +187,9 @@ export default function LessonPay() {
             {year}년 {Number(month)}월 납부 현황
           </Text>
           <Text style={[typography.caption, { color: colors.textLight, marginBottom: spacing.sm }]}>
-            입금하셨다면 본인 이름을 눌러 알려주세요 — 반장님 확인 후 완료돼요.
+            {view.mode === 'manage'
+              ? '입금이 확인된 반원의 [입금 확인]을 눌러주세요. 이 링크는 반장님 전용이에요 — 단톡에 공유하지 마세요.'
+              : '입금하셨다면 본인 이름을 눌러 알려주세요 — 반장님 확인 후 완료돼요. 잘못 눌렀다면 다시 눌러 취소할 수 있어요.'}
           </Text>
           <View style={[styles.card, shadows.sm, { backgroundColor: colors.surface, borderColor: colors.border, paddingVertical: 4 }]}>
             {view.rows.length === 0 && (
@@ -151,11 +198,12 @@ export default function LessonPay() {
             {view.rows.map((r, i) => {
               const meta = STATUS_META[r.status];
               const isSel = selected === r.applicationId;
-              const done = r.status !== 'UNPAID';
+              const tappable = view.mode === 'pay' && r.status !== 'CONFIRMED';
+              const rowBusy = busyRowId === r.applicationId;
               return (
                 <Pressable
                   key={r.applicationId}
-                  onPress={() => !done && setSelected(isSel ? null : r.applicationId)}
+                  onPress={() => tappable && setSelected(isSel ? null : r.applicationId)}
                   style={[
                     styles.row,
                     i > 0 && { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.border },
@@ -178,22 +226,47 @@ export default function LessonPay() {
                   >
                     {meta.label}
                   </Text>
+                  {view.mode === 'manage' && (
+                    <Pressable
+                      onPress={() => manageToggle(r.applicationId, r.status)}
+                      disabled={rowBusy}
+                      style={[
+                        styles.manageBtn,
+                        r.status === 'CONFIRMED'
+                          ? { backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border }
+                          : { backgroundColor: colors.primary },
+                        rowBusy && { opacity: 0.5 },
+                      ]}
+                    >
+                      <Text style={[styles.manageBtnText, r.status === 'CONFIRMED' && { color: colors.textSecondary }]}>
+                        {r.status === 'CONFIRMED' ? '해제' : '입금 확인'}
+                      </Text>
+                    </Pressable>
+                  )}
                 </Pressable>
               );
             })}
           </View>
 
-          {/* 신고 버튼 */}
-          {selectedRow && (
+          {/* 신고/취소 버튼 (반원 모드) */}
+          {selectedRow && view.mode === 'pay' && (
             <Pressable
-              onPress={report}
+              onPress={selectedRow.status === 'REPORTED' ? cancelReport : report}
               disabled={busy}
-              style={[styles.cta, { backgroundColor: colors.primary, opacity: busy ? 0.6 : 1 }]}
+              style={[
+                styles.cta,
+                selectedRow.status === 'REPORTED'
+                  ? { backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border }
+                  : { backgroundColor: colors.primary },
+                { opacity: busy ? 0.6 : 1 },
+              ]}
             >
               {busy ? (
-                <ActivityIndicator color="#fff" />
+                <ActivityIndicator color={selectedRow.status === 'REPORTED' ? colors.text : '#fff'} />
               ) : (
-                <Text style={styles.ctaText}>{selectedRow.name} — 입금했어요</Text>
+                <Text style={[styles.ctaText, selectedRow.status === 'REPORTED' && { color: colors.textSecondary }]}>
+                  {selectedRow.status === 'REPORTED' ? `${selectedRow.name} — 신고 취소` : `${selectedRow.name} — 입금했어요`}
+                </Text>
               )}
             </Pressable>
           )}
@@ -207,6 +280,28 @@ export default function LessonPay() {
           <Text style={[typography.caption, { color: colors.textLight, textAlign: 'center', marginTop: spacing.xl }]}>
             돈은 이 페이지로 오가지 않아요 — 이체는 계좌로, 여기서는 확인만 해요.
           </Text>
+
+          {/* 콕고 푸터 — 브랜드 + 앱 안내 */}
+          <View style={[styles.footer, { borderTopColor: colors.border }]}>
+            <Text style={[styles.footerBrand, { color: colors.text }]}>🏸 콕고</Text>
+            <Text style={[typography.caption, { color: colors.textLight, textAlign: 'center' }]}>
+              배드민턴 모임 운영 — 체크인·게임 편성·회비·레슨비까지
+            </Text>
+            <View style={{ flexDirection: 'row', gap: spacing.md, marginTop: spacing.xs }}>
+              <Text
+                style={[typography.caption, { color: colors.primary, fontWeight: '700' }]}
+                onPress={() => Linking.openURL(APP_STORE_URL).catch(() => {})}
+              >
+                App Store
+              </Text>
+              <Text
+                style={[typography.caption, { color: colors.primary, fontWeight: '700' }]}
+                onPress={() => Linking.openURL(PLAY_STORE_URL).catch(() => {})}
+              >
+                Google Play
+              </Text>
+            </View>
+          </View>
         </>
       ) : null}
     </ScrollView>
@@ -228,4 +323,10 @@ const styles = StyleSheet.create({
   cta: { marginTop: spacing.lg, borderRadius: radius.pill, paddingVertical: 15, alignItems: 'center' },
   ctaText: { color: '#fff', fontSize: 16, fontWeight: '700' },
   refresh: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', marginTop: spacing.lg, padding: spacing.sm },
+  manageBadge: { paddingHorizontal: 8, paddingVertical: 3, borderRadius: 8 },
+  manageBadgeText: { fontSize: 11, fontWeight: '800' },
+  manageBtn: { paddingHorizontal: 12, paddingVertical: 7, borderRadius: radius.pill, marginLeft: 6 },
+  manageBtnText: { color: '#fff', fontSize: 12.5, fontWeight: '800' },
+  footer: { alignItems: 'center', gap: 4, marginTop: spacing.xxl, paddingTop: spacing.lg, borderTopWidth: StyleSheet.hairlineWidth },
+  footerBrand: { fontSize: 14, fontWeight: '800' },
 });

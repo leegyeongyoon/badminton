@@ -626,6 +626,9 @@ model LessonOffer {
   // 무설치 납부 페이지(/lesson-pay?t=...)의 capability 토큰 — 운영진이 발급/재발급.
   // null이면 링크 미발급 상태(페이지 접근 불가).
   publicToken String? @unique
+  // 반장용 관리 토큰 — 같은 페이지가 관리 모드(확인/해제 가능)로 열린다.
+  // 반장(비운영진·무로그인)에게 개인적으로만 전달하는 링크. 재발급으로 무효화.
+  manageToken String? @unique
   createdAt DateTime @default(now())
 
   club         Club                @relation(fields: [clubId], references: [id], onDelete: Cascade)
