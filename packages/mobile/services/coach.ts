@@ -42,6 +42,8 @@ export interface CoachDetail extends CoachCard {
   active: boolean;
   createdAt: string;
   careerEntries: CoachCareerEntry[]; // 구조화 이력서(있으면 career 텍스트보다 우선)
+  // 콕고 실운영 지표(관찰 기반 검증 경력) — 레슨반 운영 데이터 파생, 없으면 null.
+  liveStats: { activeLessons: number; totalStudents: number; totalAttendance: number } | null;
 }
 
 export interface CoachProfileInput {

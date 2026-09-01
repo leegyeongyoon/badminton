@@ -66,6 +66,9 @@ export interface CoachDetailDTO extends CoachCardDTO {
   active: boolean;
   createdAt: string;
   careerEntries: CareerEntryDTO[]; // 원티드식 구조화 이력서(있으면 career 텍스트보다 우선)
+  // 콕고 실운영 지표 — 자기소개(주장)와 달리 앱이 관찰한 검증된 경력.
+  // 클럽 레슨반 운영 데이터에서 파생: 진행 중 반 수 / 누적 확정 수강생 / 누적 출석 체크.
+  liveStats: { activeLessons: number; totalStudents: number; totalAttendance: number } | null;
 }
 
 export interface CoachProfileInput {
@@ -169,6 +172,7 @@ function toDetail(c: CoachRow): CoachDetailDTO {
     active: c.active,
     createdAt: c.createdAt.toISOString(),
     careerEntries: (c.careerEntries ?? []).map(toEntryDTO),
+    liveStats: null, // getCoach에서 실집계로 대체
   };
 }
 
@@ -238,7 +242,29 @@ export async function getCoach(id: string, viewerUserId?: string): Promise<Coach
   if (!c || (!c.active && c.userId !== viewerUserId)) throw new NotFoundError('코치');
   const detail = toDetail(c);
   await decorateCards([detail], viewerUserId);
+  detail.liveStats = await computeCoachLiveStats(id);
   return detail;
+}
+
+/** 실운영 지표 — 이 코치가 연결된 레슨반의 관찰 데이터 집계(주장이 아닌 기록). */
+async function computeCoachLiveStats(
+  coachProfileId: string,
+): Promise<{ activeLessons: number; totalStudents: number; totalAttendance: number } | null> {
+  try {
+    const [activeLessons, totalStudents, totalAttendance] = await Promise.all([
+      prisma.lessonOffer.count({ where: { coachProfileId, enabled: true } }),
+      prisma.lessonApplication.count({
+        where: { offer: { coachProfileId }, status: 'CONFIRMED' },
+      }),
+      prisma.lessonAttendance.count({
+        where: { offer: { coachProfileId }, present: true },
+      }),
+    ]);
+    if (activeLessons === 0 && totalStudents === 0 && totalAttendance === 0) return null;
+    return { activeLessons, totalStudents, totalAttendance };
+  } catch {
+    return null; // 지표 실패가 프로필 조회를 막지 않는다
+  }
 }
 
 /** 내 코치 프로필(없으면 null — 아직 코치로 등록 안 한 상태). */

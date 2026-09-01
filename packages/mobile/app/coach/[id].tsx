@@ -189,6 +189,15 @@ export default function CoachProfileScreen() {
                 </Text>
               </View>
             )}
+            {/* 실운영 지표 — 자기소개(주장)와 달리 콕고가 관찰한 검증 경력 */}
+            {coach.liveStats && (
+              <View style={styles.regionRow}>
+                <Ionicons name="pulse-outline" size={12} color={colors.primary} />
+                <Text style={[styles.regionText, { color: colors.textSecondary, fontWeight: '600' }]}>
+                  콕고에서 레슨 {coach.liveStats.activeLessons}반 운영 중 · 수강생 {coach.liveStats.totalStudents}명 · 출석 체크 {coach.liveStats.totalAttendance}회
+                </Text>
+              </View>
+            )}
             {!coach.active && (
               <Text style={[styles.inactive, { color: colors.textLight }]}>지금은 비공개 상태예요 (본인에게만 보임)</Text>
             )}

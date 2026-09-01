@@ -1,4 +1,5 @@
 import { prisma } from '../../utils/prisma';
+import { logger } from '../../utils/logger';
 import { NotFoundError, BadRequestError, ForbiddenError } from '../../utils/errors';
 import { sendPushToUser, sendPushToUsers } from '../notification/notification.service';
 import { verifyClubStaff } from '../clubSession/clubSession.service';
@@ -662,6 +663,49 @@ export async function updateApplicationStatus(
     where: { id: applicationId },
     data: { status, ...offerData, ...interviewData },
   });
+
+  // 채용 확정 → 레슨반 자동 개설 (클럽 공고에 한함 — 학교·센터 공고는 클럽이 없어 제외).
+  // 요일·시간은 오퍼레터(최종 합의 조건) 우선, 없으면 공고 조건, 그마저 협의면 기본값으로
+  // 만들어두고 운영진에게 "확인·수정" 푸시를 보낸다. 레슨비(fee)는 코치 급여와 다른 값이라
+  // 비워두고 운영진이 수납 시작 전에 설정한다.
+  if (status === 'ACCEPTED' && app.post.clubId) {
+    try {
+      const terms = (app.offerTerms ?? {}) as { days?: unknown; start?: unknown; end?: unknown };
+      const rawDays = Array.isArray(terms.days) && terms.days.length > 0
+        ? terms.days
+        : Array.isArray(app.post.days) && (app.post.days as unknown[]).length > 0
+          ? (app.post.days as unknown[])
+          : [1];
+      const days = [...new Set(rawDays.map(Number).filter((d) => Number.isInteger(d) && d >= 0 && d <= 6))];
+      const start = typeof terms.start === 'string' && terms.start ? terms.start : app.post.start || '19:00';
+      const end = typeof terms.end === 'string' && terms.end ? terms.end : app.post.end || '20:00';
+      const created = await prisma.lessonOffer.create({
+        data: {
+          clubId: app.post.clubId,
+          coachName: app.coachProfile.displayName,
+          coachProfileId: app.coachProfile.id,
+          day: days[0] ?? 1,
+          days: days.length > 0 ? days : [1],
+          start,
+          end,
+          fee: null,
+          enabled: true,
+        },
+      });
+      await sendPushToUser(app.post.authorUserId, {
+        title: '레슨반이 개설됐어요 🏸',
+        body: `${app.coachProfile.displayName} 코치 채용 확정으로 레슨반이 자동 개설됐어요 — 레슨비·시간을 확인하고 수강생 모집을 시작하세요`,
+        data: { type: 'lessonOfferCreated', clubId: app.post.clubId, offerId: created.id },
+      });
+      await sendPushToUser(app.coachProfile.userId, {
+        title: '레슨반 배정 완료 🎉',
+        body: `"${app.post.title}" 채용이 확정돼 레슨반이 개설됐어요 — 앱에서 수강생·출석을 관리할 수 있어요`,
+        data: { type: 'lessonOfferCreated', clubId: app.post.clubId, offerId: created.id },
+      });
+    } catch (err) {
+      logger.error('채용 확정 레슨반 자동 개설 실패(채용 자체는 유지)', { err, applicationId });
+    }
+  }
 
   let threadId: string | undefined;
   if (status === 'INTERVIEW' || status === 'OFFERED') {
