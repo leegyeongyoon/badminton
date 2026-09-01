@@ -50,6 +50,8 @@ jobs:
           # Google OAuth client id = public (safe to ship; client_secret stays
           # server-side on the Pi via .env.prod, injected by deploy.yml).
           EXPO_PUBLIC_GOOGLE_CLIENT_ID: 1020314759155-5itpocn654tbvt8ah0a44kif04pj8hjh.apps.googleusercontent.com
+          # 코치 마켓(구인공고·이력서·채용→레슨 루프) 오픈 — 2026-09-01.
+          EXPO_PUBLIC_COACH_MARKET: "1"
         run: |
           npx expo export --platform web
           # Cloudflare Pages SKIPS any directory named `node_modules` during
