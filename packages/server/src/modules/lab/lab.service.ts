@@ -1488,6 +1488,48 @@ export async function addLessonStudent(offerId: string, input: { name?: string; 
   return { id: app.id };
 }
 
+/** 레슨 공지(휴강·보강·전달사항) — 코치·운영진이 수강생 전체에게.
+ *  회원 연결 수강생은 푸시, 나머지는 반환된 문구를 단톡에 공유. */
+export async function sendLessonNotice(
+  offerId: string,
+  message: string,
+): Promise<{ shareText: string; notifiedCount: number }> {
+  const text = String(message ?? '').trim();
+  if (!text) throw new BadRequestError('공지 내용을 입력해 주세요.');
+  if (text.length > 300) throw new BadRequestError('공지는 300자 이내로 입력해 주세요.');
+  const offer = await prisma.lessonOffer.findUnique({
+    where: { id: offerId },
+    include: { club: { select: { name: true } } },
+  });
+  if (!offer) throw new NotFoundError('레슨');
+
+  const roster = await lessonFeeRoster(offerId);
+  const userIds = (
+    await prisma.lessonApplication.findMany({
+      where: { id: { in: roster.map((r) => r.id) }, userId: { not: null } },
+      select: { userId: true },
+    })
+  ).map((a) => a.userId!) ;
+
+  let notifiedCount = 0;
+  try {
+    const { sendPushToUsers } = await import('../notification/notification.service');
+    if (userIds.length > 0) {
+      await sendPushToUsers(userIds, {
+        title: `레슨 공지 — ${offer.coachName} 코치 🏸`,
+        body: text,
+        data: { type: 'lessonNotice', offerId },
+      });
+      notifiedCount = userIds.length;
+    }
+  } catch {
+    /* 알림 실패 무시 */
+  }
+
+  const shareText = `[${offer.club.name}] ${offer.coachName} 코치 레슨(${lessonSummary(offer)}) 공지\n${text}`;
+  return { shareText, notifiedCount };
+}
+
 /** 미납 독촉 — 회원 연결 수강생에게 푸시 + 단톡 공유용 문구 반환. */
 export async function remindLessonFees(
   offerId: string,

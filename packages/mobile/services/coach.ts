@@ -265,6 +265,10 @@ export const lessonDetailApi = {
     api.post<{ url: string; manageUrl: string }>(`/clubs/${clubId}/money/lessons/${offerId}/share-link`, { regenerate }).then((r) => r.data),
   addStudent: (clubId: string, offerId: string, input: { name: string; phone?: string }) =>
     api.post<{ id: string }>(`/clubs/${clubId}/money/lessons/${offerId}/students`, input).then((r) => r.data),
+  sendNotice: (clubId: string, offerId: string, message: string) =>
+    api
+      .post<{ shareText: string; notifiedCount: number }>(`/clubs/${clubId}/money/lessons/${offerId}/notice`, { message })
+      .then((r) => r.data),
   remindFees: (clubId: string, offerId: string, period: string) =>
     api
       .post<{ message: string; unpaidCount: number; notifiedCount: number }>(`/clubs/${clubId}/money/lessons/${offerId}/fees/remind`, { period })

@@ -54,20 +54,30 @@ export interface OfferTerms {
   days?: number[] | null;
   start?: string | null;
   end?: string | null;
+  startDate?: string | null; // 근무 시작일 "YYYY-MM-DD" — 확정 조건의 핵심
+  contractMonths?: number | null; // 계약 기간(개월, 1~36) — null = 무기한/협의
   startNote?: string | null; // 시작 시기·기타(자유 텍스트)
   message?: string | null;
 }
+
+const OFFER_YMD = /^\d{4}-\d{2}-\d{2}$/;
 
 function sanitizeOffer(raw: unknown): OfferTerms {
   const o = (raw ?? {}) as OfferTerms;
   const start = o.start && HHMM.test(String(o.start)) ? String(o.start) : null;
   const end = o.end && HHMM.test(String(o.end)) ? String(o.end) : null;
+  const contractMonths =
+    o.contractMonths != null && Number.isInteger(Number(o.contractMonths)) && Number(o.contractMonths) >= 1 && Number(o.contractMonths) <= 36
+      ? Number(o.contractMonths)
+      : null;
   const terms: OfferTerms = {
     payMonthly: toPay(o.payMonthly),
     paySession: toPay(o.paySession),
     days: sanitizeDays(o.days),
     start,
     end,
+    startDate: o.startDate && OFFER_YMD.test(String(o.startDate)) ? String(o.startDate) : null,
+    contractMonths,
     startNote: clamp(o.startNote, 100),
     message: clamp(o.message, 500),
   };
@@ -600,9 +610,11 @@ export async function applyJob(postId: string, userId: string, message?: string 
 }
 
 // 원티드식 전이 규칙: 앞으로만. 합격은 오퍼레터(OFFERED)를 거쳐 코치가 수락해야 확정.
+// TRIAL(시강) = 배드민턴 코치 채용의 핵심 관문 — 면접 없이 바로 시강으로 갈 수도 있다.
 const TRANSITIONS: Record<string, string[]> = {
-  APPLIED: ['INTERVIEW', 'OFFERED', 'REJECTED', 'WITHDRAWN'],
-  INTERVIEW: ['OFFERED', 'REJECTED', 'WITHDRAWN'],
+  APPLIED: ['INTERVIEW', 'TRIAL', 'OFFERED', 'REJECTED', 'WITHDRAWN'],
+  INTERVIEW: ['TRIAL', 'OFFERED', 'REJECTED', 'WITHDRAWN'],
+  TRIAL: ['OFFERED', 'REJECTED', 'WITHDRAWN'],
   OFFERED: ['ACCEPTED', 'DECLINED', 'REJECTED'], // 수락/거절=코치 회신, REJECTED=공고측 철회
   ACCEPTED: [],
   REJECTED: [],
@@ -626,7 +638,7 @@ export async function updateApplicationStatus(
   offer?: unknown,
   interview?: { when?: unknown; place?: unknown; note?: unknown } | null,
 ): Promise<{ threadId?: string }> {
-  if (!['INTERVIEW', 'OFFERED', 'ACCEPTED', 'REJECTED', 'DECLINED', 'WITHDRAWN'].includes(status)) {
+  if (!['INTERVIEW', 'TRIAL', 'OFFERED', 'ACCEPTED', 'REJECTED', 'DECLINED', 'WITHDRAWN'].includes(status)) {
     throw new BadRequestError('잘못된 상태예요');
   }
   const app = await prisma.coachJobApplication.findUnique({
@@ -649,9 +661,9 @@ export async function updateApplicationStatus(
   // 오퍼레터 발송 — 조건 명시 필수.
   const offerData =
     status === 'OFFERED' ? { offerTerms: sanitizeOffer(offer) as never, offerSentAt: new Date() } : {};
-  // 면접 전환 시 면접 안내(일시·장소·메모, 전부 선택) 함께 저장.
+  // 면접·시강 전환 시 안내(일시·장소·메모, 전부 선택) 함께 저장 — 같은 컬럼 재사용.
   const interviewData =
-    status === 'INTERVIEW' && interview
+    (status === 'INTERVIEW' || status === 'TRIAL') && interview
       ? {
           interviewWhen: clamp(interview.when, 80),
           interviewPlace: clamp(interview.place, 120),
@@ -708,8 +720,8 @@ export async function updateApplicationStatus(
   }
 
   let threadId: string | undefined;
-  if (status === 'INTERVIEW' || status === 'OFFERED') {
-    // 면접·오퍼 → 공고 담당자 ↔ 코치 1:1 채용 채팅 자동 생성(있으면 재사용).
+  if (status === 'INTERVIEW' || status === 'TRIAL' || status === 'OFFERED') {
+    // 면접·시강·오퍼 → 공고 담당자 ↔ 코치 1:1 채용 채팅 자동 생성(있으면 재사용).
     const view = await coachChat.startThread(requesterId, app.coachProfile.id, app.post.clubId, 'RECRUIT', postId);
     threadId = view.threadId;
   }
@@ -726,14 +738,20 @@ export async function updateApplicationStatus(
         data: { type: 'coachJobOfferReply', postId, status },
       });
     } else if (status !== 'WITHDRAWN') {
-      // 면접 안내가 있으면 일시·장소를 푸시 본문에 바로 담아준다.
-      const iv = status === 'INTERVIEW' && interview ? [clamp(interview.when, 80), clamp(interview.place, 120)].filter(Boolean).join(' · ') : '';
+      // 면접·시강 안내가 있으면 일시·장소를 푸시 본문에 바로 담아준다.
+      const iv = (status === 'INTERVIEW' || status === 'TRIAL') && interview ? [clamp(interview.when, 80), clamp(interview.place, 120)].filter(Boolean).join(' · ') : '';
       const pushMap: Record<string, { title: string; body: string }> = {
         INTERVIEW: {
           title: '면접 제안이 왔어요 💬',
           body: iv
             ? `"${app.post.title}" 면접 안내: ${iv} — 채팅에서 조율하세요`
             : `"${app.post.title}" 공고에서 면접(채팅)을 제안했어요`,
+        },
+        TRIAL: {
+          title: '시강(시범 레슨) 제안이 왔어요 🏸',
+          body: iv
+            ? `"${app.post.title}" 시강 안내: ${iv} — 채팅에서 조율하세요`
+            : `"${app.post.title}" 공고에서 시범 레슨을 제안했어요 — 일정을 채팅으로 조율하세요`,
         },
         OFFERED: { title: '오퍼레터가 도착했어요 📄', body: `"${app.post.title}" 공고에서 채용 조건을 제시했어요 — 확인 후 회신해 주세요` },
         REJECTED: { title: '지원 결과 안내', body: `"${app.post.title}" 공고 지원이 아쉽게도 불합격 처리됐어요` },

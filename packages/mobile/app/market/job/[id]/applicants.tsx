@@ -20,6 +20,7 @@ const STAGES = [
   { key: 'ALL', label: '전체' },
   { key: 'APPLIED', label: '지원' },
   { key: 'INTERVIEW', label: '면접' },
+  { key: 'TRIAL', label: '시강' },
   { key: 'OFFERED', label: '오퍼' },
   { key: 'ACCEPTED', label: '확정' },
   { key: 'REJECTED', label: '불합격' },
@@ -73,7 +74,7 @@ export default function JobApplicants() {
 
   const statusColor = (s: string) =>
     s === 'ACCEPTED' ? colors.secondary
-      : s === 'INTERVIEW' ? colors.primary
+      : s === 'INTERVIEW' || s === 'TRIAL' ? colors.primary
       : s === 'OFFERED' ? colors.primary
       : s === 'REJECTED' || s === 'DECLINED' ? colors.textLight
       : colors.textSecondary;

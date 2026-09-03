@@ -19,11 +19,11 @@ const TABS = [
   { key: 'DONE', label: '종료' }, // ACCEPTED + REJECTED
 ] as const;
 
-const STEPS = ['지원', '면접', '오퍼레터', '최종'] as const;
+const STEPS = ['지원', '면접·시강', '오퍼레터', '최종'] as const;
 
 function stepIndex(status: string): number {
   if (status === 'APPLIED') return 0;
-  if (status === 'INTERVIEW') return 1;
+  if (status === 'INTERVIEW' || status === 'TRIAL') return 1;
   if (status === 'OFFERED') return 2;
   return 3; // ACCEPTED | REJECTED | DECLINED
 }
@@ -52,12 +52,12 @@ export default function MyApplications() {
 
   const counts = useMemo(() => ({
     ALL: rows.length,
-    ACTIVE: rows.filter((r) => ['APPLIED', 'INTERVIEW', 'OFFERED'].includes(r.status)).length,
+    ACTIVE: rows.filter((r) => ['APPLIED', 'INTERVIEW', 'TRIAL', 'OFFERED'].includes(r.status)).length,
     DONE: rows.filter((r) => ['ACCEPTED', 'REJECTED', 'DECLINED'].includes(r.status)).length,
   }), [rows]);
 
   const filtered = useMemo(() => {
-    if (tab === 'ACTIVE') return rows.filter((r) => ['APPLIED', 'INTERVIEW', 'OFFERED'].includes(r.status));
+    if (tab === 'ACTIVE') return rows.filter((r) => ['APPLIED', 'INTERVIEW', 'TRIAL', 'OFFERED'].includes(r.status));
     if (tab === 'DONE') return rows.filter((r) => ['ACCEPTED', 'REJECTED', 'DECLINED'].includes(r.status));
     return rows;
   }, [rows, tab]);

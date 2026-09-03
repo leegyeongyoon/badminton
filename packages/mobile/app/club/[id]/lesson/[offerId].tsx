@@ -192,6 +192,25 @@ export default function LessonDetailScreen() {
     }
   };
 
+  // 레슨 공지(휴강·보강) — 코치·운영진이 수강생 전체에게. 회원은 푸시, 나머지는 공유.
+  const [noticeText, setNoticeText] = useState('');
+  const [sendingNotice, setSendingNotice] = useState(false);
+  const sendNotice = async () => {
+    const msg = noticeText.trim();
+    if (!clubId || !offerId || !msg || sendingNotice) return;
+    setSendingNotice(true);
+    try {
+      const r = await lessonDetailApi.sendNotice(clubId, offerId, msg);
+      setNoticeText('');
+      showSuccess(r.notifiedCount > 0 ? `앱 회원 ${r.notifiedCount}명에게 공지를 보냈어요` : '공지를 만들었어요 — 단톡에 공유하세요');
+      await Share.share({ message: r.shareText });
+    } catch {
+      /* noop */
+    } finally {
+      setSendingNotice(false);
+    }
+  };
+
   const addStudent = async () => {
     const name = newStudent.trim();
     if (!clubId || !offerId || !name || addingStudent) return;
@@ -392,6 +411,28 @@ export default function LessonDetailScreen() {
 
         {tab === 'roster' ? (
           <>
+            {/* 레슨 공지 — 휴강·보강·전달사항을 수강생 전체에게 (코치·운영진 공용) */}
+            {confirmed.length > 0 && (
+              <View style={styles.noteRow}>
+                <TextInput
+                  style={[styles.noteInput, { color: colors.text, backgroundColor: colors.surface, borderColor: colors.border }]}
+                  value={noticeText}
+                  onChangeText={setNoticeText}
+                  placeholder="📢 수강생 공지 (예: 이번 주 목요일 휴강, 보강은 토 10시)"
+                  placeholderTextColor={colors.textLight}
+                  maxLength={300}
+                  onSubmitEditing={sendNotice}
+                />
+                <Pressable
+                  onPress={sendNotice}
+                  disabled={sendingNotice || !noticeText.trim()}
+                  style={[styles.noteSave, { backgroundColor: colors.primary, opacity: sendingNotice || !noticeText.trim() ? 0.5 : 1 }]}
+                >
+                  <Text style={styles.noteSaveText}>공지</Text>
+                </Pressable>
+              </View>
+            )}
+
             {confirmed.length === 0 && pending.length === 0 && (
               <View style={styles.emptyBox}>
                 <Ionicons name="people-outline" size={32} color={colors.textLight} />

@@ -36,6 +36,7 @@ import {
   issueLessonShareLink,
   addLessonStudent,
   remindLessonFees,
+  sendLessonNotice,
 } from '../lab/lab.service';
 import { payLessonFee, cancelLessonPayment } from '../payment/payment.service';
 import * as guestChat from '../guestChat/guestChat.service';
@@ -334,6 +335,14 @@ router.post('/:clubId/money/lessons/:offerId/students', authenticate, staffOrLes
   try {
     const { name, phone } = req.body as { name?: string; phone?: string };
     res.json(await addLessonStudent(String(req.params.offerId), { name, phone }));
+  } catch (err) { next(err); }
+});
+
+// POST /clubs/:clubId/money/lessons/:offerId/notice {message} — 레슨 공지(휴강·보강, 코치·운영진)
+router.post('/:clubId/money/lessons/:offerId/notice', authenticate, staffOrLessonCoach, async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { message } = req.body as { message?: string };
+    res.json(await sendLessonNotice(String(req.params.offerId), String(message || '')));
   } catch (err) { next(err); }
 });
 

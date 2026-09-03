@@ -53,6 +53,8 @@ export interface OfferTerms {
   days?: number[] | null;
   start?: string | null;
   end?: string | null;
+  startDate?: string | null; // 근무 시작일 "YYYY-MM-DD"
+  contractMonths?: number | null; // 계약 기간(개월)
   startNote?: string | null;
   message?: string | null;
 }
@@ -152,6 +154,7 @@ export function ddayLabel(deadline: string | null): { label: string; urgent: boo
 export const APPLICATION_STATUS_LABEL: Record<string, string> = {
   APPLIED: '지원 완료',
   INTERVIEW: '면접 진행',
+  TRIAL: '시강(시범 레슨)',
   OFFERED: '오퍼레터',
   ACCEPTED: '채용 확정',
   DECLINED: '오퍼 거절',

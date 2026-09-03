@@ -43,8 +43,9 @@ export default function ApplicantDetail() {
 
   // 오퍼레터 작성 폼
   const [showOffer, setShowOffer] = useState(false);
-  // 면접 안내 폼(제안 시·수정 시 공용)
+  // 면접/시강 안내 폼(제안 시·수정 시 공용) — trialMode=true 면 시강(시범 레슨) 제안
   const [showInterview, setShowInterview] = useState(false);
+  const [trialMode, setTrialMode] = useState(false);
   const [ivWhen, setIvWhen] = useState('');
   const [ivPlace, setIvPlace] = useState('');
   const [ivNote, setIvNote] = useState('');
@@ -53,6 +54,8 @@ export default function ApplicantDetail() {
   const [noteSaving, setNoteSaving] = useState(false);
   const [offerPayMonthly, setOfferPayMonthly] = useState('');
   const [offerPaySession, setOfferPaySession] = useState('');
+  const [offerStartDate, setOfferStartDate] = useState('');
+  const [offerMonths, setOfferMonths] = useState('');
   const [offerStartNote, setOfferStartNote] = useState('');
   const [offerMessage, setOfferMessage] = useState('');
 
@@ -80,8 +83,8 @@ export default function ApplicantDetail() {
       setBusy(true);
       try {
         const { threadId } = await coachJobApi.setApplicationStatus(postId, appId, status, offer, interview);
-        if (status === 'INTERVIEW') {
-          showSuccess(`${app.displayName} 코치에게 면접을 제안했어요`);
+        if (status === 'INTERVIEW' || status === 'TRIAL') {
+          showSuccess(`${app.displayName} 코치에게 ${status === 'TRIAL' ? '시강(시범 레슨)' : '면접'}을 제안했어요`);
           setShowInterview(false);
           await load();
           if (threadId) router.push(`/coach-chat/${threadId}` as never);
@@ -101,7 +104,8 @@ export default function ApplicantDetail() {
     else act();
   };
 
-  const openInterviewForm = () => {
+  const openInterviewForm = (trial = false) => {
+    setTrialMode(trial);
     setIvWhen(app?.interviewWhen ?? '');
     setIvPlace(app?.interviewPlace ?? '');
     setIvNote(app?.interviewNote ?? '');
@@ -110,16 +114,21 @@ export default function ApplicantDetail() {
 
   const submitInterview = async () => {
     const info = { when: ivWhen.trim() || null, place: ivPlace.trim() || null, note: ivNote.trim() || null };
-    if (app?.status === 'APPLIED') {
+    // 시강 제안 — APPLIED/INTERVIEW 어디서든 다음 단계로 전이.
+    if (trialMode && app?.status !== 'TRIAL') {
+      await setStatus('TRIAL', undefined, info);
+      return;
+    }
+    if (app?.status === 'APPLIED' && !trialMode) {
       await setStatus('INTERVIEW', undefined, info);
       return;
     }
-    // 이미 면접 단계 — 안내만 갱신
+    // 이미 면접·시강 단계 — 안내만 갱신
     if (!postId || !appId || busy) return;
     setBusy(true);
     try {
       await coachJobApi.setInterview(postId, appId, info);
-      showSuccess('면접 안내를 보냈어요');
+      showSuccess(`${app?.status === 'TRIAL' ? '시강' : '면접'} 안내를 보냈어요`);
       setShowInterview(false);
       await load();
     } catch { /* noop */ } finally {
@@ -146,6 +155,8 @@ export default function ApplicantDetail() {
     setStatus('OFFERED', {
       payMonthly: offerPayMonthly.trim() ? Number(offerPayMonthly.replace(/[^0-9]/g, '')) : null,
       paySession: offerPaySession.trim() ? Number(offerPaySession.replace(/[^0-9]/g, '')) : null,
+      startDate: /^\d{4}-\d{2}-\d{2}$/.test(offerStartDate.trim()) ? offerStartDate.trim() : null,
+      contractMonths: offerMonths.trim() ? Number(offerMonths.replace(/[^0-9]/g, '')) || null : null,
       startNote: offerStartNote.trim() || null,
       message: offerMessage.trim() || null,
     });
@@ -156,6 +167,8 @@ export default function ApplicantDetail() {
     return [
       t.payMonthly ? `월 ${t.payMonthly.toLocaleString()}원` : null,
       t.paySession ? `회당 ${t.paySession.toLocaleString()}원` : null,
+      t.startDate ? `${t.startDate} 시작` : null,
+      t.contractMonths ? `계약 ${t.contractMonths}개월` : null,
       t.startNote,
     ].filter(Boolean).join(' · ');
   };
@@ -184,6 +197,7 @@ export default function ApplicantDetail() {
   const statusColor =
     app.status === 'ACCEPTED' ? colors.secondary
       : app.status === 'INTERVIEW' ? colors.primary
+      : app.status === 'TRIAL' ? colors.primary
       : app.status === 'OFFERED' ? colors.primary
       : app.status === 'REJECTED' || app.status === 'DECLINED' ? colors.textLight
       : colors.textSecondary;
@@ -230,16 +244,16 @@ export default function ApplicantDetail() {
           </View>
         )}
 
-        {/* 면접 안내(공고측이 잡은 일시·장소) */}
+        {/* 면접·시강 안내(공고측이 잡은 일시·장소) */}
         {(app.interviewWhen || app.interviewPlace || app.interviewNote) && (
           <View style={[styles.msgCard, { backgroundColor: colors.surface, borderColor: colors.border }]}>
-            <Text style={[styles.msgLabel, { color: colors.textSecondary }]}>면접 안내</Text>
+            <Text style={[styles.msgLabel, { color: colors.textSecondary }]}>{app.status === 'TRIAL' ? '시강(시범 레슨) 안내' : '면접 안내'}</Text>
             <Text style={[styles.msgText, { color: colors.text }]}>
               {[app.interviewWhen, app.interviewPlace].filter(Boolean).join(' · ') || '일정 협의 중'}
             </Text>
             {!!app.interviewNote && <Text style={[styles.noteHint, { color: colors.textSecondary }]}>{app.interviewNote}</Text>}
-            {app.status === 'INTERVIEW' && (
-              <Pressable onPress={openInterviewForm} hitSlop={6} style={{ alignSelf: 'flex-start', marginTop: 6 }}>
+            {(app.status === 'INTERVIEW' || app.status === 'TRIAL') && (
+              <Pressable onPress={() => openInterviewForm(app.status === 'TRIAL')} hitSlop={6} style={{ alignSelf: 'flex-start', marginTop: 6 }}>
                 <Text style={[styles.editLink, { color: colors.primary }]}>안내 수정</Text>
               </Pressable>
             )}
@@ -264,7 +278,9 @@ export default function ApplicantDetail() {
         {/* 오퍼레터(발송 후) — 제시한 조건 */}
         {app.offerTerms && (app.status === 'OFFERED' || app.status === 'ACCEPTED' || app.status === 'DECLINED') && (
           <View style={[styles.offerCard, { backgroundColor: colors.surface, borderColor: colors.border }]}>
-            <Text style={[styles.offerLabel, { color: colors.textSecondary }]}>보낸 오퍼레터</Text>
+            <Text style={[styles.offerLabel, { color: colors.textSecondary }]}>
+              {app.status === 'ACCEPTED' ? '채용 확정 조건 ✓' : '보낸 오퍼레터'}
+            </Text>
             <Text style={[styles.offerText, { color: colors.text }]}>{offerSummary(app.offerTerms)}</Text>
             {!!app.offerTerms.message && <Text style={[styles.offerMsg, { color: colors.textSecondary }]}>{app.offerTerms.message}</Text>}
           </View>
@@ -277,7 +293,9 @@ export default function ApplicantDetail() {
       <View style={[styles.actionBar, { backgroundColor: colors.background, borderTopColor: colors.border, paddingBottom: Math.max(insets.bottom, spacing.md) }]}>
         {showInterview ? (
           <View style={[styles.offerForm, { maxWidth: 560, width: '100%', alignSelf: 'center' }]}>
-            <Text style={[styles.offerFormTitle, { color: colors.text }]}>면접 안내 (모두 선택 — 비우면 채팅으로 조율)</Text>
+            <Text style={[styles.offerFormTitle, { color: colors.text }]}>
+              {trialMode || app.status === 'TRIAL' ? '시강(시범 레슨) 안내' : '면접 안내'} (모두 선택 — 비우면 채팅으로 조율)
+            </Text>
             <View style={{ flexDirection: 'row', gap: spacing.sm }}>
               <TextInput
                 style={[styles.offerInput, { color: colors.text, backgroundColor: colors.surface, borderColor: colors.border, flex: 1 }]}
@@ -303,7 +321,9 @@ export default function ApplicantDetail() {
                 {busy ? <ActivityIndicator color="#fff" /> : (
                   <>
                     <Ionicons name="chatbubble-ellipses-outline" size={15} color="#fff" />
-                    <Text style={styles.primaryText}>{app.status === 'APPLIED' ? '면접 제안' : '안내 보내기'}</Text>
+                    <Text style={styles.primaryText}>
+                      {trialMode && app.status !== 'TRIAL' ? '시강 제안' : app.status === 'APPLIED' ? '면접 제안' : '안내 보내기'}
+                    </Text>
                   </>
                 )}
               </Pressable>
@@ -322,6 +342,18 @@ export default function ApplicantDetail() {
                 style={[styles.offerInput, { color: colors.text, backgroundColor: colors.surface, borderColor: colors.border, flex: 1 }]}
                 value={offerPaySession} onChangeText={setOfferPaySession}
                 placeholder="회당 급여(원)" placeholderTextColor={colors.textLight} keyboardType="number-pad" maxLength={9}
+              />
+            </View>
+            <View style={{ flexDirection: 'row', gap: spacing.sm }}>
+              <TextInput
+                style={[styles.offerInput, { color: colors.text, backgroundColor: colors.surface, borderColor: colors.border, flex: 1.4 }]}
+                value={offerStartDate} onChangeText={setOfferStartDate}
+                placeholder="시작일 (예: 2026-10-01)" placeholderTextColor={colors.textLight} maxLength={10}
+              />
+              <TextInput
+                style={[styles.offerInput, { color: colors.text, backgroundColor: colors.surface, borderColor: colors.border, flex: 1 }]}
+                value={offerMonths} onChangeText={setOfferMonths}
+                placeholder="계약 기간(개월)" placeholderTextColor={colors.textLight} keyboardType="number-pad" maxLength={2}
               />
             </View>
             <TextInput
@@ -355,7 +387,10 @@ export default function ApplicantDetail() {
                 <Pressable onPress={() => setStatus('REJECTED')} disabled={busy} style={[styles.ghostBtn, { borderColor: colors.border }]}>
                   <Text style={[styles.ghostText, { color: colors.textSecondary }]}>불합격</Text>
                 </Pressable>
-                <Pressable onPress={openInterviewForm} disabled={busy} style={({ pressed }) => [styles.primaryBtn, { backgroundColor: colors.primary, flex: 2 }, (pressed || busy) && { opacity: 0.85 }]}>
+                <Pressable onPress={() => openInterviewForm(true)} disabled={busy} style={[styles.ghostBtn, { borderColor: colors.border }]}>
+                  <Text style={[styles.ghostText, { color: colors.primary }]}>시강 제안</Text>
+                </Pressable>
+                <Pressable onPress={() => openInterviewForm(false)} disabled={busy} style={({ pressed }) => [styles.primaryBtn, { backgroundColor: colors.primary, flex: 1.6 }, (pressed || busy) && { opacity: 0.85 }]}>
                   {busy ? <ActivityIndicator color="#fff" /> : (
                     <>
                       <Ionicons name="chatbubble-ellipses-outline" size={16} color="#fff" />
@@ -374,9 +409,27 @@ export default function ApplicantDetail() {
                 <Pressable onPress={() => setStatus('REJECTED')} disabled={busy} style={[styles.ghostBtn, { borderColor: colors.border }]}>
                   <Text style={[styles.ghostText, { color: colors.textSecondary }]}>불합격</Text>
                 </Pressable>
+                <Pressable onPress={() => openInterviewForm(true)} disabled={busy} style={[styles.ghostBtn, { borderColor: colors.border }]}>
+                  <Text style={[styles.ghostText, { color: colors.primary }]}>시강 제안</Text>
+                </Pressable>
+                <Pressable onPress={() => setShowOffer(true)} disabled={busy} style={({ pressed }) => [styles.primaryBtn, { backgroundColor: colors.primary, flex: 1.6 }, (pressed || busy) && { opacity: 0.85 }]}>
+                  <Ionicons name="document-text-outline" size={15} color="#fff" />
+                  <Text style={styles.primaryText}>오퍼레터</Text>
+                </Pressable>
+              </>
+            )}
+            {app.status === 'TRIAL' && (
+              <>
+                <Pressable onPress={openChat} disabled={busy} style={[styles.ghostBtn, { borderColor: colors.border }]}>
+                  <Ionicons name="chatbubble-outline" size={15} color={colors.textSecondary} />
+                  <Text style={[styles.ghostText, { color: colors.textSecondary }]}>채팅</Text>
+                </Pressable>
+                <Pressable onPress={() => setStatus('REJECTED')} disabled={busy} style={[styles.ghostBtn, { borderColor: colors.border }]}>
+                  <Text style={[styles.ghostText, { color: colors.textSecondary }]}>불합격</Text>
+                </Pressable>
                 <Pressable onPress={() => setShowOffer(true)} disabled={busy} style={({ pressed }) => [styles.primaryBtn, { backgroundColor: colors.primary, flex: 1.8 }, (pressed || busy) && { opacity: 0.85 }]}>
                   <Ionicons name="document-text-outline" size={15} color="#fff" />
-                  <Text style={styles.primaryText}>오퍼레터 보내기</Text>
+                  <Text style={styles.primaryText}>시강 통과 — 오퍼레터</Text>
                 </Pressable>
               </>
             )}
