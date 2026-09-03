@@ -197,7 +197,7 @@ export function MoneyManager({ clubs, api }: { clubs: MoneyClub[]; api: MoneyApi
     const lines = unpaid.map((m) => `· ${m.name}: ${won(m.balance)}`).join('\n');
     const acct = (data.duesAccountInfo || account || '').trim();
     const acctLine = acct ? `\n\n입금계좌: ${acct}` : '';
-    const msg = `[${data.clubName}] ${data.period} 회비/게스트비 정산 안내\n\n${lines}\n\n총 미납 ${won(data.totals.unpaid)}${acctLine}\n\n송금 부탁드려요 🙏`;
+    const msg = `[${data.clubName}] ${data.period} 회비/게스트비 정산 안내\n\n${lines}\n\n총 미납 ${won(data.totals.unpaid)}${acctLine}\n\n송금 부탁드려요 🙏\n\n— 콕고로 관리 중 · badmintoncourt.store`;
     try { await Share.share({ message: msg }); } catch { /* noop */ }
   };
 

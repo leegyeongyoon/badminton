@@ -1526,7 +1526,7 @@ export async function sendLessonNotice(
     /* 알림 실패 무시 */
   }
 
-  const shareText = `[${offer.club.name}] ${offer.coachName} 코치 레슨(${lessonSummary(offer)}) 공지\n${text}`;
+  const shareText = `[${offer.club.name}] ${offer.coachName} 코치 레슨(${lessonSummary(offer)}) 공지\n${text}\n\n— 콕고로 관리 중 · badmintoncourt.store`;
   return { shareText, notifiedCount };
 }
 
@@ -1570,7 +1570,9 @@ export async function remindLessonFees(
     ...unpaid.map((r) => `· ${r.name}${fee ? `: ${fee.toLocaleString()}원` : ''}`),
     offer.club.duesAccountInfo ? `입금계좌: ${offer.club.duesAccountInfo}` : null,
     '입금 후 납부 페이지에서 "입금했어요"를 눌러주세요 🙏',
-  ].filter(Boolean);
+    '',
+    '— 콕고로 관리 중 · badmintoncourt.store',
+  ].filter((l) => l !== null);
   return { message: lines.join('\n'), unpaidCount: unpaid.length, notifiedCount };
 }
 

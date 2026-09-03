@@ -124,6 +124,13 @@ router.get('/me/stats/total', authenticate, async (req: Request, res: Response, 
   } catch (err) { next(err); }
 });
 
+// GET /users/me/month-card - 이번 달 기록 카드(공유용 월간 요약)
+router.get('/me/month-card', authenticate, async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    res.json(await userService.getMonthCard(req.user!.userId));
+  } catch (err) { next(err); }
+});
+
 // GET /users/me/stats - get player stats
 router.get('/me/stats', authenticate, async (req: Request, res: Response, next: NextFunction) => {
   try {

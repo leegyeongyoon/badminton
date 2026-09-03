@@ -298,6 +298,46 @@ export async function getTotalStats(
   return { totalGames, consecutiveDays };
 }
 
+/** 이번 달 기록 카드 — 회원이 단톡·SNS에 자랑(공유)하는 월간 요약.
+ *  출석일수(체크인한 날 distinct)·게임 수·연속 출석·누적 게임. KST 기준 월. */
+export async function getMonthCard(userId: string): Promise<{
+  yearMonth: string; // "YYYY-MM"
+  attendanceDays: number;
+  games: number;
+  consecutiveDays: number;
+  totalGames: number;
+}> {
+  const KST_OFFSET_MS = 9 * 60 * 60 * 1000;
+  const kstNow = new Date(Date.now() + KST_OFFSET_MS);
+  const y = kstNow.getUTCFullYear();
+  const m = kstNow.getUTCMonth(); // 0-based
+  const yearMonth = `${y}-${String(m + 1).padStart(2, '0')}`;
+  // KST 월초/말 → UTC 경계
+  const monthStart = new Date(Date.UTC(y, m, 1) - KST_OFFSET_MS);
+  const monthEnd = new Date(Date.UTC(y, m + 1, 1) - KST_OFFSET_MS);
+
+  const [games, checkins, totals] = await Promise.all([
+    prisma.gamePlayer.count({
+      where: { userId, game: { createdAt: { gte: monthStart, lt: monthEnd }, status: { not: 'CANCELLED' } } },
+    }),
+    prisma.checkIn.findMany({
+      where: { userId, checkedInAt: { gte: monthStart, lt: monthEnd } },
+      select: { checkedInAt: true },
+    }),
+    getTotalStats(userId),
+  ]);
+  const days = new Set(
+    checkins.map((c) => new Date(c.checkedInAt.getTime() + KST_OFFSET_MS).toISOString().slice(0, 10)),
+  );
+  return {
+    yearMonth,
+    attendanceDays: days.size,
+    games,
+    consecutiveDays: totals.consecutiveDays,
+    totalGames: totals.totalGames,
+  };
+}
+
 export async function getPenalties(userId: string): Promise<NoShowRecordResponse[]> {
   const records = await prisma.noShowRecord.findMany({
     where: { userId },

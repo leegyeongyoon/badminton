@@ -1,5 +1,5 @@
 import { useEffect, useCallback, useState, useMemo } from 'react';
-import { StyleSheet, ScrollView, View, Text, Pressable, Platform } from 'react-native';
+import { StyleSheet, ScrollView, View, Text, Pressable, Platform, Share } from 'react-native';
 import { useRouter } from 'expo-router';
 import { useTurnStore } from '../../store/turnStore';
 import { useAuthStore } from '../../store/authStore';
@@ -90,12 +90,31 @@ export default function MyStatusScreen() {
     setActiveBoards(boards);
   }, [checkinStatus?.clubSessionId, fetchClubs]);
 
+  // 이번 달 기록 카드 — 회원의 자랑(공유) 심리를 위한 월간 요약.
+  const [monthCard, setMonthCard] = useState<{
+    yearMonth: string; attendanceDays: number; games: number; consecutiveDays: number; totalGames: number;
+  } | null>(null);
+
   useEffect(() => {
     fetchMyTurns();
     fetchMyStatus();
     fetchCheckin(); // 게임 진입 카드 등 체크인 조건 UI를 위해 스토어를 직접 채운다
+    profileApi.getMonthCard().then((r) => setMonthCard(r.data)).catch(() => {});
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  const shareMonthCard = async () => {
+    if (!monthCard) return;
+    const m = Number(monthCard.yearMonth.split('-')[1]);
+    const lines = [
+      `🏸 ${m}월의 ${user?.name ?? '나'}`,
+      `출석 ${monthCard.attendanceDays}일 · 게임 ${monthCard.games}판${monthCard.consecutiveDays > 1 ? ` · ${monthCard.consecutiveDays}일 연속` : ''}`,
+      `누적 게임 ${monthCard.totalGames}판`,
+      '',
+      '— 콕고 · badmintoncourt.store',
+    ];
+    try { await Share.share({ message: lines.join('\n') }); } catch { /* noop */ }
+  };
 
   // 활성 정모 보드 목록은 마운트 + 체크인 변경 시에만 재계산한다(모든 모임의 활성 세션을
   // 조회하는 비용이 크므로, 아래 고빈도 턴/보드 소켓 이벤트마다 다시 돌리지 않는다).
@@ -324,6 +343,24 @@ export default function MyStatusScreen() {
         <Icon name="chevronRight" size={18} color={colors.textLight} />
       </Pressable>
 
+      {/* 이번 달 기록 카드 — 활동이 있을 때만. 자랑은 최고의 입소문이다. */}
+      {monthCard && (monthCard.attendanceDays > 0 || monthCard.games > 0) && (
+        <View style={[styles.monthCard, { backgroundColor: colors.surface, borderColor: colors.border }, shadows.sm]}>
+          <View style={{ flex: 1, minWidth: 0 }}>
+            <Text style={[styles.monthTitle, { color: colors.text }]}>
+              {Number(monthCard.yearMonth.split('-')[1])}월의 나
+            </Text>
+            <Text style={[styles.monthStats, { color: colors.textSecondary }]} numberOfLines={1}>
+              출석 {monthCard.attendanceDays}일 · 게임 {monthCard.games}판
+              {monthCard.consecutiveDays > 1 ? ` · ${monthCard.consecutiveDays}일 연속` : ''} · 누적 {monthCard.totalGames}판
+            </Text>
+          </View>
+          <Pressable onPress={shareMonthCard} style={[styles.monthShareBtn, { backgroundColor: colors.primaryBg }]}>
+            <Text style={[styles.monthShareText, { color: colors.primary }]}>자랑하기</Text>
+          </Pressable>
+        </View>
+      )}
+
       {/* My active game — lets me end/extend my own turn */}
       {playingTurn && (
         <PlayingTurnCard
@@ -420,6 +457,14 @@ const styles = StyleSheet.create({
   },
   rallyTitle: { fontSize: 16, fontWeight: '700' },
   rallySub: { ...typography.caption, marginTop: 1 },
+  monthCard: {
+    flexDirection: 'row', alignItems: 'center', gap: spacing.sm,
+    borderWidth: 1, borderRadius: radius.lg, padding: spacing.md, marginTop: spacing.sm,
+  },
+  monthTitle: { fontSize: 14, fontWeight: '700' },
+  monthStats: { ...typography.caption, marginTop: 2 },
+  monthShareBtn: { paddingHorizontal: 12, paddingVertical: 7, borderRadius: radius.pill },
+  monthShareText: { fontSize: 12.5, fontWeight: '800' },
 
   // 진행 중 정모가 여러 개일 때: 모임별 보드 목록.
   boardsWrap: { gap: spacing.sm, marginBottom: spacing.md },

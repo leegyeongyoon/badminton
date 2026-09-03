@@ -27,6 +27,11 @@ export const profileApi = {
     api.put('/users/me/profile', data),
   getStats: () =>
     api.get('/users/me/stats'),
+  // 이번 달 기록 카드(공유용 월간 요약) — 출석일·게임·연속·누적.
+  getMonthCard: () =>
+    api.get<{ yearMonth: string; attendanceDays: number; games: number; consecutiveDays: number; totalGames: number }>(
+      '/users/me/month-card',
+    ),
   // 크로스클럽 활동 요약(총게임·스트릭·파트너 랭킹·뱃지) — 내 정보 화면용.
   getMySummary: () =>
     api.get('/users/me/summary'),

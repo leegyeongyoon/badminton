@@ -144,7 +144,7 @@ export default function LessonDetailScreen() {
       await copyToClipboard(url);
       showSuccess('납부 링크를 복사했어요 — 반 단톡에 공유하세요');
       await Share.share({
-        message: `[${detail?.offer.clubName ?? '콕고'}] ${detail?.offer.coachName} 코치 레슨비 납부 페이지예요.\n입금 후 "입금했어요"를 눌러주세요 🙏\n${url}`,
+        message: `[${detail?.offer.clubName ?? '콕고'}] ${detail?.offer.coachName} 코치 레슨비 납부 페이지예요.\n입금 후 "입금했어요"를 눌러주세요 🙏\n${url}\n\n— 콕고로 관리 중 · badmintoncourt.store`,
       });
     } catch {
       /* 공유 시트 취소 포함 무시 */
