@@ -18,6 +18,7 @@ import { ScreenContainer } from '../../components/ui/ScreenContainer';
 import { PlayingTurnCard } from '../../components/activity/PlayingTurnCard';
 import { EmptyState } from '../../components/ui/EmptyState';
 import { Icon } from '../../components/ui/Icon';
+import { SessionPolls } from '../../components/session/SessionPolls';
 
 /**
  * 내 현황 — the player's minimal "enter → see the live situation" surface.
@@ -316,6 +317,13 @@ export default function MyStatusScreen() {
               <Icon name="chevronRight" size={18} color={b.isMine ? palette.white : colors.textLight} />
             </Pressable>
           ))}
+        </View>
+      )}
+
+      {/* 정모 즉석 투표 — 체크인한 정모의 투표를 여기서 바로 참여/확인 */}
+      {checkinStatus?.clubSessionId && (
+        <View style={{ marginBottom: spacing.sm }}>
+          <SessionPolls clubSessionId={checkinStatus.clubSessionId} />
         </View>
       )}
 
