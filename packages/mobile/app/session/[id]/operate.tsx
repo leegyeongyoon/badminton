@@ -13,6 +13,7 @@ import type { LayoutChangeEvent } from 'react-native';
 import { useAuthStore } from '../../../store/authStore';
 import { useFacilityRoom, useClubRoom, useSocketEvent } from '../../../hooks/useSocket';
 import { Icon } from '../../../components/ui/Icon';
+import { CreatePollModal } from '../../../components/session/CreatePollModal';
 import { getSkillMeta, SKILL_LEVELS } from '../../../constants/skill';
 import { getGenderMeta, getGameType, GENDER_META, type Gender } from '../../../constants/gender';
 import { GenderMarker } from '../../../components/ui/GenderMarker';
@@ -584,6 +585,7 @@ export default function OperateScreen() {
   const [guestModal, setGuestModal] = useState(false);
   const [feeModal, setFeeModal] = useState(false);
   const [courtModal, setCourtModal] = useState(false);
+  const [pollModal, setPollModal] = useState(false);
   // 테스트/데모용 랜덤 게스트 일괄 추가 진행 상태 (실제 출석 아님).
   const [addingTestGuests, setAddingTestGuests] = useState(false);
   // Matchup popup: the player whose "오늘 함께 친 사람" sheet is open (null = closed).
@@ -4036,6 +4038,15 @@ export default function OperateScreen() {
       )}
       <TouchableOpacity
         style={[styles.headerLink, headerLinkTouch, { borderColor: colors.border }]}
+        onPress={() => setPollModal(true)}
+        activeOpacity={0.8}
+        accessibilityLabel="투표 만들기"
+      >
+        <Icon name="stats" size={16} color={colors.primary} />
+        <Text style={[styles.headerLinkText, { color: colors.primary }]}>투표</Text>
+      </TouchableOpacity>
+      <TouchableOpacity
+        style={[styles.headerLink, headerLinkTouch, { borderColor: colors.border }]}
         onPress={() => router.push(`/session/${clubSessionId}/board`)}
         activeOpacity={0.8}
       >
@@ -4175,6 +4186,7 @@ export default function OperateScreen() {
 
   const modals = (
     <>
+      {pollModal && clubSessionId && <CreatePollModal clubSessionId={clubSessionId} onClose={() => setPollModal(false)} />}
       {guestModal && <AddGuestModal sessionId={clubSessionId!} colors={colors} onClose={() => setGuestModal(false)} onAdded={() => { setGuestModal(false); loadPool(); }} />}
       {feeModal && <GuestFeeModal sessionId={clubSessionId!} colors={colors} onClose={() => setFeeModal(false)} />}
       {courtModal && facilityId && (

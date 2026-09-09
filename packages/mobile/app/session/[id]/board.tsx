@@ -13,6 +13,7 @@ import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useTheme } from '../../../hooks/useTheme';
 import { useResponsiveLayout } from '../../../hooks/useResponsiveLayout';
 import { useAuthStore } from '../../../store/authStore';
+import { useClubStore } from '../../../store/clubStore';
 import { useGameBoard } from '../../../hooks/useGameBoard';
 import { useFacilityRoom, useSocketEvent } from '../../../hooks/useSocket';
 import { Icon } from '../../../components/ui/Icon';
@@ -20,6 +21,7 @@ import { getSkillMeta } from '../../../constants/skill';
 import { getGenderMeta } from '../../../constants/gender';
 import { GenderMarker } from '../../../components/ui/GenderMarker';
 import { PlayerCard } from '../../../components/game-board/PlayerCard';
+import { SessionPolls } from '../../../components/session/SessionPolls';
 import api from '../../../services/api';
 import { typography, spacing, radius, palette, breakpoints } from '../../../constants/theme';
 
@@ -65,7 +67,14 @@ export default function ViewBoardScreen() {
   const [dedicatedCourtIds, setDedicatedCourtIds] = useState<Set<string>>(new Set());
   const [facilityId, setFacilityId] = useState<string | undefined>(undefined);
   const [clubName, setClubName] = useState<string>('');
+  const [clubId, setClubId] = useState<string | undefined>(undefined);
   const [loaded, setLoaded] = useState(false);
+
+  // 이 정모 클럽의 운영진(리더/스태프)이면 투표를 관리(마감·삭제·명단)할 수 있다.
+  const clubs = useClubStore((s) => s.clubs);
+  const canManagePoll =
+    (user as { role?: string } | null)?.role === 'SUPER_ADMIN' ||
+    (!!clubId && clubs.some((c) => c.id === clubId && (c.role === 'LEADER' || c.role === 'STAFF')));
 
   // ─── Load session meta ───
   useEffect(() => {
@@ -75,6 +84,7 @@ export default function ViewBoardScreen() {
       if (!alive) return;
       setFacilityId(data?.facilityId);
       setClubName(data?.clubName || '');
+      setClubId(data?.clubId);
       if (data?.courtIds) setDedicatedCourtIds(new Set(data.courtIds));
     }).catch(() => {});
     return () => { alive = false; };
@@ -374,6 +384,9 @@ export default function ViewBoardScreen() {
             </Text>
           </View>
         ) : null}
+
+        {/* 정모 즉석 투표 — 운영진이 열면 여기 뜨고 탭 한 번으로 참여 */}
+        {clubSessionId && <SessionPolls clubSessionId={clubSessionId} canManage={canManagePoll} />}
 
         {/* Courts grid */}
         <Text style={[styles.sectionTitle, { color: colors.textSecondary }]}>코트 현황</Text>

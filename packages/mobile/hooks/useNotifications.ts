@@ -66,10 +66,15 @@ export function useNotifications() {
 
     const responseSub = Notifications.addNotificationResponseReceivedListener((response) => {
       const data = response.notification.request.content.data as
-        | { type?: string; clubId?: string; threadId?: string }
+        | { type?: string; clubId?: string; threadId?: string; clubSessionId?: string }
         | undefined;
       if (isTurnStart(data)) {
         router.push('/(tabs)/my-status');
+        return;
+      }
+      // 정모 투표: 현황 보드로 이동(투표 카드가 상단에 보인다).
+      if (data?.type === 'poll_created' && data.clubSessionId) {
+        router.push(`/session/${data.clubSessionId}/board` as never);
         return;
       }
       // 게스트 문의: 운영진은 문의함으로, 게스트(앱 회원)는 대화로 바로 이동.

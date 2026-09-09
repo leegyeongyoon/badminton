@@ -30,6 +30,7 @@ import coachChatRouter from './modules/coachChat/coachChat.router';
 import coachJobRouter from './modules/coachJob/coachJob.router';
 import paymentRouter from './modules/payment/payment.router';
 import rallyGameRouter from './modules/rallyGame/rallyGame.router';
+import { pollRouter } from './modules/poll/poll.router';
 import { noteRequest } from './modules/admin/metrics.service';
 
 const app = express();
@@ -87,6 +88,7 @@ app.use('/api/v1/clubs', clubSessionRouter);           // /clubs/:clubId/session
 app.use('/api/v1/clubs', chatRouter);                  // /clubs/:clubId/messages
 app.use('/api/v1/club-sessions', clubSessionRouter);   // /club-sessions/:id/*
 app.use('/api/v1/club-sessions', gameBoardRouter);     // /club-sessions/:id/game-board
+app.use('/api/v1', pollRouter);                        // 정모 즉석 투표 (/club-sessions/:id/polls, /polls/:pollId/*)
 app.use('/api/v1/game-boards', gameBoardRouter);       // /game-boards/:id/entries/*
 app.use('/api/v1/operator-requests', operatorRequestRouter);
 app.use('/api/v1/admin', adminRouter);                 // /admin/metrics (슈퍼관리자)

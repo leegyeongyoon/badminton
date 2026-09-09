@@ -744,6 +744,10 @@ export interface ServerToClientEvents {
   'gameBoard:entryPushed': (data: GameBoardEntryResponse) => void;
   'gameBoard:reordered': (data: { boardId: string; entryIds: string[] }) => void;
   'clubMessage:new': (data: ClubMessageResponse) => void;
+  // 정모 즉석 투표 — payload는 최소화(변경 신호만), 클라가 refetch
+  'poll:created': (data: { clubSessionId: string; pollId: string }) => void;
+  'poll:updated': (data: { clubSessionId: string; pollId: string }) => void;
+  'poll:closed': (data: { clubSessionId: string; pollId: string }) => void;
   // 콕고 랠리 PvP — 서버는 릴레이만 (게임 로직 없음)
   'rally:invited': (data: { matchId: string; from: { id: string; name: string } }) => void;
   'rally:matched': (data: { matchId: string }) => void;

@@ -499,6 +499,12 @@ export async function endSession(
     data: { checkedOutAt: new Date() },
   });
 
+  // 열려 있던 즉석 투표는 정모 종료와 함께 자동 마감.
+  await prisma.sessionPoll.updateMany({
+    where: { clubSessionId: sessionId, status: 'OPEN' },
+    data: { status: 'CLOSED', closedAt: new Date() },
+  });
+
   const updated = await prisma.clubSession.update({
     where: { id: sessionId },
     data: { status: 'ENDED', endedAt: new Date() },

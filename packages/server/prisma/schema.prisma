@@ -560,9 +560,46 @@ model ClubSession {
   turns           CourtTurn[]
   gameBoard       GameBoard?
   checkIns        CheckIn[]
+  polls           SessionPoll[]
 
   @@index([clubId, status])
   @@index([facilityId, status])
+}
+
+// 정모 즉석 투표 — 운영진이 정모 중 만들고, 체크인한 회원이 참여한다.
+// 뒤풀이 인원 확인, 다음 요일 결정 등. 정모 종료 시 자동 마감.
+model SessionPoll {
+  id            String     @id @default(uuid())
+  clubSessionId String
+  createdById   String
+  question      String
+  // 선택지 텍스트 배열 ["갈래요","다음에"] — 순서가 곧 optionIndex.
+  options       Json
+  anonymous     Boolean    @default(false) // true면 운영진도 집계 숫자만(명단 X)
+  multi         Boolean    @default(false) // true면 복수 선택 허용
+  status        String     @default("OPEN") // OPEN | CLOSED
+  closesAt      DateTime?  // 자동 마감 예정(선택) — null이면 수동/정모종료까지
+  createdAt     DateTime   @default(now())
+  closedAt      DateTime?
+
+  session ClubSession @relation(fields: [clubSessionId], references: [id], onDelete: Cascade)
+  votes   PollVote[]
+
+  @@index([clubSessionId, status])
+}
+
+model PollVote {
+  id          String   @id @default(uuid())
+  pollId      String
+  userId      String
+  optionIndex Int
+  createdAt   DateTime @default(now())
+
+  poll SessionPoll @relation(fields: [pollId], references: [id], onDelete: Cascade)
+
+  // 단일 선택: 한 사람 한 표. 복수 선택은 (pollId,userId,optionIndex) 유니크로 전환됨.
+  @@unique([pollId, userId, optionIndex])
+  @@index([pollId])
 }
 
 // 일단위 운영 지표 스냅샷(슈퍼관리자 대시보드용). 나중에 소급 계산이 불가능한
