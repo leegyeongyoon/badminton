@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { View, Text, Pressable, ScrollView, StyleSheet } from 'react-native';
+import { View, Text, Pressable, ScrollView, StyleSheet, TextInput } from 'react-native';
 import { useTheme } from '../../hooks/useTheme';
 import { useAuthStore } from '../../store/authStore';
 import { typography, spacing, radius, palette } from '../../constants/theme';
@@ -69,6 +69,8 @@ export function AttendanceLeaderboard({ clubId, maxRows }: AttendanceLeaderboard
   const [errored, setErrored] = useState(false);
   // Collapsed (top-N) vs expanded (all rows) when `maxRows` is set.
   const [expanded, setExpanded] = useState(false);
+  // 이름 검색 — 특정 사람이 실제 나왔는지(출석 횟수·순위) 바로 확인.
+  const [query, setQuery] = useState('');
 
   const load = useCallback(
     async (p: AttendancePeriod) => {
@@ -92,6 +94,7 @@ export function AttendanceLeaderboard({ clubId, maxRows }: AttendanceLeaderboard
   useEffect(() => {
     load(period);
     setExpanded(false); // collapse back to top-N when switching period
+    setQuery(''); // 기간 바꾸면 검색 초기화
   }, [load, period]);
 
   const me = data?.me ?? null;
@@ -102,6 +105,12 @@ export function AttendanceLeaderboard({ clubId, maxRows }: AttendanceLeaderboard
   // Collapse to top-N rows unless expanded (only when maxRows is provided).
   const collapsible = maxRows != null && entries.length > maxRows;
   const visibleEntries = collapsible && !expanded ? entries.slice(0, maxRows) : entries;
+  // 검색 중이면 이름으로 필터(전체에서, 순위·횟수 그대로). 검색어 없으면 기존 표시분.
+  const q = query.trim().toLowerCase();
+  const matched = q ? entries.filter((e) => e.name.toLowerCase().includes(q)) : null;
+  const rows = matched ?? visibleEntries;
+  // 검색은 리스트가 길 때만 노출(top-N 접힘이 있거나 6명 이상).
+  const showSearch = hasAny && (collapsible || entries.length > 5);
 
   return (
     <View style={styles.container}>
@@ -207,31 +216,57 @@ export function AttendanceLeaderboard({ clubId, maxRows }: AttendanceLeaderboard
           />
         </View>
       ) : (
-        <View style={[styles.card, { backgroundColor: colors.surface }, shadows.md]}>
-          {visibleEntries.map((entry, idx) => (
-            <AttendanceRow
-              key={entry.userId}
-              entry={entry}
-              isMe={entry.userId === user?.id}
-              isLast={idx === visibleEntries.length - 1 && !collapsible}
-            />
-          ))}
-          {collapsible && (
-            <Pressable
-              onPress={() => setExpanded((v) => !v)}
-              style={({ pressed }) => [
-                styles.seeAll,
-                { borderTopColor: colors.divider },
-                pressed && { opacity: 0.6 },
-              ]}
-              accessibilityLabel={expanded ? '출석왕 접기' : '출석왕 전체 보기'}
-            >
-              <Text style={[styles.seeAllText, { color: colors.primary }]}>
-                {expanded ? '접기' : `전체 보기 (${entries.length})`}
-              </Text>
-            </Pressable>
+        <>
+          {showSearch && (
+            <View style={[styles.searchBox, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+              <Text style={{ fontSize: 15 }}>🔍</Text>
+              <TextInput
+                style={[styles.searchInput, { color: colors.text }]}
+                value={query}
+                onChangeText={setQuery}
+                placeholder="이름 검색 — 실제 나왔는지 확인"
+                placeholderTextColor={colors.textLight}
+                returnKeyType="search"
+              />
+              {query.length > 0 && (
+                <Pressable onPress={() => setQuery('')} hitSlop={8}>
+                  <Text style={{ color: colors.textLight, fontSize: 16 }}>✕</Text>
+                </Pressable>
+              )}
+            </View>
           )}
-        </View>
+          <View style={[styles.card, { backgroundColor: colors.surface }, shadows.md]}>
+            {matched && matched.length === 0 ? (
+              <Text style={[styles.noMatch, { color: colors.textLight }]}>
+                '{query.trim()}' 님을 찾을 수 없어요 — 이 기간에 출석 기록이 없어요
+              </Text>
+            ) : (
+              rows.map((entry, idx) => (
+                <AttendanceRow
+                  key={entry.userId}
+                  entry={entry}
+                  isMe={entry.userId === user?.id}
+                  isLast={idx === rows.length - 1 && (!collapsible || !!matched)}
+                />
+              ))
+            )}
+            {collapsible && !matched && (
+              <Pressable
+                onPress={() => setExpanded((v) => !v)}
+                style={({ pressed }) => [
+                  styles.seeAll,
+                  { borderTopColor: colors.divider },
+                  pressed && { opacity: 0.6 },
+                ]}
+                accessibilityLabel={expanded ? '출석왕 접기' : '출석왕 전체 보기'}
+              >
+                <Text style={[styles.seeAllText, { color: colors.primary }]}>
+                  {expanded ? '접기' : `전체 보기 (${entries.length})`}
+                </Text>
+              </Pressable>
+            )}
+          </View>
+        </>
       )}
     </View>
   );
@@ -380,6 +415,19 @@ const styles = StyleSheet.create({
     overflow: 'hidden',
     paddingHorizontal: spacing.lg,
   },
+
+  searchBox: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+    borderWidth: 1,
+    borderRadius: radius.md,
+    paddingHorizontal: spacing.md,
+    paddingVertical: 10,
+    marginBottom: spacing.sm,
+  },
+  searchInput: { flex: 1, fontSize: 14, padding: 0 },
+  noMatch: { ...typography.body2, textAlign: 'center', paddingVertical: spacing.lg },
 
   // 전체 보기 / 접기 toggle (collapsed top-N mode)
   seeAll: {
