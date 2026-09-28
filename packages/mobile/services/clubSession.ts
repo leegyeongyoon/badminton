@@ -106,10 +106,23 @@ export interface AttendResponse {
   checkedInAt: string;
 }
 
+export interface SessionGameLogRow {
+  turnId: string;
+  courtName: string;
+  startedAt: string;
+  completedAt: string | null;
+  status: string;
+  players: { userId: string; name: string }[];
+}
+
 export const clubSessionApi = {
   // 정모 시작: 코트 수(courtCount)를 등록하면 서버가 이 정모 전용 코트 1..N을 만든다.
   start: (clubId: string, data: { facilityId: string; courtCount?: number }) =>
     api.post(`/clubs/${clubId}/sessions`, data),
+
+  // 정모 게임 기록(시작시간 내림차순) — 누가 몇 시에 누구랑 쳤는지 + 중복 점검.
+  gameLog: (clubSessionId: string) =>
+    api.get<SessionGameLogRow[]>(`/club-sessions/${clubSessionId}/games`).then((r) => r.data),
 
   // 정모 출석용 QR (data URL) — 운영자가 띄워두면 참가자가 스캔해 출석.
   getSessionQr: (clubSessionId: string) =>

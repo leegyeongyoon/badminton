@@ -1,7 +1,7 @@
 import { useState, useCallback, useEffect, useMemo, useRef } from 'react';
 import {
   View, Text, ScrollView, StyleSheet, ActivityIndicator,
-  TouchableOpacity, Platform,
+  TouchableOpacity, Platform, Pressable,
 } from 'react-native';
 // RN 기본 SafeAreaView는 Android에서 상태바 인셋을 무시(iOS 전용) → edge-to-edge에서
 // 헤더가 상태바에 겹친다. safe-area-context 버전은 Android 상태바도 처리한다.
@@ -22,6 +22,7 @@ import { getGenderMeta } from '../../../constants/gender';
 import { GenderMarker } from '../../../components/ui/GenderMarker';
 import { PlayerCard } from '../../../components/game-board/PlayerCard';
 import { SessionPolls } from '../../../components/session/SessionPolls';
+import { GameLog } from '../../../components/session/GameLog';
 import api from '../../../services/api';
 import { typography, spacing, radius, palette, breakpoints } from '../../../constants/theme';
 
@@ -68,6 +69,7 @@ export default function ViewBoardScreen() {
   const [clubName, setClubName] = useState<string>('');
   const [clubId, setClubId] = useState<string | undefined>(undefined);
   const [loaded, setLoaded] = useState(false);
+  const [gameLogOpen, setGameLogOpen] = useState(false);
 
   // 이 정모 클럽의 운영진(리더/스태프)이면 투표를 관리(마감·삭제·명단)할 수 있다.
   const clubs = useClubStore((s) => s.clubs);
@@ -386,6 +388,18 @@ export default function ViewBoardScreen() {
         {/* 정모 즉석 투표 — 운영진이 열면 여기 뜨고 탭 한 번으로 참여 */}
         {clubSessionId && <SessionPolls clubSessionId={clubSessionId} canManage={canManagePoll} />}
 
+        {/* 오늘 내 게임 — 몇 시에 누구랑 쳤는지 */}
+        {clubSessionId && (
+          <Pressable
+            onPress={() => setGameLogOpen(true)}
+            style={({ pressed }) => [styles.myGamesBtn, { backgroundColor: colors.surface, borderColor: colors.border }, pressed && { opacity: 0.9 }]}
+          >
+            <Text style={{ fontSize: 16 }}>📋</Text>
+            <Text style={[styles.myGamesText, { color: colors.text }]}>오늘 내 게임 · 누구랑 쳤나</Text>
+            <Icon name="chevronRight" size={16} color={colors.textLight} />
+          </Pressable>
+        )}
+
         {/* Courts grid */}
         <Text style={[styles.sectionTitle, { color: colors.textSecondary }]}>코트 현황</Text>
         <View style={styles.grid}>
@@ -507,6 +521,9 @@ export default function ViewBoardScreen() {
 
         <View style={{ height: spacing.xxxl }} />
       </ScrollView>
+      {gameLogOpen && clubSessionId && (
+        <GameLog clubSessionId={clubSessionId} meOnlyDefault onClose={() => setGameLogOpen(false)} />
+      )}
     </SafeAreaView>
   );
 }
@@ -560,6 +577,8 @@ const styles = StyleSheet.create({
 
   // Grid
   grid: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.md },
+  myGamesBtn: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, borderWidth: 1, borderRadius: radius.lg, paddingHorizontal: spacing.md, paddingVertical: 13, marginBottom: spacing.sm },
+  myGamesText: { flex: 1, fontSize: 14, fontWeight: '700' },
   col1: { width: '100%' },
   col2: { width: '48.5%' },
   col3: { width: '31.8%' },

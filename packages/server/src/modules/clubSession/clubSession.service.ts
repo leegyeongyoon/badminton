@@ -85,6 +85,38 @@ function mapClubSession(session: any): ClubSessionResponse {
  * independent of every other 정모; another 정모's identically-named courts are
  * never visible here. Drives the operator board / 코트 관리 modal.
  */
+export interface SessionGameLogRow {
+  turnId: string;
+  courtName: string;
+  startedAt: string; // ISO
+  completedAt: string | null;
+  status: string; // PLAYING | COMPLETED 등
+  players: { userId: string; name: string }[];
+}
+
+/** 정모 게임 기록 — 시작된 게임(turn)을 시작시간 내림차순으로. 각 게임의 시각+멤버.
+ *  "누가 몇 시에 누구랑 쳤는지" 로그 + 중복 점검(짝 그래프)의 데이터원. */
+export async function getSessionGameLog(sessionId: string): Promise<SessionGameLogRow[]> {
+  const session = await prisma.clubSession.findUnique({ where: { id: sessionId }, select: { id: true } });
+  if (!session) throw new NotFoundError('모임 세션');
+  const turns = await prisma.courtTurn.findMany({
+    where: { clubSessionId: sessionId, startedAt: { not: null } },
+    orderBy: { startedAt: 'desc' },
+    include: {
+      court: { select: { name: true } },
+      players: { include: { user: { select: { id: true, name: true } } } },
+    },
+  });
+  return turns.map((t) => ({
+    turnId: t.id,
+    courtName: t.court?.name ?? '코트',
+    startedAt: (t.startedAt as Date).toISOString(),
+    completedAt: t.completedAt ? t.completedAt.toISOString() : null,
+    status: t.status,
+    players: t.players.map((p) => ({ userId: p.userId, name: p.user.name })),
+  }));
+}
+
 export async function getSessionCourts(sessionId: string) {
   const session = await prisma.clubSession.findUnique({
     where: { id: sessionId },

@@ -150,6 +150,20 @@ router.post(
   },
 );
 
+// GET /api/v1/club-sessions/:id/games - 정모 게임 기록(시작시간 내림차순).
+// "누가 몇 시에 누구랑 쳤는지" + 중복 점검 데이터. 로그인 회원 누구나(같은 정모).
+router.get(
+  '/:id/games',
+  authenticate,
+  async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      res.json(await clubSessionService.getSessionGameLog(req.params.id as string));
+    } catch (err) {
+      next(err);
+    }
+  },
+);
+
 // GET /api/v1/club-sessions/:id/courts - the courts THIS 정모 owns (session.courtIds).
 // Operator board / start picker uses this so each 정모 only sees its own courts.
 router.get(
