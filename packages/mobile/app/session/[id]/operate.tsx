@@ -3642,13 +3642,13 @@ export default function OperateScreen() {
                 <TouchableOpacity
                   style={[styles.editBtnSm, { borderColor: colors.border, backgroundColor: colors.surface, marginRight: 6 }]}
                   onPress={() => setGroupCheckIds(entry.playerIds.filter(Boolean))}
-                  accessibilityLabel="짝 점검"
+                  accessibilityLabel="중복 점검"
                   activeOpacity={0.8}
                   hitSlop={6}
                   {...stopDragProps}
                 >
                   <Text style={{ fontSize: 12 }}>🔁</Text>
-                  <Text style={[styles.editBtnText, { color: colors.textSecondary }]}>짝 점검</Text>
+                  <Text style={[styles.editBtnText, { color: colors.textSecondary }]}>중복 점검</Text>
                 </TouchableOpacity>
               )}
               <TouchableOpacity
@@ -4294,7 +4294,7 @@ export default function OperateScreen() {
           <Modal visible transparent animationType="fade" onRequestClose={() => setGroupCheckIds(null)}>
             <TouchableOpacity style={groupStyles.backdrop} activeOpacity={1} onPress={() => setGroupCheckIds(null)}>
               <TouchableOpacity style={[groupStyles.sheet, { backgroundColor: colors.surface }]} activeOpacity={1}>
-                <Text style={[groupStyles.title, { color: colors.text }]}>🔁 이 게임 짝 점검</Text>
+                <Text style={[groupStyles.title, { color: colors.text }]}>🔁 이 게임 중복 점검</Text>
                 <Text style={[groupStyles.sub, { color: colors.textLight }]}>이번 정모에서 함께 친 횟수예요</Text>
 
                 {groupN >= 2 && (
