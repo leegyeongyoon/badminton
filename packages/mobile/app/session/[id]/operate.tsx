@@ -5077,6 +5077,17 @@ export default function OperateScreen() {
           {/* 게임 순서(게임 하는 순서) 이동 ▲▼ + 삭제 × — 선수 선택 중이 아닐 때만. */}
           {!isNew && !selectedPlayer && (
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 1 }} {...(Platform.OS === 'web' ? { onPointerDown: (e: any) => e.stopPropagation?.() } : {})}>
+              {members.length >= 2 && (
+                <TouchableOpacity
+                  onPress={() => setGroupCheckIds(members.filter(Boolean))}
+                  hitSlop={4}
+                  style={[styles.gameOrderBtn, { flexDirection: 'row', alignItems: 'center', gap: 2, paddingHorizontal: 6 }]}
+                  accessibilityLabel="중복 점검"
+                >
+                  <Text style={{ fontSize: 12 }}>🔁</Text>
+                  <Text style={{ fontSize: 11, fontWeight: '700', color: colors.textSecondary }}>중복</Text>
+                </TouchableOpacity>
+              )}
               <TouchableOpacity disabled={idx === 0} onPress={() => moveQueueItem(idx, idx - 1)} hitSlop={4} style={styles.gameOrderBtn} accessibilityLabel={`${idx + 1}번째 게임 앞으로`}>
                 <Text style={[styles.gameOrderT, { color: idx === 0 ? colors.border : colors.textSecondary }]}>▲</Text>
               </TouchableOpacity>
