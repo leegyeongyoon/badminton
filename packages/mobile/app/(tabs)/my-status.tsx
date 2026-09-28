@@ -19,6 +19,7 @@ import { PlayingTurnCard } from '../../components/activity/PlayingTurnCard';
 import { EmptyState } from '../../components/ui/EmptyState';
 import { Icon } from '../../components/ui/Icon';
 import { SessionPolls } from '../../components/session/SessionPolls';
+import { MyGamesSummary } from '../../components/session/MyGamesSummary';
 
 /**
  * 내 현황 — the player's minimal "enter → see the live situation" surface.
@@ -325,6 +326,11 @@ export default function MyStatusScreen() {
         <View style={{ marginBottom: spacing.sm }}>
           <SessionPolls clubSessionId={checkinStatus.clubSessionId} />
         </View>
+      )}
+
+      {/* 내 오늘 기록 — 몇 판·누구랑(탭하면 몇 시에) */}
+      {checkinStatus?.clubSessionId && (
+        <MyGamesSummary clubSessionId={checkinStatus.clubSessionId} />
       )}
 
       {/* 배드민턴 게임 — 언제든 AI 대전 가능하므로 항상 노출, 정모 중이면 1:1 대결 문구 */}
