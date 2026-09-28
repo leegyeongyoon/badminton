@@ -6,7 +6,7 @@ import { useTheme } from '../../hooks/useTheme';
 import { useAuthStore } from '../../store/authStore';
 import { typography, spacing, radius } from '../../constants/theme';
 import { clubSessionApi, type SessionGameLogRow } from '../../services/clubSession';
-import { PairGraph } from './PairGraph';
+import { PairDetailModal } from './PairDetailModal';
 
 // ─────────────────────────────────────────────────────────────
 // 정모 게임 기록 — 시작시간 순으로 "몇 시에 누구랑 쳤는지". 내 게임만 보기 토글,
@@ -41,20 +41,6 @@ export function GameLog({ clubSessionId, onClose, meOnlyDefault }: { clubSession
     }
   }, [clubSessionId]);
   useEffect(() => { load(); }, [load]);
-
-  // 짝별 함께 친 횟수(전체 기록에서) — 그래프용.
-  const pairCount = useMemo(() => {
-    const m = new Map<string, number>();
-    for (const g of rows ?? []) {
-      const ids = g.players.map((p) => p.userId);
-      for (let i = 0; i < ids.length; i += 1)
-        for (let j = i + 1; j < ids.length; j += 1) {
-          const k = ids[i] < ids[j] ? `${ids[i]}|${ids[j]}` : `${ids[j]}|${ids[i]}`;
-          m.set(k, (m.get(k) || 0) + 1);
-        }
-    }
-    return (a: string, b: string) => m.get(a < b ? `${a}|${b}` : `${b}|${a}`) || 0;
-  }, [rows]);
 
   const shown = useMemo(
     () => (meOnly && myId ? (rows ?? []).filter((g) => g.players.some((p) => p.userId === myId)) : rows ?? []),
@@ -128,26 +114,14 @@ export function GameLog({ clubSessionId, onClose, meOnlyDefault }: { clubSession
         </View>
       </View>
 
-      {/* 중복 점검 그래프 */}
+      {/* 중복 점검 상세 — 그래프 + 각 짝 몇 시에 쳤는지 */}
       {graphRow && (
-        <Modal visible transparent animationType="fade" onRequestClose={() => setGraphRow(null)}>
-          <Pressable style={styles.gBackdrop} onPress={() => setGraphRow(null)}>
-            <Pressable style={[styles.gSheet, { backgroundColor: colors.surface }]}>
-              <Text style={[styles.gTitle, { color: colors.text }]}>🔁 {hhmm(graphRow.startedAt)} 게임 · 중복 점검</Text>
-              <PairGraph
-                players={graphRow.players.map((p) => ({ id: p.userId, name: p.name }))}
-                pairCount={pairCount}
-                size={260}
-              />
-              <Text style={[styles.gLegend, { color: colors.textLight }]}>
-                선 = 함께 친 횟수 · <Text style={{ color: colors.danger }}>빨강 2회+</Text> · <Text style={{ color: colors.warning }}>주황 1회</Text>
-              </Text>
-              <Pressable onPress={() => setGraphRow(null)} style={[styles.gClose, { backgroundColor: colors.primary }]}>
-                <Text style={styles.gCloseText}>닫기</Text>
-              </Pressable>
-            </Pressable>
-          </Pressable>
-        </Modal>
+        <PairDetailModal
+          players={graphRow.players.map((p) => ({ id: p.userId, name: p.name }))}
+          rows={rows ?? []}
+          title={`${hhmm(graphRow.startedAt)} · ${graphRow.courtName} 게임`}
+          onClose={() => setGraphRow(null)}
+        />
       )}
     </Modal>
   );
@@ -173,10 +147,4 @@ const styles = StyleSheet.create({
   pchip: { paddingHorizontal: 10, paddingVertical: 5, borderRadius: radius.pill },
   pname: { fontSize: 13 },
   hint: { ...typography.caption, textAlign: 'center', marginTop: spacing.sm },
-  gBackdrop: { flex: 1, backgroundColor: 'rgba(0,0,0,0.45)', alignItems: 'center', justifyContent: 'center', padding: spacing.lg },
-  gSheet: { width: '100%', maxWidth: 400, borderRadius: radius.lg, padding: spacing.lg, alignItems: 'center' },
-  gTitle: { fontSize: 15, fontWeight: '800', marginBottom: spacing.md, textAlign: 'center' },
-  gLegend: { ...typography.caption, textAlign: 'center', marginTop: spacing.md },
-  gClose: { borderRadius: radius.pill, paddingVertical: 12, alignItems: 'center', marginTop: spacing.md, alignSelf: 'stretch' },
-  gCloseText: { color: '#fff', fontSize: 14, fontWeight: '800' },
 });

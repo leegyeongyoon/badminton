@@ -14,7 +14,7 @@ import { useAuthStore } from '../../../store/authStore';
 import { useFacilityRoom, useClubRoom, useSocketEvent } from '../../../hooks/useSocket';
 import { Icon } from '../../../components/ui/Icon';
 import { CreatePollModal } from '../../../components/session/CreatePollModal';
-import { PairGraph } from '../../../components/session/PairGraph';
+import { PairDetailModal } from '../../../components/session/PairDetailModal';
 import { GameLog } from '../../../components/session/GameLog';
 import { getSkillMeta, SKILL_LEVELS } from '../../../constants/skill';
 import { getGenderMeta, getGameType, GENDER_META, type Gender } from '../../../constants/gender';
@@ -22,7 +22,7 @@ import { GenderMarker } from '../../../components/ui/GenderMarker';
 import { PlayerCard } from '../../../components/game-board/PlayerCard';
 import api from '../../../services/api';
 import { clubApi } from '../../../services/club';
-import { clubSessionApi, GuestFeeSettlement, PlayerMatchups, SessionCourt } from '../../../services/clubSession';
+import { clubSessionApi, GuestFeeSettlement, PlayerMatchups, SessionCourt, type SessionGameLogRow } from '../../../services/clubSession';
 import { courtApi } from '../../../services/court';
 import { showAlert, showConfirm, showModalConfirm } from '../../../utils/alert';
 import { showSuccess, showError } from '../../../utils/feedback';
@@ -593,8 +593,14 @@ export default function OperateScreen() {
   const [addingTestGuests, setAddingTestGuests] = useState(false);
   // Matchup popup: the player whose "오늘 함께 친 사람" sheet is open (null = closed).
   const [matchupTarget, setMatchupTarget] = useState<{ userId: string; name: string; skillLevel?: string | null; isGuest?: boolean } | null>(null);
-  // 게임 카드 "짝 점검" — 이 게임 4명(또는 2~3명) 사이 함께 친 횟수를 팝업으로.
+  // 게임 카드 "중복 점검" — 이 게임 4명의 짝별 함께 친 횟수+시각을 팝업으로.
   const [groupCheckIds, setGroupCheckIds] = useState<string[] | null>(null);
+  const [gameLogRows, setGameLogRows] = useState<SessionGameLogRow[]>([]);
+  // 중복 점검·게임 기록을 열 때 게임 로그를 로드(시각 정보용).
+  const openGroupCheck = useCallback((ids: string[]) => {
+    setGroupCheckIds(ids.filter(Boolean));
+    if (clubSessionId) clubSessionApi.gameLog(clubSessionId).then(setGameLogRows).catch(() => {});
+  }, [clubSessionId]);
 
   // Swap: { entryId, slotIndex } of the queued-game slot being replaced
   const [swapTarget, setSwapTarget] = useState<{ entryId: string; slotIndex: number } | null>(null);
@@ -3644,7 +3650,7 @@ export default function OperateScreen() {
               {entry.playerIds.length >= 2 && (
                 <TouchableOpacity
                   style={[styles.editBtnSm, { borderColor: colors.border, backgroundColor: colors.surface, marginRight: 6 }]}
-                  onPress={() => setGroupCheckIds(entry.playerIds.filter(Boolean))}
+                  onPress={() => openGroupCheck(entry.playerIds)}
                   accessibilityLabel="중복 점검"
                   activeOpacity={0.8}
                   hitSlop={6}
@@ -4292,72 +4298,14 @@ export default function OperateScreen() {
           onClose={() => setMatchupTarget(null)}
         />
       )}
-      {groupCheckIds && (() => {
-        // 이 게임 멤버들의 각 짝이 이 정모에서 함께 친 횟수 — pairCounts에서 바로 계산.
-        const ids = groupCheckIds;
-        const rowsData: { a: string; b: string; count: number }[] = [];
-        for (let i = 0; i < ids.length; i += 1)
-          for (let j = i + 1; j < ids.length; j += 1)
-            rowsData.push({ a: ids[i], b: ids[j], count: pairCounts[pairKey(ids[i], ids[j])] || 0 });
-        rowsData.sort((x, y) => y.count - x.count);
-        const groupKey = [...ids].sort().join('|');
-        const groupN = ids.length === 4 ? (board?.groupCounts?.[groupKey] || 0) : 0;
-        const nm = (id: string) => getPlayer(id)?.userName || '탈퇴';
-        return (
-          <Modal visible transparent animationType="fade" onRequestClose={() => setGroupCheckIds(null)}>
-            <TouchableOpacity style={groupStyles.backdrop} activeOpacity={1} onPress={() => setGroupCheckIds(null)}>
-              <TouchableOpacity style={[groupStyles.sheet, { backgroundColor: colors.surface }]} activeOpacity={1}>
-                <Text style={[groupStyles.title, { color: colors.text }]}>🔁 이 게임 중복 점검</Text>
-                <Text style={[groupStyles.sub, { color: colors.textLight }]}>이번 정모에서 함께 친 횟수예요</Text>
-
-                {groupN >= 2 && (
-                  <View style={[groupStyles.repeatBanner, { backgroundColor: colors.danger + '18' }]}>
-                    <Text style={[groupStyles.repeatText, { color: colors.danger }]}>
-                      이 4명 그대로 이번 정모 {groupN}번째 — 조합을 바꿔보세요
-                    </Text>
-                  </View>
-                )}
-
-                {/* 선 그래프 시각화 — 함께 친 횟수만큼 선 색·굵기 (우동배 스타일) */}
-                <View style={{ marginTop: spacing.sm }}>
-                  <PairGraph
-                    players={ids.map((id) => ({ id, name: nm(id) }))}
-                    pairCount={(a, b) => pairCounts[pairKey(a, b)] || 0}
-                    size={260}
-                  />
-                </View>
-
-                <View style={{ gap: 6, marginTop: spacing.sm }}>
-                  {rowsData.map((r, i) => {
-                    const heavy = r.count >= 2;
-                    const some = r.count === 1;
-                    const c = heavy ? colors.danger : some ? colors.warning : colors.textLight;
-                    return (
-                      <View key={i} style={[groupStyles.pairRow, { borderColor: colors.border }]}>
-                        <Text style={[groupStyles.pairName, { color: colors.text }]} numberOfLines={1}>
-                          {nm(r.a)} <Text style={{ color: colors.textLight }}>↔</Text> {nm(r.b)}
-                        </Text>
-                        <View style={[groupStyles.countPill, { backgroundColor: c + '1F' }]}>
-                          <Text style={[groupStyles.countText, { color: c }]}>
-                            {r.count === 0 ? '처음' : `${r.count}회`}
-                          </Text>
-                        </View>
-                      </View>
-                    );
-                  })}
-                </View>
-
-                <Text style={[groupStyles.legend, { color: colors.textLight }]}>
-                  <Text style={{ color: colors.danger }}>빨강 2회+</Text> · <Text style={{ color: colors.warning }}>주황 1회</Text> · 회색 처음
-                </Text>
-                <TouchableOpacity onPress={() => setGroupCheckIds(null)} style={[groupStyles.closeBtn, { backgroundColor: colors.primary }]}>
-                  <Text style={groupStyles.closeText}>닫기</Text>
-                </TouchableOpacity>
-              </TouchableOpacity>
-            </TouchableOpacity>
-          </Modal>
-        );
-      })()}
+      {groupCheckIds && (
+        <PairDetailModal
+          players={groupCheckIds.map((id) => ({ id, name: getPlayer(id)?.userName || '탈퇴' }))}
+          rows={gameLogRows}
+          title="이 게임 중복 점검"
+          onClose={() => setGroupCheckIds(null)}
+        />
+      )}
     </>
   );
 
@@ -5101,7 +5049,7 @@ export default function OperateScreen() {
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 1 }} {...(Platform.OS === 'web' ? { onPointerDown: (e: any) => e.stopPropagation?.() } : {})}>
               {members.length >= 2 && (
                 <TouchableOpacity
-                  onPress={() => setGroupCheckIds(members.filter(Boolean))}
+                  onPress={() => openGroupCheck(members)}
                   hitSlop={4}
                   style={[styles.gameOrderBtn, { flexDirection: 'row', alignItems: 'center', gap: 2, paddingHorizontal: 6 }]}
                   accessibilityLabel="중복 점검"
