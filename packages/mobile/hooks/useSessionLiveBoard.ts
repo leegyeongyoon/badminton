@@ -41,7 +41,6 @@ export function useSessionLiveBoard(clubSessionId?: string) {
 
   const [courts, setCourts] = useState<LiveBoardCourt[]>([]);
   const [players, setPlayers] = useState<LiveBoardPlayer[]>([]);
-  const [dedicatedCourtIds, setDedicatedCourtIds] = useState<Set<string>>(new Set());
   const [facilityId, setFacilityId] = useState<string | undefined>(undefined);
   const [clubName, setClubName] = useState<string>('');
   const [loaded, setLoaded] = useState(false);
@@ -61,7 +60,6 @@ export function useSessionLiveBoard(clubSessionId?: string) {
       if (!alive) return;
       setFacilityId(data?.facilityId);
       setClubName(data?.clubName || '');
-      if (data?.courtIds) setDedicatedCourtIds(new Set(data.courtIds));
     }).catch(() => {});
     return () => { alive = false; };
   }, [clubSessionId]);
@@ -164,11 +162,10 @@ export function useSessionLiveBoard(clubSessionId?: string) {
     [uniquePlayers, onCourtPlayerIds],
   );
 
-  // 이 정모 전용 코트만(courtIds). 없으면 전체.
-  const displayCourts = useMemo(() => {
-    const dedicated = courts.filter((c) => dedicatedCourtIds.has(c.id));
-    return dedicated.length > 0 ? dedicated : courts;
-  }, [courts, dedicatedCourtIds]);
+  // /courts 응답이 이미 "이 정모의 코트"만 authoritative 하게 돌려주므로 그대로 사용.
+  // (마운트 때만 읽던 옛 courtIds로 새로 추가된 코트가 필터돼 '코트 개수가 줄어 보임'
+  // 버그가 났었다 — 필터 제거로 원천 해결.)
+  const displayCourts = courts;
 
   return {
     clubName,

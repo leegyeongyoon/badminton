@@ -64,7 +64,6 @@ export default function ViewBoardScreen() {
   const [nowTs, setNowTs] = useState(() => Date.now());
   useEffect(() => { const t = setInterval(() => setNowTs(Date.now()), 30 * 1000); return () => clearInterval(t); }, []);
   const [players, setPlayers] = useState<Player[]>([]);
-  const [dedicatedCourtIds, setDedicatedCourtIds] = useState<Set<string>>(new Set());
   const [facilityId, setFacilityId] = useState<string | undefined>(undefined);
   const [clubName, setClubName] = useState<string>('');
   const [clubId, setClubId] = useState<string | undefined>(undefined);
@@ -85,7 +84,6 @@ export default function ViewBoardScreen() {
       setFacilityId(data?.facilityId);
       setClubName(data?.clubName || '');
       setClubId(data?.clubId);
-      if (data?.courtIds) setDedicatedCourtIds(new Set(data.courtIds));
     }).catch(() => {});
     return () => { alive = false; };
   }, [clubSessionId]);
@@ -206,10 +204,10 @@ export default function ViewBoardScreen() {
     [uniquePlayers, onCourtPlayerIds],
   );
 
-  const displayCourts = useMemo(() => {
-    const dedicated = courts.filter((c) => dedicatedCourtIds.has(c.id));
-    return dedicated.length > 0 ? dedicated : courts;
-  }, [courts, dedicatedCourtIds]);
+  // /courts 응답이 이미 "이 정모의 코트"만 authoritative 하게 돌려주므로, courtIds로
+  // 또 필터링하지 않는다. (마운트 때만 읽던 옛 courtIds로 새로 추가된 코트가 필터돼
+  // '코트 5개인데 3개만 보임'이 나던 버그의 원인 — 필터 제거로 원천 해결.)
+  const displayCourts = courts;
 
   // Which court (if any) is the viewer playing on?
   const myCourtId = useMemo(() => {
