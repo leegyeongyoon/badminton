@@ -240,7 +240,10 @@ export async function joinClub(userId: string, inviteCode: string) {
     throw new ForbiddenError('승인 대기 중인 계정입니다. 최고관리자 승인 후 이용해 주세요');
   }
 
-  const club = await prisma.club.findUnique({ where: { inviteCode } });
+  // 초대코드는 대문자 hex(CLUBAA01)인데 사용자는 소문자로 입력하는 일이 흔하다.
+  // 공백 제거 + 대문자로 정규화해 "소문자로 쳐서 모임을 못 찾는" 입장 실패를 막는다.
+  const normalized = String(inviteCode ?? '').trim().toUpperCase();
+  const club = await prisma.club.findUnique({ where: { inviteCode: normalized } });
   if (!club) throw new NotFoundError('모임');
 
   const existing = await prisma.clubMember.findUnique({

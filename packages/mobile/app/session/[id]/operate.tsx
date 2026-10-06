@@ -14,7 +14,7 @@ import { useAuthStore } from '../../../store/authStore';
 import { useFacilityRoom, useClubRoom, useSocketEvent } from '../../../hooks/useSocket';
 import { Icon } from '../../../components/ui/Icon';
 import { CreatePollModal } from '../../../components/session/CreatePollModal';
-import { PairDetailModal } from '../../../components/session/PairDetailModal';
+import { FloatingMatchupPanel } from '../../../components/session/FloatingMatchupPanel';
 import { GameLog } from '../../../components/session/GameLog';
 import { getSkillMeta, SKILL_LEVELS } from '../../../constants/skill';
 import { getGenderMeta, getGameType, GENDER_META, type Gender } from '../../../constants/gender';
@@ -4299,7 +4299,7 @@ export default function OperateScreen() {
         />
       )}
       {groupCheckIds && (
-        <PairDetailModal
+        <FloatingMatchupPanel
           players={groupCheckIds.map((id) => ({ id, name: getPlayer(id)?.userName || '탈퇴' }))}
           rows={gameLogRows}
           title="이 게임 중복 점검"

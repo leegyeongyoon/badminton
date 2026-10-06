@@ -267,7 +267,8 @@ export const createClubSchema = z.object({
 });
 
 export const joinClubSchema = z.object({
-  inviteCode: z.string().length(8),
+  // 공백 제거 + 대문자로 정규화한 뒤 길이 검증 — 사용자가 소문자/공백으로 쳐도 통과.
+  inviteCode: z.string().trim().toUpperCase().pipe(z.string().length(8)),
 });
 
 // 모임 정보 수정 (LEADER 또는 SUPER_ADMIN). 최소 한 필드 이상 — 빈 PATCH 거부.
