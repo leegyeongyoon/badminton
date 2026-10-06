@@ -28,6 +28,58 @@ function generateInviteCode(): string {
   return crypto.randomBytes(4).toString('hex').toUpperCase();
 }
 
+// 초대코드 정규화 — 조회·저장 공통. 공백 제거 + ASCII 대문자(한글은 그대로).
+// 영문은 대소문자 구분 없이, 한글은 그대로 매칭된다.
+export function normalizeInviteCode(raw: string): string {
+  return String(raw ?? '')
+    .trim()
+    .replace(/\s+/g, '')
+    .replace(/[a-z]/g, (c) => c.toUpperCase());
+}
+
+// 모임명에서 외우기 쉬운 코드 후보 생성 — 한글·영문·숫자만 남기고 4~12자.
+// 예: "번개 배드민턴" → "번개배드민턴". 빈약하면 랜덤으로 폴백.
+function slugFromName(name: string): string {
+  const cleaned = String(name ?? '')
+    .replace(/[^0-9A-Za-z가-힣]/g, '')
+    .slice(0, 12);
+  const norm = normalizeInviteCode(cleaned);
+  return norm.length >= 4 ? norm : generateInviteCode();
+}
+
+// 모임명 기반 초대코드를 유니크하게 발급 — 이미 쓰면 뒤에 2,3,… 붙임.
+async function uniqueCodeFromName(name: string): Promise<string> {
+  const base = slugFromName(name);
+  for (let i = 0; i < 20; i += 1) {
+    const candidate = i === 0 ? base : normalizeInviteCode(`${base}${i + 1}`).slice(0, 20);
+    const taken = await prisma.club.findUnique({ where: { inviteCode: candidate }, select: { id: true } });
+    if (!taken) return candidate;
+  }
+  return generateInviteCode(); // 매우 드문 폴백
+}
+
+const CODE_RE = /^[0-9A-Z가-힣]{4,20}$/;
+
+// 리더가 커스텀 초대코드를 직접 설정. 정규화 후 형식·중복 검증.
+export async function setInviteCode(
+  clubId: string,
+  requesterId: string,
+  requesterRole: string,
+  rawCode: string,
+): Promise<{ inviteCode: string }> {
+  await verifyClubLeaderOrSuperAdmin(clubId, requesterId, requesterRole);
+  const code = normalizeInviteCode(rawCode);
+  if (!CODE_RE.test(code)) {
+    throw new BadRequestError('초대코드는 한글·영문·숫자 4~20자로 입력해 주세요 (공백·특수문자 불가)');
+  }
+  const taken = await prisma.club.findUnique({ where: { inviteCode: code }, select: { id: true } });
+  if (taken && taken.id !== clubId) {
+    throw new ConflictError('이미 다른 모임이 쓰는 코드예요. 다른 코드를 입력해 주세요');
+  }
+  await prisma.club.update({ where: { id: clubId }, data: { inviteCode: code } });
+  return { inviteCode: code };
+}
+
 export async function createClub(userId: string, input: CreateClubInput) {
   // 생성 시 홈 시설(위치) 연결 — 제공되면 실존 검증 후 세팅.
   const homeFacilityId = (input as { homeFacilityId?: string }).homeFacilityId;
@@ -43,7 +95,7 @@ export async function createClub(userId: string, input: CreateClubInput) {
     data: {
       name: input.name,
       clubType: (input as { clubType?: string }).clubType === 'MEETUP' ? 'MEETUP' : 'CLUB',
-      inviteCode: generateInviteCode(),
+      inviteCode: await uniqueCodeFromName(input.name),
       homeFacilityId: homeFacilityId ?? null,
       members: { create: { userId, role: 'LEADER' } },
     },
@@ -240,9 +292,9 @@ export async function joinClub(userId: string, inviteCode: string) {
     throw new ForbiddenError('승인 대기 중인 계정입니다. 최고관리자 승인 후 이용해 주세요');
   }
 
-  // 초대코드는 대문자 hex(CLUBAA01)인데 사용자는 소문자로 입력하는 일이 흔하다.
-  // 공백 제거 + 대문자로 정규화해 "소문자로 쳐서 모임을 못 찾는" 입장 실패를 막는다.
-  const normalized = String(inviteCode ?? '').trim().toUpperCase();
+  // 초대코드는 영문 대문자+숫자(또는 모임명 기반 한글)인데 사용자는 소문자/공백을 섞어 입력하는 일이 흔하다.
+  // 저장 때와 똑같이 정규화(공백 제거 + 영문 대문자, 한글 그대로)해 "소문자로 쳐서 모임을 못 찾는" 입장 실패를 막는다.
+  const normalized = normalizeInviteCode(inviteCode);
   const club = await prisma.club.findUnique({ where: { inviteCode: normalized } });
   if (!club) throw new NotFoundError('모임');
 

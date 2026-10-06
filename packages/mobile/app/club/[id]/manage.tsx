@@ -96,6 +96,9 @@ export default function ClubManageScreen() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [regenerating, setRegenerating] = useState(false);
+  // 커스텀 초대코드 입력(모임명 관련 코드 등 외우기 쉬운 값으로 변경)
+  const [customCode, setCustomCode] = useState('');
+  const [savingCode, setSavingCode] = useState(false);
 
   // 멤버·운영진 섹션 상태.
   const [members, setMembers] = useState<ClubMemberResponse[]>([]);
@@ -235,6 +238,36 @@ export default function ClubManageScreen() {
       '취소',
     );
   }, [clubId, fetchClubs]);
+
+  // 커스텀 초대코드 저장 — 모임명 관련 등 원하는 코드로 바꾼다.
+  const handleSetCode = useCallback(() => {
+    if (!clubId) return;
+    const code = customCode.replace(/\s+/g, '').replace(/[a-z]/g, (c) => c.toUpperCase());
+    if (!/^[0-9A-Z가-힣]{4,20}$/.test(code)) {
+      showAlert('초대코드 형식', '한글·영문·숫자 4~20자로 입력해 주세요 (공백·특수문자 불가)');
+      return;
+    }
+    showConfirm(
+      '초대코드 변경',
+      `초대코드를 "${code}" 로 바꿀까요?\n기존 코드·QR·링크는 더 이상 쓸 수 없어요.`,
+      async () => {
+        setSavingCode(true);
+        try {
+          const { data } = await clubApi.setInviteCode(clubId, code);
+          setInviteCode(data.inviteCode);
+          setCustomCode('');
+          await fetchClubs();
+          showSuccess('초대코드를 바꿨어요');
+        } catch (err: any) {
+          showAlert(Strings.common.error, err?.response?.data?.error || '변경에 실패했습니다');
+        } finally {
+          setSavingCode(false);
+        }
+      },
+      '바꾸기',
+      '취소',
+    );
+  }, [clubId, customCode, fetchClubs]);
 
   // 모임 삭제 (2단계 확인 — 되돌릴 수 없음) → 설정으로 복귀.
   const handleDelete = useCallback(() => {
@@ -733,8 +766,40 @@ export default function ClubManageScreen() {
             <Text style={[styles.codeValue, { color: colors.text }]}>{inviteCode || '—'}</Text>
           </View>
 
+          {/* 원하는 코드로 직접 변경 — 모임명처럼 외우기 쉬운 코드 권장 */}
+          <Text style={[styles.fieldLabel, { color: colors.textSecondary, marginTop: 14 }]}>코드 직접 정하기</Text>
+          <View style={{ flexDirection: 'row', gap: 8, alignItems: 'center' }}>
+            <TextInput
+              style={[styles.input, { flex: 1, marginBottom: 0, backgroundColor: colors.background, color: colors.text, borderColor: colors.border }]}
+              value={customCode}
+              onChangeText={setCustomCode}
+              placeholder="예: 번개배드민턴"
+              placeholderTextColor={colors.textLight}
+              autoCapitalize="characters"
+              autoCorrect={false}
+              maxLength={20}
+              accessibilityLabel="새 초대코드 입력"
+            />
+            <TouchableOpacity
+              style={[styles.codeSaveBtn, { backgroundColor: customCode.trim().length >= 4 ? colors.primary : colors.border }]}
+              onPress={handleSetCode}
+              disabled={savingCode || customCode.trim().length < 4}
+              activeOpacity={0.8}
+              accessibilityLabel="초대코드 바꾸기"
+            >
+              {savingCode ? (
+                <ActivityIndicator size="small" color="#fff" />
+              ) : (
+                <Text style={styles.codeSaveBtnText}>바꾸기</Text>
+              )}
+            </TouchableOpacity>
+          </View>
+          <Text style={[styles.fieldHint, { color: colors.textLight }]}>
+            한글·영문·숫자 4~20자. 모임 이름처럼 외우기 쉬운 코드를 추천해요
+          </Text>
+
           <TouchableOpacity
-            style={styles.linkRow}
+            style={[styles.linkRow, { marginTop: 10 }]}
             onPress={() => router.push(`/club/${clubId}/qr`)}
             activeOpacity={0.7}
             accessibilityLabel="모임 참여 QR 보기"
@@ -1467,6 +1532,16 @@ const styles = StyleSheet.create({
     marginTop: spacing.sm,
   },
   regenBtnText: { ...typography.subtitle2 },
+
+  codeSaveBtn: {
+    borderRadius: radius.md,
+    paddingHorizontal: spacing.md,
+    paddingVertical: Platform.OS === 'web' ? spacing.md : spacing.sm + 2,
+    alignItems: 'center',
+    justifyContent: 'center',
+    minWidth: 68,
+  },
+  codeSaveBtnText: { ...typography.subtitle2, color: '#fff', fontWeight: '700' },
 
   placeholder: { ...typography.body2, paddingVertical: spacing.sm },
 

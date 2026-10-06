@@ -4,6 +4,7 @@ import {
   createClubSchema,
   updateClubSchema,
   joinClubSchema,
+  setInviteCodeSchema,
   updateMemberRoleSchema,
   updateMemberProfileSchema,
   attendancePeriodSchema,
@@ -114,6 +115,21 @@ router.post('/:id/invite-code/regenerate', authenticate, async (req: Request, re
       req.params.id as string,
       req.user!.userId,
       req.user!.role,
+    );
+    res.json(result);
+  } catch (err) { next(err); }
+});
+
+// PATCH /api/v1/clubs/:id/invite-code - set a custom invite code (LEADER or
+// SUPER_ADMIN). Accepts 한글·영문·숫자 4~20자. The old code/QR/link is replaced.
+// Returns { inviteCode }.
+router.patch('/:id/invite-code', authenticate, validate(setInviteCodeSchema), async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const result = await clubService.setInviteCode(
+      req.params.id as string,
+      req.user!.userId,
+      req.user!.role,
+      req.body.inviteCode,
     );
     res.json(result);
   } catch (err) { next(err); }

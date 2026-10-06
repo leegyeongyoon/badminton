@@ -266,9 +266,28 @@ export const createClubSchema = z.object({
   homeFacilityId: z.string().uuid().optional(),
 });
 
+// 초대코드 정규화 — 공백 모두 제거 + 영문 대문자(한글은 그대로).
+// 서버 normalizeInviteCode 와 동일 규칙이라, 소문자/공백을 섞어 쳐도, 모임명 기반 한글 코드도 통과한다.
+const normalizeInvite = (raw: string) => raw.replace(/\s+/g, '').replace(/[a-z]/g, (c) => c.toUpperCase());
+
 export const joinClubSchema = z.object({
-  // 공백 제거 + 대문자로 정규화한 뒤 길이 검증 — 사용자가 소문자/공백으로 쳐도 통과.
-  inviteCode: z.string().trim().toUpperCase().pipe(z.string().length(8)),
+  // 모임명 기반 커스텀 코드(한글 포함)를 허용하기 위해 길이는 4~20자 범위로.
+  inviteCode: z
+    .string()
+    .transform(normalizeInvite)
+    .pipe(z.string().min(4, '초대코드가 너무 짧아요').max(20, '초대코드가 너무 길어요')),
+});
+
+// 리더가 커스텀 초대코드를 직접 설정. 한글·영문·숫자 4~20자(공백·특수문자 불가).
+export const setInviteCodeSchema = z.object({
+  inviteCode: z
+    .string()
+    .transform(normalizeInvite)
+    .pipe(
+      z
+        .string()
+        .regex(/^[0-9A-Z가-힣]{4,20}$/, '초대코드는 한글·영문·숫자 4~20자로 입력해 주세요 (공백·특수문자 불가)'),
+    ),
 });
 
 // 모임 정보 수정 (LEADER 또는 SUPER_ADMIN). 최소 한 필드 이상 — 빈 PATCH 거부.
@@ -381,6 +400,7 @@ export type CheckInInput = z.infer<typeof checkInSchema>;
 export type CreateClubInput = z.infer<typeof createClubSchema>;
 export type UpdateClubInput = z.infer<typeof updateClubSchema>;
 export type JoinClubInput = z.infer<typeof joinClubSchema>;
+export type SetInviteCodeInput = z.infer<typeof setInviteCodeSchema>;
 export type RegisterTurnInput = z.infer<typeof registerTurnSchema>;
 export type ExtendTurnInput = z.infer<typeof extendTurnSchema>;
 export type RequeueTurnInput = z.infer<typeof requeueTurnSchema>;

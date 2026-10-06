@@ -180,6 +180,9 @@ export const clubApi = {
   // 초대코드 재발급 — 기존 코드/QR/링크는 즉시 무효화됨.
   regenerateInvite: (id: string) =>
     api.post<{ inviteCode: string }>(`/clubs/${id}/invite-code/regenerate`),
+  // 초대코드를 원하는 값으로 직접 설정 — 한글·영문·숫자 4~20자.
+  setInviteCode: (id: string, inviteCode: string) =>
+    api.patch<{ inviteCode: string }>(`/clubs/${id}/invite-code`, { inviteCode }),
   // 모임 삭제 — 모임과 모든 하위 데이터(정모/코트/체크인 등)를 영구 삭제.
   // 서버에서 권한 확인(SUPER_ADMIN 또는 해당 모임 LEADER/STAFF).
   deleteClub: (id: string) => api.delete<{ success: boolean }>(`/clubs/${id}`),
