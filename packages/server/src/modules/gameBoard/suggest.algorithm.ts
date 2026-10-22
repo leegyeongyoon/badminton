@@ -437,6 +437,15 @@ export function resolveTuning(t?: Partial<SuggestTuning>): SuggestTuning {
 const STYLE_WEIGHT = 0.7;
 export type StyleScorer = (group: ModePlayer[]) => number;
 
+/**
+ * 운영진 요청 반영 훅 — score: 그룹에 더할 비용(같이 안 짜기 = 매우 큼, 파트너 함께 = 음수),
+ * companions: id → 함께 후보에 올려야 할 파트너 id들(한 명이 후보면 짝도 후보로).
+ */
+export interface RequestHooks {
+  score?: (group: ModePlayer[]) => number;
+  companions?: Map<string, string[]>;
+}
+
 function scoreGroup(
   group: ModePlayer[],
   mode: SuggestMode,
@@ -444,11 +453,14 @@ function scoreGroup(
   jitterById: Map<string, number>,
   tuning: SuggestTuning,
   style?: StyleScorer,
+  requests?: RequestHooks,
 ): number {
   const w = MODE_WEIGHTS[mode];
+  const requestTerm = requests?.score ? requests.score(group) : 0;
   // '빡센 게임(2강 2약)'은 일부러 급수를 벌리는 모드라 모임 스타일(급수 비슷하게)과 충돌 → 제외.
   const styleTerm = style && mode !== 'competitive' ? -STYLE_WEIGHT * style(group) : 0;
   return (
+    requestTerm +
     styleTerm +
     w.wFair * fairnessCost(group, jitterById) +
     w.wVariety * varietyCost(group, pairWeight) +
@@ -487,6 +499,7 @@ export function selectFoursomeByMode(
   topN = 20,
   tuning?: Partial<SuggestTuning>,
   style?: StyleScorer,
+  requests?: RequestHooks,
 ): ModeResult {
   const tune = resolveTuning(tuning);
   if (pool.length <= size) {
@@ -522,6 +535,20 @@ export function selectFoursomeByMode(
   const banded = band.length >= minBand ? band : ranked.slice(0, minBand);
   shuffleInPlace(banded);
   const candidates = banded.slice(0, Math.min(topN, banded.length));
+  // 파트너 요청: 후보에 든 사람의 파트너가 풀에 있으면 같이 후보로(둘을 한 게임에 묶을 수 있게).
+  if (requests?.companions) {
+    const byIdAll = new Map(pool.map((p) => [p.id, p]));
+    const inCand = new Set(candidates.map((p) => p.id));
+    for (const p of [...candidates]) {
+      for (const cid of requests.companions.get(p.id) ?? []) {
+        const c = byIdAll.get(cid);
+        if (c && !inCand.has(cid)) {
+          candidates.push(c);
+          inCand.add(cid);
+        }
+      }
+    }
+  }
 
   // Bounded combo search over C(|candidates|, 4). With topN=20 that's C(20,4)=
   // 4845 groups — cheap. Score each; keep the best (lowest cost).
@@ -535,7 +562,7 @@ export function selectFoursomeByMode(
         for (let c = b + 1; c < n; c++)
           for (let d = c + 1; d < n; d++) {
             const group = [candidates[a], candidates[b], candidates[c], candidates[d]];
-            const s = scoreGroup(group, mode, pairWeight, jitterById, tune, style);
+            const s = scoreGroup(group, mode, pairWeight, jitterById, tune, style, requests);
             if (s < bestScore) {
               bestScore = s;
               best = group;
@@ -563,6 +590,7 @@ export function splitTeams(
   group: ModePlayer[],
   genderOffsetFemale: number,
   pairWeight: Record<string, number> = {},
+  partners?: Set<string>,
 ): ModePlayer[] {
   if (group.length !== 4) return group;
   const sk = (p: ModePlayer) => effectiveSkill(p, genderOffsetFemale);
@@ -579,6 +607,23 @@ export function splitTeams(
   if (group.filter(isF).length === 2 && group.filter(isM).length === 2) {
     const mixedPairs = options.filter((o) => isF(o[0]) !== isF(o[1]) && isF(o[2]) !== isF(o[3]));
     if (mixedPairs.length > 0) options = mixedPairs;
+  }
+  // 운영진 파트너 요청이 이 판에 있으면 그 둘은 반드시 같은 팀(혼복 규칙보다 우선).
+  if (partners && partners.size > 0) {
+    const allOpts: typeof options = [
+      [a, b, c, d],
+      [a, c, b, d],
+      [a, d, b, c],
+    ];
+    const sameTeam = (x: ModePlayer, y: ModePlayer, o: typeof allOpts[number]) =>
+      (o.slice(0, 2).includes(x) && o.slice(0, 2).includes(y)) || (o.slice(2).includes(x) && o.slice(2).includes(y));
+    const reqPairs: [ModePlayer, ModePlayer][] = [];
+    for (let i = 0; i < 4; i++)
+      for (let j = i + 1; j < 4; j++) if (partners.has(pairKey(group[i].id, group[j].id))) reqPairs.push([group[i], group[j]]);
+    if (reqPairs.length > 0) {
+      const ok = allOpts.filter((o) => reqPairs.every(([x, y]) => sameTeam(x, y, o)));
+      if (ok.length > 0) options = ok;
+    }
   }
   let best = options[0];
   let bestCost = Infinity;

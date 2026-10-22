@@ -738,6 +738,8 @@ export interface ServerToClientEvents {
   'clubSession:started': (data: ClubSessionResponse) => void;
   'clubSession:courtsUpdated': (data: ClubSessionResponse) => void;
   'clubSession:ended': (data: { clubSessionId: string; clubId: string }) => void;
+  // 운영진 편성 요청(파트너/같이 안 짜기) 변경 신호 — 클라가 refetch
+  'clubSession:requestsUpdated': (data: { clubSessionId: string }) => void;
   'gameBoard:entryAdded': (data: GameBoardEntryResponse) => void;
   'gameBoard:entryUpdated': (data: GameBoardEntryResponse) => void;
   'gameBoard:entryRemoved': (data: { entryId: string; boardId: string }) => void;

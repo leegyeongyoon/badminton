@@ -6,7 +6,7 @@ import {
 } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useGameBoard, GameBoardEntry } from '../../../hooks/useGameBoard';
-import { gameBoardApi, type SuggestMode, type SuggestTuning, type SessionPace } from '../../../services/gameBoard';
+import { gameBoardApi, type SuggestMode, type SuggestTuning, type SessionPace, type SessionRequest, type RequestKind } from '../../../services/gameBoard';
 import { useTheme } from '../../../hooks/useTheme';
 import { useResponsiveLayout, courtColumnsFor, poolColumnsFor } from '../../../hooks/useResponsiveLayout';
 import type { LayoutChangeEvent } from 'react-native';
@@ -1575,6 +1575,93 @@ export default function OperateScreen() {
     return m ? { tag: m[1], rest: m[2] } : { tag: null, rest: l };
   };
   const memoTagColor = (tag: string | null) => MEMO_TAGS.find((t) => t.key === tag)?.color ?? colors.textSecondary;
+
+  // ─── 운영진 편성 요청 — "철수·영희 대회 파트너 2게임", "민수·지훈 같이 안 짜기" ───
+  // 자동 편성 엔진이 지킨다(파트너=같은 팀, 판수 채우면 자동 종료 / 떼기=같은 게임 금지).
+  // 운영진 전원 실시간 공유(소켓 clubSession:requestsUpdated). 📌 요청·메모 패널에서 관리.
+  const [requests, setRequests] = useState<SessionRequest[]>([]);
+  const loadRequests = useCallback(() => {
+    if (!clubSessionId) return;
+    gameBoardApi.requests(clubSessionId).then(({ data }) => setRequests(data ?? [])).catch(() => {});
+  }, [clubSessionId]);
+  useEffect(() => { loadRequests(); }, [loadRequests]);
+  const handleRequestsUpdated = useCallback((p: { clubSessionId: string }) => {
+    if (!p || p.clubSessionId === clubSessionId) loadRequests();
+  }, [clubSessionId, loadRequests]);
+  useSocketEvent('clubSession:requestsUpdated', handleRequestsUpdated);
+  const addRequest = useCallback(async (kind: RequestKind, aId: string, bId: string, games: number | null) => {
+    if (!clubSessionId) return false;
+    try {
+      const { data } = await gameBoardApi.createRequest(clubSessionId, { kind, aId, bId, games });
+      setRequests(data ?? []);
+      const an = getPlayer(aId)?.userName || '선수';
+      const bn = getPlayer(bId)?.userName || '선수';
+      showSuccess(kind === 'APART' ? `${an}·${bn} 같이 안 짜기` : `${an}·${bn} 파트너${games ? ` ${games}게임` : ' (계속)'}`);
+      return true;
+    } catch (err: any) {
+      showAlert('요청', err?.response?.data?.error || '요청 저장에 실패했어요');
+      return false;
+    }
+  }, [clubSessionId, getPlayer]);
+  // 대기 게임이 요청과 어긋나는지(요청 전에 짜인 게임 등) — 게임 카드에 ⚠ 표시 + '요청대로 다시 짜기'.
+  //  · 같이 안 짜기 두 사람이 같은 게임 · 파트너가 같은 게임인데 상대 팀 · 파트너가 서로 다른 대기 게임
+  const requestIssues = useMemo(() => {
+    const issues = new Map<string, string>();
+    const nm = (id: string) => getPlayer(id)?.userName || '선수';
+    const team = (e: GameBoardEntry, id: string) => (e.teamSplit ? (e.playerIds.indexOf(id) < 2 ? 'A' : 'B') : null);
+    for (const r of requests) {
+      const withA = queuedEntries.find((e) => e.playerIds.includes(r.aId));
+      const withB = queuedEntries.find((e) => e.playerIds.includes(r.bId));
+      if (r.kind === 'APART') {
+        if (withA && withA === withB) issues.set(withA.id, `${nm(r.aId)}·${nm(r.bId)} 같이 안 짜기 요청`);
+        continue;
+      }
+      if (r.remaining === 0) continue;
+      if (withA && withA === withB) {
+        const ta = team(withA, r.aId);
+        if (ta && ta !== team(withA, r.bId)) issues.set(withA.id, `${nm(r.aId)}·${nm(r.bId)} 파트너인데 상대 팀`);
+      } else if (withA && withB) {
+        issues.set(withA.id, `${nm(r.aId)}·${nm(r.bId)} 파트너가 다른 게임에`);
+        issues.set(withB.id, `${nm(r.aId)}·${nm(r.bId)} 파트너가 다른 게임에`);
+      }
+    }
+    return issues;
+  }, [requests, queuedEntries, getPlayer]);
+  const [regenerating, setRegenerating] = useState(false);
+  const regenForRequests = useCallback(async () => {
+    if (!clubSessionId || requestIssues.size === 0) return;
+    setRegenerating(true);
+    try {
+      const ids = Array.from(requestIssues.keys());
+      for (const id of ids) await deleteEntry(id);
+      const { data } = await gameBoardApi.suggest(clubSessionId, { count: ids.length, mode: autoModeRef.current, tuning: autoTuningRef.current });
+      for (const sg of (data?.suggestions ?? []) as { playerIds: string[]; reason?: string; teamSplit?: boolean }[]) {
+        if (sg.playerIds?.length === 4) await createQueueGame(sg.playerIds, sg.reason || undefined, !!sg.teamSplit);
+      }
+      showSuccess(`요청대로 ${ids.length}게임 다시 짰어요 (대기 맨 뒤로)`);
+    } catch (err: any) {
+      showAlert('다시 짜기', err?.response?.data?.error || '다시 짜기에 실패했어요');
+    } finally {
+      setRegenerating(false);
+      loadBoard(); loadPool();
+    }
+  }, [clubSessionId, requestIssues, deleteEntry, createQueueGame, loadBoard, loadPool]);
+  const removeRequest = useCallback(async (id: string) => {
+    if (!clubSessionId) return;
+    try { const { data } = await gameBoardApi.deleteRequest(clubSessionId, id); setRequests(data ?? []); }
+    catch { loadRequests(); }
+  }, [clubSessionId, loadRequests]);
+  // 요청 고르기 창(두 사람 + 종류 + 판수) / 패널 모달(모드1 등) / 말로 부탁하기 입력.
+  const [reqModal, setReqModal] = useState<{ kind: RequestKind; aId: string | null; bId: string | null; games: number | null; q: string } | null>(null);
+  const [requestsOpen, setRequestsOpen] = useState(false);
+  const [askText, setAskText] = useState('');
+  const [asking, setAsking] = useState(false);
+  // '자동으로 돌리는 법' 안내 — 한 번 닫으면 숨김(기기별). 헤더 '사용법'으로 다시 열기.
+  const [guideOpen, setGuideOpen] = useState(false);
+  useEffect(() => {
+    getItem('operate_autoguide_seen').then((v) => { if (v !== '1') setGuideOpen(true); }).catch(() => setGuideOpen(true));
+  }, []);
+  const closeGuide = useCallback(() => { setGuideOpen(false); setItem('operate_autoguide_seen', '1').catch(() => {}); }, []);
   const [poolGenders, setPoolGenders] = useState<string[]>([]);
   const [poolSkills, setPoolSkills] = useState<string[]>([]);
   const toggleIn = (arr: string[], v: string) => (arr.includes(v) ? arr.filter((x) => x !== v) : [...arr, v]);
@@ -1991,6 +2078,8 @@ export default function OperateScreen() {
       case 'lesson': return `레슨 ${nm(a.name)}`;
       case 'addGuest': return `게스트 ${nm(a.guestName)}${a.skill ? ` ${nm(a.skill)}` : ''}`;
       case 'autoFill': return '자동';
+      case 'pairTogether': return `파트너 ${(a.names || []).slice(0, 2).join(' ')}${a.games ? ` ${nm(a.games)}` : ''}`.trim();
+      case 'pairApart': return `떼기 ${(a.names || []).slice(0, 2).join(' ')}`.trim();
       default: return null;
     }
   };
@@ -2033,6 +2122,22 @@ export default function OperateScreen() {
       playingByCourtId.forEach((e) => (e.playerIds || []).forEach((id) => playing.add(id)));
       const inQ = new Set(queuedEntries.flatMap((e) => e.playerIds));
       autoFillQueue(uniquePlayers.filter((m) => !playing.has(m.userId) && !inQ.has(m.userId)).map((m) => m.userId));
+      done(); return;
+    }
+    // 파트너 A B [N] — 두 사람을 같은 팀으로(지금부터 N게임, 생략=정모 내내). 떼기 A B — 같은 게임에 안 넣기.
+    // 자동 편성이 지킨다(📌 요청·메모에 남음). AI 자유 문장("철수 영희 대회 파트너 2게임")도 여기로 온다.
+    if ((head === '파트너' || head === '같이' || head === '떼기' || head === '따로') && tokens[1] && tokens[2]) {
+      const a = matchName(tokens[1]); if (a.err) { showAlert('요청', a.err); return; }
+      const b = matchName(tokens[2]); if (b.err) { showAlert('요청', b.err); return; }
+      if (a.id === b.id) { showAlert('요청', '서로 다른 두 사람을 입력하세요'); return; }
+      const apart = head === '떼기' || head === '따로';
+      const n = tokens[3] ? parseInt(tokens[3].replace(/[^0-9]/g, ''), 10) : NaN;
+      const ok = await addRequest(apart ? 'APART' : 'TOGETHER', a.id!, b.id!, !apart && Number.isFinite(n) && n > 0 ? n : null);
+      if (ok) {
+        const an = getPlayer(a.id!)?.userName || tokens[1];
+        const bn = getPlayer(b.id!)?.userName || tokens[2];
+        showSuccess(apart ? `🚫 ${an}·${bn} 같이 안 짜기 — 자동 편성이 지켜요` : `🤝 ${an}·${bn} 파트너${Number.isFinite(n) && n > 0 ? ` ${n}게임` : ' (계속)'} — 자동 편성이 같은 팀으로 짜요`);
+      }
       done(); return;
     }
     // 교체 A B — 둘 중 "게임(코트/대기 게임)에 있는" 쪽을 빼고 다른 쪽(대기자 등)을 넣는다.
@@ -3788,6 +3893,9 @@ export default function OperateScreen() {
             {entry.teamSplit && !!entry.note && (
               <Text style={[styles.autoReason, { color: colors.textSecondary }]} numberOfLines={1}>🤖 {entry.note}</Text>
             )}
+            {requestIssues.has(entry.id) && (
+              <Text style={[styles.autoReason, { color: colors.warning, fontWeight: '700' }]} numberOfLines={1}>⚠ 요청과 다름 · {requestIssues.get(entry.id)}</Text>
+            )}
           </View>
         </RNAnimated.View>
       );
@@ -4169,6 +4277,25 @@ export default function OperateScreen() {
         </TouchableOpacity>
       )}
       <TouchableOpacity
+        style={[styles.headerLink, headerLinkTouch, { borderColor: colors.primary }]}
+        onPress={() => setRequestsOpen(true)}
+        activeOpacity={0.8}
+        accessibilityLabel="요청·메모 열기"
+      >
+        <Text style={{ fontSize: 14 }}>📌</Text>
+        <Text style={[styles.headerLinkText, { color: colors.primary, fontWeight: '700' }]}>
+          요청{requests.length + memoLines.length > 0 ? ` ${requests.length + memoLines.length}` : ''}
+        </Text>
+      </TouchableOpacity>
+      <TouchableOpacity
+        style={[styles.headerLink, headerLinkTouch, { borderColor: colors.border }]}
+        onPress={() => setGuideOpen(true)}
+        activeOpacity={0.8}
+        accessibilityLabel="자동 편성 사용법"
+      >
+        <Text style={[styles.headerLinkText, { color: colors.primary }]}>사용법</Text>
+      </TouchableOpacity>
+      <TouchableOpacity
         style={[styles.headerLink, headerLinkTouch, { borderColor: colors.border }]}
         onPress={() => setPollModal(true)}
         activeOpacity={0.8}
@@ -4325,8 +4452,238 @@ export default function OperateScreen() {
     </View>
   );
 
+  // ─── 📌 요청·메모 패널 — 운영진 요청(자동 편성이 지킴) + 공유 메모를 한곳에, 크게 ───
+  // 말로 부탁하기: "철수 영희 대회 파트너 2게임" / "민수 지훈 같이 안 짜줘" → AI 해석 → 요청 저장.
+  // 요청이 아닌 문장(예: "철수 영희 민수 지훈 게임 짜줘")은 일반 명령으로 실행, 결과는 명령 로그에.
+  const askAI = async () => {
+    const text = askText.trim();
+    if (!text || !clubSessionId) return;
+    setAsking(true);
+    try {
+      pushLog('user', text);
+      await runParse(text, true);
+      setAskText('');
+    } finally {
+      setAsking(false);
+    }
+  };
+  const saveAsMemo = () => {
+    const text = askText.trim();
+    if (!text) return;
+    saveMemoLines([...memoLines, text]);
+    setAskText('');
+  };
+  const reqDesc = (r: SessionRequest) => {
+    if (r.kind === 'APART') return '같이 안 짜기';
+    if (r.games == null) return `파트너 · 계속${r.playedTogether ? ` (${r.playedTogether}판 함께)` : ''}`;
+    return r.remaining === 0 ? `파트너 ${r.games}판 완료` : `파트너 · ${r.remaining}판 남음`;
+  };
+  const requestsPanel = (
+    <View style={[styles.reqPanel, { backgroundColor: colors.surface, borderColor: colors.primary }]}>
+      <View style={styles.reqHead}>
+        <Text style={[styles.reqTitle, { color: colors.text }]}>📌 요청·메모</Text>
+        <Text style={[styles.reqSub, { color: colors.textLight }]} numberOfLines={1}>자동 편성이 지켜요</Text>
+        <View style={{ flex: 1 }} />
+        <TouchableOpacity
+          onPress={() => setReqModal({ kind: 'TOGETHER', aId: null, bId: null, games: 1, q: '' })}
+          style={[styles.reqAddBtn, { backgroundColor: colors.primary }]}
+          accessibilityLabel="요청 추가"
+        >
+          <Text style={styles.reqAddBtnT}>+ 요청</Text>
+        </TouchableOpacity>
+      </View>
+      {requests.length === 0 && memoLines.length === 0 && (
+        <Text style={[styles.reqEmpty, { color: colors.textLight }]}>예) 철수 영희 대회 파트너 2게임 · 민수 지훈 같이 안 짜줘</Text>
+      )}
+      {requests.map((r) => {
+        const finished = r.kind === 'TOGETHER' && r.remaining === 0;
+        return (
+          <View key={r.id} style={[styles.reqItem, { backgroundColor: r.kind === 'APART' ? colors.dangerBg : colors.primaryBg, opacity: finished ? 0.55 : 1 }]}>
+            <Text style={styles.reqIcon}>{r.kind === 'APART' ? '🚫' : '🤝'}</Text>
+            <View style={{ flex: 1, minWidth: 0 }}>
+              <Text style={[styles.reqItemT, { color: colors.text }]} numberOfLines={1}>{r.aName} · {r.bName}</Text>
+              <Text style={[styles.reqItemS, { color: r.kind === 'APART' ? colors.danger : colors.primary }]} numberOfLines={1}>{reqDesc(r)}</Text>
+            </View>
+            <TouchableOpacity onPress={() => removeRequest(r.id)} hitSlop={8} accessibilityLabel={`요청 삭제: ${r.aName} ${r.bName}`}>
+              <Text style={[styles.reqDel, { color: colors.textLight }]}>✕</Text>
+            </TouchableOpacity>
+          </View>
+        );
+      })}
+      {requestIssues.size > 0 && (
+        <TouchableOpacity
+          onPress={regenForRequests}
+          disabled={regenerating}
+          style={[styles.reqBtn, { flex: 0, backgroundColor: colors.warning }]}
+          accessibilityLabel="요청대로 대기 게임 다시 짜기"
+        >
+          {regenerating ? <ActivityIndicator size="small" color="#fff" /> : (
+            <Text style={[styles.reqBtnT, { color: '#fff' }]}>⚠ 요청과 다른 대기 게임 {requestIssues.size}개 — 요청대로 다시 짜기</Text>
+          )}
+        </TouchableOpacity>
+      )}
+      {memoLines.map((l, i) => {
+        const { tag, rest } = parseMemoLine(l);
+        return (
+          <View key={`m${i}`} style={[styles.reqMemo, { borderColor: colors.border }]}>
+            {!!tag && <View style={[styles.m2MemoBarBadge, { backgroundColor: memoTagColor(tag) }]}><Text style={styles.m2MemoBarBadgeT}>{tag}</Text></View>}
+            <TouchableOpacity style={{ flex: 1, minWidth: 0 }} onPress={() => editMemoLine(i)} accessibilityLabel={`메모 수정: ${rest}`}>
+              <Text style={[styles.reqMemoT, { color: colors.text }]}>{rest || l}</Text>
+            </TouchableOpacity>
+            <TouchableOpacity onPress={() => removeMemoLine(i)} hitSlop={8} accessibilityLabel="메모 삭제">
+              <Text style={[styles.reqDel, { color: colors.textLight }]}>✕</Text>
+            </TouchableOpacity>
+          </View>
+        );
+      })}
+      <TextInput
+        value={askText}
+        onChangeText={setAskText}
+        onSubmitEditing={askAI}
+        returnKeyType="send"
+        placeholder="말로 부탁하기 (예: 철수 영희 파트너 2게임)"
+        placeholderTextColor={colors.textLight}
+        style={[styles.reqInput, { color: colors.text, backgroundColor: colors.surfaceSecondary, borderColor: colors.border }]}
+        accessibilityLabel="요청이나 메모 입력"
+      />
+      <View style={styles.reqBtnRow}>
+        <TouchableOpacity onPress={askAI} disabled={!askText.trim() || asking} style={[styles.reqBtn, { backgroundColor: askText.trim() ? colors.primary : colors.surfaceSecondary }]} accessibilityLabel="AI로 요청 적용">
+          {asking ? <ActivityIndicator size="small" color="#fff" /> : <Text style={[styles.reqBtnT, { color: askText.trim() ? '#fff' : colors.textLight }]}>🤖 AI로 적용</Text>}
+        </TouchableOpacity>
+        <TouchableOpacity onPress={saveAsMemo} disabled={!askText.trim()} style={[styles.reqBtn, { borderWidth: 1, borderColor: colors.border }]} accessibilityLabel="메모로 남기기">
+          <Text style={[styles.reqBtnT, { color: askText.trim() ? colors.text : colors.textLight }]}>메모로 남기기</Text>
+        </TouchableOpacity>
+      </View>
+    </View>
+  );
+
+  // 요청 고르기 창 — 두 사람 탭 → 파트너(1/2/3게임/계속) 또는 같이 안 짜기.
+  // (훅 아님 — 이 아래엔 조건부 return 뒤에서도 실행되는 코드가 있어 useMemo를 쓰면 훅 개수가 달라진다)
+  const reqQuery = (reqModal?.q || '').trim();
+  const reqCandidates = reqModal
+    ? [...uniquePlayers]
+        .filter((m) => !reqQuery || (m.userName || '').includes(reqQuery))
+        .sort((a, b) => (a.userName || '').localeCompare(b.userName || '', 'ko'))
+    : [];
+  const requestModal = reqModal && (
+    <Modal visible transparent animationType="fade" onRequestClose={() => setReqModal(null)}>
+      <View style={styles.reqBackdrop}>
+        <View style={[styles.reqSheet, { backgroundColor: colors.surface }]}>
+          <Text style={[styles.reqTitle, { color: colors.text, marginBottom: 8 }]}>편성 요청</Text>
+          <View style={styles.reqSeg}>
+            {([['TOGETHER', '🤝 파트너로 같이'], ['APART', '🚫 같이 안 짜기']] as const).map(([k, label]) => {
+              const on = reqModal.kind === k;
+              return (
+                <TouchableOpacity key={k} onPress={() => setReqModal({ ...reqModal, kind: k })} style={[styles.reqSegItem, { borderColor: on ? colors.primary : colors.border, backgroundColor: on ? colors.primary : 'transparent' }]}>
+                  <Text style={[styles.reqSegT, { color: on ? '#fff' : colors.textSecondary }]}>{label}</Text>
+                </TouchableOpacity>
+              );
+            })}
+          </View>
+          {reqModal.kind === 'TOGETHER' && (
+            <View style={[styles.reqSeg, { marginTop: 8 }]}>
+              {([[1, '1게임'], [2, '2게임'], [3, '3게임'], [null, '계속']] as const).map(([g, label]) => {
+                const on = reqModal.games === g;
+                return (
+                  <TouchableOpacity key={label} onPress={() => setReqModal({ ...reqModal, games: g })} style={[styles.reqSegItem, { borderColor: on ? colors.secondary : colors.border, backgroundColor: on ? colors.secondary : 'transparent' }]}>
+                    <Text style={[styles.reqSegT, { color: on ? '#fff' : colors.textSecondary }]}>{label}</Text>
+                  </TouchableOpacity>
+                );
+              })}
+            </View>
+          )}
+          <Text style={[styles.reqPickInfo, { color: colors.textSecondary }]}>
+            {reqModal.aId ? getPlayer(reqModal.aId)?.userName : '첫 번째 사람'} · {reqModal.bId ? getPlayer(reqModal.bId)?.userName : '두 번째 사람'} — 이름을 탭해서 고르세요
+          </Text>
+          <TextInput
+            value={reqModal.q}
+            onChangeText={(q) => setReqModal({ ...reqModal, q })}
+            placeholder="이름 검색"
+            placeholderTextColor={colors.textLight}
+            style={[styles.reqInput, { color: colors.text, backgroundColor: colors.surfaceSecondary, borderColor: colors.border }]}
+          />
+          <ScrollView style={{ maxHeight: 260 }} contentContainerStyle={styles.reqNameWrap} keyboardShouldPersistTaps="handled">
+            {reqCandidates.map((m) => {
+              const sel = m.userId === reqModal.aId || m.userId === reqModal.bId;
+              return (
+                <TouchableOpacity
+                  key={m.userId}
+                  onPress={() => {
+                    if (m.userId === reqModal.aId) setReqModal({ ...reqModal, aId: reqModal.bId, bId: null });
+                    else if (m.userId === reqModal.bId) setReqModal({ ...reqModal, bId: null });
+                    else if (!reqModal.aId) setReqModal({ ...reqModal, aId: m.userId });
+                    else setReqModal({ ...reqModal, bId: m.userId });
+                  }}
+                  style={[styles.reqName, { borderColor: sel ? colors.primary : colors.border, backgroundColor: sel ? colors.primary : 'transparent' }]}
+                >
+                  <Text style={[styles.reqNameT, { color: sel ? '#fff' : colors.text }]}>{m.userName}{m.skillLevel ? ` ${m.skillLevel}` : ''}</Text>
+                </TouchableOpacity>
+              );
+            })}
+          </ScrollView>
+          <View style={[styles.reqBtnRow, { marginTop: 10 }]}>
+            <TouchableOpacity onPress={() => setReqModal(null)} style={[styles.reqBtn, { borderWidth: 1, borderColor: colors.border }]}>
+              <Text style={[styles.reqBtnT, { color: colors.text }]}>취소</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              disabled={!reqModal.aId || !reqModal.bId}
+              onPress={async () => {
+                if (!reqModal.aId || !reqModal.bId) return;
+                const ok = await addRequest(reqModal.kind, reqModal.aId, reqModal.bId, reqModal.kind === 'TOGETHER' ? reqModal.games : null);
+                if (ok) setReqModal(null);
+              }}
+              style={[styles.reqBtn, { backgroundColor: reqModal.aId && reqModal.bId ? colors.primary : colors.surfaceSecondary }]}
+            >
+              <Text style={[styles.reqBtnT, { color: reqModal.aId && reqModal.bId ? '#fff' : colors.textLight }]}>저장</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </View>
+    </Modal>
+  );
+
+  // '자동으로 돌리는 법' — 처음 들어온 운영자에게 한 번. 헤더 '사용법'으로 다시 열기.
+  const autoGuide = guideOpen && (
+    <View style={[styles.guideCard, { backgroundColor: colors.primaryBg, borderColor: colors.primary }]}>
+      <View style={styles.reqHead}>
+        <Text style={[styles.reqTitle, { color: colors.text }]}>자동으로 돌리는 법</Text>
+        <View style={{ flex: 1 }} />
+        <TouchableOpacity onPress={closeGuide} hitSlop={8} accessibilityLabel="사용법 닫기">
+          <Text style={[styles.reqBtnT, { color: colors.primary }]}>알겠어요</Text>
+        </TouchableOpacity>
+      </View>
+      {[
+        ['1', '상단 🤖 자동 편성 켜기', '다음 게임이 팀(A vs B)·이유까지 자동으로 짜여요. 우리 모임 기록대로 묶어요.'],
+        ['2', '게임이 끝나면 코트의 종료만', '끝난 사람은 알아서 다음 판 후보로 들어가요.'],
+        ['3', '빈 코트를 탭해 투입', '코트를 우리만 쓰는 날엔 자동 편성 줄의 "코트 비면 자동 투입"을 켜면 이것도 자동.'],
+        ['4', '고칠 땐 이름을 끌어 옮기기', '파트너·같이 안 짜기 같은 부탁은 📌 요청·메모에 남기면 자동 편성이 지켜요.'],
+      ].map(([n, t, d]) => (
+        <View key={n} style={styles.guideRow}>
+          <View style={[styles.guideNum, { backgroundColor: colors.primary }]}><Text style={styles.guideNumT}>{n}</Text></View>
+          <View style={{ flex: 1, minWidth: 0 }}>
+            <Text style={[styles.guideT, { color: colors.text }]}>{t}</Text>
+            <Text style={[styles.guideD, { color: colors.textSecondary }]}>{d}</Text>
+          </View>
+        </View>
+      ))}
+    </View>
+  );
+
   const modals = (
     <>
+      {requestModal}
+      {requestsOpen && (
+        <Modal visible transparent animationType="fade" onRequestClose={() => setRequestsOpen(false)}>
+          <View style={styles.reqBackdrop}>
+            <View style={[styles.reqSheet, { backgroundColor: colors.surface, padding: 0 }]}>
+              <ScrollView style={{ maxHeight: 520 }} keyboardShouldPersistTaps="handled">{requestsPanel}</ScrollView>
+              <TouchableOpacity onPress={() => setRequestsOpen(false)} style={[styles.reqBtn, { margin: 10, borderWidth: 1, borderColor: colors.border }]}>
+                <Text style={[styles.reqBtnT, { color: colors.text }]}>닫기</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </Modal>
+      )}
       {pollModal && clubSessionId && <CreatePollModal clubSessionId={clubSessionId} onClose={() => setPollModal(false)} />}
       {gameLogOpen && clubSessionId && <GameLog clubSessionId={clubSessionId} onClose={() => setGameLogOpen(false)} />}
       {guestModal && <AddGuestModal sessionId={clubSessionId!} colors={colors} onClose={() => setGuestModal(false)} onAdded={() => { setGuestModal(false); loadPool(); }} />}
@@ -5217,6 +5574,9 @@ export default function OperateScreen() {
         {frame.teamSplit && full && !!frame.note && (
           <Text style={[styles.autoReason, { color: colors.textSecondary }]} numberOfLines={1}>🤖 {frame.note}</Text>
         )}
+        {!!frame.id && requestIssues.has(frame.id) && (
+          <Text style={[styles.autoReason, { color: colors.warning, fontWeight: '700' }]} numberOfLines={1}>⚠ 요청과 다름 · {requestIssues.get(frame.id)}</Text>
+        )}
       </View>
     );
   };
@@ -5355,6 +5715,7 @@ export default function OperateScreen() {
         </View>
         {/* 오른쪽 대기판 = 대기 명단을 '같이 나온 4명'끼리 한 줄로 정렬. 그 4명을 탭→다음 게임으로 재편성. */}
         <View style={[styles.m2PoolRight, { borderLeftColor: colors.border, width: m2RightWidth }]}>
+          {requestsPanel}
           <Text style={[styles.m2PanelTitle, { color: colors.text }]}>대기 명단 ({pool.length}) · 급수순</Text>
           {/* 대기 명단 검색 + 성별 필터 — 가운데 게임은 그대로, 대기만 추림 */}
           <View style={styles.m2PoolSearchRow}>
@@ -5510,43 +5871,8 @@ export default function OperateScreen() {
       <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]}>
         {Header}
         {ModeTabs}
-        {/* 상단 항상 보이는 '운영 노트' 바 — 편성 맥락(#주의/#파트너/#결석/#일반)을 한 줄씩 실시간 공유 */}
-        <View style={[styles.m2MemoBar, { backgroundColor: colors.surface, borderBottomColor: colors.border }]}>
-          <Text style={styles.m2MemoBarIcon}>🗒</Text>
-          <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ flex: 1 }} contentContainerStyle={styles.m2MemoBarList} keyboardShouldPersistTaps="handled">
-            {memoLines.length === 0 ? (
-              <Text style={[styles.m2MemoBarEmpty, { color: colors.textLight }]}>운영 노트 — 오른쪽에서 #태그 골라 한 줄씩 남기면 운영진 전원에게 실시간 공유돼요</Text>
-            ) : memoLines.map((l, i) => {
-              const { tag, rest } = parseMemoLine(l);
-              return (
-                <View key={i} style={[styles.m2MemoBarChip, { backgroundColor: colors.surfaceSecondary }]}>
-                  <TouchableOpacity style={styles.m2MemoBarChipMain} onPress={() => editMemoLine(i)} accessibilityLabel={`노트 수정: ${rest}`}>
-                    {!!tag && <View style={[styles.m2MemoBarBadge, { backgroundColor: memoTagColor(tag) }]}><Text style={styles.m2MemoBarBadgeT}>{tag}</Text></View>}
-                    <Text style={[styles.m2MemoBarChipT, { color: colors.text }]} numberOfLines={1}>{rest || (tag ? '' : l)}</Text>
-                  </TouchableOpacity>
-                  <TouchableOpacity onPress={() => removeMemoLine(i)} hitSlop={6} style={styles.m2MemoBarDel} accessibilityLabel="노트 줄 삭제"><Text style={[styles.m2MemoBarDelT, { color: colors.textLight }]}>✕</Text></TouchableOpacity>
-                </View>
-              );
-            })}
-          </ScrollView>
-          <View style={styles.m2MemoBarInputWrap}>
-            {MEMO_TAGS.map((t) => {
-              const on = lineTag === t.key;
-              return (
-                <TouchableOpacity key={t.key} onPress={() => { setLineTag(on ? null : t.key); memoInputRef.current?.focus?.(); }}
-                  style={[styles.m2MemoBarTag, { borderColor: t.color, backgroundColor: on ? t.color : 'transparent' }]}>
-                  <Text style={[styles.m2MemoBarTagT, { color: on ? '#fff' : t.color }]}>#{t.key}</Text>
-                </TouchableOpacity>
-              );
-            })}
-            <TextInput ref={memoInputRef} testID="memoLineInput" value={lineInput} onChangeText={setLineInput} onSubmitEditing={addMemoLine} returnKeyType="done" blurOnSubmit={false}
-              placeholder={lineTag ? `#${lineTag} 내용…` : '메모 추가…'} placeholderTextColor={colors.textLight}
-              style={[styles.m2MemoBarInput, { color: colors.text, backgroundColor: colors.surfaceSecondary, borderColor: colors.border }]} />
-            <TouchableOpacity onPress={addMemoLine} disabled={!lineInput.trim()} style={[styles.m2MemoBarAdd, { backgroundColor: lineInput.trim() ? colors.primary : colors.surfaceSecondary }]} accessibilityLabel="노트 줄 추가">
-              <Text style={[styles.m2MemoBarAddT, { color: lineInput.trim() ? '#fff' : colors.textLight }]}>추가</Text>
-            </TouchableOpacity>
-          </View>
-        </View>
+        {/* 운영 노트는 오른쪽 📌 요청·메모 패널로 이동(크게·요청과 함께). 처음 온 운영자에겐 사용법 카드. */}
+        {autoGuide}
         {BoardMode2}
         {DragOverlay}
         {QueueDragOverlay}
@@ -7132,6 +7458,39 @@ const styles = StyleSheet.create({
   vsInline: { fontSize: 12, fontWeight: '800', alignSelf: 'center', paddingHorizontal: 2 },
   vsRow: { width: '100%', textAlign: 'center', fontSize: 11, fontWeight: '800', marginVertical: -2 },
   autoReason: { fontSize: 11, marginTop: 4 },
+  reqPanel: { borderWidth: 1.5, borderRadius: radius.md, padding: 10, gap: 6, marginBottom: 10 },
+  reqHead: { flexDirection: 'row', alignItems: 'center', gap: 6 },
+  reqTitle: { fontSize: 15, fontWeight: '800' },
+  reqSub: { fontSize: 11, flexShrink: 1 },
+  reqAddBtn: { borderRadius: radius.pill, paddingHorizontal: 12, paddingVertical: 6 },
+  reqAddBtnT: { color: '#fff', fontSize: 13, fontWeight: '800' },
+  reqEmpty: { fontSize: 12, lineHeight: 17 },
+  reqItem: { flexDirection: 'row', alignItems: 'center', gap: 8, borderRadius: radius.sm, paddingHorizontal: 10, paddingVertical: 8 },
+  reqIcon: { fontSize: 16 },
+  reqItemT: { fontSize: 14, fontWeight: '700' },
+  reqItemS: { fontSize: 12, fontWeight: '700', marginTop: 1 },
+  reqDel: { fontSize: 15, fontWeight: '700', paddingHorizontal: 2 },
+  reqMemo: { flexDirection: 'row', alignItems: 'center', gap: 6, borderWidth: 1, borderRadius: radius.sm, paddingHorizontal: 8, paddingVertical: 7 },
+  reqMemoT: { fontSize: 14, lineHeight: 19 },
+  reqInput: { borderWidth: 1, borderRadius: radius.sm, paddingHorizontal: 10, paddingVertical: Platform.OS === 'web' ? 9 : 7, fontSize: 14 },
+  reqBtnRow: { flexDirection: 'row', gap: 6 },
+  reqBtn: { flex: 1, borderRadius: radius.sm, paddingVertical: 9, alignItems: 'center', justifyContent: 'center' },
+  reqBtnT: { fontSize: 13, fontWeight: '800' },
+  reqBackdrop: { flex: 1, backgroundColor: 'rgba(0,0,0,0.35)', alignItems: 'center', justifyContent: 'center', padding: 16 },
+  reqSheet: { width: '100%', maxWidth: 480, borderRadius: radius.lg, padding: 16 },
+  reqSeg: { flexDirection: 'row', flexWrap: 'wrap', gap: 6 },
+  reqSegItem: { borderWidth: 1.5, borderRadius: radius.pill, paddingHorizontal: 12, paddingVertical: 7 },
+  reqSegT: { fontSize: 13, fontWeight: '700' },
+  reqPickInfo: { fontSize: 12, marginTop: 10, marginBottom: 6 },
+  reqNameWrap: { flexDirection: 'row', flexWrap: 'wrap', gap: 6, paddingTop: 8 },
+  reqName: { borderWidth: 1, borderRadius: radius.pill, paddingHorizontal: 10, paddingVertical: 6 },
+  reqNameT: { fontSize: 13, fontWeight: '600' },
+  guideCard: { borderWidth: 1.5, borderRadius: radius.md, padding: 12, gap: 8, marginHorizontal: 12, marginTop: 8 },
+  guideRow: { flexDirection: 'row', gap: 10, alignItems: 'flex-start' },
+  guideNum: { width: 22, height: 22, borderRadius: 11, alignItems: 'center', justifyContent: 'center', marginTop: 1 },
+  guideNumT: { color: '#fff', fontSize: 12, fontWeight: '800' },
+  guideT: { fontSize: 14, fontWeight: '800' },
+  guideD: { fontSize: 12, lineHeight: 17, marginTop: 1 },
   miniChip: {
     flex: 1, flexBasis: 0, minWidth: 0,
     flexDirection: 'row', alignItems: 'center', gap: spacing.xs,

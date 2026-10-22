@@ -473,6 +473,15 @@ export const suggestFoursomeSchema = z.object({
 // Create a court-less QUEUED game appended to the end of the global queue.
 // playerIds: 1~4 — the operator can draft a partial group (2~3) and add more
 // while editing; not forced to a fixed 4.
+// 운영진 편성 요청 — TOGETHER(파트너로 같이, games=지금부터 N판 / 비우면 계속) · APART(같이 안 짜기)
+export const createSessionRequestSchema = z.object({
+  kind: z.enum(['TOGETHER', 'APART']),
+  aId: z.string().uuid(),
+  bId: z.string().uuid(),
+  games: z.number().int().min(1).max(20).nullable().optional(),
+  note: z.string().max(100).nullable().optional(),
+});
+
 export const createQueueGameSchema = z.object({
   playerIds: z.array(z.string().uuid()).min(1).max(4),
   note: z.string().max(100).optional(),

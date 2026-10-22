@@ -12,8 +12,10 @@ import {
   type ModePlayer,
   type SuggestTuning,
   type StyleScorer,
+  type RequestHooks,
 } from './suggest.algorithm';
 import { getClubStyle, styleUtility, type ClubStyle } from './clubStyle';
+import { activeRequestsForEngine } from './sessionRequest.service';
 
 // Map a SkillLevel enum (S strongest … F weakest; null=미설정) to a number used
 // by the mode-based matching. null → 4 (mid), matching the spec.
@@ -858,6 +860,60 @@ export async function suggestNextFoursome(
       styleUtility(style, group.map((p) => ({ id: p.id, skill: p.skill, gender: p.gender, guest: guestIds.has(p.id) })));
   }
 
+  // ── 운영진 요청(파트너로 같이 N게임 / 같이 안 짜기) ──
+  // 같이 친 판수 = 실제 시작된 판 + 대기 게임에 이미 함께 잡힌 판 + 이번 호출에서 짠 판. 목표 판수를
+  // 채우면 그 파트너 요청은 더 이상 적용 안 함. '같이 안 짜기'는 사실상 금지(큰 비용).
+  const TOGETHER_BONUS = 4; // 파트너 둘이 함께면 공평 비용에서 4게임 상당 가산(후보 안에서 확실히 묶이게)
+  const PARTNER_MISSING = 2.5; // 파트너가 후보로 비어 있는데 한 명만 넣으면 비용(둘을 같이 기다리게)
+  const APART_COST = 1000;
+  const requests = await activeRequestsForEngine(clubSessionId);
+  const apartKeys = new Set(requests.filter((r) => r.kind === 'APART').map((r) => pkey(r.aId, r.bId)));
+  const togetherReqs = requests.filter((r) => r.kind === 'TOGETHER');
+  const togetherSoFar: Record<string, number> = {};
+  for (const r of togetherReqs) togetherSoFar[pkey(r.aId, r.bId)] = r.played;
+  for (const e of queued) {
+    const ids = (e.playerIds as string[]) ?? [];
+    for (let i = 0; i < ids.length; i++)
+      for (let j = i + 1; j < ids.length; j++) {
+        const k = pkey(ids[i], ids[j]);
+        if (k in togetherSoFar) togetherSoFar[k] += 1;
+      }
+  }
+  const activeTogether = () =>
+    new Set(
+      togetherReqs
+        .filter((r) => r.games == null || togetherSoFar[pkey(r.aId, r.bId)] < r.games)
+        .map((r) => pkey(r.aId, r.bId)),
+    );
+  const requestHooks = (activeKeys: Set<string>, availableIds: Set<string>): RequestHooks | undefined => {
+    if (apartKeys.size === 0 && activeKeys.size === 0) return undefined;
+    const partnerOf = new Map<string, string[]>();
+    for (const k of activeKeys) {
+      const [x, y] = k.split('|');
+      partnerOf.set(x, [...(partnerOf.get(x) ?? []), y]);
+      partnerOf.set(y, [...(partnerOf.get(y) ?? []), x]);
+    }
+    return {
+      companions: partnerOf,
+      score: (group) => {
+        const ids = group.map((p) => p.id);
+        const inGroup = new Set(ids);
+        let c = 0;
+        for (let i = 0; i < ids.length; i++)
+          for (let j = i + 1; j < ids.length; j++) {
+            const k = pkey(ids[i], ids[j]);
+            if (apartKeys.has(k)) c += APART_COST;
+            if (activeKeys.has(k)) c -= TOGETHER_BONUS;
+          }
+        for (const id of ids)
+          for (const partner of partnerOf.get(id) ?? [])
+            if (!inGroup.has(partner) && availableIds.has(partner)) c += PARTNER_MISSING;
+        return c;
+      },
+    };
+  };
+  let slotActive = activeTogether();
+
   // 이유 문구용 — 이번 정모에서 실제로 같은 게임에 들어간 횟수(감쇠 없는 원본).
   const pairCount: Record<string, number> = {};
   for (const g of sessionGames) {
@@ -878,6 +934,11 @@ export async function suggestNextFoursome(
   // 왜 이 4명인지 — 운영자가 바로 납득할 수 있게 1줄(최대 100자).
   const buildReason = (ordered: ModePlayer[], at: number): string => {
     const parts: string[] = [];
+    // 운영진 요청을 반영한 판이면 맨 앞에 표시.
+    for (let i = 0; i < ordered.length; i++)
+      for (let j = i + 1; j < ordered.length; j++)
+        if (slotActive.has(pkey(ordered[i].id, ordered[j].id)))
+          parts.push(`요청: ${poolNames.get(ordered[i].id) ?? ''}·${poolNames.get(ordered[j].id) ?? ''} 파트너`);
     const startsIn = Math.round((at - nowMs) / 60000);
     if (startsIn >= 2) parts.push(`약 ${startsIn}분 뒤 시작`);
     // 운영진 방식(시간 기준) 표시: 코트에서 곧 끝나는 사람 / 앞 판에 이어서 치는 사람.
@@ -917,14 +978,27 @@ export async function suggestNextFoursome(
     if (available.length < 4) break;
     const byId = new Map(available.map((p) => [p.id, p]));
 
-    const picked = selectFoursomeByMode(available, mode, pairWeight, 4, undefined, tuning, styleScorer);
+    slotActive = activeTogether();
+    const hooks = requestHooks(slotActive, new Set(available.map((p) => p.id)));
+    const picked = selectFoursomeByMode(available, mode, pairWeight, 4, undefined, tuning, styleScorer, hooks);
     if (picked.playerIds.length < 4) break;
 
     // 팀까지 짜준다 — 실효 급수 합이 가장 비슷한 2:2(남녀 2:2면 각 팀 남녀 1명씩), 순서 [A1, A2, B1, B2].
-    const ordered = splitTeams(picked.playerIds.map((id) => byId.get(id)!).filter(Boolean), tune.genderOffsetFemale, pairWeight);
+    const ordered = splitTeams(
+      picked.playerIds.map((id) => byId.get(id)!).filter(Boolean),
+      tune.genderOffsetFemale,
+      pairWeight,
+      slotActive,
+    );
     slotPlayerIds.push(ordered.map((p) => p.id));
     slotReasons.push(buildReason(ordered, slotStart));
     slotStarts.push(slotStart);
+    // 파트너 요청 판수 진행(이번 호출 다음 슬롯부터 목표 판수 반영).
+    for (let i = 0; i < picked.playerIds.length; i++)
+      for (let j = i + 1; j < picked.playerIds.length; j++) {
+        const k = pkey(picked.playerIds[i], picked.playerIds[j]);
+        if (k in togetherSoFar) togetherSoFar[k] += 1;
+      }
 
     // 다음 슬롯을 위해 시뮬레이션 갱신: 이 판이 코트를 차지 → 끝나면 이 4명이 비고, 판수 +1.
     const startAt = Math.max(popEarliest(), slotStart);

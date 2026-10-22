@@ -2,6 +2,7 @@ import { Router, Request, Response, NextFunction } from 'express';
 import {
   suggestFoursomeSchema,
   createQueueGameSchema,
+  createSessionRequestSchema,
   reorderQueueSchema,
   assignEntrySchema,
 } from '@badminton/shared';
@@ -23,6 +24,8 @@ import {
   unassignEntryByCourt,
   updateTagLayout,
 } from './gameBoard.service';
+
+import { listRequests, createRequest, deleteRequest } from './sessionRequest.service';
 
 const router = Router();
 
@@ -46,6 +49,37 @@ router.post(
     }
   },
 );
+
+// ── 운영진 편성 요청(파트너로 같이 N게임 / 같이 안 짜기) — 자동 편성이 지킨다. 대표/운영진만. ──
+// GET    /club-sessions/:id/requests
+// POST   /club-sessions/:id/requests      { kind, aId, bId, games?, note? }
+// DELETE /club-sessions/:id/requests/:rid
+router.get('/:id/requests', authenticate, async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    res.json(await listRequests(req.params.id as string, req.user!.userId));
+  } catch (err) {
+    next(err);
+  }
+});
+router.post(
+  '/:id/requests',
+  authenticate,
+  validate(createSessionRequestSchema),
+  async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      res.status(201).json(await createRequest(req.params.id as string, req.user!.userId, req.body));
+    } catch (err) {
+      next(err);
+    }
+  },
+);
+router.delete('/:id/requests/:rid', authenticate, async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    res.json(await deleteRequest(req.params.id as string, req.params.rid as string, req.user!.userId));
+  } catch (err) {
+    next(err);
+  }
+});
 
 // GET /club-sessions/:id/pace — 이 클럽의 실데이터 판당 시간 + 정모 1인 주기.
 // 운영판 '코트 언제 비나' 예측 기본값 + 자동 편성 공평 주기 표시용. 읽기 전용.

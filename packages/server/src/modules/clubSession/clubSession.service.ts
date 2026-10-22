@@ -1500,6 +1500,8 @@ export async function parseCommand(
     '- lesson {name}                 // 레슨 토글',
     '- addGuest {guestName, skill?}  // 게스트 추가',
     '- autoFill {}                   // 자동 편성',
+    '- pairTogether {names:[두 명], games?:숫자}  // 두 사람을 파트너(같은 팀)로 같이 치게 하는 요청. "철수 영희 대회 파트너", "철수랑 영희 같이 2게임 짜줘" → games=2. 판수를 말 안 하면 games 생략(정모 내내).',
+    '- pairApart {names:[두 명]}      // 두 사람을 같은 게임에 넣지 않는 요청. "철수 영희 같이 안 짜줘 / 떼어줘 / 붙이지 마".',
     '- unknown {reason}              // 못 알아듣거나 애매함',
     '편성(compose/assign)에서 사람을 고를 때 names 에 4명을 채워라(사용자가 일부만 말하면 나머지는 네가 골라 4명, 말한 사람은 반드시 포함).',
     '고르는 기본 원칙: ① 급수를 비슷하게 — 특히 이름이 주어지면(예: "안지민 게임 짜줘", 안지민=C) 그 사람과 급수 차가 작은 사람들로 채운다(C면 B~D 위주). 급수가 멀리 떨어진 조합(예: C와 F, A와 F를 한 게임)은 피한다. ② 오늘 판수가 적어 오래 기다린 사람 우선 ③ 레슨중이거나 이미 위 "대기 게임"에 든 사람은 제외. (명단 앞에서부터 그냥 4명 집지 마라 — 반드시 급수를 보고 골라라.)',
@@ -1510,6 +1512,7 @@ export async function parseCommand(
     '예) {"action":"swap","out":"홍길동","in":"김철수"}',
     '예) {"action":"assign","court":3,"names":["홍길동","김철수","이영희","박민수"]}',
     '예) {"action":"delete","gameNo":2}   예) {"action":"checkInAll"}   예) {"action":"autoFill"}',
+    '예) {"action":"pairTogether","names":["홍길동","김철수"],"games":2}   예) {"action":"pairApart","names":["이영희","박민수"]}',
     '규칙: names/name/out/in 의 사람 이름은 반드시 위 출석자 명단의 "정확한 이름"으로 출력(급수 괄호 제외). 명단에 없거나 애매하면 {"action":"unknown","reason":"..."}. court/gameNo 는 숫자. 설명 없이 JSON 객체 하나만 출력.',
   ].join('\n');
 

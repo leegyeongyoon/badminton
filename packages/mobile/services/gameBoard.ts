@@ -24,6 +24,22 @@ export type ClubStyleSummary = {
   trainedAt: string;
 };
 
+// 운영진 편성 요청 — 자동 편성이 지킨다. TOGETHER=파트너로 같이(games 판, null=계속), APART=같이 안 짜기.
+export type RequestKind = 'TOGETHER' | 'APART';
+export type SessionRequest = {
+  id: string;
+  kind: RequestKind;
+  aId: string;
+  bId: string;
+  aName: string;
+  bName: string;
+  games: number | null;        // 목표 누적 판수(서버가 '지금부터 N판'을 누적치로 저장)
+  playedTogether: number;      // 이번 정모에서 실제 같이 친 판수
+  remaining: number | null;    // 남은 판수(0=완료), APART·계속은 null
+  note: string | null;
+  createdAt: string;
+};
+
 // 정모 페이스(실데이터) — 판당 시간 + 1인 주기 + 학습 스타일.
 export type SessionPace = {
   medianGameMin: number;
@@ -71,6 +87,15 @@ export const gameBoardApi = {
     clubSessionId: string,
     body?: { courtId?: string; count?: number; mode?: SuggestMode; exclude?: string[]; tuning?: SuggestTuning },
   ) => api.post(`/club-sessions/${clubSessionId}/suggest`, body ?? {}),
+
+  // 운영진 편성 요청(파트너/같이 안 짜기) — 목록·추가(같은 두 사람이면 교체)·삭제. 대표/운영진만.
+  requests: (clubSessionId: string) => api.get<SessionRequest[]>(`/club-sessions/${clubSessionId}/requests`),
+  createRequest: (
+    clubSessionId: string,
+    body: { kind: RequestKind; aId: string; bId: string; games?: number | null; note?: string | null },
+  ) => api.post<SessionRequest[]>(`/club-sessions/${clubSessionId}/requests`, body),
+  deleteRequest: (clubSessionId: string, requestId: string) =>
+    api.delete<SessionRequest[]>(`/club-sessions/${clubSessionId}/requests/${requestId}`),
 
   // 이 모임 실데이터 판당 시간·1인 주기·학습 스타일(읽기 전용)
   pace: (clubSessionId: string) => api.get<SessionPace>(`/club-sessions/${clubSessionId}/pace`),
