@@ -352,8 +352,10 @@ export default function OperateScreen() {
     if (!autoAssignKey || !autoAssignLoadedRef.current) return;
     setItem(autoAssignKey, autoAssign ? '1' : '0').catch(() => {});
   }, [autoAssign, autoAssignKey]);
-  // 자동 편성 매칭 모드(기본 '비슷한 급수'). 정모별 저장.
-  const [autoMode, setAutoMode] = useState<SuggestMode>('similar');
+  // 자동 편성 매칭 모드(기본 '공평'). 정모별 저장. 예전 기본 '비슷한 급수'는 터닝 재생 평가에서
+  // 운영진보다 급수를 과하게 좁혔다(급수 폭 0.75 vs 운영진 1.70) — 급수 묶는 방식은 모임 학습
+  // 스타일이 운영진 기록대로 맡는다.
+  const [autoMode, setAutoMode] = useState<SuggestMode>('fair');
   const autoModeKey = clubSessionId ? `operate_automode_${clubSessionId}` : null;
   const autoModeLoadedRef = useRef(false);
   useEffect(() => {
@@ -405,7 +407,7 @@ export default function OperateScreen() {
   // 비동기 패스에서 최신 값을 읽는 미러 ref + 동시 실행 방지 락 + 최신 패스 fn ref.
   const autoPilotRef = useRef(false);
   useEffect(() => { autoPilotRef.current = autoPilot; }, [autoPilot]);
-  const autoModeRef = useRef<SuggestMode>('similar');
+  const autoModeRef = useRef<SuggestMode>('fair');
   useEffect(() => { autoModeRef.current = autoMode; }, [autoMode]);
   const autoTuningRef = useRef<Required<SuggestTuning>>(AUTO_TUNING_DEFAULT);
   useEffect(() => { autoTuningRef.current = autoTuning; }, [autoTuning]);
@@ -1310,9 +1312,9 @@ export default function OperateScreen() {
     setSuggestNote(null);
     setModeChooserOpen(false);
     try {
-      // Exclude players already STAGED in the tray + those already placed in a
-      // QUEUED upcoming game, so building game-after-game uses fresh people.
-      const exclude = Array.from(new Set([...staged, ...queuedPlayerIds]));
+      // 트레이에 올려둔 사람만 제외. 대기 게임에 이미 있는 사람은 서버가 '그 게임이 끝나는
+      // 시각'으로 계산해 이어지는 판에 넣을 수 있다(운영진 방식 — 시간 기준 후보).
+      const exclude = Array.from(new Set([...staged]));
       const { playerIds, effectiveMode, note } = await suggestNext({ mode, exclude, tuning: autoTuning });
       if (!playerIds || playerIds.length < 4) {
         setSuggestNote('추천할 수 있는 인원이 부족해요 (최소 4명)');
@@ -1751,7 +1753,8 @@ export default function OperateScreen() {
         let reason: string | undefined;
         let teamSplit = false;
         try {
-          const r = await suggestNext({ mode: autoModeRef.current, exclude: placed, tuning: autoTuningRef.current });
+          // 방금 만든 대기 게임은 서버 시뮬레이션에 반영되므로 별도 제외 없이 요청(이어지는 판 가능).
+          const r = await suggestNext({ mode: autoModeRef.current, tuning: autoTuningRef.current });
           ids = r.playerIds ?? [];
           reason = r.reason || undefined;
           teamSplit = !!r.teamSplit;

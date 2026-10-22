@@ -612,112 +612,154 @@ export async function suggestNextFoursome(
   }
 
   const now = new Date();
+  const nowMs = now.getTime();
   const count = opts.count ?? 1;
 
-  // Active check-ins for this club session
+  // ─────────────────────────────────────────────────────────────────────────
+  // 후보: '쉬는 사람 우선, 모자라면 시간 기준'(혼합). 터닝 재생 평가(뒤 20% 정모 596편성):
+  //  · 쉬는 사람이 4명 이상인 순간엔 쉬는 사람 중에서 고르는 게 운영진과 가장 비슷(같은 사람
+  //    45% vs 시간 기준 38%) → 그대로 쉬는 사람 우선.
+  //  · 쉬는 사람이 4명 미만인 순간(전체의 36%)엔 예전 엔진은 아무것도 못 짰다 → 이때만 아래
+  //    시간 기준으로 '곧 끝날 사람'까지 넣어 미리 짠다(운영진 방식).
+  // 시간 기준 후보(운영진 방식). 터닝포인트 3,047편성 분석(2026-10): 운영진은 코트 시작
+  // ~16분 전에 미리 짜고, 편성의 70%에 '지금 코트에서 치는 중(평균 6분 남음)'인 사람을,
+  // 1,258명은 '이미 앞 대기 게임에 있는' 사람을 넣었다. 즉 기준은 '지금 쉬는 사람'이 아니라
+  // '이 게임이 시작될 때 비어 있을 사람'. 그래서:
+  //   ① 코트별 종료 예상(진행 중 = 시작 + 판당 시간)
+  //   ② 이미 짠 대기 게임을 순서대로 코트에 배치하는 시뮬레이션 → 각자 '비는 시각'
+  //   ③ 새 게임 시작 예상 S = 가장 먼저 비는 코트
+  //   ④ 후보 = S(+2분)까지 비는 사람 · 대기/체류/판수는 S 기준
+  // 실제 코트 투입은 registerTurn 가드가 '다른 코트에서 게임 중'이면 막으므로 물리적 모순 없음.
+  // ─────────────────────────────────────────────────────────────────────────
+  const SLACK_MS = 2 * 60 * 1000;
+
   const checkins = await prisma.checkIn.findMany({
     where: { clubSessionId, checkedOutAt: null },
-    select: { userId: true, restingAt: true, isInLesson: true },
+    select: { userId: true, restingAt: true, isInLesson: true, checkedInAt: true },
   });
-
-  // Exclusion sets ------------------------------------------------------------
-  // Resting users
   const restingIds = new Set(checkins.filter((c) => c.restingAt).map((c) => c.userId));
-
   // 레슨 중인 사람 — 자동 추천에서 제외(레슨자 박스로 분리, 수동으로만 코트 배정).
   const inLessonIds = new Set(checkins.filter((c) => c.isInLesson).map((c) => c.userId));
+  const penalizedIds = new Set(
+    (await prisma.noShowRecord.findMany({ where: { penaltyEndsAt: { gt: now } }, select: { userId: true } })).map(
+      (p) => p.userId,
+    ),
+  );
+  // 운영자가 트레이에 올려둔(아직 대기 게임이 아닌) 사람 등 — 클라이언트 지정 제외.
+  const excludeIds = new Set(opts.exclude ?? []);
+  // 코트 앞에 줄 선(WAITING) 순번은 언제 시작할지 몰라 제외(보드 흐름에선 드묾).
+  const waitingTurnIds = new Set(
+    (
+      await prisma.turnPlayer.findMany({
+        where: { turn: { clubSessionId, status: 'WAITING' } },
+        select: { userId: true },
+      })
+    ).map((t) => t.userId),
+  );
 
-  // Users currently in a WAITING/PLAYING turn
-  const inTurn = await prisma.turnPlayer.findMany({
-    where: { turn: { status: { in: ['WAITING', 'PLAYING'] } } },
-    select: { userId: true },
+  const pace = await getClubPace(clubSession.clubId);
+  const elapsedMin = (nowMs - clubSession.startedAt.getTime()) / 60000;
+  const gameMs = (elapsedMin < 60 ? pace.firstHourGameMin : pace.laterGameMin) * 60 * 1000;
+
+  // ① 코트 종료 예상
+  const courts = await prisma.court.findMany({
+    where: { clubSessionId, status: { not: 'MAINTENANCE' } },
+    select: {
+      id: true,
+      turns: {
+        where: { status: 'PLAYING', startedAt: { not: null } },
+        select: { startedAt: true, players: { select: { userId: true } } },
+      },
+    },
   });
-  const inTurnIds = new Set(inTurn.map((t) => t.userId));
+  const availMs = new Map<string, number>(); // 확정 일정(진행·대기 게임)이 끝나는 시각
+  const committedGames: Record<string, number> = {}; // 대기 게임으로 잡힌 판수
+  const courtFree: number[] = [];
+  for (const c of courts) {
+    const playing = c.turns[0];
+    if (playing?.startedAt) {
+      const end = Math.max(nowMs + 60 * 1000, playing.startedAt.getTime() + gameMs);
+      courtFree.push(end);
+      for (const p of playing.players) availMs.set(p.userId, end);
+    } else {
+      courtFree.push(nowMs);
+    }
+  }
+  if (courtFree.length === 0) courtFree.push(nowMs);
+  const popEarliest = () => {
+    let i = 0;
+    for (let j = 1; j < courtFree.length; j++) if (courtFree[j] < courtFree[i]) i = j;
+    return courtFree.splice(i, 1)[0];
+  };
 
-  // Users already in a QUEUED GameBoardEntry on this board
+  // ② 이미 짠 대기 게임을 순서대로 코트에 배치
   const board = await prisma.gameBoard.findUnique({
     where: { clubSessionId },
-    include: { entries: { where: { status: 'QUEUED' }, select: { playerIds: true } } },
+    include: { entries: { where: { status: 'QUEUED' }, select: { playerIds: true, queueOrder: true } } },
   });
-  const queuedIds = new Set<string>();
-  for (const e of board?.entries ?? []) {
-    for (const pid of e.playerIds) queuedIds.add(pid);
+  const queued = [...(board?.entries ?? [])].sort((a, b) => a.queueOrder - b.queueOrder);
+  for (const e of queued) {
+    const ids = (e.playerIds as string[]) ?? [];
+    const start = Math.max(popEarliest(), ...ids.map((id) => availMs.get(id) ?? nowMs));
+    const end = start + gameMs;
+    courtFree.push(end);
+    for (const id of ids) {
+      availMs.set(id, end);
+      committedGames[id] = (committedGames[id] ?? 0) + 1;
+    }
   }
 
-  // Penalized users (active NoShow penalty)
-  const penalties = await prisma.noShowRecord.findMany({
-    where: { penaltyEndsAt: { gt: now } },
-    select: { userId: true },
-  });
-  const penalizedIds = new Set(penalties.map((p) => p.userId));
+  // 이유 문구용: 지금 실제로 코트에서 치는 사람(진행 중 게임).
+  const playingNowIds = new Set(courts.flatMap((c) => (c.turns[0]?.players ?? []).map((p) => p.userId)));
 
-  // Client-supplied exclusions: players the operator has STAGED in the next-game
-  // tray (not yet a QUEUED entry) plus any already-queued upcoming players, so
-  // building game-after-game keeps using FRESH people. This is on top of the
-  // server-side exclusions above (resting / in-turn / queued / penalized).
-  const excludeIds = new Set(opts.exclude ?? []);
+  // ③ 새 게임 시작 예상
+  let slotStart = Math.max(nowMs, Math.min(...courtFree));
 
-  // Build eligible pool --------------------------------------------------------
-  const poolIds = checkins
+  // ④ 후보 바탕(시간 조건은 슬롯마다)
+  const baseIds = checkins
     .map((c) => c.userId)
     .filter(
       (id) =>
         !restingIds.has(id) &&
         !inLessonIds.has(id) &&
-        !inTurnIds.has(id) &&
-        !queuedIds.has(id) &&
         !penalizedIds.has(id) &&
-        !excludeIds.has(id),
+        !excludeIds.has(id) &&
+        !waitingTurnIds.has(id),
     );
-
-  if (poolIds.length < 4) {
+  const freeBy = (id: string, at: number) => (availMs.get(id) ?? nowMs) <= at + SLACK_MS;
+  // 지금 쉬는 사람 = 진행·대기 게임(및 이번 호출에서 짠 판) 일정이 없는 사람.
+  const isIdle = (id: string) => (availMs.get(id) ?? 0) <= nowMs;
+  if (baseIds.filter((id) => freeBy(id, slotStart)).length < 4) {
     return { suggestions: [] };
   }
+  const poolIds = baseIds;
+  const checkedInAtMs: Record<string, number> = {};
+  for (const c of checkins) checkedInAtMs[c.userId] = c.checkedInAt.getTime();
 
-  // ── Per-player session data for fairness (games + wait time) ───────────────
-  // Games already played this 정모, AND the timestamp of each player's LAST game,
-  // so we can compute wait time. A "game played this session" = a GamePlayer row
-  // whose Game's CourtTurn belongs to this clubSession. We read each Game's
-  // timestamps to derive (a) per-player games count and (b) last-game time.
+  // ── 이번 정모 기록(판수·혼복/동성복·마지막 게임 종료) ──
   const sessionGames = await prisma.game.findMany({
     where: { turn: { clubSessionId } },
     select: {
-      // Use the turn's completedAt when available (game actually ended),
-      // otherwise the game's own updatedAt/createdAt as the "when it happened".
       createdAt: true,
       updatedAt: true,
       turn: { select: { startedAt: true, completedAt: true } },
       players: { select: { userId: true } },
     },
   });
-
   // 과거 게임 타입(혼복/동성복) 분류를 위해 '이번 정모에서 게임한 모든 참가자'의 성별을
   // 모은다(풀 밖 상대까지 포함해야 그 게임이 혼복이었는지 판정 가능).
   const gameUserIds = Array.from(new Set(sessionGames.flatMap((g) => g.players.map((p) => p.userId))));
   const gameProfiles = gameUserIds.length
-    ? await prisma.playerProfile.findMany({
-        where: { userId: { in: gameUserIds } },
-        select: { userId: true, gender: true },
-      })
+    ? await prisma.playerProfile.findMany({ where: { userId: { in: gameUserIds } }, select: { userId: true, gender: true } })
     : [];
   const genderOf = new Map(
     gameProfiles.map((p) => [p.userId, p.gender === 'M' || p.gender === 'F' ? p.gender : null] as const),
   );
-
-  const initialGamesCount: Record<string, number> = {};
-  const mixedGamesCount: Record<string, number> = {}; // 풀 유저의 혼복 횟수
-  const sameGamesCount: Record<string, number> = {}; // 풀 유저의 동성복(남복/여복) 횟수
-  for (const pid of poolIds) {
-    initialGamesCount[pid] = 0;
-    mixedGamesCount[pid] = 0;
-    sameGamesCount[pid] = 0;
-  }
-  // lastGameAt: most recent game time per pool user (ms epoch), 0 if none.
-  const lastGameAtMs: Record<string, number> = {};
+  const playedGames: Record<string, number> = {};
+  const mixedGamesCount: Record<string, number> = {};
+  const sameGamesCount: Record<string, number> = {};
+  const lastEndMs: Record<string, number> = {}; // 끝난 게임의 종료 시각(진행 중은 availMs가 담당)
   for (const g of sessionGames) {
-    const t = (g.turn?.completedAt ?? g.turn?.startedAt ?? g.updatedAt ?? g.createdAt);
-    const tMs = t ? new Date(t).getTime() : 0;
-    // 이 게임이 혼복이었는지(남녀 각 1명 이상) 참가자 성별로 판정.
     let gm = 0;
     let gf = 0;
     for (const gp of g.players) {
@@ -726,77 +768,55 @@ export async function suggestNextFoursome(
       else if (gg === 'F') gf++;
     }
     const isMixed = gm >= 1 && gf >= 1;
+    const endMs = g.turn?.completedAt ? g.turn.completedAt.getTime() : 0;
     for (const gp of g.players) {
-      if (!(gp.userId in initialGamesCount)) continue; // only pool users
-      initialGamesCount[gp.userId] = (initialGamesCount[gp.userId] ?? 0) + 1;
+      playedGames[gp.userId] = (playedGames[gp.userId] ?? 0) + 1;
       if (isMixed) mixedGamesCount[gp.userId] = (mixedGamesCount[gp.userId] ?? 0) + 1;
       else sameGamesCount[gp.userId] = (sameGamesCount[gp.userId] ?? 0) + 1;
-      if (tMs > (lastGameAtMs[gp.userId] ?? 0)) lastGameAtMs[gp.userId] = tMs;
+      if (endMs > (lastEndMs[gp.userId] ?? 0)) lastEndMs[gp.userId] = endMs;
     }
   }
 
-  // checkedInAt per pool user (arrival time). Wait = now − max(checkedInAt,
-  // lastGameAt): early arrivals idling and people just-not-playing both rise; a
-  // player who JUST finished a game has wait≈0.
-  const checkedInAtMs: Record<string, number> = {};
-  const checkinTimes = await prisma.checkIn.findMany({
-    where: { clubSessionId, checkedOutAt: null, userId: { in: poolIds } },
-    select: { userId: true, checkedInAt: true },
-  });
-  for (const c of checkinTimes) {
-    checkedInAtMs[c.userId] = new Date(c.checkedInAt).getTime();
-  }
-
-  const nowMs = now.getTime();
-  function waitSecondsFor(id: string): number {
-    const lastActivity = Math.max(checkedInAtMs[id] ?? nowMs, lastGameAtMs[id] ?? 0);
-    return Math.max(0, (nowMs - lastActivity) / 1000);
-  }
-
-  // ── Per-player skill + gender (PlayerProfile is optional) ──────────────────
+  // ── 급수·성별(모임별 급수가 우선) ──
   const profiles = await prisma.playerProfile.findMany({
     where: { userId: { in: poolIds } },
     select: { userId: true, skillLevel: true, gender: true },
   });
   const profileMap = new Map(profiles.map((p) => [p.userId, p]));
-
-  // PER-CLUB 급수 (모임별 급수): auto-match must use the EFFECTIVE per-club skill,
-  // i.e. ClubMember(userId, clubSession.clubId).skillLevel overrides the user's own
-  // default. Build an override map for this 정모's club; guests have no row → default.
   const skillOverrides = await prisma.clubMember.findMany({
     where: { clubId: clubSession.clubId, userId: { in: poolIds } },
     select: { userId: true, skillLevel: true },
   });
   const skillOverrideMap = new Map(skillOverrides.map((m) => [m.userId, m.skillLevel]));
 
-  const modePool: ModePlayer[] = poolIds.map((id) => {
+  // 선수별 고정 정보 + 슬롯 시각 기준으로 계산되는 공평 정보.
+  const extraGames: Record<string, number> = {}; // 이번 호출에서 미리 짠 판수(다음 슬롯 공평 반영)
+  const extraMixed: Record<string, number> = {};
+  const extraSame: Record<string, number> = {};
+  const toModePlayer = (id: string, at: number): ModePlayer => {
     const prof = profileMap.get(id);
     const g = prof?.gender;
-    const effectiveSkill = skillOverrideMap.get(id) ?? prof?.skillLevel;
+    const checkin = checkedInAtMs[id] ?? at;
+    const lastActivity = Math.max(checkin, lastEndMs[id] ?? 0, availMs.get(id) ?? 0);
     return {
       id,
-      skill: skillToNum(effectiveSkill),
-      games: initialGamesCount[id] ?? 0,
+      skill: skillToNum(skillOverrideMap.get(id) ?? prof?.skillLevel),
+      games: (playedGames[id] ?? 0) + (committedGames[id] ?? 0) + (extraGames[id] ?? 0),
       gender: g === 'M' || g === 'F' ? g : null,
-      waitSeconds: waitSecondsFor(id),
-      timePresentSeconds: Math.max(0, (nowMs - (checkedInAtMs[id] ?? nowMs)) / 1000),
-      mixedGames: mixedGamesCount[id] ?? 0,
-      sameGames: sameGamesCount[id] ?? 0,
+      waitSeconds: Math.max(0, (at - lastActivity) / 1000),
+      timePresentSeconds: Math.max(0, (at - checkin) / 1000),
+      mixedGames: (mixedGamesCount[id] ?? 0) + (extraMixed[id] ?? 0),
+      sameGames: (sameGamesCount[id] ?? 0) + (extraSame[id] ?? 0),
     };
-  });
-  const poolById = new Map(modePool.map((p) => [p.id, p]));
+  };
+  const modePool = poolIds.map((id) => toModePlayer(id, slotStart));
 
-  // ── Recency-weighted pair history (variety baseline, ALL modes) ────────────
-  // Build pairWeight: pairKey → Σ recency-decayed weight of shared games. Recent
-  // shared games weigh more (exponential decay by half-life). Includes COMPLETED
-  // /IN_PROGRESS games this 정모 AND the pairings implied by staged QUEUED
-  // entries (treated as "now", full weight, since they're about to be played).
+  // ── 짝 기록(겹침 회피, 최근일수록 무겁게) — 대기 게임은 '곧 칠 판'이라 최대 가중 ──
   const pairWeight: Record<string, number> = {};
   const HL = SUGGEST_TUNABLES.PAIR_RECENCY_HALFLIFE_SECONDS;
   const decay = (whenMs: number): number => {
-    if (!whenMs) return 0.25; // unknown-time game: small constant weight
-    const ageSec = Math.max(0, (nowMs - whenMs) / 1000);
-    return Math.pow(0.5, ageSec / HL);
+    if (!whenMs) return 0.25;
+    return Math.pow(0.5, Math.max(0, (nowMs - whenMs) / 1000) / HL);
   };
   const pkey = (a: string, b: string) => (a < b ? `${a}|${b}` : `${b}|${a}`);
   const addPairWeight = (ids: string[], whenMs: number) => {
@@ -808,43 +828,34 @@ export async function suggestNextFoursome(
       }
   };
   for (const g of sessionGames) {
-    const t = (g.turn?.completedAt ?? g.turn?.startedAt ?? g.updatedAt ?? g.createdAt);
+    const t = g.turn?.completedAt ?? g.turn?.startedAt ?? g.updatedAt ?? g.createdAt;
     addPairWeight(g.players.map((p) => p.userId), t ? new Date(t).getTime() : 0);
   }
-  // QUEUED staged entries → about-to-play pairings (full weight = now).
-  for (const e of board?.entries ?? []) {
-    addPairWeight((e.playerIds as string[]) ?? [], nowMs);
-  }
+  for (const e of queued) addPairWeight((e.playerIds as string[]) ?? [], nowMs);
 
   const mode: SuggestMode = opts.mode ?? 'fair';
 
-  // ── 실데이터 페이스 → 공평 주기 ──────────────────────────────────────
-  // '오래 있었는데 적게 친 사람' 판단의 기준(기대 게임 수 = 체류시간 / 1인 주기).
-  // 1인 주기 = 클럽의 실제 판당 시간 × max(1, 돌아가는 인원 / (4 × 코트 수)).
-  const pace = await getClubPace(clubSession.clubId);
-  const sessionCourts = await prisma.court.count({
-    where: { clubSessionId, status: { not: 'MAINTENANCE' } },
-  });
+  // ── 실데이터 페이스 → 공평 주기(1인 주기 = 판당 시간 × max(1, 인원/(4×코트))) ──
   const rotatingCount = checkins.filter((c) => !c.restingAt && !c.isInLesson).length;
-  const ratio = sessionCourts > 0 ? Math.max(1, rotatingCount / (4 * sessionCourts)) : 1;
-  const tuning: Partial<SuggestTuning> = {
-    ...opts.tuning,
-    gameCycleSeconds: pace.medianGameMin * 60 * ratio,
-  };
-  const tune = resolveTuning(tuning);
-
-  // ── 모임 학습 스타일 — 이 모임 총무들이 과거에 4명을 어떻게 묶었는지(기록 학습, 12시간 캐시) ──
+  const ratio = courts.length > 0 ? Math.max(1, rotatingCount / (4 * courts.length)) : 1;
+  // ── 모임 학습 스타일 — 이 모임 운영진이 과거에 4명을 어떻게 묶었는지(기록 학습, 12시간 캐시) ──
   const style = await getClubStyle(clubSession.clubId);
+  // 학습 스타일이 성별 선호(남복·여복/혼복 2:2)를 이미 담고 있어, 수동 '동성 우선'이 기본값(0.5)
+  // 그대로면 끈다 — 둘이 겹치면 운영진보다 남복·여복을 과하게 짠다(재생 평가: 71% → 61%, 운영진 59%).
+  // 운영자가 직접 바꾼 값은 존중.
+  const sameGenderOverride =
+    style && (opts.tuning?.sameGenderWeight === undefined || opts.tuning.sameGenderWeight === SUGGEST_TUNABLES.SAME_GENDER_WEIGHT)
+      ? { sameGenderWeight: 0 }
+      : {};
+  const tuning: Partial<SuggestTuning> = { ...opts.tuning, ...sameGenderOverride, gameCycleSeconds: (gameMs / 1000) * ratio };
+  const tune = resolveTuning(tuning);
   let styleScorer: StyleScorer | undefined;
   if (style) {
     const guestIds = new Set(
       (await prisma.user.findMany({ where: { id: { in: poolIds }, isGuest: true }, select: { id: true } })).map((u) => u.id),
     );
     styleScorer = (group) =>
-      styleUtility(
-        style,
-        group.map((p) => ({ id: p.id, skill: p.skill, gender: p.gender, guest: guestIds.has(p.id) })),
-      );
+      styleUtility(style, group.map((p) => ({ id: p.id, skill: p.skill, gender: p.gender, guest: guestIds.has(p.id) })));
   }
 
   // 이유 문구용 — 이번 정모에서 실제로 같은 게임에 들어간 횟수(감쇠 없는 원본).
@@ -865,16 +876,21 @@ export async function suggestNextFoursome(
   const avgGames = modePool.reduce((sum, p) => sum + p.games, 0) / Math.max(1, modePool.length);
 
   // 왜 이 4명인지 — 운영자가 바로 납득할 수 있게 1줄(최대 100자).
-  const buildReason = (ordered: ModePlayer[]): string => {
+  const buildReason = (ordered: ModePlayer[], at: number): string => {
     const parts: string[] = [];
+    const startsIn = Math.round((at - nowMs) / 60000);
+    if (startsIn >= 2) parts.push(`약 ${startsIn}분 뒤 시작`);
+    // 운영진 방식(시간 기준) 표시: 코트에서 곧 끝나는 사람 / 앞 판에 이어서 치는 사람.
+    const finishing = ordered.filter((p) => playingNowIds.has(p.id)).length;
+    const chained = ordered.filter((p) => !playingNowIds.has(p.id) && (availMs.get(p.id) ?? 0) > nowMs).length;
+    if (finishing > 0) parts.push(`코트에서 곧 끝나는 ${finishing}명`);
+    if (chained > 0) parts.push(`앞 판에 이어서 ${chained}명`);
     const longest = [...ordered].sort((a, b) => b.waitSeconds - a.waitSeconds)[0];
     if (longest && longest.waitSeconds >= 20 * 60) {
       parts.push(`${poolNames.get(longest.id) ?? ''} ${Math.round(longest.waitSeconds / 60)}분 대기`);
     }
     const fewest = [...ordered].sort((a, b) => a.games - b.games)[0];
-    if (fewest && fewest.games <= avgGames - 1) {
-      parts.push(`${poolNames.get(fewest.id) ?? ''} 오늘 ${fewest.games}판`);
-    }
+    if (fewest && fewest.games <= avgGames - 1) parts.push(`${poolNames.get(fewest.id) ?? ''} 오늘 ${fewest.games}판`);
     let repeats = 0;
     for (let i = 0; i < ordered.length; i++)
       for (let j = i + 1; j < ordered.length; j++)
@@ -887,60 +903,46 @@ export async function suggestNextFoursome(
     return parts.join(' · ').slice(0, 100);
   };
 
-  // ── Unified scoring selection (EVERY mode = fairness + variety + modeTerm) ──
-  // Pick `count` foursomes. After each pick, FEED the chosen pairings back into
-  // pairWeight (full weight) and bump games/reset wait for those players, so the
-  // next slot ROTATES partners and rebalances fairness — this is the multi-slot
-  // analogue of the per-game rotation that drives anti-routine variety.
-  let slotPlayerIds: string[][] = [];
+  // ── 슬롯별 선택: 슬롯 시작 시각에 비는 사람 중 공평+겹침회피+모드+모임 스타일 ──
+  const slotPlayerIds: string[][] = [];
   const slotReasons: string[] = [];
-  const usedThisCall = new Set<string>();
+  const slotStarts: number[] = [];
 
   for (let slot = 0; slot < count; slot++) {
-    const available = modePool.filter((p) => !usedThisCall.has(p.id));
+    // 쉬는 사람이 4명 이상이면 그들 중에서(지금 기준), 아니면 시간 기준(이 판 시작 시각에 비는 사람).
+    const idleIds = poolIds.filter(isIdle);
+    const useIdle = idleIds.length >= 4;
+    const at = useIdle ? nowMs : slotStart;
+    const available = (useIdle ? idleIds : poolIds.filter((id) => freeBy(id, slotStart))).map((id) => toModePlayer(id, at));
     if (available.length < 4) break;
+    const byId = new Map(available.map((p) => [p.id, p]));
 
     const picked = selectFoursomeByMode(available, mode, pairWeight, 4, undefined, tuning, styleScorer);
     if (picked.playerIds.length < 4) break;
 
-    // 팀까지 짜준다 — 실효 급수 합이 가장 비슷한 2:2, 순서 [A1, A2, B1, B2].
-    const ordered = splitTeams(
-      picked.playerIds.map((id) => poolById.get(id)!).filter(Boolean),
-      tune.genderOffsetFemale,
-      pairWeight,
-    );
+    // 팀까지 짜준다 — 실효 급수 합이 가장 비슷한 2:2(남녀 2:2면 각 팀 남녀 1명씩), 순서 [A1, A2, B1, B2].
+    const ordered = splitTeams(picked.playerIds.map((id) => byId.get(id)!).filter(Boolean), tune.genderOffsetFemale, pairWeight);
     slotPlayerIds.push(ordered.map((p) => p.id));
-    slotReasons.push(buildReason(ordered));
+    slotReasons.push(buildReason(ordered, slotStart));
+    slotStarts.push(slotStart);
 
-    // Feed this foursome back so subsequent slots rotate + rebalance.
-    for (const id of picked.playerIds) usedThisCall.add(id);
+    // 다음 슬롯을 위해 시뮬레이션 갱신: 이 판이 코트를 차지 → 끝나면 이 4명이 비고, 판수 +1.
+    const startAt = Math.max(popEarliest(), slotStart);
+    const endAt = startAt + gameMs;
+    courtFree.push(endAt);
     addPairWeight(picked.playerIds, nowMs);
-    // 이번에 뽑은 판의 타입(혼복/동성복)을 계산해 다음 슬롯이 타입도 순환하게 반영.
-    let pm = 0;
-    let pf = 0;
+    const mixed = ordered.some((p) => p.gender === 'M') && ordered.some((p) => p.gender === 'F');
     for (const id of picked.playerIds) {
-      const mp = poolById.get(id);
-      if (mp?.gender === 'M') pm++;
-      else if (mp?.gender === 'F') pf++;
+      availMs.set(id, endAt);
+      extraGames[id] = (extraGames[id] ?? 0) + 1;
+      if (mixed) extraMixed[id] = (extraMixed[id] ?? 0) + 1;
+      else extraSame[id] = (extraSame[id] ?? 0) + 1;
     }
-    const pickedMixed = pm >= 1 && pf >= 1;
-    for (const id of picked.playerIds) {
-      const mp = poolById.get(id);
-      if (mp) {
-        mp.games += 1;
-        mp.waitSeconds = 0; // they just got a game
-        if (pickedMixed) mp.mixedGames += 1;
-        else mp.sameGames += 1;
-      }
-    }
+    slotStart = Math.max(nowMs, Math.min(...courtFree));
   }
 
-  // Resolve player names
   const allIds = Array.from(new Set(slotPlayerIds.flat()));
-  const users = await prisma.user.findMany({
-    where: { id: { in: allIds } },
-    select: { id: true, name: true },
-  });
+  const users = await prisma.user.findMany({ where: { id: { in: allIds } }, select: { id: true, name: true } });
   const nameMap = new Map(users.map((u) => [u.id, u.name]));
 
   const suggestions = slotPlayerIds.map((ids, i) => ({
@@ -948,6 +950,7 @@ export async function suggestNextFoursome(
     playerNames: ids.map((id) => nameMap.get(id) ?? ''),
     reason: slotReasons[i] ?? '',
     teamSplit: ids.length === 4,
+    startsInMin: Math.max(0, Math.round((slotStarts[i] - nowMs) / 60000)),
   }));
 
   return {
@@ -955,6 +958,7 @@ export async function suggestNextFoursome(
     mode,
     pace: {
       medianGameMin: pace.medianGameMin,
+      currentGameMin: Math.round((gameMs / 60000) * 10) / 10,
       personCycleMin: Math.round((tune.gameCycleSeconds / 60) * 10) / 10,
       source: pace.source,
     },
