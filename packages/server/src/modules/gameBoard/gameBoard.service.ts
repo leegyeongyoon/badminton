@@ -5,6 +5,7 @@ import { registerTurn } from '../turn/turn.service';
 import { sendPushToUser } from '../notification/notification.service';
 import {
   selectFoursomeByMode,
+  completeGroup,
   splitTeams,
   resolveTuning,
   SUGGEST_TUNABLES,
@@ -391,7 +392,12 @@ export async function assignEntry(
   return pushEntry(boardId, entryId, courtId, userId);
 }
 
-export async function updateEntry(boardId: string, entryId: string, playerIds: string[]) {
+export async function updateEntry(
+  boardId: string,
+  entryId: string,
+  playerIds: string[],
+  extra: { note?: string | null; teamSplit?: boolean } = {},
+) {
   const entry = await prisma.gameBoardEntry.findUnique({ where: { id: entryId } });
   if (!entry || entry.boardId !== boardId) throw new NotFoundError('게임 편성');
   if (entry.status !== 'QUEUED') throw new BadRequestError('편성된 상태에서만 수정할 수 있습니다');
@@ -399,7 +405,12 @@ export async function updateEntry(boardId: string, entryId: string, playerIds: s
   const updated = await prisma.gameBoardEntry.update({
     where: { id: entryId },
     // 4명이 아니게 되면 팀 구성([A1,A2,B1,B2]) 의미가 깨지므로 해제. 자리 교체(4명 유지)는 팀 유지.
-    data: { playerIds, ...(playerIds.length !== 4 ? { teamSplit: false } : {}) },
+    data: {
+      playerIds,
+      ...(extra.note !== undefined ? { note: extra.note } : {}),
+      ...(extra.teamSplit !== undefined ? { teamSplit: extra.teamSplit && playerIds.length === 4 } : {}),
+      ...(playerIds.length !== 4 ? { teamSplit: false } : {}),
+    },
   });
 
   const formatted = await formatEntry(updated);
@@ -594,7 +605,20 @@ export async function pushAllEntries(boardId: string, userId: string) {
 // Does NOT mutate any state.
 export async function suggestNextFoursome(
   clubSessionId: string,
-  opts: { courtId?: string; count?: number; mode?: SuggestMode; exclude?: string[]; tuning?: Partial<SuggestTuning> },
+  opts: {
+    courtId?: string;
+    count?: number;
+    mode?: SuggestMode;
+    exclude?: string[];
+    tuning?: Partial<SuggestTuning>;
+    /**
+     * 대상 게임 모드(운영진 방식):
+     *  · fill: 대기 게임(entryId)에 이미 들어간 1~3명은 고정, 나머지 자리를 채움("한두 명 먼저 넣고 나중에 채우기")
+     *  · substitute: 땜빵 — 대기 게임(entryId) 또는 코트 진행 중 게임(turnId)에서 outUserId(선택)를 뺀
+     *    나머지를 고정하고 빈 1자리 후보를 점수순 3명 추천
+     */
+    target?: { kind: 'fill' | 'substitute'; entryId?: string; turnId?: string; outUserId?: string };
+  },
   userId: string,
 ) {
   const clubSession = await prisma.clubSession.findUnique({
@@ -697,11 +721,36 @@ export async function suggestNextFoursome(
   // ② 이미 짠 대기 게임을 순서대로 코트에 배치
   const board = await prisma.gameBoard.findUnique({
     where: { clubSessionId },
-    include: { entries: { where: { status: 'QUEUED' }, select: { playerIds: true, queueOrder: true } } },
+    include: { entries: { where: { status: 'QUEUED' }, select: { id: true, playerIds: true, queueOrder: true } } },
   });
   const queued = [...(board?.entries ?? [])].sort((a, b) => a.queueOrder - b.queueOrder);
+  // 대상 게임 모드: 그 게임 앞 순서까지만 시뮬레이션 → 그 게임의 시작 예상 시각. 뒤 순서 게임에 잡힌
+  // 사람은 후보에서 뺀다(채우면 뒤 일정이 꼬임). 코트 진행 중 게임 땜빵은 '지금' 기준.
+  const target = opts.target;
+  let targetFixed: string[] | null = null;
+  let targetStart = nowMs;
+  const laterIds = new Set<string>();
+  if (target?.turnId) {
+    const turn = await prisma.courtTurn.findUnique({
+      where: { id: target.turnId },
+      select: { clubSessionId: true, status: true, players: { select: { userId: true } } },
+    });
+    if (!turn || turn.clubSessionId !== clubSessionId) throw new NotFoundError('게임');
+    targetFixed = turn.players.map((p) => p.userId).filter((id) => id !== target.outUserId);
+  }
+  let reachedTarget = false;
   for (const e of queued) {
     const ids = (e.playerIds as string[]) ?? [];
+    if (target?.entryId && e.id === target.entryId) {
+      reachedTarget = true;
+      targetFixed = ids.filter((id) => id !== target.outUserId);
+      targetStart = Math.max(nowMs, Math.min(...courtFree), ...targetFixed.map((id) => availMs.get(id) ?? nowMs));
+      continue;
+    }
+    if (reachedTarget) {
+      ids.forEach((id) => laterIds.add(id));
+      continue;
+    }
     const start = Math.max(popEarliest(), ...ids.map((id) => availMs.get(id) ?? nowMs));
     const end = start + gameMs;
     courtFree.push(end);
@@ -731,10 +780,14 @@ export async function suggestNextFoursome(
   const freeBy = (id: string, at: number) => (availMs.get(id) ?? nowMs) <= at + SLACK_MS;
   // 지금 쉬는 사람 = 진행·대기 게임(및 이번 호출에서 짠 판) 일정이 없는 사람.
   const isIdle = (id: string) => (availMs.get(id) ?? 0) <= nowMs;
-  if (baseIds.filter((id) => freeBy(id, slotStart)).length < 4) {
+  if (target && !targetFixed) throw new NotFoundError('대기 게임');
+  if (!target && baseIds.filter((id) => freeBy(id, slotStart)).length < 4) {
     return { suggestions: [] };
   }
-  const poolIds = baseIds;
+  // 대상 게임의 고정 인원도 급수·성별·이름을 불러오도록 풀 목록에 포함(후보에선 제외).
+  const poolIds = targetFixed
+    ? Array.from(new Set([...baseIds, ...targetFixed, ...(target?.outUserId ? [target.outUserId] : [])]))
+    : baseIds;
   const checkedInAtMs: Record<string, number> = {};
   for (const c of checkins) checkedInAtMs[c.userId] = c.checkedInAt.getTime();
 
@@ -835,13 +888,16 @@ export async function suggestNextFoursome(
   }
   for (const e of queued) addPairWeight((e.playerIds as string[]) ?? [], nowMs);
 
-  const mode: SuggestMode = opts.mode ?? 'fair';
+  let mode: SuggestMode = opts.mode ?? 'fair';
 
   // ── 실데이터 페이스 → 공평 주기(1인 주기 = 판당 시간 × max(1, 인원/(4×코트))) ──
   const rotatingCount = checkins.filter((c) => !c.restingAt && !c.isInLesson).length;
   const ratio = courts.length > 0 ? Math.max(1, rotatingCount / (4 * courts.length)) : 1;
   // ── 모임 학습 스타일 — 이 모임 운영진이 과거에 4명을 어떻게 묶었는지(기록 학습, 12시간 캐시) ──
   const style = await getClubStyle(clubSession.clubId);
+  // 기록이 없는(학습 스타일 없는) 모임에서 '공정'은 급수를 전혀 안 본다 → 예전 기본값 '비슷한 급수'로.
+  // (기본 모드를 '공정'으로 바꾼 건 학습 스타일이 급수 묶는 방식을 대신 맡는 모임 기준이었다.)
+  if (!style && mode === 'fair') mode = 'similar';
   // 학습 스타일이 성별 선호(남복·여복/혼복 2:2)를 이미 담고 있어, 수동 '동성 우선'이 기본값(0.5)
   // 그대로면 끈다 — 둘이 겹치면 운영진보다 남복·여복을 과하게 짠다(재생 평가: 71% → 61%, 운영진 59%).
   // 운영자가 직접 바꾼 값은 존중.
@@ -863,8 +919,11 @@ export async function suggestNextFoursome(
   // ── 운영진 요청(파트너로 같이 N게임 / 같이 안 짜기) ──
   // 같이 친 판수 = 실제 시작된 판 + 대기 게임에 이미 함께 잡힌 판 + 이번 호출에서 짠 판. 목표 판수를
   // 채우면 그 파트너 요청은 더 이상 적용 안 함. '같이 안 짜기'는 사실상 금지(큰 비용).
-  const TOGETHER_BONUS = 4; // 파트너 둘이 함께면 공평 비용에서 4게임 상당 가산(후보 안에서 확실히 묶이게)
-  const PARTNER_MISSING = 2.5; // 파트너가 후보로 비어 있는데 한 명만 넣으면 비용(둘을 같이 기다리게)
+  // 파트너 둘이 함께면 가산 — 기본 4 + 두 사람 급수 차이 보정(급수 다른 대회 파트너도 '급수 비슷하게'·학습
+  // 스타일의 급수 폭 비용에 밀리지 않게). 누가 칠 차례인지는 공평이 정하고, 요청은 '같이 칠 때 같이'.
+  const TOGETHER_BONUS = 4;
+  const TOGETHER_GAP_COMP = 2.5; // 급수 1단계 차이당 보정
+  const PARTNER_MISSING = 8; // 파트너가 후보로 비어 있는데 한 명만 넣으면 큰 비용(둘을 갈라놓지 않게)
   const APART_COST = 1000;
   const requests = await activeRequestsForEngine(clubSessionId);
   const apartKeys = new Set(requests.filter((r) => r.kind === 'APART').map((r) => pkey(r.aId, r.bId)));
@@ -899,11 +958,19 @@ export async function suggestNextFoursome(
         const ids = group.map((p) => p.id);
         const inGroup = new Set(ids);
         let c = 0;
+        const eff = (p: ModePlayer) => p.skill + (p.gender === 'F' ? tune.genderOffsetFemale : 0);
         for (let i = 0; i < ids.length; i++)
           for (let j = i + 1; j < ids.length; j++) {
             const k = pkey(ids[i], ids[j]);
             if (apartKeys.has(k)) c += APART_COST;
-            if (activeKeys.has(k)) c -= TOGETHER_BONUS;
+            if (activeKeys.has(k)) {
+              c -= TOGETHER_BONUS + TOGETHER_GAP_COMP * Math.abs(eff(group[i]) - eff(group[j]));
+              // 파트너 팀 vs 나머지 두 명 — 급수 합이 비슷한 상대로(대회 파트너 연습이 한쪽으로 기울지 않게).
+              if (group.length === 4) {
+                const others = group.filter((_, idx) => idx !== i && idx !== j);
+                c += 1.5 * Math.abs(eff(group[i]) + eff(group[j]) - others.reduce((sum, p) => sum + eff(p), 0));
+              }
+            }
           }
         for (const id of ids)
           for (const partner of partnerOf.get(id) ?? [])
@@ -963,6 +1030,78 @@ export async function suggestNextFoursome(
     }
     return parts.join(' · ').slice(0, 100);
   };
+
+  // ── 대상 게임 모드(채우기 / 땜빵) ─────────────────────────────────────
+  if (target && targetFixed) {
+    const fixedIds = new Set(targetFixed);
+    const need = 4 - targetFixed.length;
+    if (need <= 0) return { suggestions: [], substitutes: [], mode, note: '이미 4명이에요' };
+    const eligible = baseIds.filter((id) => !fixedIds.has(id) && !laterIds.has(id));
+    // 코트 진행 중 게임의 땜빵은 지금 쉬는 사람만. 대기 게임은 쉬는 사람 우선, 모자라면 그 게임 시작 때 비는 사람.
+    const idleNow = eligible.filter(isIdle);
+    const useIdle = !!target.turnId || idleNow.length >= need;
+    const at = useIdle ? nowMs : targetStart;
+    const startAt = target.turnId ? nowMs : targetStart;
+    const available = (useIdle ? idleNow : eligible.filter((id) => freeBy(id, targetStart))).map((id) => toModePlayer(id, at));
+    const fixedMP = targetFixed.map((id) => toModePlayer(id, at));
+    slotActive = activeTogether();
+    const baseHooks = requestHooks(slotActive, new Set(available.map((p) => p.id)));
+    // 땜빵: 빠지는 사람(없으면 남은 사람들 평균)과 급수가 가까운 사람 우선 — 게임 밸런스 유지.
+    let hooks = baseHooks;
+    if (target.kind === 'substitute') {
+      const effSkill = (p: ModePlayer) => p.skill + (p.gender === 'F' ? tune.genderOffsetFemale : 0);
+      const outP = target.outUserId ? toModePlayer(target.outUserId, at) : null;
+      const ref = outP ? effSkill(outP) : fixedMP.reduce((sum, p) => sum + effSkill(p), 0) / Math.max(1, fixedMP.length);
+      // 같은 성별 우선: 빠진 사람과 성별이 다르면 비용(남복에 여자 1명 → 3:1 혼복은 운영진도 피함).
+      const refGender = outP?.gender ?? null;
+      hooks = {
+        companions: baseHooks?.companions,
+        score: (g) => {
+          let c = baseHooks?.score ? baseHooks.score(g) : 0;
+          for (const p of g) {
+            if (fixedIds.has(p.id)) continue;
+            c += 3 * Math.abs(effSkill(p) - ref); // 급수 1단계 = 공평 3게임 상당(땜빵은 밸런스 우선)
+            if (refGender && p.gender && p.gender !== refGender) c += 4;
+          }
+          return c;
+        },
+      };
+    }
+    // 땜빵은 한 자리 끼우기 — 혼복/동성복 '순환' 항은 끈다(같은 성별·급수가 우선).
+    const targetTuning = target.kind === 'substitute' ? { ...tuning, typeVarietyWeight: 0 } : tuning;
+    const ranked = completeGroup(available, fixedMP, need, mode, pairWeight, targetTuning, styleScorer, hooks, target.kind === 'substitute' ? 3 : 1);
+    const byId = new Map([...available, ...fixedMP].map((p) => [p.id, p]));
+    const names = new Map(
+      (await prisma.user.findMany({ where: { id: { in: Array.from(byId.keys()) } }, select: { id: true, name: true } })).map((u) => [u.id, u.name]),
+    );
+    if (target.kind === 'substitute') {
+      const substitutes = ranked.map((r) => {
+        const id = r.playerIds.find((x) => !fixedIds.has(x))!;
+        const p = byId.get(id)!;
+        const bits = [`${NUM_TO_SKILL[p.skill] ?? '?'}${p.gender === 'F' ? '·여' : p.gender === 'M' ? '·남' : ''}`];
+        if (p.waitSeconds >= 60) bits.push(`${Math.round(p.waitSeconds / 60)}분 대기`);
+        bits.push(`오늘 ${p.games}판`);
+        if (playingNowIds.has(id)) bits.push('코트에서 곧 끝남');
+        if (targetFixed!.some((f) => slotActive.has(pkey(f, id)))) bits.push('파트너 요청');
+        return { userId: id, name: names.get(id) ?? '', reason: bits.join(' · ') };
+      });
+      return { suggestions: [], substitutes, mode };
+    }
+    if (ranked.length === 0) return { suggestions: [], mode, note: '채울 수 있는 사람이 없어요' };
+    const ordered = splitTeams(ranked[0].playerIds.map((id) => byId.get(id)!).filter(Boolean), tune.genderOffsetFemale, pairWeight, slotActive);
+    return {
+      suggestions: [
+        {
+          playerIds: ordered.map((p) => p.id),
+          playerNames: ordered.map((p) => names.get(p.id) ?? ''),
+          reason: buildReason(ordered, startAt),
+          teamSplit: ordered.length === 4,
+          startsInMin: Math.max(0, Math.round((startAt - nowMs) / 60000)),
+        },
+      ],
+      mode,
+    };
+  }
 
   // ── 슬롯별 선택: 슬롯 시작 시각에 비는 사람 중 공평+겹침회피+모드+모임 스타일 ──
   const slotPlayerIds: string[][] = [];

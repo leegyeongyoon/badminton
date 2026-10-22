@@ -37,10 +37,10 @@ router.post(
   validate(suggestFoursomeSchema),
   async (req: Request, res: Response, next: NextFunction) => {
     try {
-      const { courtId, count, mode, exclude, tuning } = req.body;
+      const { courtId, count, mode, exclude, tuning, target } = req.body;
       const result = await suggestNextFoursome(
         req.params.id as string,
-        { courtId, count, mode, exclude, tuning },
+        { courtId, count, mode, exclude, tuning, target },
         req.user!.userId,
       );
       res.json(result);
@@ -144,8 +144,12 @@ router.patch(
   authenticate,
   async (req: Request, res: Response, next: NextFunction) => {
     try {
-      const { playerIds } = req.body;
-      const entry = await updateEntry(req.params.id as string, req.params.entryId as string, playerIds);
+      const { playerIds, note, teamSplit } = req.body;
+      // 자동 채우기/땜빵이 이유·팀 구성을 함께 갱신할 수 있게(선택). 형식이 틀리면 무시.
+      const extra: { note?: string | null; teamSplit?: boolean } = {};
+      if (note === null || (typeof note === 'string' && note.length <= 100)) extra.note = note;
+      if (typeof teamSplit === 'boolean') extra.teamSplit = teamSplit;
+      const entry = await updateEntry(req.params.id as string, req.params.entryId as string, playerIds, extra);
       res.json(entry);
     } catch (err) {
       next(err);

@@ -1646,6 +1646,57 @@ export default function OperateScreen() {
       loadBoard(); loadPool();
     }
   }, [clubSessionId, requestIssues, deleteEntry, createQueueGame, loadBoard, loadPool]);
+  // ─── 운영진 방식: '한두 명 먼저 넣고 나중에 채우기' + 땜빵 ───
+  // fillEntry: 대기 게임에 들어간 1~3명은 고정, 나머지를 엔진이 채움(급수·성별·요청·공정 + 곧 끝날 사람까지).
+  const [fillingId, setFillingId] = useState<string | null>(null);
+  const fillEntry = useCallback(async (entryId: string, quiet = false): Promise<boolean> => {
+    if (!clubSessionId) return false;
+    if (!quiet) setFillingId(entryId);
+    try {
+      const { data } = await gameBoardApi.suggest(clubSessionId, {
+        target: { kind: 'fill', entryId },
+        mode: autoModeRef.current,
+        tuning: autoTuningRef.current,
+      });
+      const sg = data?.suggestions?.[0];
+      if (!sg?.playerIds || sg.playerIds.length !== 4) {
+        if (!quiet) showAlert('채우기', data?.note || '지금 채울 수 있는 사람이 없어요');
+        return false;
+      }
+      await updateEntry(entryId, sg.playerIds, { note: sg.reason || null, teamSplit: !!sg.teamSplit });
+      if (!quiet) showSuccess(`채웠어요 · ${sg.reason || ''}`.slice(0, 80));
+      return true;
+    } catch (err: any) {
+      if (!quiet) showAlert('채우기', err?.response?.data?.error || '채우기에 실패했어요');
+      return false;
+    } finally {
+      if (!quiet) setFillingId(null);
+      loadBoard(); loadPool();
+    }
+  }, [clubSessionId, updateEntry, loadBoard, loadPool]);
+  // 땜빵 추천 — 교체 창(대기 게임 자리 / 코트 진행 중 선수)을 열면 빠지는 사람과 같은 성별·비슷한 급수 3명.
+  const [subRecs, setSubRecs] = useState<{ userId: string; name: string; reason: string }[] | null>(null);
+  useEffect(() => {
+    setSubRecs(null);
+    if (!clubSessionId) return;
+    let target: { kind: 'substitute'; entryId?: string; turnId?: string; outUserId?: string } | null = null;
+    if (runningSwap) target = { kind: 'substitute', turnId: runningSwap.turnId, outUserId: runningSwap.outUserId };
+    else if (swapTarget) {
+      const e = queuedEntries.find((x) => x.id === swapTarget.entryId);
+      if (!e) return;
+      const out = e.playerIds[swapTarget.slotIndex];
+      target = { kind: 'substitute', entryId: e.id, ...(out ? { outUserId: out } : {}) };
+    }
+    if (!target) return;
+    let alive = true;
+    gameBoardApi
+      .suggest(clubSessionId, { target, mode: autoModeRef.current, tuning: autoTuningRef.current })
+      .then(({ data }) => { if (alive) setSubRecs(data?.substitutes ?? []); })
+      .catch(() => { if (alive) setSubRecs([]); });
+    return () => { alive = false; };
+    // 교체 창이 열리는 순간 한 번(대기 게임 목록 변화로 다시 부르지 않음)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [clubSessionId, runningSwap?.turnId, runningSwap?.outUserId, swapTarget?.entryId, swapTarget?.slotIndex]);
   const removeRequest = useCallback(async (id: string) => {
     if (!clubSessionId) return;
     try { const { data } = await gameBoardApi.deleteRequest(clubSessionId, id); setRequests(data ?? []); }
@@ -1816,8 +1867,40 @@ export default function OperateScreen() {
 
   // 자동 편성 1회 패스 — '다음 게임' 대기줄을 목표량(빈 코트 수 + 1)까지 채운다.
   // 코트에는 넣지 않는다(투입은 운영자 몫). 락으로 중복 실행 방지 + 목표량 기반이라 무한 루프 없음.
+  // 부분 게임(1~3명) 변화 추적 — 운영자가 손대는 중엔 자동으로 채우지 않도록 '마지막 변경 시각'.
+  const partialSeenRef = useRef<Map<string, { sig: string; since: number }>>(new Map());
   const runAutoFillPass = useCallback(async () => {
     if (!autoPilotRef.current || autoFillLockRef.current || !board) return;
+    // ① 곧 차례인 부분 게임 채우기(운영진 방식 '한두 명 넣어두고 그때 채우기'): 대기 순서가
+    //    (빈 코트 + 곧 끝날 코트) 안에 들고, 20초 동안 그대로인 게임만 — 편성 중 끼어들기 방지.
+    const seen = partialSeenRef.current;
+    const now = Date.now();
+    const imminent = Math.max(1, emptyCourts.length + aboutToFinishCount);
+    const toFill: string[] = [];
+    queuedEntries.forEach((e, i) => {
+      const n = e.playerIds.length;
+      if (n < 1 || n > 3) { seen.delete(e.id); return; }
+      const sig = e.playerIds.join(',');
+      const prev = seen.get(e.id);
+      if (!prev || prev.sig !== sig) { seen.set(e.id, { sig, since: now }); return; }
+      if (i < imminent && now - prev.since >= 20000) toFill.push(e.id);
+    });
+    if (toFill.length > 0) {
+      autoFillLockRef.current = true;
+      setAutoComposing(true);
+      try {
+        for (const id of toFill) {
+          if (!autoPilotRef.current) break;
+          const ok = await fillEntry(id, true);
+          if (ok) setAutoLastNote(`빈자리 자동으로 채움 (${(queuedEntries.findIndex((e) => e.id === id) + 1)}번째 게임)`);
+          seen.delete(id);
+        }
+      } finally {
+        autoFillLockRef.current = false;
+        setAutoComposing(false);
+      }
+      return; // 다음 패스에서 새 게임 준비량 다시 계산
+    }
     const readyCount = queuedEntries.filter((e) => e.playerIds.length >= 4).length;
     // 시간 인지 — 빈 코트 + '곧 끝날' 코트에 더해 다음 게임을 '버퍼'개 앞서 준비(대기 인원이
     // 봐도 '내 다음 게임'이 보이게). 버퍼는 정모 인원수 기반 자동(또는 게임판 조율값). 공평은
@@ -1865,7 +1948,7 @@ export default function OperateScreen() {
         loadBoard(); loadPool();
       }
     }
-  }, [board, emptyCourts.length, courts.length, aboutToFinishCount, uniquePlayers.length, queuedEntries, suggestNext, createQueueGame, getPlayer, loadBoard, loadPool]);
+  }, [board, emptyCourts.length, courts.length, aboutToFinishCount, uniquePlayers.length, queuedEntries, suggestNext, createQueueGame, getPlayer, loadBoard, loadPool, fillEntry]);
   useEffect(() => { runAutoFillRef.current = runAutoFillPass; }, [runAutoFillPass]);
 
   // 자동 편성이 반응할 준비량 지표(완성된 4인 대기 게임 수).
@@ -3851,6 +3934,21 @@ export default function OperateScreen() {
               )}
               <QueueTypeTag playerIds={entry.playerIds} />
               <View style={{ flex: 1 }} />
+              {entry.playerIds.length >= 1 && entry.playerIds.length <= 3 && (
+                <TouchableOpacity
+                  style={[styles.editBtnSm, { borderColor: colors.primary, backgroundColor: colors.surface, marginRight: 6 }]}
+                  onPress={() => fillEntry(entry.id)}
+                  disabled={fillingId === entry.id}
+                  accessibilityLabel="빈자리 채우기"
+                  activeOpacity={0.8}
+                  hitSlop={6}
+                  {...stopDragProps}
+                >
+                  {fillingId === entry.id ? <ActivityIndicator size="small" color={colors.primary} /> : (
+                    <Text style={[styles.editBtnText, { color: colors.primary, fontWeight: '800' }]}>🤖 채우기</Text>
+                  )}
+                </TouchableOpacity>
+              )}
               {entry.playerIds.length >= 2 && (
                 <TouchableOpacity
                   style={[styles.editBtnSm, { borderColor: colors.border, backgroundColor: colors.surface, marginRight: 6 }]}
@@ -4705,6 +4803,7 @@ export default function OperateScreen() {
           queuedPool={queuedPool}
           currentIds={queuedEntries.find((e) => e.id === swapTarget.entryId)?.playerIds || []}
           onPick={handleSwapPlayer}
+          recommended={subRecs}
           onClose={() => setSwapTarget(null)}
           allowAddToEmpty={(queuedEntries.find((e) => e.id === swapTarget.entryId)?.playerIds.length ?? 0) < 4}
           canRemove={swapTarget.slotIndex < (queuedEntries.find((e) => e.id === swapTarget.entryId)?.playerIds.length ?? 0)}
@@ -4718,6 +4817,7 @@ export default function OperateScreen() {
           queuedPool={queuedPool}
           currentIds={runningSwap.currentIds}
           onPick={handleReplaceRunning}
+          recommended={subRecs}
           onClose={() => setRunningSwap(null)}
           allowAddToEmpty={false}
         />
@@ -5529,6 +5629,27 @@ export default function OperateScreen() {
           {/* 게임 순서(게임 하는 순서) 이동 ▲▼ + 삭제 × — 선수 선택 중이 아닐 때만. */}
           {!isNew && !selectedPlayer && (
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 1 }} {...(Platform.OS === 'web' ? { onPointerDown: (e: any) => e.stopPropagation?.() } : {})}>
+              {members.length >= 1 && members.length <= 3 && (
+                <TouchableOpacity
+                  onPress={() => fillEntry(frame.id!)}
+                  disabled={fillingId === frame.id}
+                  hitSlop={4}
+                  style={[styles.gameOrderBtn, { flexDirection: 'row', alignItems: 'center', gap: 2, paddingHorizontal: 6, borderWidth: 1, borderColor: colors.primary, borderRadius: 6 }]}
+                  accessibilityLabel={`${idx + 1}번째 게임 빈자리 채우기`}
+                >
+                  {fillingId === frame.id ? <ActivityIndicator size="small" color={colors.primary} /> : <Text style={{ fontSize: 11, fontWeight: '800', color: colors.primary }}>🤖 채우기</Text>}
+                </TouchableOpacity>
+              )}
+              {members.length === 3 && (
+                <TouchableOpacity
+                  onPress={() => setSwapTarget({ entryId: frame.id!, slotIndex: 3 })}
+                  hitSlop={4}
+                  style={[styles.gameOrderBtn, { paddingHorizontal: 6 }]}
+                  accessibilityLabel={`${idx + 1}번째 게임 땜빵 고르기`}
+                >
+                  <Text style={{ fontSize: 11, fontWeight: '700', color: colors.textSecondary }}>땜빵</Text>
+                </TouchableOpacity>
+              )}
               {members.length >= 2 && (
                 <TouchableOpacity
                   onPress={() => openGroupCheck(members)}
@@ -5998,8 +6119,10 @@ export default function OperateScreen() {
 // Swap-player modal — pick a replacement for a queued-game slot
 // ─────────────────────────────────────────────────────────
 function SwapPlayerModal({
-  colors, freePool, queuedPool, currentIds, onPick, onClose, allowAddToEmpty, canRemove, onRemove,
+  colors, freePool, queuedPool, currentIds, onPick, onClose, allowAddToEmpty, canRemove, onRemove, recommended,
 }: {
+  /** 🤖 땜빵 추천(같은 성별·비슷한 급수·오래 기다린 순) — null이면 불러오는 중. */
+  recommended?: { userId: string; name: string; reason: string }[] | null;
   colors: any;
   freePool: Player[];
   queuedPool: Player[];
@@ -6037,6 +6160,30 @@ function SwapPlayerModal({
             </TouchableOpacity>
           )}
           <ScrollView style={{ maxHeight: 420 }} showsVerticalScrollIndicator={false} refreshControl={undefined}>
+            {recommended !== undefined && (
+              <>
+                <Text style={[modalStyles.swapGroupLabel, { color: colors.primary }]}>🤖 땜빵 추천 (같은 성별·비슷한 급수 우선 · 오래 기다린 순)</Text>
+                {recommended === null ? (
+                  <ActivityIndicator size="small" color={colors.primary} style={{ marginVertical: 8 }} />
+                ) : recommended.length === 0 ? (
+                  <Text style={[modalStyles.feeEmpty, { color: colors.textLight }]}>추천할 수 있는 사람이 없어요</Text>
+                ) : (
+                  recommended.filter((r) => !inGame.has(r.userId)).map((r, i) => (
+                    <TouchableOpacity
+                      key={r.userId}
+                      onPress={() => onPick(r.userId)}
+                      activeOpacity={0.8}
+                      accessibilityLabel={`땜빵 추천 ${i + 1}위 ${r.name}`}
+                      style={{ flexDirection: 'row', alignItems: 'center', gap: 8, borderWidth: 1.5, borderColor: i === 0 ? colors.primary : colors.border, borderRadius: 10, paddingHorizontal: 10, paddingVertical: 9, marginBottom: 6 }}
+                    >
+                      <Text style={{ fontSize: 13, fontWeight: '800', color: colors.primary }}>{i + 1}</Text>
+                      <Text style={{ fontSize: 15, fontWeight: '800', color: colors.text }}>{r.name}</Text>
+                      <Text style={{ flex: 1, fontSize: 12, color: colors.textSecondary }} numberOfLines={1}>{r.reason}</Text>
+                    </TouchableOpacity>
+                  ))
+                )}
+              </>
+            )}
             <Text style={[modalStyles.swapGroupLabel, { color: colors.textSecondary }]}>미편성 (대기) 중에서</Text>
             <View style={modalStyles.swapGrid}>
               {freePool.filter((p) => !inGame.has(p.userId)).map((p) => (

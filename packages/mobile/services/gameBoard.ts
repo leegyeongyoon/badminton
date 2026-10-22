@@ -67,8 +67,9 @@ export const gameBoardApi = {
   addEntry: (boardId: string, playerIds: string[], courtId?: string) =>
     api.post(`/game-boards/${boardId}/entries`, { playerIds, courtId }),
 
-  updateEntry: (boardId: string, entryId: string, playerIds: string[]) =>
-    api.patch(`/game-boards/${boardId}/entries/${entryId}`, { playerIds }),
+  // extra: 자동 채우기가 이유(note)·팀 구성(teamSplit)을 함께 갱신할 때.
+  updateEntry: (boardId: string, entryId: string, playerIds: string[], extra?: { note?: string | null; teamSplit?: boolean }) =>
+    api.patch(`/game-boards/${boardId}/entries/${entryId}`, { playerIds, ...(extra ?? {}) }),
 
   deleteEntry: (boardId: string, entryId: string) =>
     api.delete(`/game-boards/${boardId}/entries/${entryId}`),
@@ -83,9 +84,17 @@ export const gameBoardApi = {
   // 자동 추천 — 다음 복식 4인 조합 제안 (LEADER/STAFF 전용, 인원 부족 시 [])
   // mode: 매칭 전략 (fair/similar/balanced/competitive/fresh), 기본 fair
   // exclude: 이미 트레이에 올려둔/큐에 편성된 인원 → 풀에서 제외 (연속 편성 시 새 인원)
+  // target: 대상 게임 모드 — fill(대기 게임 빈자리 채우기) / substitute(땜빵 후보 3명; 대기 게임 entryId 또는 코트 turnId)
   suggest: (
     clubSessionId: string,
-    body?: { courtId?: string; count?: number; mode?: SuggestMode; exclude?: string[]; tuning?: SuggestTuning },
+    body?: {
+      courtId?: string;
+      count?: number;
+      mode?: SuggestMode;
+      exclude?: string[];
+      tuning?: SuggestTuning;
+      target?: { kind: 'fill' | 'substitute'; entryId?: string; turnId?: string; outUserId?: string };
+    },
   ) => api.post(`/club-sessions/${clubSessionId}/suggest`, body ?? {}),
 
   // 운영진 편성 요청(파트너/같이 안 짜기) — 목록·추가(같은 두 사람이면 교체)·삭제. 대표/운영진만.

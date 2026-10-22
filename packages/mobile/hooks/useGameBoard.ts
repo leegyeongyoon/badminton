@@ -101,9 +101,9 @@ export function useGameBoard(clubSessionId: string | undefined) {
     return data;
   }, [board]);
 
-  const updateEntry = useCallback(async (entryId: string, playerIds: string[]) => {
+  const updateEntry = useCallback(async (entryId: string, playerIds: string[], extra?: { note?: string | null; teamSplit?: boolean }) => {
     if (!board) return;
-    const { data } = await gameBoardApi.updateEntry(board.id, entryId, playerIds);
+    const { data } = await gameBoardApi.updateEntry(board.id, entryId, playerIds, extra);
     return data;
   }, [board]);
 

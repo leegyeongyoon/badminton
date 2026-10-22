@@ -467,6 +467,16 @@ export const suggestFoursomeSchema = z.object({
       typeVarietyWeight: z.number().min(0).max(2).optional(),
     })
     .optional(),
+  // 대상 게임 모드 — fill: 대기 게임의 빈자리 채우기 / substitute: 땜빵 후보 3명(대기 게임 또는 코트 진행 중 게임)
+  target: z
+    .object({
+      kind: z.enum(['fill', 'substitute']),
+      entryId: z.string().uuid().optional(),
+      turnId: z.string().uuid().optional(),
+      outUserId: z.string().uuid().optional(),
+    })
+    .refine((t) => !!t.entryId !== !!t.turnId, { message: 'entryId 또는 turnId 중 하나만' })
+    .optional(),
 });
 
 // Game Board QUEUE (미리 짜두는 다음 게임 큐)

@@ -641,6 +641,66 @@ export function splitTeams(
   return [...ord(best[0], best[1]), ...ord(best[2], best[3])];
 }
 
+/**
+ * completeGroup — 이미 들어간 사람(fixed)은 고정하고 나머지 need 자리를 채울 조합을 점수순으로.
+ * 운영진 방식: "한두 명 먼저 넣어두고 나중에 채우기" / 땜빵(1자리). 점수는 selectFoursomeByMode와
+ * 같은 scoreGroup(공평+겹침회피+모드+모임 스타일+요청). 결정적(지터 없음) — 같은 상황이면 같은 추천.
+ * 후보: 차례 점수 상위 밴드(최대 16명) + 고정 인원·후보의 파트너 요청 짝.
+ */
+export function completeGroup(
+  pool: ModePlayer[],
+  fixed: ModePlayer[],
+  need: number,
+  mode: SuggestMode,
+  pairWeight: Record<string, number>,
+  tuning?: Partial<SuggestTuning>,
+  style?: StyleScorer,
+  requests?: RequestHooks,
+  topK = 3,
+): { playerIds: string[]; score: number }[] {
+  const tune = resolveTuning(tuning);
+  const fixedIds = new Set(fixed.map((p) => p.id));
+  const free = pool.filter((p) => !fixedIds.has(p.id));
+  if (need <= 0 || free.length < need) return [];
+  const cost = new Map<string, number>();
+  for (const p of [...fixed, ...free]) cost.set(p.id, priorityCost(p, tune.gameCycleSeconds));
+  const ranked = [...free].sort((a, b) => (cost.get(a.id)! - cost.get(b.id)!) || (a.id < b.id ? -1 : 1));
+  const best = cost.get(ranked[0].id)!;
+  let cand = ranked.filter((p) => cost.get(p.id)! - best <= OWED_BAND_GAME_EQUIV);
+  const minBand = Math.min(ranked.length, Math.max(need + 6, 8));
+  if (cand.length < minBand) cand = ranked.slice(0, minBand);
+  cand = cand.slice(0, 16);
+  if (requests?.companions) {
+    const byId = new Map(free.map((p) => [p.id, p]));
+    const inCand = new Set(cand.map((p) => p.id));
+    for (const src of [...fixed, ...cand]) {
+      for (const cid of requests.companions.get(src.id) ?? []) {
+        const c = byId.get(cid);
+        if (c && !inCand.has(cid)) {
+          cand.push(c);
+          inCand.add(cid);
+        }
+      }
+    }
+  }
+  const out: { playerIds: string[]; score: number }[] = [];
+  const pick: ModePlayer[] = [];
+  const rec = (start: number) => {
+    if (pick.length === need) {
+      const group = [...fixed, ...pick];
+      out.push({ playerIds: group.map((p) => p.id), score: scoreGroup(group, mode, pairWeight, cost, tune, style, requests) });
+      return;
+    }
+    for (let i = start; i < cand.length; i++) {
+      pick.push(cand[i]);
+      rec(i + 1);
+      pick.pop();
+    }
+  };
+  rec(0);
+  return out.sort((a, b) => a.score - b.score).slice(0, topK);
+}
+
 function selectPlayersForRound(
   allPlayers: string[],
   count: number,
