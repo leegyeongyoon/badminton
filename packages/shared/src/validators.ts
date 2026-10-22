@@ -476,6 +476,8 @@ export const suggestFoursomeSchema = z.object({
 export const createQueueGameSchema = z.object({
   playerIds: z.array(z.string().uuid()).min(1).max(4),
   note: z.string().max(100).optional(),
+  // true면 playerIds 순서가 [A1, A2, B1, B2] 팀 구성(자동 편성).
+  teamSplit: z.boolean().optional(),
 });
 
 // Reorder the global queue: full new order of QUEUED entry ids (drag-and-drop).

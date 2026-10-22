@@ -5,11 +5,15 @@ import { registerTurn } from '../turn/turn.service';
 import { sendPushToUser } from '../notification/notification.service';
 import {
   selectFoursomeByMode,
+  splitTeams,
+  resolveTuning,
   SUGGEST_TUNABLES,
   type SuggestMode,
   type ModePlayer,
   type SuggestTuning,
+  type StyleScorer,
 } from './suggest.algorithm';
+import { getClubStyle, styleUtility, type ClubStyle } from './clubStyle';
 
 // Map a SkillLevel enum (S strongest … F weakest; null=미설정) to a number used
 // by the mode-based matching. null → 4 (mid), matching the spec.
@@ -24,6 +28,105 @@ const SKILL_TO_NUM: Record<string, number> = {
 };
 function skillToNum(level: string | null | undefined): number {
   return level ? SKILL_TO_NUM[level] ?? 4 : 4;
+}
+const NUM_TO_SKILL = ['', 'F', 'E', 'D', 'C', 'B', 'A', 'S'];
+
+// ─── 클럽 페이스(실데이터) ─────────────────────────────────────────────
+// 이 클럽의 최근 90일 '완료된 판' 시간(분) 분포. 자동 편성의 공평 주기 + 운영판의
+// '코트 언제 비나' 예측 기본값으로 쓴다. 표본이 적은 신생 클럽은 기본값(13분).
+// (터닝포인트 실측 2026-10: 2,682판 중앙값 12.4분, p75 14.3분, p90 16.2분)
+export interface ClubPace {
+  medianGameMin: number;
+  p75GameMin: number;
+  /** 정모 시작 1시간 안의 판 중앙값(몸 풀리기 전이라 김 — 터닝 13.8분) / 그 이후(12.0분). */
+  firstHourGameMin: number;
+  laterGameMin: number;
+  sample: number;
+  source: 'club' | 'default';
+}
+const DEFAULT_PACE: ClubPace = {
+  medianGameMin: 13,
+  p75GameMin: 15,
+  firstHourGameMin: 14,
+  laterGameMin: 12.5,
+  sample: 0,
+  source: 'default',
+};
+const PACE_MIN_SAMPLE = 20;
+const PACE_TTL_MS = 10 * 60 * 1000;
+const paceCache = new Map<string, { at: number; pace: ClubPace }>();
+
+export async function getClubPace(clubId: string): Promise<ClubPace> {
+  const hit = paceCache.get(clubId);
+  if (hit && Date.now() - hit.at < PACE_TTL_MS) return hit.pace;
+  const since = new Date(Date.now() - 90 * 24 * 3600 * 1000);
+  const rows = await prisma.$queryRaw<
+    { median: number | null; p75: number | null; first: number | null; later: number | null; n: bigint }[]
+  >`
+    SELECT percentile_cont(0.5) WITHIN GROUP (ORDER BY m) AS median,
+           percentile_cont(0.75) WITHIN GROUP (ORDER BY m) AS p75,
+           percentile_cont(0.5) WITHIN GROUP (ORDER BY m) FILTER (WHERE phase < 60) AS first,
+           percentile_cont(0.5) WITHIN GROUP (ORDER BY m) FILTER (WHERE phase >= 60) AS later,
+           count(*) AS n
+    FROM (
+      SELECT EXTRACT(EPOCH FROM (ct."completedAt" - ct."startedAt")) / 60.0 AS m,
+             EXTRACT(EPOCH FROM (ct."startedAt" - cs."startedAt")) / 60.0 AS phase
+      FROM "CourtTurn" ct
+      JOIN "ClubSession" cs ON cs.id = ct."clubSessionId"
+      WHERE cs."clubId" = ${clubId}
+        AND ct.status = 'COMPLETED'
+        AND ct."startedAt" IS NOT NULL AND ct."completedAt" IS NOT NULL
+        AND ct."startedAt" > ${since}
+    ) x
+    WHERE m BETWEEN 3 AND 60`;
+  const r = rows[0];
+  const n = r ? Number(r.n) : 0;
+  const pace: ClubPace =
+    r && n >= PACE_MIN_SAMPLE && r.median != null && r.p75 != null
+      ? {
+          medianGameMin: Math.round(Number(r.median) * 10) / 10,
+          p75GameMin: Math.round(Number(r.p75) * 10) / 10,
+          firstHourGameMin: Math.round(Number(r.first ?? r.median) * 10) / 10,
+          laterGameMin: Math.round(Number(r.later ?? r.median) * 10) / 10,
+          sample: n,
+          source: 'club',
+        }
+      : DEFAULT_PACE;
+  paceCache.set(clubId, { at: Date.now(), pace });
+  return pace;
+}
+
+// 학습 스타일 요약(운영판 표시용) — 무엇을 배웠는지 사람이 읽을 수 있게.
+function summarizeStyle(style: ClubStyle | null) {
+  if (!style) return null;
+  return { decisions: style.decisions, testAccuracy: style.testAccuracy, traits: style.traits, trainedAt: style.trainedAt };
+}
+
+// 정모 기준 페이스 — 클럽 페이스 + 1인당 한 판 주기(판당 시간 × 인원/(4×코트)).
+export async function getSessionPace(clubSessionId: string) {
+  const session = await prisma.clubSession.findUnique({
+    where: { id: clubSessionId },
+    select: { clubId: true, startedAt: true },
+  });
+  if (!session) throw new NotFoundError('클럽 세션');
+  const pace = await getClubPace(session.clubId);
+  const [courts, rotating] = await Promise.all([
+    prisma.court.count({ where: { clubSessionId, status: { not: 'MAINTENANCE' } } }),
+    prisma.checkIn.count({ where: { clubSessionId, checkedOutAt: null, restingAt: null, isInLesson: false } }),
+  ]);
+  const ratio = courts > 0 ? Math.max(1, rotating / (4 * courts)) : 1;
+  const style = await getClubStyle(session.clubId);
+  const elapsedMin = (Date.now() - session.startedAt.getTime()) / 60000;
+  return {
+    ...pace,
+    // 지금 시점에 맞는 판당 시간 — 정모 첫 1시간은 더 길게.
+    currentGameMin: elapsedMin < 60 ? pace.firstHourGameMin : pace.laterGameMin,
+    style: summarizeStyle(style),
+    courts,
+    rotatingPlayers: rotating,
+    // 한 사람이 다음 판까지 걸리는 평균 주기(분) — 판당 시간 × 대기 비율.
+    personCycleMin: Math.round(pace.medianGameMin * ratio * 10) / 10,
+  };
 }
 
 export async function createGameBoard(clubSessionId: string, userId: string) {
@@ -115,6 +218,7 @@ export async function addEntry(
   userId: string,
   courtId?: string,
   note?: string,
+  teamSplit = false,
 ) {
   const board = await prisma.gameBoard.findUnique({
     where: { id: boardId },
@@ -157,6 +261,7 @@ export async function addEntry(
       queueOrder: maxOrder + 1,
       note: note ?? null,
       playerIds,
+      teamSplit: teamSplit && playerIds.length === 4,
       status: 'QUEUED',
     },
   });
@@ -205,10 +310,11 @@ export async function createQueueGame(
   playerIds: string[],
   userId: string,
   note?: string,
+  teamSplit = false,
 ) {
   await verifyBoardStaff(boardId, userId);
   // courtId omitted → court-less queued entry (assigned later via assignEntry).
-  return addEntry(boardId, playerIds, userId, undefined, note);
+  return addEntry(boardId, playerIds, userId, undefined, note, teamSplit);
 }
 
 // reorderQueue: set queueOrder for the QUEUED entries to match the given full order.
@@ -290,7 +396,8 @@ export async function updateEntry(boardId: string, entryId: string, playerIds: s
 
   const updated = await prisma.gameBoardEntry.update({
     where: { id: entryId },
-    data: { playerIds },
+    // 4명이 아니게 되면 팀 구성([A1,A2,B1,B2]) 의미가 깨지므로 해제. 자리 교체(4명 유지)는 팀 유지.
+    data: { playerIds, ...(playerIds.length !== 4 ? { teamSplit: false } : {}) },
   });
 
   const formatted = await formatEntry(updated);
@@ -357,6 +464,13 @@ export async function pushEntry(boardId: string, entryId: string, courtId: strin
     where: { id: entryId },
     data: { status: 'MATERIALIZED', turnId: turn.id, courtId },
   });
+
+  // 자동 편성 팀 구성([A1, A2, B1, B2])이면 실제 순번 선수에 제안 팀을 기록(파트너 통계용).
+  if (entry.teamSplit && entry.playerIds.length === 4) {
+    const [a1, a2, b1, b2] = entry.playerIds;
+    await prisma.turnPlayer.updateMany({ where: { turnId: turn.id, userId: { in: [a1, a2] } }, data: { team: 'A' } });
+    await prisma.turnPlayer.updateMany({ where: { turnId: turn.id, userId: { in: [b1, b2] } }, data: { team: 'B' } });
+  }
 
   const formatted = await formatEntry(updated);
   const io = getIO();
@@ -704,22 +818,99 @@ export async function suggestNextFoursome(
 
   const mode: SuggestMode = opts.mode ?? 'fair';
 
+  // ── 실데이터 페이스 → 공평 주기 ──────────────────────────────────────
+  // '오래 있었는데 적게 친 사람' 판단의 기준(기대 게임 수 = 체류시간 / 1인 주기).
+  // 1인 주기 = 클럽의 실제 판당 시간 × max(1, 돌아가는 인원 / (4 × 코트 수)).
+  const pace = await getClubPace(clubSession.clubId);
+  const sessionCourts = await prisma.court.count({
+    where: { clubSessionId, status: { not: 'MAINTENANCE' } },
+  });
+  const rotatingCount = checkins.filter((c) => !c.restingAt && !c.isInLesson).length;
+  const ratio = sessionCourts > 0 ? Math.max(1, rotatingCount / (4 * sessionCourts)) : 1;
+  const tuning: Partial<SuggestTuning> = {
+    ...opts.tuning,
+    gameCycleSeconds: pace.medianGameMin * 60 * ratio,
+  };
+  const tune = resolveTuning(tuning);
+
+  // ── 모임 학습 스타일 — 이 모임 총무들이 과거에 4명을 어떻게 묶었는지(기록 학습, 12시간 캐시) ──
+  const style = await getClubStyle(clubSession.clubId);
+  let styleScorer: StyleScorer | undefined;
+  if (style) {
+    const guestIds = new Set(
+      (await prisma.user.findMany({ where: { id: { in: poolIds }, isGuest: true }, select: { id: true } })).map((u) => u.id),
+    );
+    styleScorer = (group) =>
+      styleUtility(
+        style,
+        group.map((p) => ({ id: p.id, skill: p.skill, gender: p.gender, guest: guestIds.has(p.id) })),
+      );
+  }
+
+  // 이유 문구용 — 이번 정모에서 실제로 같은 게임에 들어간 횟수(감쇠 없는 원본).
+  const pairCount: Record<string, number> = {};
+  for (const g of sessionGames) {
+    const ids = g.players.map((p) => p.userId);
+    for (let i = 0; i < ids.length; i++)
+      for (let j = i + 1; j < ids.length; j++) {
+        const k = pkey(ids[i], ids[j]);
+        pairCount[k] = (pairCount[k] ?? 0) + 1;
+      }
+  }
+  const poolNames = new Map(
+    (await prisma.user.findMany({ where: { id: { in: poolIds } }, select: { id: true, name: true } })).map(
+      (u) => [u.id, u.name] as const,
+    ),
+  );
+  const avgGames = modePool.reduce((sum, p) => sum + p.games, 0) / Math.max(1, modePool.length);
+
+  // 왜 이 4명인지 — 운영자가 바로 납득할 수 있게 1줄(최대 100자).
+  const buildReason = (ordered: ModePlayer[]): string => {
+    const parts: string[] = [];
+    const longest = [...ordered].sort((a, b) => b.waitSeconds - a.waitSeconds)[0];
+    if (longest && longest.waitSeconds >= 20 * 60) {
+      parts.push(`${poolNames.get(longest.id) ?? ''} ${Math.round(longest.waitSeconds / 60)}분 대기`);
+    }
+    const fewest = [...ordered].sort((a, b) => a.games - b.games)[0];
+    if (fewest && fewest.games <= avgGames - 1) {
+      parts.push(`${poolNames.get(fewest.id) ?? ''} 오늘 ${fewest.games}판`);
+    }
+    let repeats = 0;
+    for (let i = 0; i < ordered.length; i++)
+      for (let j = i + 1; j < ordered.length; j++)
+        if ((pairCount[pkey(ordered[i].id, ordered[j].id)] ?? 0) > 0) repeats++;
+    parts.push(repeats === 0 ? '오늘 처음 만나는 조합' : `오늘 겹침 ${repeats}쌍`);
+    if (ordered.length === 4) {
+      const lv = (p: ModePlayer) => NUM_TO_SKILL[p.skill] ?? '?';
+      parts.push(`${lv(ordered[0])}${lv(ordered[1])} vs ${lv(ordered[2])}${lv(ordered[3])}`);
+    }
+    return parts.join(' · ').slice(0, 100);
+  };
+
   // ── Unified scoring selection (EVERY mode = fairness + variety + modeTerm) ──
   // Pick `count` foursomes. After each pick, FEED the chosen pairings back into
   // pairWeight (full weight) and bump games/reset wait for those players, so the
   // next slot ROTATES partners and rebalances fairness — this is the multi-slot
   // analogue of the per-game rotation that drives anti-routine variety.
   let slotPlayerIds: string[][] = [];
+  const slotReasons: string[] = [];
   const usedThisCall = new Set<string>();
 
   for (let slot = 0; slot < count; slot++) {
     const available = modePool.filter((p) => !usedThisCall.has(p.id));
     if (available.length < 4) break;
 
-    const picked = selectFoursomeByMode(available, mode, pairWeight, 4, undefined, opts.tuning);
+    const picked = selectFoursomeByMode(available, mode, pairWeight, 4, undefined, tuning, styleScorer);
     if (picked.playerIds.length < 4) break;
 
-    slotPlayerIds.push(picked.playerIds);
+    // 팀까지 짜준다 — 실효 급수 합이 가장 비슷한 2:2, 순서 [A1, A2, B1, B2].
+    const ordered = splitTeams(
+      picked.playerIds.map((id) => poolById.get(id)!).filter(Boolean),
+      tune.genderOffsetFemale,
+      pairWeight,
+    );
+    slotPlayerIds.push(ordered.map((p) => p.id));
+    slotReasons.push(buildReason(ordered));
 
     // Feed this foursome back so subsequent slots rotate + rebalance.
     for (const id of picked.playerIds) usedThisCall.add(id);
@@ -752,12 +943,23 @@ export async function suggestNextFoursome(
   });
   const nameMap = new Map(users.map((u) => [u.id, u.name]));
 
-  const suggestions = slotPlayerIds.map((ids) => ({
+  const suggestions = slotPlayerIds.map((ids, i) => ({
     playerIds: ids,
     playerNames: ids.map((id) => nameMap.get(id) ?? ''),
+    reason: slotReasons[i] ?? '',
+    teamSplit: ids.length === 4,
   }));
 
-  return { suggestions, mode };
+  return {
+    suggestions,
+    mode,
+    pace: {
+      medianGameMin: pace.medianGameMin,
+      personCycleMin: Math.round((tune.gameCycleSeconds / 60) * 10) / 10,
+      source: pace.source,
+    },
+    style: summarizeStyle(style),
+  };
 }
 
 // ─── Helpers ────────────────────────────────
@@ -935,6 +1137,7 @@ async function formatEntry(entry: any) {
     position: entry.position,
     queueOrder: entry.queueOrder ?? 0,
     note: entry.note ?? null,
+    teamSplit: !!entry.teamSplit,
     playerIds: entry.playerIds,
     playerNames: entry.playerIds.map((id: string) => playerNameMap.get(id) || ''),
     status: entry.status,

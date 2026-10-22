@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect, useMemo, useRef } from 'react';
+import { Fragment, useState, useCallback, useEffect, useMemo, useRef } from 'react';
 import {
   View, Text, ScrollView, StyleSheet, ActivityIndicator,
   TouchableOpacity, Platform, Pressable,
@@ -449,8 +449,12 @@ export default function ViewBoardScreen() {
                         const isMe = !!user?.id && pId === user.id;
                         const hasSkill = !!p?.skillLevel;
                         return (
+                          <Fragment key={pId}>
+                          {/* 자동 편성 팀 구성 [A1,A2] vs [B1,B2] */}
+                          {entry.teamSplit && i === 2 && (
+                            <Text style={[styles.vs, { color: colors.textLight, alignSelf: 'center' }]}>vs</Text>
+                          )}
                           <View
-                            key={pId}
                             style={[
                               styles.queuePlayerChip,
                               { backgroundColor: isMe ? colors.primaryLight : colors.surfaceSecondary },
@@ -476,6 +480,7 @@ export default function ViewBoardScreen() {
                             </Text>
                             {g && <GenderMarker meta={g} size={15} />}
                           </View>
+                          </Fragment>
                         );
                       })}
                     </View>

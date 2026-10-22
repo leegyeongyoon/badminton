@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect, useMemo, useRef } from 'react';
+import { Fragment, useState, useCallback, useEffect, useMemo, useRef } from 'react';
 import {
   View, Text, TextInput, TouchableOpacity, ScrollView, StyleSheet,
   SafeAreaView, ActivityIndicator, Animated as RNAnimated, LayoutAnimation,
@@ -6,7 +6,7 @@ import {
 } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useGameBoard, GameBoardEntry } from '../../../hooks/useGameBoard';
-import { gameBoardApi, type SuggestMode, type SuggestTuning } from '../../../services/gameBoard';
+import { gameBoardApi, type SuggestMode, type SuggestTuning, type SessionPace } from '../../../services/gameBoard';
 import { useTheme } from '../../../hooks/useTheme';
 import { useResponsiveLayout, courtColumnsFor, poolColumnsFor } from '../../../hooks/useResponsiveLayout';
 import type { LayoutChangeEvent } from 'react-native';
@@ -310,8 +310,9 @@ export default function OperateScreen() {
 
   // ─── 자동 편성(오토파일럿, 반자동) ─────────────────────────────────────────
   // ON이면 다음 게임을 자동으로 편성해 '다음 게임' 대기줄에 미리 준비해 둔다.
-  //  • 앱: '누구랑 할지'만 자동(공평·비슷한 급수). 코트에는 넣지 않는다.
-  //  • 운영자: 게임이 끝나면 '게임 종료', 빈 코트를 탭해 준비된 게임을 직접 투입.
+  //  • 앱: '누구랑 할지' + 팀(A vs B)까지 자동 — 공평(대기·판수) + 이 모임 기록에서 학습한 묶는 방식.
+  //  • 코트 투입: 기본은 운영자가 빈 코트를 탭해 직접(코트를 다른 팀과 같이 쓰는 경우가 있어서).
+  //    '코트 비면 자동 투입'을 켜면(코트 단독 사용 시) 코트가 비는 즉시 맨 위 게임 투입(선수 푸시).
   //  • 트리거: 코트 비움·큐 소진·체크인 등으로 준비분이 줄면 + 15초 안전망 타이머.
   //  • 목표량: (빈 코트 수 + 1)개를 항상 준비. 자격 4인 미달이면 편성 멈추고 대기(무한X).
   // 서버 보드 상태를 그대로 공유하므로 다른 운영진 화면과도 자동 sync. 기본 OFF(수동). 정모별 저장.
@@ -331,6 +332,26 @@ export default function OperateScreen() {
     if (!autoPilotKey || !autoPilotLoadedRef.current) return;
     setItem(autoPilotKey, autoPilot ? '1' : '0').catch(() => {});
   }, [autoPilot, autoPilotKey]);
+  // 코트 투입까지 자동 — 자동 편성 ON일 때, 코트가 비면 준비된 다음 게임(맨 위)을 바로 투입한다.
+  // 운영자는 '게임 종료'만 누르면 되고, 선수들에겐 투입 푸시가 간다. 기본 OFF — 체육관 코트를
+  // 다른 팀/일반 이용자와 같이 쓰면 앱에서 '빈 코트'여도 실제론 사용 중일 수 있어서, 코트를
+  // 우리 모임만 쓰는 날에만 운영자가 켠다. 정모별 저장.
+  const [autoAssign, setAutoAssign] = useState(false);
+  const autoAssignKey = clubSessionId ? `operate_autoassign_${clubSessionId}` : null;
+  const autoAssignLoadedRef = useRef(false);
+  useEffect(() => {
+    if (!autoAssignKey) return;
+    let alive = true;
+    getItem(autoAssignKey)
+      .then((raw) => { if (alive && raw === '1') setAutoAssign(true); })
+      .catch(() => {})
+      .finally(() => { autoAssignLoadedRef.current = true; });
+    return () => { alive = false; };
+  }, [autoAssignKey]);
+  useEffect(() => {
+    if (!autoAssignKey || !autoAssignLoadedRef.current) return;
+    setItem(autoAssignKey, autoAssign ? '1' : '0').catch(() => {});
+  }, [autoAssign, autoAssignKey]);
   // 자동 편성 매칭 모드(기본 '비슷한 급수'). 정모별 저장.
   const [autoMode, setAutoMode] = useState<SuggestMode>('similar');
   const autoModeKey = clubSessionId ? `operate_automode_${clubSessionId}` : null;
@@ -390,23 +411,40 @@ export default function OperateScreen() {
   useEffect(() => { autoTuningRef.current = autoTuning; }, [autoTuning]);
   const autoFillLockRef = useRef(false);
   const runAutoFillRef = useRef<null | (() => void)>(null);
-  // 게임 주기(분) — '몇 분 남음' 추정 + 시간 인지 준비의 기준(게임 ~11~13분). 정모별 저장.
-  const [gameCycleMin, setGameCycleMin] = useState(13);
-  const gameCycleKey = clubSessionId ? `operate_gamecycle_${clubSessionId}` : null;
+  // 이 모임 실데이터 페이스(판당 시간·1인 주기) + 자동 편성이 학습한 '모임 스타일'. 10분마다 갱신.
+  const [pace, setPace] = useState<SessionPace | null>(null);
+  useEffect(() => {
+    if (!clubSessionId) return;
+    let alive = true;
+    const load = () => gameBoardApi.pace(clubSessionId).then(({ data }) => { if (alive) setPace(data); }).catch(() => {});
+    load();
+    const iv = setInterval(load, 10 * 60 * 1000);
+    return () => { alive = false; clearInterval(iv); };
+  }, [clubSessionId]);
+  // 게임 주기(분) — '몇 분 남음' 추정 + 시간 인지 준비의 기준. 기본 '자동' = 이 모임의 실제 판당 시간
+  // (최근 90일 중앙값, 정모 첫 1시간은 더 길게 — 터닝 실측 13.8분 → 이후 12.0분). 11/13/15 고정도 가능. 정모별 저장.
+  const [gameCycleChoice, setGameCycleChoice] = useState<'auto' | number>('auto');
+  const gameCycleKey = clubSessionId ? `operate_gamecycle2_${clubSessionId}` : null;
   const gameCycleLoadedRef = useRef(false);
   useEffect(() => {
     if (!gameCycleKey) return;
     let alive = true;
     getItem(gameCycleKey)
-      .then((raw) => { const n = raw ? parseInt(raw, 10) : NaN; if (alive && [11, 13, 15].includes(n)) setGameCycleMin(n); })
+      .then((raw) => {
+        if (!alive || !raw) return;
+        if (raw === 'auto') { setGameCycleChoice('auto'); return; }
+        const n = parseInt(raw, 10);
+        if ([11, 13, 15].includes(n)) setGameCycleChoice(n);
+      })
       .catch(() => {})
       .finally(() => { gameCycleLoadedRef.current = true; });
     return () => { alive = false; };
   }, [gameCycleKey]);
   useEffect(() => {
     if (!gameCycleKey || !gameCycleLoadedRef.current) return;
-    setItem(gameCycleKey, String(gameCycleMin)).catch(() => {});
-  }, [gameCycleMin, gameCycleKey]);
+    setItem(gameCycleKey, String(gameCycleChoice)).catch(() => {});
+  }, [gameCycleChoice, gameCycleKey]);
+  const gameCycleMin = gameCycleChoice === 'auto' ? (pace?.currentGameMin ?? 13) : gameCycleChoice;
   const gameCycleRef = useRef(13);
   useEffect(() => { gameCycleRef.current = gameCycleMin; }, [gameCycleMin]);
 
@@ -1611,14 +1649,33 @@ export default function OperateScreen() {
     } catch (err: any) { showAlert('오류', err?.response?.data?.error || '스왑 실패'); loadBoard(); }
   }, [selectedPlayer, queuedEntries, updateEntry, loadBoard, loadPool]);
 
-  // 자동 편성: 주어진 대기 인원을 4명씩 큐 게임으로 생성.
+  // 자동 편성: 대기 인원을 서버 편성 엔진(공평·급수·겹침·모임 학습 스타일)으로 4명씩 묶고 팀(A vs B)까지
+  // 나눠 큐 게임으로 만든다. 첫 진입 1회 · 텍스트 명령 · 모드2 '자동 편성' 버튼이 모두 이 경로.
+  // (예전엔 판수 순서대로 4명씩 잘라서 급수·성별·겹침을 전혀 안 봤다 — 정모 시작 7게임이 그렇게 짜였음.)
+  // 엔진이 응답하지 않을 때만 예전 방식(순서대로 4명씩)으로 대체.
   const autoFillQueue = useCallback(async (poolUserIds: string[]) => {
     if (poolUserIds.length < 4) { showAlert('알림', '편성할 4명이 부족해요'); return; }
+    const count = Math.min(8, Math.floor(poolUserIds.length / 4));
     try {
-      for (let i = 0; i + 4 <= poolUserIds.length; i += 4) await createQueueGame(poolUserIds.slice(i, i + 4));
+      let suggestions: { playerIds: string[]; reason?: string; teamSplit?: boolean }[] = [];
+      if (clubSessionId) {
+        try {
+          const { data } = await gameBoardApi.suggest(clubSessionId, {
+            count,
+            mode: autoModeRef.current,
+            tuning: autoTuningRef.current,
+          });
+          suggestions = (data?.suggestions ?? []).filter((x: any) => x?.playerIds?.length === 4);
+        } catch { suggestions = []; }
+      }
+      if (suggestions.length > 0) {
+        for (const sg of suggestions) await createQueueGame(sg.playerIds, sg.reason || undefined, !!sg.teamSplit);
+      } else {
+        for (let i = 0; i + 4 <= poolUserIds.length; i += 4) await createQueueGame(poolUserIds.slice(i, i + 4));
+      }
       loadBoard(); loadPool();
     } catch (err: any) { showAlert('오류', err?.response?.data?.error || '자동 편성 실패'); loadBoard(); }
-  }, [createQueueGame, loadBoard, loadPool]);
+  }, [clubSessionId, createQueueGame, loadBoard, loadPool]);
 
   // 빈 코트 탭 → 투입 가능한(4명·게임중 없음) 첫 큐 게임(또는 지정 entry)을 그 코트에 투입.
   const assignQueueToCourt = useCallback(async (courtId: string, candidateEntryId?: string) => {
@@ -1691,12 +1748,19 @@ export default function OperateScreen() {
         if (!autoPilotRef.current) break;     // 도중에 OFF 되면 중단
         // 다음 4인 자동 추천(공평·급수 모드). 이번 패스에서 이미 뽑은 사람은 제외.
         let ids: string[] = [];
-        try { ids = (await suggestNext({ mode: autoModeRef.current, exclude: placed, tuning: autoTuningRef.current })).playerIds ?? []; }
-        catch { ids = []; }
-        if (ids.length < 4) break;            // 자격 인원 4명 미달 → 대기(무한X)
-        // 코트 없는 '다음 게임'으로 큐에 준비만 해둔다(투입 X).
+        let reason: string | undefined;
+        let teamSplit = false;
         try {
-          const entry = await createQueueGame(ids);
+          const r = await suggestNext({ mode: autoModeRef.current, exclude: placed, tuning: autoTuningRef.current });
+          ids = r.playerIds ?? [];
+          reason = r.reason || undefined;
+          teamSplit = !!r.teamSplit;
+        } catch { ids = []; }
+        if (ids.length < 4) break;            // 자격 인원 4명 미달 → 대기(무한X)
+        // 코트 없는 '다음 게임'으로 큐에 준비(팀 구성 [A1,A2,B1,B2] + 왜 이 4명인지 메모).
+        // 코트 투입은 '코트 투입까지 자동'이 켜져 있으면 아래 자동 투입이 맡는다.
+        try {
+          const entry = await createQueueGame(ids, reason, teamSplit);
           if (entry?.id) { placed.push(...ids); lastFour = ids; }
         } catch { break; /* 경합/오류 — 이번 패스 종료 */ }
       }
@@ -1730,6 +1794,38 @@ export default function OperateScreen() {
     const iv = setInterval(() => runAutoFillRef.current?.(), 15000);
     return () => clearInterval(iv);
   }, [autoPilot]);
+
+  // ── 코트 투입까지 자동 ── 빈 코트가 있고 준비된 4인 게임이 있으면 맨 위 게임을 투입.
+  // 맨 위 게임 선수 중 누가 아직 다른 코트에서 치는 중이면 그 게임은 건너뛰지 않고 기다린다
+  // (대기 순서 존중 — 수동 투입과 같은 규칙). 한 번에 한 코트씩, 락으로 중복 투입 방지.
+  const autoAssignLockRef = useRef(false);
+  const autoAssignFailRef = useRef<{ entryId: string; at: number } | null>(null);
+  useEffect(() => {
+    if (!autoPilot || !autoAssign || !board || autoAssignLockRef.current) return;
+    const court = emptyCourts[0];
+    const next = queuedEntries[0];
+    if (!court || !next || next.playerIds.length < 4) return;
+    const onCourt = new Set<string>();
+    playingByCourtId.forEach((e) => (e.playerIds || []).forEach((id) => onCourt.add(id)));
+    if (next.playerIds.some((id) => onCourt.has(id))) return;
+    // 같은 게임이 방금 실패했다면(경합·권한 등) 20초 쉬었다 다시.
+    const fail = autoAssignFailRef.current;
+    if (fail && fail.entryId === next.id && Date.now() - fail.at < 20000) return;
+    autoAssignLockRef.current = true;
+    const t = setTimeout(async () => {
+      try {
+        await assignEntry(next.id, court.id);
+        setAutoLastNote(`${court.name || '코트'} 자동 투입: ${next.playerNames?.slice(0, 2).join('·') || ''} 외`);
+        loadBoard(); loadCourts(); loadPool();
+      } catch {
+        autoAssignFailRef.current = { entryId: next.id, at: Date.now() };
+        loadBoard(); loadCourts();
+      } finally {
+        autoAssignLockRef.current = false;
+      }
+    }, 1200); // 게임 종료 직후 화면이 따라올 틈 + 다른 운영진과의 동시 투입 완화
+    return () => { clearTimeout(t); autoAssignLockRef.current = false; };
+  }, [autoPilot, autoAssign, board, emptyCourts, queuedEntries, playingByCourtId, assignEntry, loadBoard, loadCourts, loadPool]);
 
   // 게임 중 코트의 선수 1명을 교체(서버 replacePlayer). 성공 시 풀/보드/코트 갱신.
   const handleReplaceRunning = useCallback(async (replacementId: string) => {
@@ -3675,13 +3771,20 @@ export default function OperateScreen() {
             {/* 4 player chips on their own line, evenly spaced so names don't blur. */}
             <View style={styles.miniChipRow}>
               {[0, 1, 2, 3].map((slotIdx) => (
-                <QueueMiniChip
-                  key={slotIdx}
-                  pId={entry.playerIds[slotIdx]}
-                  name={entry.playerNames?.[slotIdx]}
-                />
+                <Fragment key={slotIdx}>
+                  {entry.teamSplit && slotIdx === 2 && (
+                    <Text style={[styles.vsMini, { color: colors.textLight }]}>vs</Text>
+                  )}
+                  <QueueMiniChip
+                    pId={entry.playerIds[slotIdx]}
+                    name={entry.playerNames?.[slotIdx]}
+                  />
+                </Fragment>
               ))}
             </View>
+            {entry.teamSplit && !!entry.note && (
+              <Text style={[styles.autoReason, { color: colors.textSecondary }]} numberOfLines={1}>🤖 {entry.note}</Text>
+            )}
           </View>
         </RNAnimated.View>
       );
@@ -4017,7 +4120,9 @@ export default function OperateScreen() {
           if (next) {
             setSuggestNote(null);
             setAutoLastNote(null);
-            showSuccess('자동 편성 ON — 다음 게임을 미리 짜둡니다 (코트 투입은 직접)');
+            showSuccess(autoAssign
+              ? '자동 편성 ON — 게임을 짜고, 코트가 비면 자동 투입해요 (게임 종료만 눌러주세요)'
+              : '자동 편성 ON — 다음 게임을 미리 짜둡니다 (코트 투입은 직접)');
             setTimeout(() => runAutoFillRef.current?.(), 300);
           } else {
             showSuccess('자동 편성 OFF — 수동 편성');
@@ -4426,6 +4531,22 @@ export default function OperateScreen() {
           {!autoComposing && !!autoLastNote && readyQueuedCount > 0 && (
             <Text style={[styles.autoStripSub, { color: colors.textSecondary }]} numberOfLines={1}>{autoLastNote}</Text>
           )}
+          {!!pace?.style && pace.style.traits.length > 0 && (
+            <Text style={[styles.autoStripSub, { color: colors.textSecondary }]} numberOfLines={2}>
+              {`우리 모임 기록 ${pace.style.decisions.toLocaleString()}판에서 배운 방식: ${pace.style.traits.join(' · ')}`}
+            </Text>
+          )}
+          <TouchableOpacity
+            style={[styles.autoChip, { alignSelf: 'flex-start', borderColor: autoAssign ? colors.secondary : colors.border, backgroundColor: autoAssign ? colors.secondary : 'transparent' }]}
+            onPress={() => setAutoAssign((v) => !v)}
+            accessibilityRole="switch"
+            accessibilityState={{ checked: autoAssign }}
+            accessibilityLabel="코트 투입까지 자동"
+          >
+            <Text style={[styles.autoChipText, { color: autoAssign ? '#fff' : colors.textSecondary }]}>
+              {autoAssign ? '✓ 코트 비면 자동 투입 (단독 사용)' : '코트 투입은 직접 · 탭해서 자동 투입 켜기'}
+            </Text>
+          </TouchableOpacity>
           <View style={styles.autoStripChips}>
             {SUGGEST_MODES.map((m) => {
               const on = autoMode === m.mode;
@@ -4480,18 +4601,19 @@ export default function OperateScreen() {
               <View style={styles.tuningRow}>
                 <Text style={[styles.tuningRowLabel, { color: colors.textSecondary }]}>게임 주기</Text>
                 <View style={styles.tuningSeg}>
-                  {[11, 13, 15].map((v) => {
-                    const on = gameCycleMin === v;
+                  {(['auto', 11, 13, 15] as const).map((v) => {
+                    const on = gameCycleChoice === v;
+                    const label = v === 'auto' ? `자동 ${pace?.currentGameMin ?? 13}분` : `${v}분`;
                     return (
                       <TouchableOpacity
-                        key={v}
+                        key={String(v)}
                         style={[styles.tuningSegItem, { borderColor: on ? colors.secondary : colors.border, backgroundColor: on ? colors.secondary : 'transparent' }]}
-                        onPress={() => setGameCycleMin(v)}
+                        onPress={() => setGameCycleChoice(v)}
                         accessibilityRole="button"
                         accessibilityState={{ selected: on }}
-                        accessibilityLabel={`게임 주기 ${v}분`}
+                        accessibilityLabel={v === 'auto' ? `게임 주기 자동(우리 모임 기록 기준 ${pace?.currentGameMin ?? 13}분)` : `게임 주기 ${v}분`}
                       >
-                        <Text style={[styles.tuningSegText, { color: on ? '#fff' : colors.textSecondary }]}>{v}분</Text>
+                        <Text style={[styles.tuningSegText, { color: on ? '#fff' : colors.textSecondary }]}>{label}</Text>
                       </TouchableOpacity>
                     );
                   })}
@@ -4838,8 +4960,8 @@ export default function OperateScreen() {
     })
     .map((x) => ({ name: x.name, ids: x.entry!.playerIds as string[] }));
   // 번호 게임 = 서버 큐 순서 + 끝에 '새 게임' 칸(entryId null).
-  const queueFrames: Array<{ id: string | null; players: string[] }> = [
-    ...queuedEntries.map((e) => ({ id: e.id, players: e.playerIds })),
+  const queueFrames: Array<{ id: string | null; players: string[]; teamSplit?: boolean; note?: string | null }> = [
+    ...queuedEntries.map((e) => ({ id: e.id, players: e.playerIds, teamSplit: e.teamSplit, note: e.note })),
     { id: null, players: [] },
   ];
   // 게임판은 '항상 2분할(2열)' 유지 — 게임이 적어도 2열로 균형 있게(가독성). 컬럼당 = ceil(개수/2).
@@ -5018,7 +5140,7 @@ export default function OperateScreen() {
   );
 
   // 게임 칸 — 번호 배지 + 'N번 게임' + 4명. 선수 선택 중이면 '여기로' 대상으로 강조, 탭하면 이동.
-  const GameFrame = ({ frame, idx, colW }: { frame: { id: string | null; players: string[] }; idx: number; colW: any }) => {
+  const GameFrame = ({ frame, idx, colW }: { frame: { id: string | null; players: string[]; teamSplit?: boolean; note?: string | null }; idx: number; colW: any }) => {
     const members = frame.players;
     const full = members.length === 4;
     const isNew = frame.id === null;
@@ -5075,15 +5197,23 @@ export default function OperateScreen() {
         <View style={styles.gameFrameSlots}>
           {[0, 1, 2, 3].map((s) => {
             const pid = members[s]; const p = pid ? getPlayer(pid) : null;
-            return p ? (
+            // 자동 편성 팀 구성이면 [A1 A2] vs [B1 B2] — 좁은 화면(2×2)에선 vs가 두 줄 사이에.
+            const vs = frame.teamSplit && full && s === 2 ? (
+              <Text key="vs" style={[narrowSlots ? styles.vsRow : styles.vsInline, { color: colors.textLight }]}>vs</Text>
+            ) : null;
+            const slot = p ? (
               <PlayerTag key={s} player={p} fill compact big />
             ) : (
               <TouchableOpacity key={s} disabled={!selectedPlayer} activeOpacity={0.6} onPress={() => { if (selectedPlayer) moveSelectedToGame(frame.id); }} style={[styles.gameSlotEmpty, narrowSlots && styles.slotHalf, { borderColor: target ? colors.primary : colors.border, backgroundColor: target ? 'rgba(16,185,129,0.10)' : 'transparent' }]}>
                 <Text style={[styles.slotEmpty, { color: target ? colors.primary : colors.textLight }]}>＋</Text>
               </TouchableOpacity>
             );
+            return vs ? <Fragment key={s}>{vs}{slot}</Fragment> : slot;
           })}
         </View>
+        {frame.teamSplit && full && !!frame.note && (
+          <Text style={[styles.autoReason, { color: colors.textSecondary }]} numberOfLines={1}>🤖 {frame.note}</Text>
+        )}
       </View>
     );
   };
@@ -6995,6 +7125,10 @@ const styles = StyleSheet.create({
   queueTypeTagText: { fontSize: 11, fontWeight: '800' },
   // The 4 player chips split the FULL row width evenly on their own line.
   miniChipRow: { flexDirection: 'row', alignItems: 'stretch', gap: spacing.xs },
+  vsMini: { fontSize: 11, fontWeight: '800', alignSelf: 'center' },
+  vsInline: { fontSize: 12, fontWeight: '800', alignSelf: 'center', paddingHorizontal: 2 },
+  vsRow: { width: '100%', textAlign: 'center', fontSize: 11, fontWeight: '800', marginVertical: -2 },
+  autoReason: { fontSize: 11, marginTop: 4 },
   miniChip: {
     flex: 1, flexBasis: 0, minWidth: 0,
     flexDirection: 'row', alignItems: 'center', gap: spacing.xs,

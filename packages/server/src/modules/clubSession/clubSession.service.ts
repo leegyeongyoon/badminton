@@ -497,19 +497,42 @@ export async function endSession(
       clubSessionId: sessionId,
       status: { in: ['WAITING', 'PLAYING'] },
     },
-    select: { id: true },
+    select: { id: true, status: true, startedAt: true },
   });
-  const cancelIds = activeTurns.map((t) => t.id);
-  if (cancelIds.length > 0) {
-    // BUG-3: a game that is live when the operator ends the 정모 DID happen, so
-    // it must still count in the summary (getSessionSummary counts only
-    // IN_PROGRESS|COMPLETED games). Mark such games COMPLETED rather than
-    // CANCELLED so they don't vanish from the played count. The turns are still
-    // cancelled below so the courts are freed for cleanup.
+  // BUG-3: a game that is live when the operator ends the 정모 DID happen, so
+  // it must still count in the summary (getSessionSummary counts only
+  // IN_PROGRESS|COMPLETED games). Mark such games COMPLETED rather than
+  // CANCELLED so they don't vanish from the played count.
+  // 진행 중(PLAYING, 시작됨) 순번은 '완료 + 종료 시각'으로 닫는다 — 예전엔 CANCELLED 로
+  // 종료 시각 없이 남아 정모마다 마지막 판들의 기록(판당 시간·대기 통계)이 빠졌다
+  // (터닝포인트 실측: 2,999판 중 301판 종료 시각 누락). 시작 전(WAITING)은 그대로 취소.
+  const playedIds = activeTurns.filter((t) => t.status === 'PLAYING' && t.startedAt).map((t) => t.id);
+  const cancelIds = activeTurns.filter((t) => !playedIds.includes(t.id)).map((t) => t.id);
+  if (activeTurns.length > 0) {
     await prisma.game.updateMany({
-      where: { turnId: { in: cancelIds }, status: 'IN_PROGRESS' },
+      where: { turnId: { in: activeTurns.map((t) => t.id) }, status: 'IN_PROGRESS' },
       data: { status: 'COMPLETED' },
     });
+  }
+  if (playedIds.length > 0) {
+    // 종료 시각 상한: 정모를 밤새 열어뒀다가 다음 날 닫으면(터닝 실측: 게임 끝난 뒤 12~25시간
+    // 열린 정모 6건) '지금'을 쓰면 마지막 판이 10시간짜리로 기록된다. 시작 + 20분(실측 p90 16분)과
+    // 지금 중 이른 쪽으로 닫는다.
+    const now = Date.now();
+    const CAP_MS = 20 * 60 * 1000;
+    for (const t of activeTurns.filter((x) => playedIds.includes(x.id))) {
+      const end = new Date(Math.min(now, t.startedAt!.getTime() + CAP_MS));
+      await prisma.courtTurn.update({
+        where: { id: t.id },
+        data: { status: 'COMPLETED', completedAt: end, timeLimitAt: null },
+      });
+    }
+    await prisma.gameBoardEntry.updateMany({
+      where: { turnId: { in: playedIds }, status: { in: ['MATERIALIZED', 'PLAYING'] } },
+      data: { status: 'COMPLETED' },
+    });
+  }
+  if (cancelIds.length > 0) {
     await prisma.courtTurn.updateMany({
       where: { id: { in: cancelIds } },
       data: { status: 'CANCELLED' },

@@ -395,6 +395,9 @@ model TurnPlayer {
   id     String @id @default(uuid())
   turnId String
   userId String
+  // 자동 편성이 제안한 팀('A'|'B'). 자동 편성 게임만 채워지고 수동 편성은 null.
+  // 실제로 그대로 쳤는지는 알 수 없으므로 '제안된 팀' 기록이다(파트너 통계용).
+  team   String?
 
   turn CourtTurn @relation(fields: [turnId], references: [id], onDelete: Cascade)
   user User      @relation(fields: [userId], references: [id], onDelete: Cascade)
@@ -518,6 +521,8 @@ model GameBoardEntry {
   queueOrder Int                  @default(0) // global ordering of the court-less QUEUED queue (다음 게임 순서)
   note       String?
   playerIds  String[]
+  // true면 playerIds 순서가 [A1, A2, B1, B2] 팀 구성(자동 편성이 급수 밸런스로 나눔).
+  teamSplit  Boolean              @default(false)
   status     GameBoardEntryStatus @default(QUEUED)
   turnId     String?              @unique
   createdAt  DateTime             @default(now())

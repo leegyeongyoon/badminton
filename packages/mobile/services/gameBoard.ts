@@ -16,6 +16,30 @@ export type SuggestTuning = {
   typeVarietyWeight?: number;  // 타입 순환 강도(0~2, 0=끔)
 };
 
+// 모임 학습 스타일 요약 — 서버가 이 모임의 과거 편성 기록에서 배운 '묶는 방식'.
+export type ClubStyleSummary = {
+  decisions: number;            // 학습에 쓴 편성 수
+  testAccuracy: number | null;  // 실제 조합을 맞힌 비율(%) — 최근 20% 정모로 검증
+  traits: string[];             // 예: ['남복·여복 위주', '급수 비슷한 사람끼리']
+  trainedAt: string;
+};
+
+// 정모 페이스(실데이터) — 판당 시간 + 1인 주기 + 학습 스타일.
+export type SessionPace = {
+  medianGameMin: number;
+  p75GameMin: number;
+  firstHourGameMin: number;
+  laterGameMin: number;
+  /** 지금 시점(정모 첫 1시간이면 더 긺)에 맞는 판당 시간. */
+  currentGameMin: number;
+  personCycleMin: number;
+  courts: number;
+  rotatingPlayers: number;
+  sample: number;
+  source: 'club' | 'default';
+  style: ClubStyleSummary | null;
+};
+
 export const gameBoardApi = {
   create: (clubSessionId: string) =>
     api.post(`/club-sessions/${clubSessionId}/game-board`),
@@ -48,10 +72,18 @@ export const gameBoardApi = {
     body?: { courtId?: string; count?: number; mode?: SuggestMode; exclude?: string[]; tuning?: SuggestTuning },
   ) => api.post(`/club-sessions/${clubSessionId}/suggest`, body ?? {}),
 
+  // 이 모임 실데이터 판당 시간·1인 주기·학습 스타일(읽기 전용)
+  pace: (clubSessionId: string) => api.get<SessionPace>(`/club-sessions/${clubSessionId}/pace`),
+
   // ─── 전체 "다음 게임" 큐 (코트 없는 QUEUED 게임) ───
-  // 큐에 게임 추가 (2명 또는 4명) — 큐 끝에 append
-  createQueueGame: (boardId: string, playerIds: string[], note?: string) =>
-    api.post(`/game-boards/${boardId}/queue`, { playerIds, ...(note ? { note } : {}) }),
+  // 큐에 게임 추가 (2명 또는 4명) — 큐 끝에 append.
+  // teamSplit: playerIds 순서가 [A1, A2, B1, B2] 팀 구성(자동 편성), note: 왜 이 4명인지.
+  createQueueGame: (boardId: string, playerIds: string[], note?: string, teamSplit?: boolean) =>
+    api.post(`/game-boards/${boardId}/queue`, {
+      playerIds,
+      ...(note ? { note } : {}),
+      ...(teamSplit ? { teamSplit: true } : {}),
+    }),
 
   // 큐 순서 변경 (드래그앤드롭/▲▼) — QUEUED 엔트리 id의 새 전체 순서
   reorderQueue: (boardId: string, entryIds: string[]) =>

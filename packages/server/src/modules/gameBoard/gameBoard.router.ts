@@ -16,6 +16,7 @@ import {
   pushEntry,
   pushAllEntries,
   suggestNextFoursome,
+  getSessionPace,
   createQueueGame,
   reorderQueue,
   assignEntry,
@@ -40,6 +41,20 @@ router.post(
         req.user!.userId,
       );
       res.json(result);
+    } catch (err) {
+      next(err);
+    }
+  },
+);
+
+// GET /club-sessions/:id/pace — 이 클럽의 실데이터 판당 시간 + 정모 1인 주기.
+// 운영판 '코트 언제 비나' 예측 기본값 + 자동 편성 공평 주기 표시용. 읽기 전용.
+router.get(
+  '/:id/pace',
+  authenticate,
+  async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      res.json(await getSessionPace(req.params.id as string));
     } catch (err) {
       next(err);
     }
@@ -145,12 +160,13 @@ router.post(
   validate(createQueueGameSchema),
   async (req: Request, res: Response, next: NextFunction) => {
     try {
-      const { playerIds, note } = req.body;
+      const { playerIds, note, teamSplit } = req.body;
       const entry = await createQueueGame(
         req.params.id as string,
         playerIds,
         req.user!.userId,
         note,
+        teamSplit,
       );
       res.status(201).json(entry);
     } catch (err) {

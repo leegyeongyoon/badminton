@@ -286,8 +286,8 @@ function pairKey(a: string, b: string): string {
  * - waitBonus = min(WAIT_BONUS_CAP, 유휴시간/WAIT_REF): 마지막 게임 이후 오래 쉰 사람을
  *   동급 결손자 사이에서 살짝 앞세우는 tie-breaker(막 끝낸 사람은 0).
  */
-export function priorityCost(p: ModePlayer): number {
-  const fairShare = Math.min(FAIRSHARE_CAP, p.timePresentSeconds / GAME_CYCLE_SECONDS);
+export function priorityCost(p: ModePlayer, cycleSeconds: number = GAME_CYCLE_SECONDS): number {
+  const fairShare = Math.min(FAIRSHARE_CAP, p.timePresentSeconds / Math.max(60, cycleSeconds));
   const waitRatio = p.waitSeconds / WAIT_REF_SECONDS;
   const waitBonus = Math.min(WAIT_BONUS_CAP, waitRatio);
   // Aging: 대기가 AGING_START_RATIO(≈22분)를 넘으면 초과분의 제곱에 비례해 우선순위를
@@ -307,7 +307,7 @@ export function priorityCost(p: ModePlayer): number {
 // player has no jitter entry (defensive; the caller always supplies one).
 function fairnessCost(group: ModePlayer[], jitterById: Map<string, number>): number {
   let c = 0;
-  for (const p of group) c += jitterById.get(p.id) ?? priorityCost(p);
+  for (const p of group) c += jitterById.get(p.id) ?? 0;
   return c;
 }
 
@@ -367,9 +367,10 @@ function modeTerm(group: ModePlayer[], mode: SuggestMode, genderOffsetFemale: nu
 }
 
 // 소프트 동성 우선(유두리) — 남복(4남)/여복(4여)을 '살짝' 선호하되 급수·공평에 양보.
-// genderMixCost: 순수 동성=0, 섞일수록 min(남수,여수)만큼 비용(3:1→1, 2:2→2). 성별 미설정은
-// 어느 쪽으로도 안 세어 관대하게 둔다. 가중치(SAME_GENDER_WEIGHT)가 작아, 급수/공평 차가
-// 조금만 있어도 바로 혼복으로 양보한다 → 남복/여복 성향 + 혼복도 충분히 섞임.
+// genderMixCost: 순수 동성=0, 혼복 2:2=1, 3:1=2. 혼복을 하더라도 2:2(남녀 한 쌍씩)가 3:1보다
+// 낫다 — 터닝포인트 실측 학습(2,794편성): 총무들은 2:2 혼복을 선호(+0.76), 3:1은 피함.
+// (예전엔 min(남,여)라 3:1이 2:2보다 '덜 섞였다'고 선호되는 역전이 있었다.) 성별 미설정은
+// 어느 쪽으로도 안 세어 관대하게 둔다. 가중치(SAME_GENDER_WEIGHT)가 작아 급수/공평에 양보한다.
 const SAME_GENDER_WEIGHT = 0.5;
 function genderMixCost(group: ModePlayer[]): number {
   let m = 0;
@@ -378,7 +379,9 @@ function genderMixCost(group: ModePlayer[]): number {
     if (p.gender === 'M') m++;
     else if (p.gender === 'F') f++;
   }
-  return Math.min(m, f);
+  const minority = Math.min(m, f);
+  if (minority === 0) return 0;
+  return m === f ? 1 : 2;
 }
 
 // 그룹 타입 — 남녀 각각 1명 이상이면 '혼복', 아니면 '동성복(남복/여복)'.
@@ -409,12 +412,18 @@ export interface SuggestTuning {
   genderOffsetFemale: number; // 여자 급수 보정폭(음수·0). 0=보정끔
   sameGenderWeight: number;   // 동성 복식(남복/여복) 선호 강도(0=끔)
   typeVarietyWeight: number;  // 타입 순환(혼복 포함) 강도(0=끔)
+  /**
+   * 1인당 '한 판 주기'(초) — 공평 결손(기대 게임 수) 환산용. 서버가 실데이터로 계산해 넣는다:
+   * 판당 시간(클럽 과거 중앙값) × max(1, 대기 가능 인원 / (4 × 코트 수)). 미지정이면 13분.
+   */
+  gameCycleSeconds: number;
 }
 export function resolveTuning(t?: Partial<SuggestTuning>): SuggestTuning {
   return {
     genderOffsetFemale: t?.genderOffsetFemale ?? GENDER_SKILL_OFFSET_FEMALE,
     sameGenderWeight: t?.sameGenderWeight ?? SAME_GENDER_WEIGHT,
     typeVarietyWeight: t?.typeVarietyWeight ?? TYPE_VARIETY_WEIGHT,
+    gameCycleSeconds: t?.gameCycleSeconds ?? GAME_CYCLE_SECONDS,
   };
 }
 
@@ -423,15 +432,24 @@ export function resolveTuning(t?: Partial<SuggestTuning>): SuggestTuning {
 // combo search rotates equally-owed players across calls without breaking a real
 // fairness gap; mode/variety terms stay un-jittered so each call still honors
 // the mode (tight band / 2강2약 / even teams) and rotates partners.
+// 모임 학습 스타일(clubStyle) 반영 강도 — utility(로그 오즈) 1 ≈ 공평 비용 0.7게임.
+// 후보는 이미 '차례가 된 사람(owed band)'으로 좁혀져 있어, 스타일은 그 안에서 '어떻게 묶나'를 정한다.
+const STYLE_WEIGHT = 0.7;
+export type StyleScorer = (group: ModePlayer[]) => number;
+
 function scoreGroup(
   group: ModePlayer[],
   mode: SuggestMode,
   pairWeight: Record<string, number>,
   jitterById: Map<string, number>,
   tuning: SuggestTuning,
+  style?: StyleScorer,
 ): number {
   const w = MODE_WEIGHTS[mode];
+  // '빡센 게임(2강 2약)'은 일부러 급수를 벌리는 모드라 모임 스타일(급수 비슷하게)과 충돌 → 제외.
+  const styleTerm = style && mode !== 'competitive' ? -STYLE_WEIGHT * style(group) : 0;
   return (
+    styleTerm +
     w.wFair * fairnessCost(group, jitterById) +
     w.wVariety * varietyCost(group, pairWeight) +
     w.wMode * modeTerm(group, mode, tuning.genderOffsetFemale) +
@@ -468,6 +486,7 @@ export function selectFoursomeByMode(
   size = 4,
   topN = 20,
   tuning?: Partial<SuggestTuning>,
+  style?: StyleScorer,
 ): ModeResult {
   const tune = resolveTuning(tuning);
   if (pool.length <= size) {
@@ -480,7 +499,7 @@ export function selectFoursomeByMode(
   // other; a clearly more-owed player (≥1 fewer game / ≥15 min more wait) still
   // sorts ahead. Compute ONCE per call so the band cut + sort agree.
   const jitterById = new Map<string, number>();
-  for (const p of pool) jitterById.set(p.id, priorityCost(p) + priorityJitter());
+  for (const p of pool) jitterById.set(p.id, priorityCost(p, tune.gameCycleSeconds) + priorityJitter());
   const key = (p: ModePlayer): number => jitterById.get(p.id) as number;
 
   // Fairness-first ranking on the jittered key (ties already broken by jitter).
@@ -516,7 +535,7 @@ export function selectFoursomeByMode(
         for (let c = b + 1; c < n; c++)
           for (let d = c + 1; d < n; d++) {
             const group = [candidates[a], candidates[b], candidates[c], candidates[d]];
-            const s = scoreGroup(group, mode, pairWeight, jitterById, tune);
+            const s = scoreGroup(group, mode, pairWeight, jitterById, tune, style);
             if (s < bestScore) {
               bestScore = s;
               best = group;
@@ -533,6 +552,48 @@ export function selectFoursomeByMode(
   }
 
   return { playerIds: best.map((p) => p.id) };
+}
+
+/**
+ * splitTeams — 4명을 실효 급수 합이 가장 비슷한 2:2로 나눈다. 반환 순서 [A1, A2, B1, B2].
+ * 4명 조합의 팀 분할은 3가지뿐이라 전수 비교. 동점이면 '최근 함께 친 적 적은 짝'을 파트너로
+ * (pairWeight가 낮은 쪽) — 같은 사람끼리 계속 한 팀 되는 걸 피한다.
+ */
+export function splitTeams(
+  group: ModePlayer[],
+  genderOffsetFemale: number,
+  pairWeight: Record<string, number> = {},
+): ModePlayer[] {
+  if (group.length !== 4) return group;
+  const sk = (p: ModePlayer) => effectiveSkill(p, genderOffsetFemale);
+  const [a, b, c, d] = group;
+  let options: [ModePlayer, ModePlayer, ModePlayer, ModePlayer][] = [
+    [a, b, c, d],
+    [a, c, b, d],
+    [a, d, b, c],
+  ];
+  // 남녀 2:2면 혼복 표준대로 각 팀 남녀 1명씩(여2 vs 남2 '남녀 대결'은 제외) — 보정 급수로는
+  // 여자 A 둘 = 남자 B 둘이라 '균형'으로 잡히는 함정이 있었다.
+  const isF = (p: ModePlayer) => p.gender === 'F';
+  const isM = (p: ModePlayer) => p.gender === 'M';
+  if (group.filter(isF).length === 2 && group.filter(isM).length === 2) {
+    const mixedPairs = options.filter((o) => isF(o[0]) !== isF(o[1]) && isF(o[2]) !== isF(o[3]));
+    if (mixedPairs.length > 0) options = mixedPairs;
+  }
+  let best = options[0];
+  let bestCost = Infinity;
+  for (const o of options) {
+    const diff = Math.abs(sk(o[0]) + sk(o[1]) - (sk(o[2]) + sk(o[3])));
+    const partnered = (pairWeight[pairKey(o[0].id, o[1].id)] ?? 0) + (pairWeight[pairKey(o[2].id, o[3].id)] ?? 0);
+    const cost = diff * 10 + partnered;
+    if (cost < bestCost) {
+      bestCost = cost;
+      best = o;
+    }
+  }
+  // 팀 안에서는 급수 높은 사람을 앞에(표시용).
+  const ord = (x: ModePlayer, y: ModePlayer) => (sk(x) >= sk(y) ? [x, y] : [y, x]);
+  return [...ord(best[0], best[1]), ...ord(best[2], best[3])];
 }
 
 function selectPlayersForRound(

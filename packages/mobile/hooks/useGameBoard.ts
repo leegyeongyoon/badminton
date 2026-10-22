@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useSocketEvent } from './useSocket';
-import { gameBoardApi, type SuggestMode, type SuggestTuning } from '../services/gameBoard';
+import { gameBoardApi, type SuggestMode, type SuggestTuning, type ClubStyleSummary } from '../services/gameBoard';
 
 export interface GameBoardEntry {
   id: string;
@@ -11,7 +11,10 @@ export interface GameBoardEntry {
   position: number;
   /** Global queue order for QUEUED entries (다음 게임 순서). */
   queueOrder: number;
+  /** 자동 편성이면 '왜 이 4명인지' 한 줄. */
   note?: string | null;
+  /** true면 playerIds 가 [A1, A2, B1, B2] 팀 구성(자동 편성이 급수 밸런스로 나눔). */
+  teamSplit?: boolean;
   playerIds: string[];
   playerNames: string[];
   status: string;
@@ -50,6 +53,10 @@ export interface GameBoard {
 export interface FoursomeSuggestion {
   playerIds: string[];
   playerNames: string[];
+  /** 왜 이 4명인지(대기·판수·겹침·팀 급수). */
+  reason?: string;
+  /** playerIds 순서가 [A1, A2, B1, B2] 팀 구성인지. */
+  teamSplit?: boolean;
 }
 
 export function useGameBoard(clubSessionId: string | undefined) {
@@ -119,9 +126,9 @@ export function useGameBoard(clubSessionId: string | undefined) {
 
   // ─── 전체 "다음 게임" 큐 ───
   // 큐에 새 게임 추가 (2 or 4명). 성공 시 새 보드를 즉시 반영.
-  const createQueueGame = useCallback(async (playerIds: string[], note?: string) => {
+  const createQueueGame = useCallback(async (playerIds: string[], note?: string, teamSplit?: boolean) => {
     if (!board) return;
-    const { data } = await gameBoardApi.createQueueGame(board.id, playerIds, note);
+    const { data } = await gameBoardApi.createQueueGame(board.id, playerIds, note, teamSplit);
     return data;
   }, [board]);
 
@@ -157,6 +164,9 @@ export function useGameBoard(clubSessionId: string | undefined) {
       playerIds: string[];
       effectiveMode?: SuggestMode;
       note?: string;
+      reason?: string;
+      teamSplit?: boolean;
+      style?: ClubStyleSummary | null;
     }> => {
       if (!clubSessionId) return { playerIds: [] };
       setSuggesting(true);
@@ -173,6 +183,9 @@ export function useGameBoard(clubSessionId: string | undefined) {
           playerIds: suggestions[0]?.playerIds ?? [],
           effectiveMode: data?.mode as SuggestMode | undefined,
           note: data?.note as string | undefined,
+          reason: suggestions[0]?.reason,
+          teamSplit: suggestions[0]?.teamSplit,
+          style: (data?.style ?? null) as ClubStyleSummary | null,
         };
       } catch (err: any) {
         setSuggestError(err.response?.data?.error || '추천에 실패했습니다');
