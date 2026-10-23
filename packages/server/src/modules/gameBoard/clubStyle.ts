@@ -49,14 +49,20 @@ export interface ClubStyle {
   traits: string[];
   /** 학습 기간의 '정모 간' 함께 친 횟수(pairKey → 판수). 스코어링 때 단골 짝 판정에 쓴다. */
   history: Map<string, number>;
+  /** 운영진이 짠 판의 95%가 지킨 급수 폭(여자 2단계 보정) — 엔진의 하드 상한. */
+  spreadCap: number;
   trainedAt: string;
 }
 
 const pk = (a: string, b: string) => (a < b ? `${a}|${b}` : `${b}|${a}`);
+// 여자 급수 보정(남자 기준) — 운영진 확인: 여자는 2단계 후하다(여 A ≈ 남 C).
+export const FEMALE_OFFSET = 2;
+/** 기록이 없을 때 한 판 급수 폭(보정) 상한 기본값. */
+export const DEFAULT_SPREAD_CAP = 2;
 
 export function styleFeatures(group: StylePlayer[], history: Map<string, number>): number[] {
   const sk = group.map((p) => p.skill);
-  const eff = group.map((p) => p.skill - (p.gender === 'F' ? 1 : 0));
+  const eff = group.map((p) => p.skill - (p.gender === 'F' ? FEMALE_OFFSET : 0));
   const [a, b, c, d] = eff;
   const teamDiff = group.length === 4 ? Math.min(Math.abs(a + b - c - d), Math.abs(a + c - b - d), Math.abs(a + d - b - c)) : 0;
   const f = group.filter((p) => p.gender === 'F').length;
@@ -274,6 +280,21 @@ export async function trainClubStyle(clubId: string): Promise<ClubStyle | null> 
 
   if (decisions < MIN_DECISIONS || rows.length === 0) return null;
 
+  // 운영진 급수 폭 규칙 — 학습 기간 4인 판의 보정 급수 폭 95% 지점(1~3으로 제한).
+  const spreads: number[] = [];
+  for (const arr of bySession.values())
+    for (const t of arr) {
+      if (t.ids.length !== 4) continue;
+      const e = t.ids.map((id) => {
+        const p = player(id);
+        return p.skill - (p.gender === 'F' ? FEMALE_OFFSET : 0);
+      });
+      spreads.push(Math.max(...e) - Math.min(...e));
+    }
+  spreads.sort((a, b) => a - b);
+  const p95 = spreads.length ? spreads[Math.min(spreads.length - 1, Math.floor(spreads.length * 0.95))] : DEFAULT_SPREAD_CAP;
+  const spreadCap = Math.max(1, Math.min(3, p95));
+
   const cut = Math.floor(sessions.length * 0.8);
   const toXY = (rs: typeof rows) => {
     const X: number[][] = [];
@@ -308,6 +329,7 @@ export async function trainClubStyle(clubId: string): Promise<ClubStyle | null> 
     testAccuracy,
     traits: describe(model.stdWeights),
     history,
+    spreadCap,
     trainedAt: new Date().toISOString(),
   };
 }

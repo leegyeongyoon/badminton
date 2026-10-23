@@ -15,7 +15,7 @@ import {
   type StyleScorer,
   type RequestHooks,
 } from './suggest.algorithm';
-import { getClubStyle, styleUtility, type ClubStyle } from './clubStyle';
+import { getClubStyle, styleUtility, type ClubStyle, DEFAULT_SPREAD_CAP } from './clubStyle';
 import { activeRequestsForEngine } from './sessionRequest.service';
 
 // Map a SkillLevel enum (S strongest … F weakest; null=미설정) to a number used
@@ -944,8 +944,26 @@ export async function suggestNextFoursome(
         .filter((r) => r.games == null || togetherSoFar[pkey(r.aId, r.bId)] < r.games)
         .map((r) => pkey(r.aId, r.bId)),
     );
+  // ── 운영진 급수·성별 규칙(하드) — 터닝 운영진 확인(2026-10-23) ──
+  //  · 한 판 급수 폭(여자 2단계 보정)은 모임 기록 95% 상한(기본 2) 이하. 파트너 요청 판은 예외.
+  //  · 여자 C급 이하는 혼복(남2·여2)·여복으로만 — 남자 3명 사이 여자 1명(3:1)은 여자 B급 이상만.
+  // 규칙 안 4명이 없으면 억지로 짜지 않고 '곧 나올 사람'까지 보거나 기다린다(아래 슬롯 선택).
+  const spreadCap = style?.spreadCap ?? DEFAULT_SPREAD_CAP;
+  const RULE_COST = 500;
+  const effOf = (p: ModePlayer) => p.skill + (p.gender === 'F' ? tune.genderOffsetFemale : 0);
+  const ruleBreak = (g: ModePlayer[], activeKeys: Set<string>): string | null => {
+    const f = g.filter((p) => p.gender === 'F');
+    const m = g.filter((p) => p.gender === 'M');
+    if (f.length === 1 && m.length === 3 && f[0].skill <= 4) return '여자 C급 이하는 혼복·여복으로';
+    if (g.length === 4) {
+      let hasReq = false;
+      for (let i = 0; i < 4; i++) for (let j = i + 1; j < 4; j++) if (activeKeys.has(pkey(g[i].id, g[j].id))) hasReq = true;
+      const e = g.map(effOf);
+      if (!hasReq && Math.max(...e) - Math.min(...e) > spreadCap) return `급수 폭 ${Math.max(...e) - Math.min(...e)}단계`;
+    }
+    return null;
+  };
   const requestHooks = (activeKeys: Set<string>, availableIds: Set<string>): RequestHooks | undefined => {
-    if (apartKeys.size === 0 && activeKeys.size === 0) return undefined;
     const partnerOf = new Map<string, string[]>();
     for (const k of activeKeys) {
       const [x, y] = k.split('|');
@@ -957,7 +975,7 @@ export async function suggestNextFoursome(
       score: (group) => {
         const ids = group.map((p) => p.id);
         const inGroup = new Set(ids);
-        let c = 0;
+        let c = ruleBreak(group, activeKeys) ? RULE_COST : 0;
         const eff = (p: ModePlayer) => p.skill + (p.gender === 'F' ? tune.genderOffsetFemale : 0);
         for (let i = 0; i < ids.length; i++)
           for (let j = i + 1; j < ids.length; j++) {
@@ -1069,8 +1087,20 @@ export async function suggestNextFoursome(
     }
     // 땜빵은 한 자리 끼우기 — 혼복/동성복 '순환' 항은 끈다(같은 성별·급수가 우선).
     const targetTuning = target.kind === 'substitute' ? { ...tuning, typeVarietyWeight: 0 } : tuning;
-    const ranked = completeGroup(available, fixedMP, need, mode, pairWeight, targetTuning, styleScorer, hooks, target.kind === 'substitute' ? 3 : 1);
-    const byId = new Map([...available, ...fixedMP].map((p) => [p.id, p]));
+    // 규칙(급수 폭·여자 C 이하 3:1) 안 조합만. 채우기는 쉬는 사람으로 안 되면 그 게임 시작 때 비는 사람까지.
+    const valid = (pool: ModePlayer[], fixed: ModePlayer[], k: number) => {
+      const m = new Map([...pool, ...fixed].map((p) => [p.id, p]));
+      return completeGroup(pool, fixed, need, mode, pairWeight, targetTuning, styleScorer, hooks, 12)
+        .filter((r) => !ruleBreak(r.playerIds.map((id) => m.get(id)!), slotActive))
+        .slice(0, k);
+    };
+    let ranked = valid(available, fixedMP, target.kind === 'substitute' ? 3 : 1);
+    let pool2: ModePlayer[] = [];
+    if (ranked.length === 0 && target.kind === 'fill' && useIdle && !target.turnId) {
+      pool2 = eligible.filter((id) => freeBy(id, targetStart)).map((id) => toModePlayer(id, targetStart));
+      ranked = valid(pool2, targetFixed.map((id) => toModePlayer(id, targetStart)), 1);
+    }
+    const byId = new Map([...available, ...fixedMP, ...pool2].map((p) => [p.id, p]));
     const names = new Map(
       (await prisma.user.findMany({ where: { id: { in: Array.from(byId.keys()) } }, select: { id: true, name: true } })).map((u) => [u.id, u.name]),
     );
@@ -1087,7 +1117,12 @@ export async function suggestNextFoursome(
       });
       return { suggestions: [], substitutes, mode };
     }
-    if (ranked.length === 0) return { suggestions: [], mode, note: '채울 수 있는 사람이 없어요' };
+    if (ranked.length === 0)
+      return {
+        suggestions: [],
+        mode,
+        note: `급수·성별 규칙(급수 폭 ${spreadCap}단계, 여자 C 이하 혼복·여복)에 맞는 사람이 아직 없어요 — 코트에서 나오면 채워요`,
+      };
     const ordered = splitTeams(ranked[0].playerIds.map((id) => byId.get(id)!).filter(Boolean), tune.genderOffsetFemale, pairWeight, slotActive);
     return {
       suggestions: [
@@ -1107,20 +1142,39 @@ export async function suggestNextFoursome(
   const slotPlayerIds: string[][] = [];
   const slotReasons: string[] = [];
   const slotStarts: number[] = [];
+  let waitingNote: string | null = null;
 
   for (let slot = 0; slot < count; slot++) {
     // 쉬는 사람이 4명 이상이면 그들 중에서(지금 기준), 아니면 시간 기준(이 판 시작 시각에 비는 사람).
     const idleIds = poolIds.filter(isIdle);
-    const useIdle = idleIds.length >= 4;
-    const at = useIdle ? nowMs : slotStart;
-    const available = (useIdle ? idleIds : poolIds.filter((id) => freeBy(id, slotStart))).map((id) => toModePlayer(id, at));
-    if (available.length < 4) break;
-    const byId = new Map(available.map((p) => [p.id, p]));
-
     slotActive = activeTogether();
-    const hooks = requestHooks(slotActive, new Set(available.map((p) => p.id)));
-    const picked = selectFoursomeByMode(available, mode, pairWeight, 4, undefined, tuning, styleScorer, hooks);
-    if (picked.playerIds.length < 4) break;
+    // 후보 시점: 지금 쉬는 사람(4명+면) → 안 되면 코트가 비는 시각들(최대 3개)에 비는 사람.
+    // 각 시점에서 규칙(급수 폭·여자 C 이하 3:1 금지) 안 4명이 나오면 그걸로, 끝까지 없으면 이 판은 기다림.
+    const attempts: { at: number; ids: string[] }[] = [];
+    if (idleIds.length >= 4) attempts.push({ at: nowMs, ids: idleIds });
+    const futureStarts = Array.from(new Set([slotStart, ...courtFree.filter((t) => t > slotStart)])).sort((a, b) => a - b).slice(0, 3);
+    for (const t of futureStarts) attempts.push({ at: t, ids: poolIds.filter((id) => freeBy(id, t)) });
+    let picked: { playerIds: string[] } | null = null;
+    let byId = new Map<string, ModePlayer>();
+    let chosenAt = slotStart;
+    for (const att of attempts) {
+      if (att.ids.length < 4) continue;
+      const available = att.ids.map((id) => toModePlayer(id, att.at));
+      const hooks = requestHooks(slotActive, new Set(available.map((p) => p.id)));
+      const pk4 = selectFoursomeByMode(available, mode, pairWeight, 4, undefined, tuning, styleScorer, hooks);
+      if (pk4.playerIds.length < 4) continue;
+      const m = new Map(available.map((p) => [p.id, p]));
+      if (ruleBreak(pk4.playerIds.map((id) => m.get(id)!), slotActive)) continue;
+      picked = pk4;
+      byId = m;
+      chosenAt = Math.max(att.at, slotStart);
+      break;
+    }
+    if (!picked) {
+      waitingNote = `급수·성별 규칙(급수 폭 ${spreadCap}단계, 여자 C 이하 혼복·여복)에 맞는 4명이 아직 없어요 — 코트에서 나오면 짜요`;
+      break;
+    }
+    slotStart = chosenAt;
 
     // 팀까지 짜준다 — 실효 급수 합이 가장 비슷한 2:2(남녀 2:2면 각 팀 남녀 1명씩), 순서 [A1, A2, B1, B2].
     const ordered = splitTeams(
@@ -1169,6 +1223,8 @@ export async function suggestNextFoursome(
   return {
     suggestions,
     mode,
+    ...(waitingNote ? { note: waitingNote } : {}),
+    rules: { spreadCap, femaleOffset: tune.genderOffsetFemale },
     pace: {
       medianGameMin: pace.medianGameMin,
       currentGameMin: Math.round((gameMs / 60000) * 10) / 10,

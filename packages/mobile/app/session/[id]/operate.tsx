@@ -89,7 +89,7 @@ const SUGGEST_MODES: {
 // ─── 자동 편성 조율(운영자 튜닝) — 서버 suggest tuning 과 1:1 ───
 // 기본값은 서버 기본과 동일(바꾸기 전엔 동작 변화 없음). 정모별 저장.
 const AUTO_TUNING_DEFAULT: Required<SuggestTuning> = {
-  genderOffsetFemale: -1, // 여B≈남C
+  genderOffsetFemale: -2, // 여A≈남C — 터닝 운영진 확인(여자 급수는 2단계 후함)
   sameGenderWeight: 0.5,
   typeVarietyWeight: 0.6,
 };
@@ -379,7 +379,8 @@ export default function OperateScreen() {
   // 자동 편성 조율값(성별 보정폭·동성 강도·타입 순환) — 자동+수동 suggest에 전달. 정모별 저장.
   const [autoTuning, setAutoTuning] = useState<Required<SuggestTuning>>(AUTO_TUNING_DEFAULT);
   const [tuningOpen, setTuningOpen] = useState(false);
-  const autoTuningKey = clubSessionId ? `operate_autotuning_${clubSessionId}` : null;
+  // v2: 여자 보정 기본값이 −1 → −2로 바뀌어, 예전 기본값이 저장된 정모 설정은 무시(새 기본값 적용).
+  const autoTuningKey = clubSessionId ? `operate_autotuning2_${clubSessionId}` : null;
   const autoTuningLoadedRef = useRef(false);
   useEffect(() => {
     if (!autoTuningKey) return;
@@ -1798,6 +1799,8 @@ export default function OperateScreen() {
     const count = Math.min(8, Math.floor(poolUserIds.length / 4));
     try {
       let suggestions: { playerIds: string[]; reason?: string; teamSplit?: boolean }[] = [];
+      let engineFailed = !clubSessionId;
+      let waitNote: string | undefined;
       if (clubSessionId) {
         try {
           const { data } = await gameBoardApi.suggest(clubSessionId, {
@@ -1806,13 +1809,16 @@ export default function OperateScreen() {
             tuning: autoTuningRef.current,
           });
           suggestions = (data?.suggestions ?? []).filter((x: any) => x?.playerIds?.length === 4);
-        } catch { suggestions = []; }
+          waitNote = data?.note;
+        } catch { engineFailed = true; }
       }
       if (suggestions.length > 0) {
         for (const sg of suggestions) await createQueueGame(sg.playerIds, sg.reason || undefined, !!sg.teamSplit);
-      } else {
+      } else if (engineFailed) {
+        // 엔진 오류일 때만 예전 방식(순서대로 4명씩). 규칙 때문에 0판이면 억지로 짜지 않는다.
         for (let i = 0; i + 4 <= poolUserIds.length; i += 4) await createQueueGame(poolUserIds.slice(i, i + 4));
       }
+      if (waitNote) setAutoLastNote(`⏳ ${waitNote}`);
       loadBoard(); loadPool();
     } catch (err: any) { showAlert('오류', err?.response?.data?.error || '자동 편성 실패'); loadBoard(); }
   }, [clubSessionId, createQueueGame, loadBoard, loadPool]);
@@ -1922,14 +1928,17 @@ export default function OperateScreen() {
         let ids: string[] = [];
         let reason: string | undefined;
         let teamSplit = false;
+        let waitNote: string | undefined;
         try {
           // 방금 만든 대기 게임은 서버 시뮬레이션에 반영되므로 별도 제외 없이 요청(이어지는 판 가능).
           const r = await suggestNext({ mode: autoModeRef.current, tuning: autoTuningRef.current });
           ids = r.playerIds ?? [];
           reason = r.reason || undefined;
           teamSplit = !!r.teamSplit;
+          waitNote = r.note || undefined;
         } catch { ids = []; }
-        if (ids.length < 4) break;            // 자격 인원 4명 미달 → 대기(무한X)
+        // 인원 미달 또는 급수·성별 규칙에 맞는 4명이 없음 → 억지로 안 짜고 대기(안내 표시).
+        if (ids.length < 4) { if (waitNote) setAutoLastNote(`⏳ ${waitNote}`); break; }
         // 코트 없는 '다음 게임'으로 큐에 준비(팀 구성 [A1,A2,B1,B2] + 왜 이 4명인지 메모).
         // 코트 투입은 '코트 투입까지 자동'이 켜져 있으면 아래 자동 투입이 맡는다.
         try {
@@ -4988,7 +4997,7 @@ export default function OperateScreen() {
             </Text>
             {autoComposing && <ActivityIndicator size="small" color={colors.secondary} />}
           </View>
-          {!autoComposing && !!autoLastNote && readyQueuedCount > 0 && (
+          {!autoComposing && !!autoLastNote && (readyQueuedCount > 0 || autoLastNote.startsWith('⏳')) && (
             <Text style={[styles.autoStripSub, { color: colors.textSecondary }]} numberOfLines={1}>{autoLastNote}</Text>
           )}
           {!!pace?.style && pace.style.traits.length > 0 && (
