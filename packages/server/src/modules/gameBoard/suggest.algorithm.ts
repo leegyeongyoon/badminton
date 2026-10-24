@@ -207,7 +207,8 @@ const AGING_CAP = 12;          // 상한 — 최악의 급수 페널티(≈9)도
 
 // 타입 편중 방지 — 잘/못 치는 사람 누구도 혼복/동성복 한쪽에 갇히지 않게, 부족한 타입을
 // 주는 그룹을 선호(soft). 급수·공평엔 양보한다.
-const TYPE_VARIETY_WEIGHT = 0.6;
+// 운영진 피드백(2026-10-24): 순환이 여자분들을 계속 혼복으로 밀어 여복을 못 침 → 기본 끔(조율로만 켬).
+const TYPE_VARIETY_WEIGHT = 0;
 
 // ── Controlled tie-breaking randomness (anti-determinism) ────────────────────
 // The unified scoring is otherwise fully deterministic, so when many players are
@@ -331,14 +332,28 @@ function effectiveSkill(p: ModePlayer, genderOffsetFemale: number): number {
   return p.skill + (p.gender === 'F' ? genderOffsetFemale : 0);
 }
 
+/**
+ * levelSpread — 한 판의 '급수 폭'(운영진 기준).
+ *  · 혼복 2:2: 팀마다 남녀 1명씩이라 남자끼리·여자끼리 급수 폭(실제 급수)의 큰 쪽. 남자가 여자보다
+ *    높은 건 정상(남자가 받쳐주는 구조 — 특히 여자 F조) → 남녀 차이는 폭에 넣지 않는다.
+ *  · 남복·여복·3:1: 여자 보정 급수(실효)로 4명 전체 폭.
+ */
+export function levelSpread(group: ModePlayer[], genderOffsetFemale: number): number {
+  const f = group.filter((p) => p.gender === 'F');
+  const m = group.filter((p) => p.gender === 'M');
+  const sp = (xs: number[]) => (xs.length ? Math.max(...xs) - Math.min(...xs) : 0);
+  if (group.length === 4 && f.length === 2 && m.length === 2) return Math.max(sp(m.map((p) => p.skill)), sp(f.map((p) => p.skill)));
+  return sp(group.map((p) => effectiveSkill(p, genderOffsetFemale)));
+}
+
 // modeTerm(group, mode): the mode-specific flavor cost (lower = better). The
 // fairness + variety baseline is added by scoreGroup, NOT here.
 function modeTerm(group: ModePlayer[], mode: SuggestMode, genderOffsetFemale: number): number {
   const skills = group.map((p) => effectiveSkill(p, genderOffsetFemale));
   switch (mode) {
     case 'similar': {
-      // Prefer a tight skill spread.
-      return Math.max(...skills) - Math.min(...skills);
+      // Prefer a tight skill spread(혼복은 남자끼리·여자끼리 폭 — levelSpread).
+      return levelSpread(group, genderOffsetFemale);
     }
     case 'competitive': {
       // 빡센 게임 = 2강 2약. Reward a POLARIZED/bimodal four whose sorted skills
@@ -372,7 +387,8 @@ function modeTerm(group: ModePlayer[], mode: SuggestMode, genderOffsetFemale: nu
 // 낫다 — 터닝포인트 실측 학습(2,794편성): 총무들은 2:2 혼복을 선호(+0.76), 3:1은 피함.
 // (예전엔 min(남,여)라 3:1이 2:2보다 '덜 섞였다'고 선호되는 역전이 있었다.) 성별 미설정은
 // 어느 쪽으로도 안 세어 관대하게 둔다. 가중치(SAME_GENDER_WEIGHT)가 작아 급수/공평에 양보한다.
-const SAME_GENDER_WEIGHT = 0.5;
+// 남복·여복이 기본, 혼복은 성별 인원이 안 맞을 때 — 운영진 피드백(2026-10-24)으로 0.5 → 1.5.
+const SAME_GENDER_WEIGHT = 1.5;
 function genderMixCost(group: ModePlayer[]): number {
   let m = 0;
   let f = 0;

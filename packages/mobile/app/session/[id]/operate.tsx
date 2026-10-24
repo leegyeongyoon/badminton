@@ -90,13 +90,13 @@ const SUGGEST_MODES: {
 // 기본값은 서버 기본과 동일(바꾸기 전엔 동작 변화 없음). 정모별 저장.
 const AUTO_TUNING_DEFAULT: Required<SuggestTuning> = {
   genderOffsetFemale: -2, // 여A≈남C — 터닝 운영진 확인(여자 급수는 2단계 후함)
-  sameGenderWeight: 0.5,
-  typeVarietyWeight: 0.6,
+  sameGenderWeight: 1.5, // 남복·여복 기본(혼복은 성별 인원이 안 맞을 때) — 운영진 피드백
+  typeVarietyWeight: 0,  // 혼복/동성복 순환 끔 — 여자분들이 계속 혼복으로 밀리던 원인
 };
 // 각 조율 항목의 세그먼트 선택지 [표시라벨, 값].
 const TUNING_OPTIONS: Record<keyof SuggestTuning, readonly (readonly [string, number])[]> = {
   genderOffsetFemale: [['끔', 0], ['1단계', -1], ['2단계', -2]],
-  sameGenderWeight: [['끔', 0], ['약', 0.35], ['중', 0.5], ['강', 0.9]],
+  sameGenderWeight: [['끔', 0], ['약', 0.5], ['중', 1.0], ['강', 1.5]],
   typeVarietyWeight: [['끔', 0], ['약', 0.4], ['중', 0.6], ['강', 1.0]],
 };
 const TUNING_ROWS: { key: keyof SuggestTuning; label: string; hint: string }[] = [
@@ -380,7 +380,7 @@ export default function OperateScreen() {
   const [autoTuning, setAutoTuning] = useState<Required<SuggestTuning>>(AUTO_TUNING_DEFAULT);
   const [tuningOpen, setTuningOpen] = useState(false);
   // v2: 여자 보정 기본값이 −1 → −2로 바뀌어, 예전 기본값이 저장된 정모 설정은 무시(새 기본값 적용).
-  const autoTuningKey = clubSessionId ? `operate_autotuning2_${clubSessionId}` : null;
+  const autoTuningKey = clubSessionId ? `operate_autotuning3_${clubSessionId}` : null; // v3: 동성 우선↑·순환 끔
   const autoTuningLoadedRef = useRef(false);
   useEffect(() => {
     if (!autoTuningKey) return;

@@ -6,6 +6,7 @@ import { sendPushToUser } from '../notification/notification.service';
 import {
   selectFoursomeByMode,
   completeGroup,
+  levelSpread,
   splitTeams,
   resolveTuning,
   SUGGEST_TUNABLES,
@@ -901,11 +902,8 @@ export async function suggestNextFoursome(
   // 학습 스타일이 성별 선호(남복·여복/혼복 2:2)를 이미 담고 있어, 수동 '동성 우선'이 기본값(0.5)
   // 그대로면 끈다 — 둘이 겹치면 운영진보다 남복·여복을 과하게 짠다(재생 평가: 71% → 61%, 운영진 59%).
   // 운영자가 직접 바꾼 값은 존중.
-  const sameGenderOverride =
-    style && (opts.tuning?.sameGenderWeight === undefined || opts.tuning.sameGenderWeight === SUGGEST_TUNABLES.SAME_GENDER_WEIGHT)
-      ? { sameGenderWeight: 0 }
-      : {};
-  const tuning: Partial<SuggestTuning> = { ...opts.tuning, ...sameGenderOverride, gameCycleSeconds: (gameMs / 1000) * ratio };
+  // (이전엔 학습 스타일이 있으면 수동 동성 우선을 껐지만, 실제 운영에서 혼복이 과다해 운영진 피드백으로 유지.)
+  const tuning: Partial<SuggestTuning> = { ...opts.tuning, gameCycleSeconds: (gameMs / 1000) * ratio };
   const tune = resolveTuning(tuning);
   let styleScorer: StyleScorer | undefined;
   if (style) {
@@ -948,18 +946,33 @@ export async function suggestNextFoursome(
   //  · 한 판 급수 폭(여자 2단계 보정)은 모임 기록 95% 상한(기본 2) 이하. 파트너 요청 판은 예외.
   //  · 여자 C급 이하는 혼복(남2·여2)·여복으로만 — 남자 3명 사이 여자 1명(3:1)은 여자 B급 이상만.
   // 규칙 안 4명이 없으면 억지로 짜지 않고 '곧 나올 사람'까지 보거나 기다린다(아래 슬롯 선택).
-  const spreadCap = style?.spreadCap ?? DEFAULT_SPREAD_CAP;
+  // 급수 폭(보정): 0~1단계가 기본, 2단계는 가끔(큰 비용), 3단계+ 금지. 모임 기록 상한이 더 좁으면 그걸로.
+  // 운영진 피드백(2026-10-24): "남복도 C·E·C·E처럼 섞여 들어간다 — 비슷한 급수나 1~2급 위와 치고 싶어 한다".
+  const spreadCap = Math.min(style?.spreadCap ?? DEFAULT_SPREAD_CAP, 2);
+  const SPREAD2_COST = 4; // 2단계 판 — 1단계 이하 조합이 있으면 그쪽(공평 4게임 상당)
   const RULE_COST = 500;
   const effOf = (p: ModePlayer) => p.skill + (p.gender === 'F' ? tune.genderOffsetFemale : 0);
+  // 혼복 2:2의 남녀 급수 관계: 남자가 여자보다 최대 3단계 높아도 됨(남자가 받쳐주는 구조, 여자 F조가
+  // 혼복으로 자주 들어가는 이유). 여자가 남자보다 높은 건 1단계까지. (운영진 피드백 2026-10-24)
+  const mixedGap = (g: ModePlayer[]) => {
+    const f = g.filter((p) => p.gender === 'F');
+    const m = g.filter((p) => p.gender === 'M');
+    if (g.length !== 4 || f.length !== 2 || m.length !== 2) return null;
+    return (m[0].skill + m[1].skill) / 2 - (f[0].skill + f[1].skill) / 2;
+  };
+  const hasRequestPair = (g: ModePlayer[], activeKeys: Set<string>) => {
+    for (let i = 0; i < g.length; i++) for (let j = i + 1; j < g.length; j++) if (activeKeys.has(pkey(g[i].id, g[j].id))) return true;
+    return false;
+  };
   const ruleBreak = (g: ModePlayer[], activeKeys: Set<string>): string | null => {
     const f = g.filter((p) => p.gender === 'F');
     const m = g.filter((p) => p.gender === 'M');
     if (f.length === 1 && m.length === 3 && f[0].skill <= 4) return '여자 C급 이하는 혼복·여복으로';
-    if (g.length === 4) {
-      let hasReq = false;
-      for (let i = 0; i < 4; i++) for (let j = i + 1; j < 4; j++) if (activeKeys.has(pkey(g[i].id, g[j].id))) hasReq = true;
-      const e = g.map(effOf);
-      if (!hasReq && Math.max(...e) - Math.min(...e) > spreadCap) return `급수 폭 ${Math.max(...e) - Math.min(...e)}단계`;
+    if (g.length === 4 && !hasRequestPair(g, activeKeys)) {
+      const sp = levelSpread(g, tune.genderOffsetFemale);
+      if (sp > spreadCap) return `급수 폭 ${sp}단계`;
+      const gap = mixedGap(g);
+      if (gap != null && (gap > 3 || gap < -1)) return `혼복 남녀 급수 차이 ${gap > 0 ? '+' : ''}${gap}`;
     }
     return null;
   };
@@ -976,6 +989,27 @@ export async function suggestNextFoursome(
         const ids = group.map((p) => p.id);
         const inGroup = new Set(ids);
         let c = ruleBreak(group, activeKeys) ? RULE_COST : 0;
+        if (group.length === 4 && !hasRequestPair(group, activeKeys)) {
+          if (levelSpread(group, tune.genderOffsetFemale) === 2) c += SPREAD2_COST;
+          const f = group.filter((p) => p.gender === 'F');
+          const m = group.filter((p) => p.gender === 'M');
+          if (f.length === 2 && m.length === 2) {
+            // 혼복 팀 균형: (남+여) vs (남+여) 실제 급수 합 차이가 작은 배치 기준.
+            const d1 = Math.abs(m[0].skill + f[0].skill - m[1].skill - f[1].skill);
+            const d2 = Math.abs(m[0].skill + f[1].skill - m[1].skill - f[0].skill);
+            c += 1.5 * Math.min(d1, d2);
+            // 여자 E조 이상은 여복이 기본(서로 랠리가 됨) → 그런 혼복은 비용.
+            // F조 여자가 든 혼복은 정배 → 가산점(한 판씩 고르는 엔진이 남복으로 받쳐줄 남자를 먼저 써버리지 않게).
+            const fCount = f.filter((p) => p.skill <= 1).length;
+            if (fCount === 0) c += 3;
+            else c -= 2.5 * fCount;
+            // 남녀 차이는 허용하되 2단계를 넘으면 조금씩(남자가 받쳐주는 구조라도 차이가 작을수록 좋음).
+            const gap = (m[0].skill + m[1].skill - f[0].skill - f[1].skill) / 2;
+            if (gap > 2) c += 0.8 * (gap - 2);
+          }
+          // 여자 F조끼리 여복은 랠리가 어려움 → 남자가 받쳐주는 혼복 쪽으로(남자 후보가 있으면).
+          if (f.length === 4 && f.some((p) => p.skill <= 1)) c += 3;
+        }
         const eff = (p: ModePlayer) => p.skill + (p.gender === 'F' ? tune.genderOffsetFemale : 0);
         for (let i = 0; i < ids.length; i++)
           for (let j = i + 1; j < ids.length; j++) {
@@ -1095,6 +1129,17 @@ export async function suggestNextFoursome(
         .slice(0, k);
     };
     let ranked = valid(available, fixedMP, target.kind === 'substitute' ? 3 : 1);
+    // 땜빵은 이미 진행 중인 판의 급한 빈자리 — 규칙 안 후보가 3명이 안 되면 '덜 나쁜' 규칙 밖 후보도
+    // 뒤에 보여준다(표시: ⚠ 급수 차이 큼). 새 게임·채우기는 규칙을 엄격히 지킨다.
+    const relaxedIds = new Set<string>();
+    if (target.kind === 'substitute' && ranked.length < 3) {
+      const have = new Set(ranked.map((r) => r.playerIds.join(',')));
+      const extra = completeGroup(available, fixedMP, need, mode, pairWeight, targetTuning, styleScorer, hooks, 12)
+        .filter((r) => !have.has(r.playerIds.join(',')))
+        .slice(0, 3 - ranked.length);
+      for (const r of extra) relaxedIds.add(r.playerIds.find((x) => !fixedIds.has(x))!);
+      ranked = [...ranked, ...extra];
+    }
     let pool2: ModePlayer[] = [];
     if (ranked.length === 0 && target.kind === 'fill' && useIdle && !target.turnId) {
       pool2 = eligible.filter((id) => freeBy(id, targetStart)).map((id) => toModePlayer(id, targetStart));
@@ -1113,6 +1158,7 @@ export async function suggestNextFoursome(
         bits.push(`오늘 ${p.games}판`);
         if (playingNowIds.has(id)) bits.push('코트에서 곧 끝남');
         if (targetFixed!.some((f) => slotActive.has(pkey(f, id)))) bits.push('파트너 요청');
+        if (relaxedIds.has(id)) bits.unshift('⚠ 급수 차이 큼');
         return { userId: id, name: names.get(id) ?? '', reason: bits.join(' · ') };
       });
       return { suggestions: [], substitutes, mode };
