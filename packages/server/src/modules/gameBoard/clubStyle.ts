@@ -85,10 +85,11 @@ export function styleFeatures(group: StylePlayer[], history: Map<string, number>
   ];
 }
 
-export function styleUtility(style: ClubStyle, group: StylePlayer[]): number {
+// skipGender: 운영자가 혼복 비율을 직접 정했으면 학습된 남복·여복/혼복 선호(특성 2·3)는 빼고 본다.
+export function styleUtility(style: ClubStyle, group: StylePlayer[], opts?: { skipGender?: boolean }): number {
   const x = styleFeatures(group, style.history);
   let u = 0;
-  for (let j = 0; j < x.length; j++) u += style.weights[j] * x[j];
+  for (let j = 0; j < x.length; j++) if (!(opts?.skipGender && (j === 2 || j === 3))) u += style.weights[j] * x[j];
   return u;
 }
 

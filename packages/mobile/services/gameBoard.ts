@@ -19,7 +19,8 @@ export type SuggestTuning = {
 // 운영판 '편성 기준' (서버 suggestFoursomeSchema.prefs 와 1:1) — 주면 mode·동성/순환 tuning보다 우선.
 export type SuggestPrefs = {
   levelMatch?: 'tight' | 'normal' | 'loose';   // 급수 맞추기: 딱 맞게 / 보통 / 넉넉하게
-  gameType?: 'same' | 'even' | 'mixed';        // 게임 종류: 남복·여복 위주 / 골고루 / 혼복 위주
+  gameType?: 'same' | 'even' | 'mixed';        // (예전) 게임 종류 — 지금 앱은 mixedRatio 를 보냄
+  mixedRatio?: number;                         // 혼복 비율 목표(0~100%) — 오늘 전체 판 기준
   avoidRepeat?: 'normal' | 'strong';           // 같은 사람과 또: 보통 / 최대한 피하기
 };
 
@@ -61,6 +62,8 @@ export type SessionPace = {
   sample: number;
   source: 'club' | 'default';
   style: ClubStyleSummary | null;
+  /** 오늘 혼복 판수 / 전체 판수(시작된 판 + 대기 게임). */
+  mixToday?: { mixed: number; total: number };
 };
 
 export const gameBoardApi = {

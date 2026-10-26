@@ -475,6 +475,8 @@ export const suggestFoursomeSchema = z.object({
     .object({
       levelMatch: z.enum(['tight', 'normal', 'loose']).optional(),
       gameType: z.enum(['same', 'even', 'mixed']).optional(),
+      // 혼복 비율 목표(%) — 주면 gameType 대신 오늘 전체 판의 혼복 비율을 이 값에 맞춘다.
+      mixedRatio: z.number().int().min(0).max(100).optional(),
       avoidRepeat: z.enum(['normal', 'strong']).optional(),
     })
     .optional(),

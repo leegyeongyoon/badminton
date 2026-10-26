@@ -10,6 +10,7 @@ import {
   splitTeams,
   resolveTuning,
   SUGGEST_TUNABLES,
+  GENDER_SKILL_OFFSET_FEMALE,
   type SuggestMode,
   type ModePlayer,
   type SuggestTuning,
@@ -107,6 +108,27 @@ function summarizeStyle(style: ClubStyle | null) {
 }
 
 // 정모 기준 페이스 — 클럽 페이스 + 1인당 한 판 주기(판당 시간 × 인원/(4×코트)).
+// 오늘 혼복 비율 — 시작된 판 + 대기 게임(4명). 운영판 '혼복 비율' 옆에 실제 값으로 보여준다.
+async function countMixToday(clubSessionId: string): Promise<{ mixed: number; total: number }> {
+  const [games, entries] = await Promise.all([
+    prisma.game.findMany({ where: { turn: { clubSessionId } }, select: { players: { select: { userId: true } } } }),
+    prisma.gameBoardEntry.findMany({ where: { board: { clubSessionId }, status: 'QUEUED' }, select: { playerIds: true } }),
+  ]);
+  const groups = [
+    ...games.map((g) => g.players.map((p) => p.userId)),
+    ...entries.map((e) => (e.playerIds as string[]) ?? []),
+  ].filter((ids) => ids.length === 4);
+  const ids = Array.from(new Set(groups.flat()));
+  const gender = new Map(
+    (await prisma.playerProfile.findMany({ where: { userId: { in: ids } }, select: { userId: true, gender: true } })).map(
+      (p) => [p.userId, p.gender] as const,
+    ),
+  );
+  let mixed = 0;
+  for (const g of groups) if (g.some((id) => gender.get(id) === 'M') && g.some((id) => gender.get(id) === 'F')) mixed++;
+  return { mixed, total: groups.length };
+}
+
 export async function getSessionPace(clubSessionId: string) {
   const session = await prisma.clubSession.findUnique({
     where: { id: clubSessionId },
@@ -121,8 +143,10 @@ export async function getSessionPace(clubSessionId: string) {
   const ratio = courts > 0 ? Math.max(1, rotating / (4 * courts)) : 1;
   const style = await getClubStyle(session.clubId);
   const elapsedMin = (Date.now() - session.startedAt.getTime()) / 60000;
+  const mixToday = await countMixToday(clubSessionId);
   return {
     ...pace,
+    mixToday,
     // 지금 시점에 맞는 판당 시간 — 정모 첫 1시간은 더 길게.
     currentGameMin: elapsedMin < 60 ? pace.firstHourGameMin : pace.laterGameMin,
     style: summarizeStyle(style),
@@ -616,6 +640,8 @@ export async function suggestNextFoursome(
     prefs?: {
       levelMatch?: 'tight' | 'normal' | 'loose';
       gameType?: 'same' | 'even' | 'mixed';
+      /** 혼복 비율 목표(0~100%) — 주면 gameType 대신 오늘 전체 판의 혼복 비율을 이 값에 맞춘다. */
+      mixedRatio?: number;
       avoidRepeat?: 'normal' | 'strong';
     };
     /**
@@ -810,7 +836,9 @@ export async function suggestNextFoursome(
   });
   // 과거 게임 타입(혼복/동성복) 분류를 위해 '이번 정모에서 게임한 모든 참가자'의 성별을
   // 모은다(풀 밖 상대까지 포함해야 그 게임이 혼복이었는지 판정 가능).
-  const gameUserIds = Array.from(new Set(sessionGames.flatMap((g) => g.players.map((p) => p.userId))));
+  const gameUserIds = Array.from(
+    new Set([...sessionGames.flatMap((g) => g.players.map((p) => p.userId)), ...queued.flatMap((e) => (e.playerIds as string[]) ?? [])]),
+  );
   const gameProfiles = gameUserIds.length
     ? await prisma.playerProfile.findMany({ where: { userId: { in: gameUserIds } }, select: { userId: true, gender: true } })
     : [];
@@ -821,6 +849,15 @@ export async function suggestNextFoursome(
   const mixedGamesCount: Record<string, number> = {};
   const sameGamesCount: Record<string, number> = {};
   const lastEndMs: Record<string, number> = {}; // 끝난 게임의 종료 시각(진행 중은 availMs가 담당)
+  // 오늘 혼복 비율(목표 비율 조절용) — 시작된 판 + 대기 게임, 이번 호출에서 짠 판은 아래 슬롯에서 더한다.
+  let mixSoFar = 0;
+  let gamesSoFar = 0;
+  const isMixedIds = (ids: string[]) => ids.some((id) => genderOf.get(id) === 'M') && ids.some((id) => genderOf.get(id) === 'F');
+  for (const ids of [...sessionGames.map((g) => g.players.map((p) => p.userId)), ...queued.map((e) => (e.playerIds as string[]) ?? [])]) {
+    if (ids.length !== 4) continue;
+    gamesSoFar++;
+    if (isMixedIds(ids)) mixSoFar++;
+  }
   for (const g of sessionGames) {
     let gm = 0;
     let gf = 0;
@@ -875,6 +912,18 @@ export async function suggestNextFoursome(
 
   // ── 짝 기록(겹침 회피, 최근일수록 무겁게) — 대기 게임은 '곧 칠 판'이라 최대 가중 ──
   const pairWeight: Record<string, number> = {};
+  // 급수가 높을수록(또는 낮을수록) 비슷한 급수 사람이 적어 같은 사람과 다시 치는 게 자연스럽다 →
+  // 오늘 비슷한 급수(보정 ±1단계) 상대가 적은 사람끼리는 겹침 회피를 약하게(10명 이상이면 그대로).
+  const effNow = new Map(modePool.map((p) => [p.id, p.skill + (p.gender === 'F' ? GENDER_SKILL_OFFSET_FEMALE : 0)] as const));
+  const peerScale = new Map(
+    modePool.map((p) => {
+      const e = effNow.get(p.id)!;
+      let peers = 0;
+      for (const q of modePool) if (q.id !== p.id && Math.abs(effNow.get(q.id)! - e) <= 1) peers++;
+      return [p.id, Math.min(1, Math.max(0.3, peers / 10))] as const;
+    }),
+  );
+  const pairScale = (a: string, b: string) => ((peerScale.get(a) ?? 1) + (peerScale.get(b) ?? 1)) / 2;
   const HL = SUGGEST_TUNABLES.PAIR_RECENCY_HALFLIFE_SECONDS;
   const decay = (whenMs: number): number => {
     if (!whenMs) return 0.25;
@@ -886,7 +935,7 @@ export async function suggestNextFoursome(
     for (let i = 0; i < ids.length; i++)
       for (let j = i + 1; j < ids.length; j++) {
         const k = pkey(ids[i], ids[j]);
-        pairWeight[k] = (pairWeight[k] ?? 0) + w;
+        pairWeight[k] = (pairWeight[k] ?? 0) + w * pairScale(ids[i], ids[j]);
       }
   };
   for (const g of sessionGames) {
@@ -917,7 +966,9 @@ export async function suggestNextFoursome(
   //  · 같은 사람 또 만나기: 보통 / 최대한 피하기
   const prefs = opts.prefs;
   const levelMatch = prefs?.levelMatch ?? 'normal';
-  const gameType = prefs?.gameType ?? 'same';
+  // 혼복 비율(0~1) — 주면 게임 종류 대신 오늘 전체 판의 혼복 비율을 목표에 맞춘다(운영진이 직접 정함).
+  const mixTarget = prefs?.mixedRatio != null ? Math.min(100, Math.max(0, prefs.mixedRatio)) / 100 : null;
+  const gameType = mixTarget != null ? 'ratio' : prefs?.gameType ?? 'same';
   let prefTuning: Partial<SuggestTuning> = {};
   if (prefs) {
     mode = 'similar';
@@ -925,6 +976,7 @@ export async function suggestNextFoursome(
       levelWeight: levelMatch === 'tight' ? 2.5 : levelMatch === 'loose' ? 0 : style ? 0.5 : 1.5,
       varietyWeight: prefs.avoidRepeat === 'strong' ? 3 : 1,
       sameGenderWeight: gameType === 'same' ? 1.5 : gameType === 'even' ? 0.8 : 0,
+      // 혼복 비율 모드는 아래 비율 조절 항이 남복·여복/혼복을 정하므로 동성 가중·순환은 끔.
       typeVarietyWeight: gameType === 'even' ? 0.6 : 0,
     };
   }
@@ -932,12 +984,16 @@ export async function suggestNextFoursome(
   const tune = resolveTuning(tuning);
   let styleScorer: StyleScorer | undefined;
   // 학습 스타일은 운영진 평소 방식(남복·여복 위주)을 담고 있어, 운영자가 게임 종류를 바꿨으면 끈다.
-  if (style && gameType === 'same') {
+  if (style && (gameType === 'same' || gameType === 'ratio')) {
     const guestIds = new Set(
       (await prisma.user.findMany({ where: { id: { in: poolIds }, isGuest: true }, select: { id: true } })).map((u) => u.id),
     );
     styleScorer = (group) =>
-      styleUtility(style, group.map((p) => ({ id: p.id, skill: p.skill, gender: p.gender, guest: guestIds.has(p.id) })));
+      styleUtility(
+        style,
+        group.map((p) => ({ id: p.id, skill: p.skill, gender: p.gender, guest: guestIds.has(p.id) })),
+        { skipGender: gameType === 'ratio' },
+      );
   }
 
   // ── 운영진 요청(파트너로 같이 N게임 / 같이 안 짜기) ──
@@ -978,6 +1034,7 @@ export async function suggestNextFoursome(
   // 2단계 판 — 보통이면 1단계 이하 조합이 있으면 그쪽(공평 4게임 상당), 넉넉하게면 거의 부담 없이.
   const SPREAD2_COST = levelMatch === 'loose' ? 0.5 : 4;
   const RULE_COST = 500;
+  const MIX_RATIO_COST = 8;
   const effOf = (p: ModePlayer) => p.skill + (p.gender === 'F' ? tune.genderOffsetFemale : 0);
   // 혼복 2:2의 남녀 급수 관계: 남자가 여자보다 최대 3단계 높아도 됨(남자가 받쳐주는 구조, 여자 F조가
   // 혼복으로 자주 들어가는 이유). 여자가 남자보다 높은 건 1단계까지. (운영진 피드백 2026-10-24)
@@ -1002,6 +1059,18 @@ export async function suggestNextFoursome(
       if (gap != null && (gap > 3 || gap < -1)) return `혼복 남녀 급수 차이 ${gap > 0 ? '+' : ''}${gap}`;
     }
     return null;
+  };
+  // 아쉬운 판 — 규칙 위반은 아니지만 더 나은 판을 위해 잠깐 기다려볼 만한 경우.
+  const softIssue = (g: ModePlayer[], activeKeys: Set<string>): boolean => {
+    if (g.length !== 4 || hasRequestPair(g, activeKeys)) return false;
+    if (levelMatch !== 'loose' && levelSpread(g, tune.genderOffsetFemale) >= 2) return true;
+    if (mixTarget != null) {
+      const isMix = g.some((p) => p.gender === 'M') && g.some((p) => p.gender === 'F');
+      const want = mixTarget * (gamesSoFar + 1);
+      if (isMix && mixSoFar + 1 > want + 0.5) return true;
+      if (!isMix && mixSoFar < want - 1) return true;
+    }
+    return false;
   };
   const requestHooks = (activeKeys: Set<string>, availableIds: Set<string>): RequestHooks | undefined => {
     const partnerOf = new Map<string, string[]>();
@@ -1036,7 +1105,15 @@ export async function suggestNextFoursome(
           }
           // 여자 F조끼리 여복은 랠리가 어려움 → 남자가 받쳐주는 혼복 쪽으로(남자 후보가 있으면).
           if (f.length === 4 && f.some((p) => p.skill <= 1)) c += 3;
-          // 게임 종류 '골고루'·'혼복 위주' — 혼복은 2:2로(3:1은 덜), '혼복 위주'면 남복·여복에 비용.
+          // 혼복 비율(운영진이 정한 목표) — 오늘 판(시작+대기+이번 호출) 중 혼복이 목표보다 많아지면 혼복에,
+          // 모자라면 남복·여복에 비용. 목표에서 1판 벗어날 때마다 MIX_RATIO_COST(공평 약 8게임 상당 — F조 혼복 가산점보다 커야 목표를 지킴).
+          if (mixTarget != null) {
+            const isMix = f.length > 0 && m.length > 0;
+            const want = mixTarget * (gamesSoFar + 1);
+            if (isMix && mixSoFar + 1 > want + 0.5) c += MIX_RATIO_COST * (mixSoFar + 1 - want);
+            if (!isMix && mixSoFar < want - 0.5) c += MIX_RATIO_COST * (want - mixSoFar);
+          }
+          // 게임 종류 '골고루'·'혼복 위주'·혼복 비율 — 혼복은 2:2로(3:1은 덜), '혼복 위주'면 남복·여복에 비용.
           if (gameType !== 'same') {
             if (f.length === 1 || f.length === 3) c += 2;
             if (gameType === 'mixed' && (f.length === 0 || m.length === 0)) c += 3;
@@ -1235,6 +1312,9 @@ export async function suggestNextFoursome(
     let picked: { playerIds: string[] } | null = null;
     let byId = new Map<string, ModePlayer>();
     let chosenAt = slotStart;
+    // 규칙은 지키지만 아쉬운 판(2단계 차이 · 혼복 비율 목표에서 벗어남)이면 바로 짜지 않고 다음 시점(코트에서
+    // 나올 사람까지)도 본다 — 운영진이 '조금 기다리면 맞는 사람이 나온다'며 기다리는 방식. 끝까지 없으면 첫 후보.
+    let fallback: { pk: { playerIds: string[] }; m: Map<string, ModePlayer>; at: number } | null = null;
     for (const att of attempts) {
       if (att.ids.length < 4) continue;
       const available = att.ids.map((id) => toModePlayer(id, att.at));
@@ -1242,11 +1322,21 @@ export async function suggestNextFoursome(
       const pk4 = selectFoursomeByMode(available, mode, pairWeight, 4, undefined, tuning, styleScorer, hooks);
       if (pk4.playerIds.length < 4) continue;
       const m = new Map(available.map((p) => [p.id, p]));
-      if (ruleBreak(pk4.playerIds.map((id) => m.get(id)!), slotActive)) continue;
+      const g = pk4.playerIds.map((id) => m.get(id)!);
+      if (ruleBreak(g, slotActive)) continue;
+      if (softIssue(g, slotActive)) {
+        if (!fallback) fallback = { pk: pk4, m, at: att.at };
+        continue;
+      }
       picked = pk4;
       byId = m;
       chosenAt = Math.max(att.at, slotStart);
       break;
+    }
+    if (!picked && fallback) {
+      picked = fallback.pk;
+      byId = fallback.m;
+      chosenAt = Math.max(fallback.at, slotStart);
     }
     if (!picked) {
       waitingNote = `급수·성별 규칙(급수 폭 ${spreadCap}단계, 여자 C 이하 혼복·여복)에 맞는 4명이 아직 없어요 — 코트에서 나오면 짜요`;
@@ -1277,6 +1367,8 @@ export async function suggestNextFoursome(
     courtFree.push(endAt);
     addPairWeight(picked.playerIds, nowMs);
     const mixed = ordered.some((p) => p.gender === 'M') && ordered.some((p) => p.gender === 'F');
+    gamesSoFar++;
+    if (mixed) mixSoFar++;
     for (const id of picked.playerIds) {
       availMs.set(id, endAt);
       extraGames[id] = (extraGames[id] ?? 0) + 1;
@@ -1303,6 +1395,8 @@ export async function suggestNextFoursome(
     mode,
     ...(waitingNote ? { note: waitingNote } : {}),
     rules: { spreadCap, femaleOffset: tune.genderOffsetFemale },
+    // 오늘 혼복 비율(이번에 짠 판 포함) — 운영판 '혼복 비율' 옆 실제 값.
+    mixToday: { mixed: mixSoFar, total: gamesSoFar },
     pace: {
       medianGameMin: pace.medianGameMin,
       currentGameMin: Math.round((gameMs / 60000) * 10) / 10,

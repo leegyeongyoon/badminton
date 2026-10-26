@@ -72,43 +72,38 @@ type RoleState = 'loading' | 'allowed' | 'denied';
 // 예전 모드 5개(공정·비슷한 급수·균형 접전·빡센 게임·새 조합)와 강도 조율(성별 보정·동성 우선·타입 순환)은
 // 급수·성별 하드 규칙이 생긴 뒤로 결과가 거의 같아서(같은 출석 비교) 이것으로 바꿨다. 선택지마다
 // 실제로 다른 판이 나오는지 확인한 값이고, effect 는 고르면 무엇이 달라지는지 한 줄.
-type AutoPrefs = Required<SuggestPrefs>;
-const AUTO_PREFS_DEFAULT: AutoPrefs = { levelMatch: 'normal', gameType: 'same', avoidRepeat: 'normal' };
-type PrefRow<K extends keyof AutoPrefs> = {
+type AutoPrefs = { levelMatch: 'tight' | 'normal' | 'loose'; mixedRatio: number; avoidRepeat: 'normal' | 'strong' };
+// 혼복 비율 기본 20% — 운영진 피드백: 보통은 동성끼리(남복·여복)를 선호. 모임마다 직접 정한다.
+const AUTO_PREFS_DEFAULT: AutoPrefs = { levelMatch: 'normal', mixedRatio: 20, avoidRepeat: 'normal' };
+type PrefRow<K extends 'levelMatch' | 'avoidRepeat'> = {
   key: K;
   label: string;
   options: { value: AutoPrefs[K]; label: string; effect: string }[];
 };
-const PREF_ROWS: [PrefRow<'levelMatch'>, PrefRow<'gameType'>, PrefRow<'avoidRepeat'>] = [
-  {
-    key: 'levelMatch',
-    label: '급수 맞추기',
-    options: [
-      { value: 'tight', label: '딱 맞게', effect: '같은 급수~1단계 차이만 짜요. 맞는 4명이 없으면 코트에서 나올 때까지 기다려요.' },
-      { value: 'normal', label: '보통', effect: '같은 급수~1단계 차이 위주로, 2단계 차이는 가끔만 짜요.' },
-      { value: 'loose', label: '넉넉하게', effect: '2단계 차이도 섞어서 빨리 돌려요. 3단계 이상은 안 짜요.' },
-    ],
-  },
-  {
-    key: 'gameType',
-    label: '게임 종류',
-    options: [
-      { value: 'same', label: '남복·여복 위주', effect: '같은 성별끼리 먼저 짜요. F조 여자분은 혼복으로 들어가요.' },
-      { value: 'even', label: '골고루', effect: '남복·여복과 혼복을 반반쯤 섞어요.' },
-      { value: 'mixed', label: '혼복 위주', effect: '남녀 2:2 혼복을 먼저 짜요. 혼복 데이에 쓰세요.' },
-    ],
-  },
-  {
-    key: 'avoidRepeat',
-    label: '같은 사람과 또',
-    options: [
-      { value: 'normal', label: '보통', effect: '오늘 같이 친 사람은 되도록 피해요.' },
-      { value: 'strong', label: '최대한 피하기', effect: '오늘 같이 친 사람과는 거의 다시 안 묶어요.' },
-    ],
-  },
-];
+const LEVEL_ROW: PrefRow<'levelMatch'> = {
+  key: 'levelMatch',
+  label: '급수 맞추기',
+  options: [
+    { value: 'tight', label: '딱 맞게', effect: '같은 급수~1단계 차이만 짜요. 맞는 4명이 없으면 코트에서 나올 때까지 기다려요.' },
+    { value: 'normal', label: '보통', effect: '같은 급수~1단계 차이 위주로, 2단계 차이는 맞는 사람이 정말 없을 때만 짜요.' },
+    { value: 'loose', label: '넉넉하게', effect: '2단계 차이도 섞어서 빨리 돌려요. 3단계 이상은 안 짜요.' },
+  ],
+};
+const REPEAT_ROW: PrefRow<'avoidRepeat'> = {
+  key: 'avoidRepeat',
+  label: '같은 사람과 또',
+  options: [
+    { value: 'normal', label: '보통', effect: '오늘 같이 친 사람은 되도록 피해요. 급수가 높거나 낮아 비슷한 사람이 적으면 덜 피해요.' },
+    { value: 'strong', label: '최대한 피하기', effect: '오늘 같이 친 사람과는 거의 다시 안 묶어요.' },
+  ],
+};
+const MIX_RATIO_OPTIONS = [0, 10, 20, 30, 40, 50] as const;
 const prefsSummary = (p: AutoPrefs) =>
-  PREF_ROWS.map((row) => (row.options as { value: string; label: string }[]).find((o) => o.value === p[row.key])?.label ?? '').join(' · ');
+  [
+    LEVEL_ROW.options.find((o) => o.value === p.levelMatch)?.label ?? '',
+    `혼복 ${p.mixedRatio}%`,
+    REPEAT_ROW.options.find((o) => o.value === p.avoidRepeat)?.label ?? '',
+  ].join(' · ');
 
 // ─── 다음 게임 미리 준비 수(버퍼) ───
 // 자동 편성이 '다음 게임' 대기줄에 몇 개를 미리 준비할지. '자동'은 정모 인원수에 맞춰
@@ -360,7 +355,7 @@ export default function OperateScreen() {
   // 모임 운영 방식이라 정모가 바뀌어도 유지(모임별 저장).
   const [autoPrefs, setAutoPrefs] = useState<AutoPrefs>(AUTO_PREFS_DEFAULT);
   const [tuningOpen, setTuningOpen] = useState(false);
-  const autoPrefsKey = clubId ? `operate_autoprefs_${clubId}` : null;
+  const autoPrefsKey = clubId ? `operate_autoprefs2_${clubId}` : null; // v2: 게임 종류 → 혼복 비율(%)
   const autoPrefsLoadedRef = useRef(false);
   useEffect(() => {
     if (!autoPrefsKey) return;
@@ -370,11 +365,11 @@ export default function OperateScreen() {
         if (!alive || !raw) return;
         try {
           const p = JSON.parse(raw);
-          const pick = <K extends keyof AutoPrefs>(k: K): AutoPrefs[K] => {
-            const row = PREF_ROWS.find((r) => r.key === k) as PrefRow<K> | undefined;
-            return row?.options.some((o) => o.value === p?.[k]) ? p[k] : AUTO_PREFS_DEFAULT[k];
-          };
-          setAutoPrefs({ levelMatch: pick('levelMatch'), gameType: pick('gameType'), avoidRepeat: pick('avoidRepeat') });
+          setAutoPrefs({
+            levelMatch: LEVEL_ROW.options.some((o) => o.value === p?.levelMatch) ? p.levelMatch : AUTO_PREFS_DEFAULT.levelMatch,
+            mixedRatio: (MIX_RATIO_OPTIONS as readonly number[]).includes(p?.mixedRatio) ? p.mixedRatio : AUTO_PREFS_DEFAULT.mixedRatio,
+            avoidRepeat: REPEAT_ROW.options.some((o) => o.value === p?.avoidRepeat) ? p.avoidRepeat : AUTO_PREFS_DEFAULT.avoidRepeat,
+          });
         } catch { /* 손상된 값 무시 */ }
       })
       .catch(() => {})
@@ -397,10 +392,13 @@ export default function OperateScreen() {
   const runAutoFillRef = useRef<null | (() => void)>(null);
   // 이 모임 실데이터 페이스(판당 시간·1인 주기) + 자동 편성이 학습한 '모임 스타일'. 10분마다 갱신.
   const [pace, setPace] = useState<SessionPace | null>(null);
+  // 오늘 혼복 판수/전체(시작된 판 + 대기 게임) — '혼복 비율' 옆 실제 값. 대기 게임이 바뀌면 다시 센다.
+  const [mixToday, setMixToday] = useState<{ mixed: number; total: number } | null>(null);
   useEffect(() => {
     if (!clubSessionId) return;
     let alive = true;
-    const load = () => gameBoardApi.pace(clubSessionId).then(({ data }) => { if (alive) setPace(data); }).catch(() => {});
+    const load = () =>
+      gameBoardApi.pace(clubSessionId).then(({ data }) => { if (alive) { setPace(data); if (data?.mixToday) setMixToday(data.mixToday); } }).catch(() => {});
     load();
     const iv = setInterval(load, 10 * 60 * 1000);
     return () => { alive = false; clearInterval(iv); };
@@ -959,6 +957,14 @@ export default function OperateScreen() {
       .sort((a, b) => a.queueOrder - b.queueOrder),
     [board],
   );
+  // 대기 게임 수가 바뀌면(편성·삭제·투입) 오늘 혼복 비율을 다시 센다.
+  useEffect(() => {
+    if (!clubSessionId) return;
+    const t = setTimeout(() => {
+      gameBoardApi.pace(clubSessionId).then(({ data }) => { if (data?.mixToday) setMixToday(data.mixToday); }).catch(() => {});
+    }, 1500);
+    return () => clearTimeout(t);
+  }, [clubSessionId, queuedEntries.length]);
   // When the queue order/membership changes from the server (after a persisted
   // reorder, add, remove, …) AND no drag is in flight, snap every gap-shift back
   // to 0 so the new order renders flat, and prune anim values for gone entries.
@@ -4973,10 +4979,10 @@ export default function OperateScreen() {
           </TouchableOpacity>
           {tuningOpen && (
             <View style={styles.tuningPanel}>
-              {PREF_ROWS.map((row) => {
+              {([LEVEL_ROW, REPEAT_ROW] as PrefRow<'levelMatch' | 'avoidRepeat'>[]).map((row, idx) => {
                 const opts = row.options as { value: string; label: string; effect: string }[];
                 const cur = opts.find((o) => o.value === autoPrefs[row.key]);
-                return (
+                const block = (
                   <View key={row.key} style={styles.prefBlock}>
                     <View style={styles.tuningRow}>
                       <Text style={[styles.tuningRowLabel, { color: colors.textSecondary }]}>{row.label}</Text>
@@ -5000,6 +5006,43 @@ export default function OperateScreen() {
                     </View>
                     {!!cur && <Text style={[styles.prefEffect, { color: colors.textSecondary }]}>{cur.effect}</Text>}
                   </View>
+                );
+                if (idx !== 0) return block;
+                // 급수 맞추기 다음에 혼복 비율(운영진이 직접 정하는 %).
+                return (
+                  <Fragment key="level-mix">
+                    {block}
+                    <View style={styles.prefBlock}>
+                      <View style={styles.tuningRow}>
+                        <Text style={[styles.tuningRowLabel, { color: colors.textSecondary }]}>혼복 비율</Text>
+                        <View style={styles.tuningSeg}>
+                          {MIX_RATIO_OPTIONS.map((v) => {
+                            const on = autoPrefs.mixedRatio === v;
+                            return (
+                              <TouchableOpacity
+                                key={v}
+                                style={[styles.tuningSegItem, { borderColor: on ? colors.secondary : colors.border, backgroundColor: on ? colors.secondary : 'transparent' }]}
+                                onPress={() => setAutoPrefs((prev) => ({ ...prev, mixedRatio: v }))}
+                                accessibilityRole="button"
+                                accessibilityState={{ selected: on }}
+                                accessibilityLabel={`혼복 비율 ${v}%`}
+                              >
+                                <Text style={[styles.tuningSegText, { color: on ? '#fff' : colors.textSecondary }]}>{v}%</Text>
+                              </TouchableOpacity>
+                            );
+                          })}
+                        </View>
+                      </View>
+                      <Text style={[styles.prefEffect, { color: colors.textSecondary }]}>
+                        {autoPrefs.mixedRatio === 0
+                          ? '혼복은 짜지 않아요(남녀 인원이 안 맞을 때만 예외). 남복·여복 100%.'
+                          : `오늘 판 중 혼복을 약 ${autoPrefs.mixedRatio}%로 맞추고 나머지 ${100 - autoPrefs.mixedRatio}%는 남복·여복. 혼복 자리는 F조 여자분 먼저.`}
+                        {mixToday && mixToday.total > 0
+                          ? ` 지금까지 혼복 ${mixToday.mixed}/${mixToday.total}판(${Math.round((mixToday.mixed / mixToday.total) * 100)}%).`
+                          : ''}
+                      </Text>
+                    </View>
+                  </Fragment>
                 );
               })}
               <Text style={[styles.prefEffect, { color: colors.textLight }]}>
