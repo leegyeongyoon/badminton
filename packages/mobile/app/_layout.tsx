@@ -328,6 +328,7 @@ function RootLayoutInner() {
           <Stack.Screen name="session/[id]/board" options={transitions.slideFromRight} />
           <Stack.Screen name="session/[id]/monitor" options={transitions.slideFromRight} />
           <Stack.Screen name="session/[id]/summary" options={transitions.slideFromRight} />
+          <Stack.Screen name="session/[id]/ai-settings" options={transitions.slideFromRight} />
           <Stack.Screen name="change-password" options={transitions.slideFromRight} />
         </Stack>
         <ToastContainer />

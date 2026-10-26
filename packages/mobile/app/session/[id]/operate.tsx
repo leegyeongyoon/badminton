@@ -4,7 +4,7 @@ import {
   SafeAreaView, ActivityIndicator, Animated as RNAnimated, LayoutAnimation,
   Platform, UIManager, Modal, KeyboardAvoidingView, PanResponder,
 } from 'react-native';
-import { useLocalSearchParams, useRouter } from 'expo-router';
+import { useLocalSearchParams, useRouter, useFocusEffect } from 'expo-router';
 import { useGameBoard, GameBoardEntry } from '../../../hooks/useGameBoard';
 import { gameBoardApi, type ResolvedAutoSettings, type SessionPace, type SessionRequest, type RequestKind } from '../../../services/gameBoard';
 import { useTheme } from '../../../hooks/useTheme';
@@ -16,7 +16,6 @@ import { Icon } from '../../../components/ui/Icon';
 import { CreatePollModal } from '../../../components/session/CreatePollModal';
 import { FloatingMatchupPanel } from '../../../components/session/FloatingMatchupPanel';
 import { GameLog } from '../../../components/session/GameLog';
-import { AutoSettingsSheet } from '../../../components/session/AutoSettingsSheet';
 import { getSkillMeta, SKILL_LEVELS } from '../../../constants/skill';
 import { getGenderMeta, getGameType, GENDER_META, type Gender } from '../../../constants/gender';
 import { GenderMarker } from '../../../components/ui/GenderMarker';
@@ -327,10 +326,13 @@ export default function OperateScreen() {
   // AI 편성 설정(모임 단위, 서버 저장) — 자동 편성 줄 요약용. 엔진은 서버에서 이 설정을 직접 읽는다.
   const [autoSettings, setAutoSettings] = useState<ResolvedAutoSettings | null>(null);
   const [tuningOpen, setTuningOpen] = useState(false);
-  useEffect(() => {
-    if (!clubSessionId) return;
-    gameBoardApi.getAutoSettings(clubSessionId).then(({ data }) => setAutoSettings(data.resolved)).catch(() => {});
-  }, [clubSessionId]);
+  // 설정 화면에서 돌아올 때마다 다시 읽음(다른 운영진이 바꿨을 수도).
+  useFocusEffect(
+    useCallback(() => {
+      if (!clubSessionId) return;
+      gameBoardApi.getAutoSettings(clubSessionId).then(({ data }) => setAutoSettings(data.resolved)).catch(() => {});
+    }, [clubSessionId]),
+  );
   // 상태 스트립 표시용 — 편성 진행 중 여부 + 마지막 편성 안내.
   const [autoComposing, setAutoComposing] = useState(false);
   const [autoLastNote, setAutoLastNote] = useState<string | null>(null);
@@ -4292,6 +4294,14 @@ export default function OperateScreen() {
       </TouchableOpacity>
       <TouchableOpacity
         style={[styles.headerLink, headerLinkTouch, { borderColor: colors.border }]}
+        onPress={() => router.push(`/session/${clubSessionId}/ai-settings` as any)}
+        activeOpacity={0.8}
+        accessibilityLabel="AI 편성 설정"
+      >
+        <Text style={[styles.headerLinkText, { color: colors.primary, fontWeight: '700' }]}>🤖 AI 설정</Text>
+      </TouchableOpacity>
+      <TouchableOpacity
+        style={[styles.headerLink, headerLinkTouch, { borderColor: colors.border }]}
         onPress={() => setGuideOpen(true)}
         activeOpacity={0.8}
         accessibilityLabel="자동 편성 사용법"
@@ -4656,7 +4666,7 @@ export default function OperateScreen() {
         </TouchableOpacity>
       </View>
       {[
-        ['1', '상단 🤖 자동 편성 켜기', '다음 게임이 팀(A vs B)·이유까지 자동으로 짜여요. 급수를 얼마나 맞출지·남복/혼복 비율은 ⚙︎ 편성 기준에서 골라요.'],
+        ['1', '상단 🤖 자동 편성 켜기', '다음 게임이 팀(A vs B)·이유까지 자동으로 짜여요. 급수를 얼마나 맞출지·혼복 비율·판수는 위 🤖 AI 설정에서 정해요.'],
         ['2', '게임이 끝나면 코트의 종료만', '끝난 사람은 알아서 다음 판 후보로 들어가요.'],
         ['3', '빈 코트를 탭해 투입', '코트를 우리만 쓰는 날엔 자동 편성 줄의 "코트 비면 자동 투입"을 켜면 이것도 자동.'],
         ['4', '고칠 땐 이름을 끌어 옮기기', '파트너·같이 안 짜기 같은 부탁은 📌 요청·메모에 남기면 자동 편성이 지켜요.'],
@@ -4912,24 +4922,28 @@ export default function OperateScreen() {
               {autoAssign ? '✓ 코트 비면 자동 투입 (단독 사용)' : '코트 투입은 직접 · 탭해서 자동 투입 켜기'}
             </Text>
           </TouchableOpacity>
-          {/* AI 편성 설정 — 모임 단위(운영진 공유). 누르면 설정 창(오늘 현황 + 급수·혼복·게임 수·급수별). */}
+          {/* AI 편성 설정 — 모임 단위(운영진 공유). 누르면 설정 화면(오늘 현황 + AI는 이렇게 짜요 + 급수별). */}
           <TouchableOpacity
-            onPress={() => setTuningOpen(true)}
+            onPress={() => router.push(`/session/${clubSessionId}/ai-settings` as any)}
             style={styles.tuningToggle}
             accessibilityRole="button"
             accessibilityLabel="AI 편성 설정 열기"
           >
             <Text style={[styles.autoChipText, { color: colors.secondary, fontWeight: '700' }]} numberOfLines={1}>
-              {`⚙︎ AI 편성 설정: ${autoSettingsSummary(autoSettings)}`}
+              {`⚙︎ AI 편성 설정: ${autoSettingsSummary(autoSettings)} ›`}
             </Text>
           </TouchableOpacity>
-          {tuningOpen && clubSessionId && (
-            <AutoSettingsSheet
-              clubSessionId={clubSessionId}
-              pace={pace}
-              onClose={() => { setTuningOpen(false); refreshPace(); }}
-              onChange={setAutoSettings}
-              deviceRows={
+          {/* 시간 설정(이 기기) — 게임 주기·다음 게임 준비 수. */}
+          <TouchableOpacity
+            onPress={() => setTuningOpen((o) => !o)}
+            style={styles.tuningToggle}
+            accessibilityRole="button"
+            accessibilityLabel="게임 주기·미리 준비 설정"
+          >
+            <Text style={[styles.autoChipText, { color: colors.textSecondary, fontWeight: '700' }]}>{`⏱ 게임 주기·미리 준비 ${tuningOpen ? '▲' : '▼'}`}</Text>
+          </TouchableOpacity>
+          {tuningOpen && (
+            <View style={styles.tuningPanel}>
                 <>
               {/* 게임 주기 — '몇 분 남음' 추정 + 시간 인지 준비의 기준. */}
               <View style={styles.tuningRow}>
@@ -4975,8 +4989,7 @@ export default function OperateScreen() {
                 </View>
               </View>
                 </>
-              }
-            />
+            </View>
           )}
         </View>
       )}
