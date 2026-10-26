@@ -5,6 +5,7 @@ import {
   createSessionRequestSchema,
   reorderQueueSchema,
   assignEntrySchema,
+  autoMatchSettingsSchema,
 } from '@badminton/shared';
 import { authenticate } from '../../middleware/auth';
 import { validate } from '../../middleware/validate';
@@ -26,6 +27,7 @@ import {
 } from './gameBoard.service';
 
 import { listRequests, createRequest, deleteRequest } from './sessionRequest.service';
+import { getAutoSettings, saveAutoSettings } from './autoSettings';
 
 const router = Router();
 
@@ -80,6 +82,27 @@ router.delete('/:id/requests/:rid', authenticate, async (req: Request, res: Resp
     next(err);
   }
 });
+
+// GET/PUT /club-sessions/:id/auto-settings — AI 편성 설정(모임 단위, 운영진 공유).
+router.get('/:id/auto-settings', authenticate, async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    res.json(await getAutoSettings(req.params.id as string, req.user!.userId));
+  } catch (err) {
+    next(err);
+  }
+});
+router.put(
+  '/:id/auto-settings',
+  authenticate,
+  validate(autoMatchSettingsSchema),
+  async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      res.json(await saveAutoSettings(req.params.id as string, req.user!.userId, req.body));
+    } catch (err) {
+      next(err);
+    }
+  },
+);
 
 // GET /club-sessions/:id/pace — 이 클럽의 실데이터 판당 시간 + 정모 1인 주기.
 // 운영판 '코트 언제 비나' 예측 기본값 + 자동 편성 공평 주기 표시용. 읽기 전용.

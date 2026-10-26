@@ -299,6 +299,8 @@ model Club {
   guestApplyDeadlineHours Int?
   contactInfo String? // 운영진 문의 채널(오픈채팅 링크·전화 등) — 게스트 신청 페이지 노출
   maxGuestsPerDay Int?
+  // AI 편성 설정(급수 맞추기·혼복 비율·게임 수·급수별 설정) — 운영진 공유. null = 기본값.
+  autoMatchSettings Json?
   createdAt      DateTime @default(now())
   updatedAt      DateTime @updatedAt
 

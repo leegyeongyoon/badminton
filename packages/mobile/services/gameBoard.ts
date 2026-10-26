@@ -24,6 +24,25 @@ export type SuggestPrefs = {
   avoidRepeat?: 'normal' | 'strong';           // 같은 사람과 또: 보통 / 최대한 피하기
 };
 
+// AI 편성 설정(모임 단위, 운영진 공유) — 서버 autoMatchSettingsSchema 와 1:1.
+export type AutoLevelSetting = {
+  mixedPct?: number | null; // 이 급수·성별 혼복 비율(null = 모임 비율)
+  up?: number | null;       // 같은 성별 기준 위로 몇 단계까지 같이(null = 제한 없음)
+  down?: number | null;     // 아래로 몇 단계까지
+  games?: 'less' | 'normal' | 'more'; // 판수 비중
+};
+export type AutoMatchSettings = {
+  levelMatch?: 'tight' | 'normal' | 'loose' | 'custom';
+  spread2MaxPct?: number;
+  mixedRatio?: number;
+  avoidRepeat?: 'normal' | 'strong';
+  gameBalance?: 'auto' | 'gap1' | 'gap2' | 'gap3';
+  levels?: Record<string, AutoLevelSetting>; // 키: 'M'|'F' + 급수 글자(예 'FF' = 여자 F조)
+};
+export type ResolvedAutoSettings = Required<Omit<AutoMatchSettings, 'levels'>> & {
+  levels: Record<string, Required<AutoLevelSetting>>;
+};
+
 // 모임 학습 스타일 요약 — 서버가 이 모임의 과거 편성 기록에서 배운 '묶는 방식'.
 export type ClubStyleSummary = {
   decisions: number;            // 학습에 쓴 편성 수
@@ -64,6 +83,12 @@ export type SessionPace = {
   style: ClubStyleSummary | null;
   /** 오늘 혼복 판수 / 전체 판수(시작된 판 + 대기 게임). */
   mixToday?: { mixed: number; total: number };
+  /** 오늘 급수 차이별 판수 [같은 급수, 1단계, 2단계, 3단계+]. */
+  spreadToday?: number[];
+  /** 지금 있는 사람 판수(대기 게임 포함) 최소·최대. */
+  gamesToday?: { min: number; max: number } | null;
+  /** 지금 있는 사람 급수·성별별 인원(키 예 'FF'). */
+  levelCounts?: Record<string, number>;
 };
 
 export const gameBoardApi = {
@@ -119,6 +144,11 @@ export const gameBoardApi = {
 
   // 이 모임 실데이터 판당 시간·1인 주기·학습 스타일(읽기 전용)
   pace: (clubSessionId: string) => api.get<SessionPace>(`/club-sessions/${clubSessionId}/pace`),
+  // AI 편성 설정 — 모임 단위(정모 id로 모임을 찾음). 운영진만.
+  getAutoSettings: (clubSessionId: string) =>
+    api.get<{ saved: AutoMatchSettings | null; resolved: ResolvedAutoSettings }>(`/club-sessions/${clubSessionId}/auto-settings`),
+  saveAutoSettings: (clubSessionId: string, settings: AutoMatchSettings) =>
+    api.put<{ saved: AutoMatchSettings; resolved: ResolvedAutoSettings }>(`/club-sessions/${clubSessionId}/auto-settings`, settings),
 
   // ─── 전체 "다음 게임" 큐 (코트 없는 QUEUED 게임) ───
   // 큐에 게임 추가 (2명 또는 4명) — 큐 끝에 append.

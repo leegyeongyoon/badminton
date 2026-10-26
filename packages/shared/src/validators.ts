@@ -505,6 +505,28 @@ export const createSessionRequestSchema = z.object({
   note: z.string().max(100).nullable().optional(),
 });
 
+// AI 편성 설정(모임 단위, 운영진 전원 공유) — 운영판 'AI 편성 설정'.
+//   levelMatch: 급수 맞추기 tight(1단계까지만) / normal(2단계 판 최대 10%) / loose(최대 30%) / custom(spread2MaxPct)
+//   mixedRatio: 오늘 판 중 혼복 목표 %   avoidRepeat: 같은 사람과 또 normal/strong
+//   gameBalance: 게임 수 맞추기 auto(체류 시간 대비 적게 친 사람 먼저) / gap1~3(판수 차이 최대 N판, 늦게 온 분 보정)
+//   levels: 급수·성별별(키 'M'|'F' + 급수 글자, 예 'FF'=여자 F조) — mixedPct 혼복 비율(null=모임 비율),
+//           up/down 같이 칠 범위(같은 성별 기준 위·아래 몇 단계, null=제한 없음), games 판수 비중
+const autoLevelSettingSchema = z.object({
+  mixedPct: z.number().int().min(0).max(100).nullable().optional(),
+  up: z.number().int().min(0).max(3).nullable().optional(),
+  down: z.number().int().min(0).max(3).nullable().optional(),
+  games: z.enum(['less', 'normal', 'more']).optional(),
+});
+export const autoMatchSettingsSchema = z.object({
+  levelMatch: z.enum(['tight', 'normal', 'loose', 'custom']).optional(),
+  spread2MaxPct: z.number().int().min(0).max(50).optional(),
+  mixedRatio: z.number().int().min(0).max(100).optional(),
+  avoidRepeat: z.enum(['normal', 'strong']).optional(),
+  gameBalance: z.enum(['auto', 'gap1', 'gap2', 'gap3']).optional(),
+  levels: z.record(z.string().regex(/^[MF][SABCDEF]$/), autoLevelSettingSchema).optional(),
+});
+export type AutoMatchSettings = z.infer<typeof autoMatchSettingsSchema>;
+
 export const createQueueGameSchema = z.object({
   playerIds: z.array(z.string().uuid()).min(1).max(4),
   note: z.string().max(100).optional(),

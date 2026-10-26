@@ -6,7 +6,7 @@ import {
 } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useGameBoard, GameBoardEntry } from '../../../hooks/useGameBoard';
-import { gameBoardApi, type SuggestPrefs, type SessionPace, type SessionRequest, type RequestKind } from '../../../services/gameBoard';
+import { gameBoardApi, type ResolvedAutoSettings, type SessionPace, type SessionRequest, type RequestKind } from '../../../services/gameBoard';
 import { useTheme } from '../../../hooks/useTheme';
 import { useResponsiveLayout, courtColumnsFor, poolColumnsFor } from '../../../hooks/useResponsiveLayout';
 import type { LayoutChangeEvent } from 'react-native';
@@ -16,6 +16,7 @@ import { Icon } from '../../../components/ui/Icon';
 import { CreatePollModal } from '../../../components/session/CreatePollModal';
 import { FloatingMatchupPanel } from '../../../components/session/FloatingMatchupPanel';
 import { GameLog } from '../../../components/session/GameLog';
+import { AutoSettingsSheet } from '../../../components/session/AutoSettingsSheet';
 import { getSkillMeta, SKILL_LEVELS } from '../../../constants/skill';
 import { getGenderMeta, getGameType, GENDER_META, type Gender } from '../../../constants/gender';
 import { GenderMarker } from '../../../components/ui/GenderMarker';
@@ -68,42 +69,14 @@ interface Court {
 
 type RoleState = 'loading' | 'allowed' | 'denied';
 
-// ─── 자동 편성 '편성 기준' — 운영진 말로 된 3가지(서버 suggest prefs 와 1:1) ───
-// 예전 모드 5개(공정·비슷한 급수·균형 접전·빡센 게임·새 조합)와 강도 조율(성별 보정·동성 우선·타입 순환)은
-// 급수·성별 하드 규칙이 생긴 뒤로 결과가 거의 같아서(같은 출석 비교) 이것으로 바꿨다. 선택지마다
-// 실제로 다른 판이 나오는지 확인한 값이고, effect 는 고르면 무엇이 달라지는지 한 줄.
-type AutoPrefs = { levelMatch: 'tight' | 'normal' | 'loose'; mixedRatio: number; avoidRepeat: 'normal' | 'strong' };
-// 혼복 비율 기본 20% — 운영진 피드백: 보통은 동성끼리(남복·여복)를 선호. 모임마다 직접 정한다.
-const AUTO_PREFS_DEFAULT: AutoPrefs = { levelMatch: 'normal', mixedRatio: 20, avoidRepeat: 'normal' };
-type PrefRow<K extends 'levelMatch' | 'avoidRepeat'> = {
-  key: K;
-  label: string;
-  options: { value: AutoPrefs[K]; label: string; effect: string }[];
+// ─── AI 편성 설정 요약(자동 편성 줄에 한 줄로) — 설정 자체는 모임 단위로 서버에 저장(AutoSettingsSheet). ───
+const autoSettingsSummary = (s: ResolvedAutoSettings | null) => {
+  if (!s) return '불러오는 중';
+  const level = { tight: '급수 딱 맞게', normal: '급수 보통', loose: '급수 넉넉하게', custom: `2단계 최대 ${s.spread2MaxPct}%` }[s.levelMatch];
+  const games = s.gameBalance === 'auto' ? '판수 자동' : `판수 ${s.gameBalance.slice(3)}판 차이까지`;
+  const custom = Object.entries(s.levels).filter(([k, v]) => (v.mixedPct != null && !(k === 'FF' && v.mixedPct === 70)) || v.up != null || v.down != null || v.games !== 'normal').length;
+  return [level, `혼복 ${s.mixedRatio}%`, games, custom ? `급수별 ${custom}개` : ''].filter(Boolean).join(' · ');
 };
-const LEVEL_ROW: PrefRow<'levelMatch'> = {
-  key: 'levelMatch',
-  label: '급수 맞추기',
-  options: [
-    { value: 'tight', label: '딱 맞게', effect: '같은 급수~1단계 차이만 짜요. 맞는 4명이 없으면 코트에서 나올 때까지 기다려요.' },
-    { value: 'normal', label: '보통', effect: '같은 급수~1단계 차이 위주로, 2단계 차이는 맞는 사람이 정말 없을 때만 짜요.' },
-    { value: 'loose', label: '넉넉하게', effect: '2단계 차이도 섞어서 빨리 돌려요. 3단계 이상은 안 짜요.' },
-  ],
-};
-const REPEAT_ROW: PrefRow<'avoidRepeat'> = {
-  key: 'avoidRepeat',
-  label: '같은 사람과 또',
-  options: [
-    { value: 'normal', label: '보통', effect: '오늘 같이 친 사람은 되도록 피해요. 급수가 높거나 낮아 비슷한 사람이 적으면 덜 피해요.' },
-    { value: 'strong', label: '최대한 피하기', effect: '오늘 같이 친 사람과는 거의 다시 안 묶어요.' },
-  ],
-};
-const MIX_RATIO_OPTIONS = [0, 10, 20, 30, 40, 50] as const;
-const prefsSummary = (p: AutoPrefs) =>
-  [
-    LEVEL_ROW.options.find((o) => o.value === p.levelMatch)?.label ?? '',
-    `혼복 ${p.mixedRatio}%`,
-    REPEAT_ROW.options.find((o) => o.value === p.avoidRepeat)?.label ?? '',
-  ].join(' · ');
 
 // ─── 다음 게임 미리 준비 수(버퍼) ───
 // 자동 편성이 '다음 게임' 대기줄에 몇 개를 미리 준비할지. '자동'은 정모 인원수에 맞춰
@@ -351,54 +324,32 @@ export default function OperateScreen() {
     if (!autoAssignKey || !autoAssignLoadedRef.current) return;
     setItem(autoAssignKey, autoAssign ? '1' : '0').catch(() => {});
   }, [autoAssign, autoAssignKey]);
-  // 자동 편성 '편성 기준'(급수 맞추기·게임 종류·같은 사람과 또) — 자동·수동 추천·채우기·땜빵 모두에 적용.
-  // 모임 운영 방식이라 정모가 바뀌어도 유지(모임별 저장).
-  const [autoPrefs, setAutoPrefs] = useState<AutoPrefs>(AUTO_PREFS_DEFAULT);
+  // AI 편성 설정(모임 단위, 서버 저장) — 자동 편성 줄 요약용. 엔진은 서버에서 이 설정을 직접 읽는다.
+  const [autoSettings, setAutoSettings] = useState<ResolvedAutoSettings | null>(null);
   const [tuningOpen, setTuningOpen] = useState(false);
-  const autoPrefsKey = clubId ? `operate_autoprefs2_${clubId}` : null; // v2: 게임 종류 → 혼복 비율(%)
-  const autoPrefsLoadedRef = useRef(false);
   useEffect(() => {
-    if (!autoPrefsKey) return;
-    let alive = true;
-    getItem(autoPrefsKey)
-      .then((raw) => {
-        if (!alive || !raw) return;
-        try {
-          const p = JSON.parse(raw);
-          setAutoPrefs({
-            levelMatch: LEVEL_ROW.options.some((o) => o.value === p?.levelMatch) ? p.levelMatch : AUTO_PREFS_DEFAULT.levelMatch,
-            mixedRatio: (MIX_RATIO_OPTIONS as readonly number[]).includes(p?.mixedRatio) ? p.mixedRatio : AUTO_PREFS_DEFAULT.mixedRatio,
-            avoidRepeat: REPEAT_ROW.options.some((o) => o.value === p?.avoidRepeat) ? p.avoidRepeat : AUTO_PREFS_DEFAULT.avoidRepeat,
-          });
-        } catch { /* 손상된 값 무시 */ }
-      })
-      .catch(() => {})
-      .finally(() => { autoPrefsLoadedRef.current = true; });
-    return () => { alive = false; };
-  }, [autoPrefsKey]);
-  useEffect(() => {
-    if (!autoPrefsKey || !autoPrefsLoadedRef.current) return;
-    setItem(autoPrefsKey, JSON.stringify(autoPrefs)).catch(() => {});
-  }, [autoPrefs, autoPrefsKey]);
+    if (!clubSessionId) return;
+    gameBoardApi.getAutoSettings(clubSessionId).then(({ data }) => setAutoSettings(data.resolved)).catch(() => {});
+  }, [clubSessionId]);
   // 상태 스트립 표시용 — 편성 진행 중 여부 + 마지막 편성 안내.
   const [autoComposing, setAutoComposing] = useState(false);
   const [autoLastNote, setAutoLastNote] = useState<string | null>(null);
   // 비동기 패스에서 최신 값을 읽는 미러 ref + 동시 실행 방지 락 + 최신 패스 fn ref.
   const autoPilotRef = useRef(false);
   useEffect(() => { autoPilotRef.current = autoPilot; }, [autoPilot]);
-  const autoPrefsRef = useRef<AutoPrefs>(AUTO_PREFS_DEFAULT);
-  useEffect(() => { autoPrefsRef.current = autoPrefs; }, [autoPrefs]);
   const autoFillLockRef = useRef(false);
   const runAutoFillRef = useRef<null | (() => void)>(null);
   // 이 모임 실데이터 페이스(판당 시간·1인 주기) + 자동 편성이 학습한 '모임 스타일'. 10분마다 갱신.
   const [pace, setPace] = useState<SessionPace | null>(null);
-  // 오늘 혼복 판수/전체(시작된 판 + 대기 게임) — '혼복 비율' 옆 실제 값. 대기 게임이 바뀌면 다시 센다.
-  const [mixToday, setMixToday] = useState<{ mixed: number; total: number } | null>(null);
+  const refreshPace = useCallback(() => {
+    if (!clubSessionId) return;
+    gameBoardApi.pace(clubSessionId).then(({ data }) => setPace(data)).catch(() => {});
+  }, [clubSessionId]);
   useEffect(() => {
     if (!clubSessionId) return;
     let alive = true;
     const load = () =>
-      gameBoardApi.pace(clubSessionId).then(({ data }) => { if (alive) { setPace(data); if (data?.mixToday) setMixToday(data.mixToday); } }).catch(() => {});
+      gameBoardApi.pace(clubSessionId).then(({ data }) => { if (alive) setPace(data); }).catch(() => {});
     load();
     const iv = setInterval(load, 10 * 60 * 1000);
     return () => { alive = false; clearInterval(iv); };
@@ -957,14 +908,11 @@ export default function OperateScreen() {
       .sort((a, b) => a.queueOrder - b.queueOrder),
     [board],
   );
-  // 대기 게임 수가 바뀌면(편성·삭제·투입) 오늘 혼복 비율을 다시 센다.
+  // 대기 게임 수가 바뀌면(편성·삭제·투입) 오늘 현황(혼복·급수 차이·판수)을 다시 센다.
   useEffect(() => {
-    if (!clubSessionId) return;
-    const t = setTimeout(() => {
-      gameBoardApi.pace(clubSessionId).then(({ data }) => { if (data?.mixToday) setMixToday(data.mixToday); }).catch(() => {});
-    }, 1500);
+    const t = setTimeout(refreshPace, 1500);
     return () => clearTimeout(t);
-  }, [clubSessionId, queuedEntries.length]);
+  }, [refreshPace, queuedEntries.length]);
   // When the queue order/membership changes from the server (after a persisted
   // reorder, add, remove, …) AND no drag is in flight, snap every gap-shift back
   // to 0 so the new order renders flat, and prune anim values for gone entries.
@@ -1300,7 +1248,7 @@ export default function OperateScreen() {
       // 트레이에 올려둔 사람만 제외. 대기 게임에 이미 있는 사람은 서버가 '그 게임이 끝나는
       // 시각'으로 계산해 이어지는 판에 넣을 수 있다(운영진 방식 — 시간 기준 후보).
       const exclude = Array.from(new Set([...staged]));
-      const { playerIds, note, reason } = await suggestNext({ exclude, prefs: autoPrefs });
+      const { playerIds, note, reason } = await suggestNext({ exclude });
       if (!playerIds || playerIds.length < 4) {
         setSuggestNote('추천할 수 있는 인원이 부족해요 (최소 4명)');
         return;
@@ -1315,7 +1263,7 @@ export default function OperateScreen() {
         setSuggestNote(err?.response?.data?.error || '추천에 실패했어요');
       }
     }
-  }, [suggestNext, prefillStaged, staged, queuedPlayerIds, autoPrefs]);
+  }, [suggestNext, prefillStaged, staged, queuedPlayerIds]);
 
   // ─── 다음 게임 추가 (큐에 등록) ───
   const handleAddToQueue = useCallback(async () => {
@@ -1616,7 +1564,7 @@ export default function OperateScreen() {
     try {
       const ids = Array.from(requestIssues.keys());
       for (const id of ids) await deleteEntry(id);
-      const { data } = await gameBoardApi.suggest(clubSessionId, { count: ids.length, prefs: autoPrefsRef.current });
+      const { data } = await gameBoardApi.suggest(clubSessionId, { count: ids.length });
       for (const sg of (data?.suggestions ?? []) as { playerIds: string[]; reason?: string; teamSplit?: boolean }[]) {
         if (sg.playerIds?.length === 4) await createQueueGame(sg.playerIds, sg.reason || undefined, !!sg.teamSplit);
       }
@@ -1637,7 +1585,6 @@ export default function OperateScreen() {
     try {
       const { data } = await gameBoardApi.suggest(clubSessionId, {
         target: { kind: 'fill', entryId },
-        prefs: autoPrefsRef.current,
       });
       const sg = data?.suggestions?.[0];
       if (!sg?.playerIds || sg.playerIds.length !== 4) {
@@ -1671,7 +1618,7 @@ export default function OperateScreen() {
     if (!target) return;
     let alive = true;
     gameBoardApi
-      .suggest(clubSessionId, { target, prefs: autoPrefsRef.current })
+      .suggest(clubSessionId, { target })
       .then(({ data }) => { if (alive) setSubRecs(data?.substitutes ?? []); })
       .catch(() => { if (alive) setSubRecs([]); });
     return () => { alive = false; };
@@ -1785,7 +1732,6 @@ export default function OperateScreen() {
         try {
           const { data } = await gameBoardApi.suggest(clubSessionId, {
             count,
-            prefs: autoPrefsRef.current,
           });
           suggestions = (data?.suggestions ?? []).filter((x: any) => x?.playerIds?.length === 4);
           waitNote = data?.note;
@@ -1910,7 +1856,7 @@ export default function OperateScreen() {
         let waitNote: string | undefined;
         try {
           // 방금 만든 대기 게임은 서버 시뮬레이션에 반영되므로 별도 제외 없이 요청(이어지는 판 가능).
-          const r = await suggestNext({ prefs: autoPrefsRef.current });
+          const r = await suggestNext();
           ids = r.playerIds ?? [];
           reason = r.reason || undefined;
           teamSplit = !!r.teamSplit;
@@ -4966,88 +4912,25 @@ export default function OperateScreen() {
               {autoAssign ? '✓ 코트 비면 자동 투입 (단독 사용)' : '코트 투입은 직접 · 탭해서 자동 투입 켜기'}
             </Text>
           </TouchableOpacity>
-          {/* 편성 기준 — 운영진 말로 된 3가지(급수 맞추기·게임 종류·같은 사람과 또). 자동·수동 추천·채우기·땜빵에 모두 적용. */}
+          {/* AI 편성 설정 — 모임 단위(운영진 공유). 누르면 설정 창(오늘 현황 + 급수·혼복·게임 수·급수별). */}
           <TouchableOpacity
-            onPress={() => setTuningOpen((o) => !o)}
+            onPress={() => setTuningOpen(true)}
             style={styles.tuningToggle}
             accessibilityRole="button"
-            accessibilityLabel="편성 기준 바꾸기"
+            accessibilityLabel="AI 편성 설정 열기"
           >
             <Text style={[styles.autoChipText, { color: colors.secondary, fontWeight: '700' }]} numberOfLines={1}>
-              {`⚙︎ 편성 기준: ${prefsSummary(autoPrefs)} ${tuningOpen ? '▲' : '▼'}`}
+              {`⚙︎ AI 편성 설정: ${autoSettingsSummary(autoSettings)}`}
             </Text>
           </TouchableOpacity>
-          {tuningOpen && (
-            <View style={styles.tuningPanel}>
-              {([LEVEL_ROW, REPEAT_ROW] as PrefRow<'levelMatch' | 'avoidRepeat'>[]).map((row, idx) => {
-                const opts = row.options as { value: string; label: string; effect: string }[];
-                const cur = opts.find((o) => o.value === autoPrefs[row.key]);
-                const block = (
-                  <View key={row.key} style={styles.prefBlock}>
-                    <View style={styles.tuningRow}>
-                      <Text style={[styles.tuningRowLabel, { color: colors.textSecondary }]}>{row.label}</Text>
-                      <View style={styles.tuningSeg}>
-                        {opts.map((o) => {
-                          const on = autoPrefs[row.key] === o.value;
-                          return (
-                            <TouchableOpacity
-                              key={o.value}
-                              style={[styles.tuningSegItem, { borderColor: on ? colors.secondary : colors.border, backgroundColor: on ? colors.secondary : 'transparent' }]}
-                              onPress={() => setAutoPrefs((prev) => ({ ...prev, [row.key]: o.value }))}
-                              accessibilityRole="button"
-                              accessibilityState={{ selected: on }}
-                              accessibilityLabel={`${row.label} ${o.label}`}
-                            >
-                              <Text style={[styles.tuningSegText, { color: on ? '#fff' : colors.textSecondary }]}>{o.label}</Text>
-                            </TouchableOpacity>
-                          );
-                        })}
-                      </View>
-                    </View>
-                    {!!cur && <Text style={[styles.prefEffect, { color: colors.textSecondary }]}>{cur.effect}</Text>}
-                  </View>
-                );
-                if (idx !== 0) return block;
-                // 급수 맞추기 다음에 혼복 비율(운영진이 직접 정하는 %).
-                return (
-                  <Fragment key="level-mix">
-                    {block}
-                    <View style={styles.prefBlock}>
-                      <View style={styles.tuningRow}>
-                        <Text style={[styles.tuningRowLabel, { color: colors.textSecondary }]}>혼복 비율</Text>
-                        <View style={styles.tuningSeg}>
-                          {MIX_RATIO_OPTIONS.map((v) => {
-                            const on = autoPrefs.mixedRatio === v;
-                            return (
-                              <TouchableOpacity
-                                key={v}
-                                style={[styles.tuningSegItem, { borderColor: on ? colors.secondary : colors.border, backgroundColor: on ? colors.secondary : 'transparent' }]}
-                                onPress={() => setAutoPrefs((prev) => ({ ...prev, mixedRatio: v }))}
-                                accessibilityRole="button"
-                                accessibilityState={{ selected: on }}
-                                accessibilityLabel={`혼복 비율 ${v}%`}
-                              >
-                                <Text style={[styles.tuningSegText, { color: on ? '#fff' : colors.textSecondary }]}>{v}%</Text>
-                              </TouchableOpacity>
-                            );
-                          })}
-                        </View>
-                      </View>
-                      <Text style={[styles.prefEffect, { color: colors.textSecondary }]}>
-                        {autoPrefs.mixedRatio === 0
-                          ? '혼복은 짜지 않아요(남녀 인원이 안 맞을 때만 예외). 남복·여복 100%.'
-                          : `오늘 판 중 혼복을 약 ${autoPrefs.mixedRatio}%로 맞추고 나머지 ${100 - autoPrefs.mixedRatio}%는 남복·여복. 혼복 자리는 F조 여자분 먼저.`}
-                        {mixToday && mixToday.total > 0
-                          ? ` 지금까지 혼복 ${mixToday.mixed}/${mixToday.total}판(${Math.round((mixToday.mixed / mixToday.total) * 100)}%).`
-                          : ''}
-                      </Text>
-                    </View>
-                  </Fragment>
-                );
-              })}
-              <Text style={[styles.prefEffect, { color: colors.textLight }]}>
-                바꾸면 다음에 짜는 게임부터 적용돼요. 이미 짜인 대기 게임은 그대로예요.
-              </Text>
+          {tuningOpen && clubSessionId && (
+            <AutoSettingsSheet
+              clubSessionId={clubSessionId}
+              pace={pace}
+              onClose={() => { setTuningOpen(false); refreshPace(); }}
+              onChange={setAutoSettings}
+              deviceRows={
+                <>
               {/* 게임 주기 — '몇 분 남음' 추정 + 시간 인지 준비의 기준. */}
               <View style={styles.tuningRow}>
                 <Text style={[styles.tuningRowLabel, { color: colors.textSecondary }]}>게임 주기</Text>
@@ -5091,7 +4974,9 @@ export default function OperateScreen() {
                   })}
                 </View>
               </View>
-            </View>
+                </>
+              }
+            />
           )}
         </View>
       )}
