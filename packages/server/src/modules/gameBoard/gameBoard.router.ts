@@ -37,10 +37,10 @@ router.post(
   validate(suggestFoursomeSchema),
   async (req: Request, res: Response, next: NextFunction) => {
     try {
-      const { courtId, count, mode, exclude, tuning, target } = req.body;
+      const { courtId, count, mode, exclude, tuning, prefs, target } = req.body;
       const result = await suggestNextFoursome(
         req.params.id as string,
-        { courtId, count, mode, exclude, tuning, target },
+        { courtId, count, mode, exclude, tuning, prefs, target },
         req.user!.userId,
       );
       res.json(result);

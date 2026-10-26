@@ -6,7 +6,7 @@ import {
 } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useGameBoard, GameBoardEntry } from '../../../hooks/useGameBoard';
-import { gameBoardApi, type SuggestMode, type SuggestTuning, type SessionPace, type SessionRequest, type RequestKind } from '../../../services/gameBoard';
+import { gameBoardApi, type SuggestPrefs, type SessionPace, type SessionRequest, type RequestKind } from '../../../services/gameBoard';
 import { useTheme } from '../../../hooks/useTheme';
 import { useResponsiveLayout, courtColumnsFor, poolColumnsFor } from '../../../hooks/useResponsiveLayout';
 import type { LayoutChangeEvent } from 'react-native';
@@ -68,42 +68,47 @@ interface Court {
 
 type RoleState = 'loading' | 'allowed' | 'denied';
 
-// 자동 추천 매칭 모드 — 운영자가 전략을 고르는 칩. label(짧은 이름) + hint(한 줄 설명)
-// + note(추천 후 트레이에 보여줄 안내문). 서버 mode enum 과 1:1.
-// 순서 = 실력 격차 스펙트럼: 비슷 → 중간 → 큰 격차
-//   공정 / 비슷한 급수 / 균형 접전 / 빡센 게임 / 새 조합
-const SUGGEST_MODES: {
-  mode: SuggestMode;
-  emoji: string;
+// ─── 자동 편성 '편성 기준' — 운영진 말로 된 3가지(서버 suggest prefs 와 1:1) ───
+// 예전 모드 5개(공정·비슷한 급수·균형 접전·빡센 게임·새 조합)와 강도 조율(성별 보정·동성 우선·타입 순환)은
+// 급수·성별 하드 규칙이 생긴 뒤로 결과가 거의 같아서(같은 출석 비교) 이것으로 바꿨다. 선택지마다
+// 실제로 다른 판이 나오는지 확인한 값이고, effect 는 고르면 무엇이 달라지는지 한 줄.
+type AutoPrefs = Required<SuggestPrefs>;
+const AUTO_PREFS_DEFAULT: AutoPrefs = { levelMatch: 'normal', gameType: 'same', avoidRepeat: 'normal' };
+type PrefRow<K extends keyof AutoPrefs> = {
+  key: K;
   label: string;
-  hint: string;
-  note: string;
-}[] = [
-  { mode: 'fair', emoji: '⚖️', label: '공정', hint: '적게 친 사람 우선 · 새 파트너', note: '공정하게 추천했어요' },
-  { mode: 'similar', emoji: '🎯', label: '비슷한 급수', hint: '급수 차이가 가장 작게 · 수준 맞춘 게임', note: '비슷한 급수로 추천했어요' },
-  { mode: 'balanced', emoji: '🤝', label: '균형 접전', hint: '2:2 실력이 팽팽하게 · 중간 격차', note: '균형 접전으로 추천했어요' },
-  { mode: 'competitive', emoji: '🔥', label: '빡센 게임', hint: '2강 2약 · 실력 격차 큰 도전', note: '빡센 게임으로 추천했어요' },
-  { mode: 'fresh', emoji: '✨', label: '새 조합', hint: '안 친 사람들끼리', note: '새 조합으로 추천했어요' },
-];
-
-// ─── 자동 편성 조율(운영자 튜닝) — 서버 suggest tuning 과 1:1 ───
-// 기본값은 서버 기본과 동일(바꾸기 전엔 동작 변화 없음). 정모별 저장.
-const AUTO_TUNING_DEFAULT: Required<SuggestTuning> = {
-  genderOffsetFemale: -2, // 여A≈남C — 터닝 운영진 확인(여자 급수는 2단계 후함)
-  sameGenderWeight: 1.5, // 남복·여복 기본(혼복은 성별 인원이 안 맞을 때) — 운영진 피드백
-  typeVarietyWeight: 0,  // 혼복/동성복 순환 끔 — 여자분들이 계속 혼복으로 밀리던 원인
+  options: { value: AutoPrefs[K]; label: string; effect: string }[];
 };
-// 각 조율 항목의 세그먼트 선택지 [표시라벨, 값].
-const TUNING_OPTIONS: Record<keyof SuggestTuning, readonly (readonly [string, number])[]> = {
-  genderOffsetFemale: [['끔', 0], ['1단계', -1], ['2단계', -2]],
-  sameGenderWeight: [['끔', 0], ['약', 0.5], ['중', 1.0], ['강', 1.5]],
-  typeVarietyWeight: [['끔', 0], ['약', 0.4], ['중', 0.6], ['강', 1.0]],
-};
-const TUNING_ROWS: { key: keyof SuggestTuning; label: string; hint: string }[] = [
-  { key: 'genderOffsetFemale', label: '성별 보정', hint: '여자 급수를 남자 기준 몇 단계 낮춰볼지 (남D=여B는 2단계)' },
-  { key: 'sameGenderWeight', label: '동성 우선', hint: '남복/여복 선호 강도 (강할수록 동성끼리)' },
-  { key: 'typeVarietyWeight', label: '타입 순환', hint: '혼복/동성복 골고루 (강할수록 한 타입에 안 갇힘)' },
+const PREF_ROWS: [PrefRow<'levelMatch'>, PrefRow<'gameType'>, PrefRow<'avoidRepeat'>] = [
+  {
+    key: 'levelMatch',
+    label: '급수 맞추기',
+    options: [
+      { value: 'tight', label: '딱 맞게', effect: '같은 급수~1단계 차이만 짜요. 맞는 4명이 없으면 코트에서 나올 때까지 기다려요.' },
+      { value: 'normal', label: '보통', effect: '같은 급수~1단계 차이 위주로, 2단계 차이는 가끔만 짜요.' },
+      { value: 'loose', label: '넉넉하게', effect: '2단계 차이도 섞어서 빨리 돌려요. 3단계 이상은 안 짜요.' },
+    ],
+  },
+  {
+    key: 'gameType',
+    label: '게임 종류',
+    options: [
+      { value: 'same', label: '남복·여복 위주', effect: '같은 성별끼리 먼저 짜요. F조 여자분은 혼복으로 들어가요.' },
+      { value: 'even', label: '골고루', effect: '남복·여복과 혼복을 반반쯤 섞어요.' },
+      { value: 'mixed', label: '혼복 위주', effect: '남녀 2:2 혼복을 먼저 짜요. 혼복 데이에 쓰세요.' },
+    ],
+  },
+  {
+    key: 'avoidRepeat',
+    label: '같은 사람과 또',
+    options: [
+      { value: 'normal', label: '보통', effect: '오늘 같이 친 사람은 되도록 피해요.' },
+      { value: 'strong', label: '최대한 피하기', effect: '오늘 같이 친 사람과는 거의 다시 안 묶어요.' },
+    ],
+  },
 ];
+const prefsSummary = (p: AutoPrefs) =>
+  PREF_ROWS.map((row) => (row.options as { value: string; label: string }[]).find((o) => o.value === p[row.key])?.label ?? '').join(' · ');
 
 // ─── 다음 게임 미리 준비 수(버퍼) ───
 // 자동 편성이 '다음 게임' 대기줄에 몇 개를 미리 준비할지. '자동'은 정모 인원수에 맞춰
@@ -304,7 +309,6 @@ export default function OperateScreen() {
   useEffect(() => {
     setStaged([]);
     setSuggestNote(null);
-    setModeChooserOpen(false);
     setCourtDrafts({});
   }, [boardMode]);
 
@@ -352,66 +356,43 @@ export default function OperateScreen() {
     if (!autoAssignKey || !autoAssignLoadedRef.current) return;
     setItem(autoAssignKey, autoAssign ? '1' : '0').catch(() => {});
   }, [autoAssign, autoAssignKey]);
-  // 자동 편성 매칭 모드(기본 '공평'). 정모별 저장. 예전 기본 '비슷한 급수'는 터닝 재생 평가에서
-  // 운영진보다 급수를 과하게 좁혔다(급수 폭 0.75 vs 운영진 1.70) — 급수 묶는 방식은 모임 학습
-  // 스타일이 운영진 기록대로 맡는다.
-  const [autoMode, setAutoMode] = useState<SuggestMode>('fair');
-  const autoModeKey = clubSessionId ? `operate_automode_${clubSessionId}` : null;
-  const autoModeLoadedRef = useRef(false);
-  useEffect(() => {
-    if (!autoModeKey) return;
-    let alive = true;
-    getItem(autoModeKey)
-      .then((raw) => {
-        if (alive && raw && SUGGEST_MODES.some((m) => m.mode === raw)) setAutoMode(raw as SuggestMode);
-      })
-      .catch(() => {})
-      .finally(() => { autoModeLoadedRef.current = true; });
-    return () => { alive = false; };
-  }, [autoModeKey]);
-  useEffect(() => {
-    if (!autoModeKey || !autoModeLoadedRef.current) return;
-    setItem(autoModeKey, autoMode).catch(() => {});
-  }, [autoMode, autoModeKey]);
-  // 상태 스트립 표시용 — 편성 진행 중 여부 + 마지막 편성 안내.
-  const [autoComposing, setAutoComposing] = useState(false);
-  const [autoLastNote, setAutoLastNote] = useState<string | null>(null);
-  // 자동 편성 조율값(성별 보정폭·동성 강도·타입 순환) — 자동+수동 suggest에 전달. 정모별 저장.
-  const [autoTuning, setAutoTuning] = useState<Required<SuggestTuning>>(AUTO_TUNING_DEFAULT);
+  // 자동 편성 '편성 기준'(급수 맞추기·게임 종류·같은 사람과 또) — 자동·수동 추천·채우기·땜빵 모두에 적용.
+  // 모임 운영 방식이라 정모가 바뀌어도 유지(모임별 저장).
+  const [autoPrefs, setAutoPrefs] = useState<AutoPrefs>(AUTO_PREFS_DEFAULT);
   const [tuningOpen, setTuningOpen] = useState(false);
-  // v2: 여자 보정 기본값이 −1 → −2로 바뀌어, 예전 기본값이 저장된 정모 설정은 무시(새 기본값 적용).
-  const autoTuningKey = clubSessionId ? `operate_autotuning3_${clubSessionId}` : null; // v3: 동성 우선↑·순환 끔
-  const autoTuningLoadedRef = useRef(false);
+  const autoPrefsKey = clubId ? `operate_autoprefs_${clubId}` : null;
+  const autoPrefsLoadedRef = useRef(false);
   useEffect(() => {
-    if (!autoTuningKey) return;
+    if (!autoPrefsKey) return;
     let alive = true;
-    getItem(autoTuningKey)
+    getItem(autoPrefsKey)
       .then((raw) => {
         if (!alive || !raw) return;
         try {
           const p = JSON.parse(raw);
-          setAutoTuning({
-            genderOffsetFemale: typeof p?.genderOffsetFemale === 'number' ? p.genderOffsetFemale : AUTO_TUNING_DEFAULT.genderOffsetFemale,
-            sameGenderWeight: typeof p?.sameGenderWeight === 'number' ? p.sameGenderWeight : AUTO_TUNING_DEFAULT.sameGenderWeight,
-            typeVarietyWeight: typeof p?.typeVarietyWeight === 'number' ? p.typeVarietyWeight : AUTO_TUNING_DEFAULT.typeVarietyWeight,
-          });
+          const pick = <K extends keyof AutoPrefs>(k: K): AutoPrefs[K] => {
+            const row = PREF_ROWS.find((r) => r.key === k) as PrefRow<K> | undefined;
+            return row?.options.some((o) => o.value === p?.[k]) ? p[k] : AUTO_PREFS_DEFAULT[k];
+          };
+          setAutoPrefs({ levelMatch: pick('levelMatch'), gameType: pick('gameType'), avoidRepeat: pick('avoidRepeat') });
         } catch { /* 손상된 값 무시 */ }
       })
       .catch(() => {})
-      .finally(() => { autoTuningLoadedRef.current = true; });
+      .finally(() => { autoPrefsLoadedRef.current = true; });
     return () => { alive = false; };
-  }, [autoTuningKey]);
+  }, [autoPrefsKey]);
   useEffect(() => {
-    if (!autoTuningKey || !autoTuningLoadedRef.current) return;
-    setItem(autoTuningKey, JSON.stringify(autoTuning)).catch(() => {});
-  }, [autoTuning, autoTuningKey]);
+    if (!autoPrefsKey || !autoPrefsLoadedRef.current) return;
+    setItem(autoPrefsKey, JSON.stringify(autoPrefs)).catch(() => {});
+  }, [autoPrefs, autoPrefsKey]);
+  // 상태 스트립 표시용 — 편성 진행 중 여부 + 마지막 편성 안내.
+  const [autoComposing, setAutoComposing] = useState(false);
+  const [autoLastNote, setAutoLastNote] = useState<string | null>(null);
   // 비동기 패스에서 최신 값을 읽는 미러 ref + 동시 실행 방지 락 + 최신 패스 fn ref.
   const autoPilotRef = useRef(false);
   useEffect(() => { autoPilotRef.current = autoPilot; }, [autoPilot]);
-  const autoModeRef = useRef<SuggestMode>('fair');
-  useEffect(() => { autoModeRef.current = autoMode; }, [autoMode]);
-  const autoTuningRef = useRef<Required<SuggestTuning>>(AUTO_TUNING_DEFAULT);
-  useEffect(() => { autoTuningRef.current = autoTuning; }, [autoTuning]);
+  const autoPrefsRef = useRef<AutoPrefs>(AUTO_PREFS_DEFAULT);
+  useEffect(() => { autoPrefsRef.current = autoPrefs; }, [autoPrefs]);
   const autoFillLockRef = useRef(false);
   const runAutoFillRef = useRef<null | (() => void)>(null);
   // 이 모임 실데이터 페이스(판당 시간·1인 주기) + 자동 편성이 학습한 '모임 스타일'. 10분마다 갱신.
@@ -620,8 +601,6 @@ export default function OperateScreen() {
 
   const [suggestNote, setSuggestNote] = useState<string | null>(null);
   const [suggestUnavailable, setSuggestUnavailable] = useState(false);
-  // 자동 추천 모드 칩 표시 여부 (🎲 자동 추천 탭 시 토글).
-  const [modeChooserOpen, setModeChooserOpen] = useState(false);
   const bounceAnims = useRef([0, 1, 2, 3].map(() => new RNAnimated.Value(1))).current;
 
   // Modals
@@ -1308,24 +1287,20 @@ export default function OperateScreen() {
   }, [bounceAnims]);
 
   // ─── Auto-suggest ───
-  // mode 별 전략으로 다음 4인 추천 → 트레이 prefill + 안내문. mode 미지정 시 'fair'.
-  const handleSuggest = useCallback(async (mode: SuggestMode = 'fair') => {
+  // '편성 기준'대로 다음 4인 추천 → 트레이 prefill + 안내문.
+  const handleSuggest = useCallback(async () => {
     setSuggestNote(null);
-    setModeChooserOpen(false);
     try {
       // 트레이에 올려둔 사람만 제외. 대기 게임에 이미 있는 사람은 서버가 '그 게임이 끝나는
       // 시각'으로 계산해 이어지는 판에 넣을 수 있다(운영진 방식 — 시간 기준 후보).
       const exclude = Array.from(new Set([...staged]));
-      const { playerIds, effectiveMode, note } = await suggestNext({ mode, exclude, tuning: autoTuning });
+      const { playerIds, note, reason } = await suggestNext({ exclude, prefs: autoPrefs });
       if (!playerIds || playerIds.length < 4) {
         setSuggestNote('추천할 수 있는 인원이 부족해요 (최소 4명)');
         return;
       }
       prefillStaged(playerIds);
-      // 서버가 실제 적용한 mode 의 안내문 사용(mixed→fair 대체 시 fair 문구).
-      const applied = effectiveMode ?? mode;
-      const meta = SUGGEST_MODES.find((m) => m.mode === applied);
-      setSuggestNote(note ?? meta?.note ?? null);
+      setSuggestNote(note ?? (reason ? `추천 이유: ${reason}` : null));
     } catch (err: any) {
       if (err?.response?.status === 404) {
         setSuggestUnavailable(true);
@@ -1334,7 +1309,7 @@ export default function OperateScreen() {
         setSuggestNote(err?.response?.data?.error || '추천에 실패했어요');
       }
     }
-  }, [suggestNext, prefillStaged, staged, queuedPlayerIds, autoTuning]);
+  }, [suggestNext, prefillStaged, staged, queuedPlayerIds, autoPrefs]);
 
   // ─── 다음 게임 추가 (큐에 등록) ───
   const handleAddToQueue = useCallback(async () => {
@@ -1635,7 +1610,7 @@ export default function OperateScreen() {
     try {
       const ids = Array.from(requestIssues.keys());
       for (const id of ids) await deleteEntry(id);
-      const { data } = await gameBoardApi.suggest(clubSessionId, { count: ids.length, mode: autoModeRef.current, tuning: autoTuningRef.current });
+      const { data } = await gameBoardApi.suggest(clubSessionId, { count: ids.length, prefs: autoPrefsRef.current });
       for (const sg of (data?.suggestions ?? []) as { playerIds: string[]; reason?: string; teamSplit?: boolean }[]) {
         if (sg.playerIds?.length === 4) await createQueueGame(sg.playerIds, sg.reason || undefined, !!sg.teamSplit);
       }
@@ -1656,8 +1631,7 @@ export default function OperateScreen() {
     try {
       const { data } = await gameBoardApi.suggest(clubSessionId, {
         target: { kind: 'fill', entryId },
-        mode: autoModeRef.current,
-        tuning: autoTuningRef.current,
+        prefs: autoPrefsRef.current,
       });
       const sg = data?.suggestions?.[0];
       if (!sg?.playerIds || sg.playerIds.length !== 4) {
@@ -1691,7 +1665,7 @@ export default function OperateScreen() {
     if (!target) return;
     let alive = true;
     gameBoardApi
-      .suggest(clubSessionId, { target, mode: autoModeRef.current, tuning: autoTuningRef.current })
+      .suggest(clubSessionId, { target, prefs: autoPrefsRef.current })
       .then(({ data }) => { if (alive) setSubRecs(data?.substitutes ?? []); })
       .catch(() => { if (alive) setSubRecs([]); });
     return () => { alive = false; };
@@ -1805,8 +1779,7 @@ export default function OperateScreen() {
         try {
           const { data } = await gameBoardApi.suggest(clubSessionId, {
             count,
-            mode: autoModeRef.current,
-            tuning: autoTuningRef.current,
+            prefs: autoPrefsRef.current,
           });
           suggestions = (data?.suggestions ?? []).filter((x: any) => x?.playerIds?.length === 4);
           waitNote = data?.note;
@@ -1931,7 +1904,7 @@ export default function OperateScreen() {
         let waitNote: string | undefined;
         try {
           // 방금 만든 대기 게임은 서버 시뮬레이션에 반영되므로 별도 제외 없이 요청(이어지는 판 가능).
-          const r = await suggestNext({ mode: autoModeRef.current, tuning: autoTuningRef.current });
+          const r = await suggestNext({ prefs: autoPrefsRef.current });
           ids = r.playerIds ?? [];
           reason = r.reason || undefined;
           teamSplit = !!r.teamSplit;
@@ -3561,13 +3534,11 @@ export default function OperateScreen() {
             styles.suggestBtn,
             {
               backgroundColor: suggestUnavailable ? colors.textLight : colors.info,
-              opacity: modeChooserOpen ? 0.9 : 1,
             },
           ]}
           onPress={() => {
             if (suggestUnavailable) return;
-            setSuggestNote(null);
-            setModeChooserOpen((o) => !o);
+            handleSuggest();
           }}
           disabled={suggesting || suggestUnavailable}
           activeOpacity={0.85}
@@ -3577,7 +3548,7 @@ export default function OperateScreen() {
             <ActivityIndicator size="small" color={palette.white} />
           ) : (
             <Text style={styles.suggestBtnText}>
-              {suggestUnavailable ? '준비 중' : `🎲 자동 추천${modeChooserOpen ? ' ▴' : ' ▾'}`}
+              {suggestUnavailable ? '준비 중' : '🎲 자동 추천'}
             </Text>
           )}
         </TouchableOpacity>
@@ -3588,33 +3559,6 @@ export default function OperateScreen() {
         )}
       </View>
 
-      {/* 매칭 모드 선택기 — 🎲 자동 추천 탭 시 펼쳐지는 칩 묶음. 칩 탭 → 해당 모드로 추천. */}
-      {modeChooserOpen && !suggestUnavailable && (
-        <View style={[styles.modeChooser, { borderColor: colors.border, backgroundColor: colors.background }]}>
-          <Text style={[styles.modeChooserTitle, { color: colors.textSecondary }]}>
-            어떻게 추천할까요?
-          </Text>
-          <View style={styles.modeChips}>
-            {SUGGEST_MODES.map((m) => (
-              <TouchableOpacity
-                key={m.mode}
-                style={[styles.modeChip, { borderColor: colors.border, backgroundColor: colors.surface }]}
-                onPress={() => handleSuggest(m.mode)}
-                disabled={suggesting}
-                activeOpacity={0.8}
-                accessibilityLabel={`${m.label} 추천`}
-              >
-                <Text style={[styles.modeChipLabel, { color: colors.text }]}>
-                  {m.emoji} {m.label}
-                </Text>
-                <Text style={[styles.modeChipHint, { color: colors.textSecondary }]} numberOfLines={1}>
-                  {m.hint}
-                </Text>
-              </TouchableOpacity>
-            ))}
-          </View>
-        </View>
-      )}
 
       <TouchableOpacity
         style={[styles.registerBtn, { backgroundColor: staged.length >= 2 ? colors.primary : colors.textLight }]}
@@ -4760,7 +4704,7 @@ export default function OperateScreen() {
         </TouchableOpacity>
       </View>
       {[
-        ['1', '상단 🤖 자동 편성 켜기', '다음 게임이 팀(A vs B)·이유까지 자동으로 짜여요. 우리 모임 기록대로 묶어요.'],
+        ['1', '상단 🤖 자동 편성 켜기', '다음 게임이 팀(A vs B)·이유까지 자동으로 짜여요. 급수를 얼마나 맞출지·남복/혼복 비율은 ⚙︎ 편성 기준에서 골라요.'],
         ['2', '게임이 끝나면 코트의 종료만', '끝난 사람은 알아서 다음 판 후보로 들어가요.'],
         ['3', '빈 코트를 탭해 투입', '코트를 우리만 쓰는 날엔 자동 편성 줄의 "코트 비면 자동 투입"을 켜면 이것도 자동.'],
         ['4', '고칠 땐 이름을 끌어 옮기기', '파트너·같이 안 짜기 같은 부탁은 📌 요청·메모에 남기면 자동 편성이 지켜요.'],
@@ -4982,7 +4926,7 @@ export default function OperateScreen() {
           })}
         </View>
       </View>
-      {/* 자동 편성 상태 스트립 — ON일 때만. 준비 상황 안내 + 편성 모드 칩. */}
+      {/* 자동 편성 상태 스트립 — ON일 때만. 준비 상황 안내 + 편성 기준. */}
       {autoPilot && (
         <View style={[styles.autoStrip, { backgroundColor: colors.secondaryBg, borderColor: colors.secondary }]}>
           <View style={styles.autoStripTop}>
@@ -5016,56 +4960,51 @@ export default function OperateScreen() {
               {autoAssign ? '✓ 코트 비면 자동 투입 (단독 사용)' : '코트 투입은 직접 · 탭해서 자동 투입 켜기'}
             </Text>
           </TouchableOpacity>
-          <View style={styles.autoStripChips}>
-            {SUGGEST_MODES.map((m) => {
-              const on = autoMode === m.mode;
-              return (
-                <TouchableOpacity
-                  key={m.mode}
-                  style={[styles.autoChip, { borderColor: on ? colors.secondary : colors.border, backgroundColor: on ? colors.secondary : 'transparent' }]}
-                  onPress={() => setAutoMode(m.mode)}
-                  accessibilityRole="button"
-                  accessibilityState={{ selected: on }}
-                  accessibilityLabel={`자동 편성 모드 ${m.label}`}
-                >
-                  <Text style={[styles.autoChipText, { color: on ? '#fff' : colors.textSecondary }]}>{m.emoji} {m.label}</Text>
-                </TouchableOpacity>
-              );
-            })}
-          </View>
-          {/* 조율 토글 + 패널 — 성별 보정폭·동성 강도·타입 순환 (자동+수동 편성에 적용). */}
+          {/* 편성 기준 — 운영진 말로 된 3가지(급수 맞추기·게임 종류·같은 사람과 또). 자동·수동 추천·채우기·땜빵에 모두 적용. */}
           <TouchableOpacity
             onPress={() => setTuningOpen((o) => !o)}
             style={styles.tuningToggle}
             accessibilityRole="button"
-            accessibilityLabel="자동 편성 조율"
+            accessibilityLabel="편성 기준 바꾸기"
           >
-            <Text style={[styles.autoChipText, { color: colors.secondary, fontWeight: '700' }]}>⚙︎ 조율 {tuningOpen ? '▲' : '▼'}</Text>
+            <Text style={[styles.autoChipText, { color: colors.secondary, fontWeight: '700' }]} numberOfLines={1}>
+              {`⚙︎ 편성 기준: ${prefsSummary(autoPrefs)} ${tuningOpen ? '▲' : '▼'}`}
+            </Text>
           </TouchableOpacity>
           {tuningOpen && (
             <View style={styles.tuningPanel}>
-              {TUNING_ROWS.map((row) => (
-                <View key={row.key} style={styles.tuningRow}>
-                  <Text style={[styles.tuningRowLabel, { color: colors.textSecondary }]}>{row.label}</Text>
-                  <View style={styles.tuningSeg}>
-                    {TUNING_OPTIONS[row.key].map(([lbl, val]) => {
-                      const on = autoTuning[row.key] === val;
-                      return (
-                        <TouchableOpacity
-                          key={lbl}
-                          style={[styles.tuningSegItem, { borderColor: on ? colors.secondary : colors.border, backgroundColor: on ? colors.secondary : 'transparent' }]}
-                          onPress={() => setAutoTuning((t) => ({ ...t, [row.key]: val }))}
-                          accessibilityRole="button"
-                          accessibilityState={{ selected: on }}
-                          accessibilityLabel={`${row.label} ${lbl}`}
-                        >
-                          <Text style={[styles.tuningSegText, { color: on ? '#fff' : colors.textSecondary }]}>{lbl}</Text>
-                        </TouchableOpacity>
-                      );
-                    })}
+              {PREF_ROWS.map((row) => {
+                const opts = row.options as { value: string; label: string; effect: string }[];
+                const cur = opts.find((o) => o.value === autoPrefs[row.key]);
+                return (
+                  <View key={row.key} style={styles.prefBlock}>
+                    <View style={styles.tuningRow}>
+                      <Text style={[styles.tuningRowLabel, { color: colors.textSecondary }]}>{row.label}</Text>
+                      <View style={styles.tuningSeg}>
+                        {opts.map((o) => {
+                          const on = autoPrefs[row.key] === o.value;
+                          return (
+                            <TouchableOpacity
+                              key={o.value}
+                              style={[styles.tuningSegItem, { borderColor: on ? colors.secondary : colors.border, backgroundColor: on ? colors.secondary : 'transparent' }]}
+                              onPress={() => setAutoPrefs((prev) => ({ ...prev, [row.key]: o.value }))}
+                              accessibilityRole="button"
+                              accessibilityState={{ selected: on }}
+                              accessibilityLabel={`${row.label} ${o.label}`}
+                            >
+                              <Text style={[styles.tuningSegText, { color: on ? '#fff' : colors.textSecondary }]}>{o.label}</Text>
+                            </TouchableOpacity>
+                          );
+                        })}
+                      </View>
+                    </View>
+                    {!!cur && <Text style={[styles.prefEffect, { color: colors.textSecondary }]}>{cur.effect}</Text>}
                   </View>
-                </View>
-              ))}
+                );
+              })}
+              <Text style={[styles.prefEffect, { color: colors.textLight }]}>
+                바꾸면 다음에 짜는 게임부터 적용돼요. 이미 짜인 대기 게임은 그대로예요.
+              </Text>
               {/* 게임 주기 — '몇 분 남음' 추정 + 시간 인지 준비의 기준. */}
               <View style={styles.tuningRow}>
                 <Text style={[styles.tuningRowLabel, { color: colors.textSecondary }]}>게임 주기</Text>
@@ -5305,14 +5244,14 @@ export default function OperateScreen() {
       <View style={styles.trayButtons}>
         <TouchableOpacity
           style={[styles.suggestBtn, { backgroundColor: suggestUnavailable ? colors.textLight : colors.info }]}
-          onPress={() => { if (suggestUnavailable) return; setSuggestNote(null); setModeChooserOpen((o) => !o); }}
+          onPress={() => { if (suggestUnavailable) return; handleSuggest(); }}
           disabled={suggesting || suggestUnavailable}
           activeOpacity={0.85}
           accessibilityLabel="자동 추천"
         >
           {suggesting
             ? <ActivityIndicator size="small" color={palette.white} />
-            : <Text style={styles.suggestBtnText}>{suggestUnavailable ? '준비 중' : `🎲 자동 추천${modeChooserOpen ? ' ▴' : ' ▾'}`}</Text>}
+            : <Text style={styles.suggestBtnText}>{suggestUnavailable ? '준비 중' : '🎲 자동 추천'}</Text>}
         </TouchableOpacity>
         {staged.length > 0 && (
           <TouchableOpacity style={[styles.clearBtn, { borderColor: colors.border }]} onPress={clearStaged}>
@@ -5320,25 +5259,6 @@ export default function OperateScreen() {
           </TouchableOpacity>
         )}
       </View>
-      {modeChooserOpen && !suggestUnavailable && (
-        <View style={[styles.modeChooser, { borderColor: colors.border, backgroundColor: colors.background }]}>
-          <View style={styles.modeChips}>
-            {SUGGEST_MODES.map((m) => (
-              <TouchableOpacity
-                key={m.mode}
-                style={[styles.modeChip, { borderColor: colors.border, backgroundColor: colors.surface }]}
-                onPress={() => handleSuggest(m.mode)}
-                disabled={suggesting}
-                activeOpacity={0.8}
-                accessibilityLabel={`${m.label} 추천`}
-              >
-                <Text style={[styles.modeChipLabel, { color: colors.text }]}>{m.emoji} {m.label}</Text>
-                <Text style={[styles.modeChipHint, { color: colors.textSecondary }]} numberOfLines={1}>{m.hint}</Text>
-              </TouchableOpacity>
-            ))}
-          </View>
-        </View>
-      )}
       <TouchableOpacity
         style={[styles.registerBtn, { backgroundColor: staged.length >= 2 ? colors.primary : colors.textLight }]}
         onPress={handleAddToQueue}
@@ -7109,7 +7029,9 @@ const styles = StyleSheet.create({
   tuningToggle: { paddingVertical: 2, alignSelf: 'flex-start' },
   tuningPanel: { gap: 6, paddingTop: 2 },
   tuningRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, flexWrap: 'wrap' },
-  tuningRowLabel: { ...typography.caption, fontWeight: '700', minWidth: 56 },
+  tuningRowLabel: { ...typography.caption, fontWeight: '700', minWidth: 72 },
+  prefBlock: { gap: 2 },
+  prefEffect: { ...typography.caption, paddingLeft: 2 },
   tuningSeg: { flexDirection: 'row', flexWrap: 'wrap', gap: 4 },
   tuningSegItem: {
     paddingHorizontal: spacing.sm, paddingVertical: 3,

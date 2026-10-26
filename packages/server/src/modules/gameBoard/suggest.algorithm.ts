@@ -434,6 +434,10 @@ export interface SuggestTuning {
    * 판당 시간(클럽 과거 중앙값) × max(1, 대기 가능 인원 / (4 × 코트 수)). 미지정이면 13분.
    */
   gameCycleSeconds: number;
+  /** '급수 맞추기' 강도 — 'similar' 모드의 급수 폭 항 가중치(미지정이면 모드 기본). */
+  levelWeight?: number;
+  /** '같은 사람 또 만나기' — 겹침 항 가중치(미지정이면 모드 기본). */
+  varietyWeight?: number;
 }
 export function resolveTuning(t?: Partial<SuggestTuning>): SuggestTuning {
   return {
@@ -441,6 +445,8 @@ export function resolveTuning(t?: Partial<SuggestTuning>): SuggestTuning {
     sameGenderWeight: t?.sameGenderWeight ?? SAME_GENDER_WEIGHT,
     typeVarietyWeight: t?.typeVarietyWeight ?? TYPE_VARIETY_WEIGHT,
     gameCycleSeconds: t?.gameCycleSeconds ?? GAME_CYCLE_SECONDS,
+    levelWeight: t?.levelWeight,
+    varietyWeight: t?.varietyWeight,
   };
 }
 
@@ -480,8 +486,8 @@ function scoreGroup(
     requestTerm +
     styleTerm +
     w.wFair * fairnessCost(group, jitterById) +
-    w.wVariety * varietyCost(group, pairWeight) +
-    w.wMode * modeTerm(group, mode, tuning.genderOffsetFemale) +
+    (tuning.varietyWeight ?? w.wVariety) * varietyCost(group, pairWeight) +
+    (mode === 'similar' && tuning.levelWeight != null ? tuning.levelWeight : w.wMode) * modeTerm(group, mode, tuning.genderOffsetFemale) +
     // 타입 순환 — 부족한 타입(혼복/동성복)을 주도록 유도(아무도 한 타입에 갇히지 않게).
     tuning.typeVarietyWeight * typeVarietyCost(group) +
     // 소프트 동성 우선 — 모든 모드에 얹는 약한 성향(급수/공평이 우선, 혼복 유두리 유지).

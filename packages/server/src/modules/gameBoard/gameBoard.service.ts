@@ -612,6 +612,12 @@ export async function suggestNextFoursome(
     mode?: SuggestMode;
     exclude?: string[];
     tuning?: Partial<SuggestTuning>;
+    /** 운영판 '편성 기준' — 주면 mode·동성/순환 tuning 대신 이걸로 정한다(아래 prefs 해석). */
+    prefs?: {
+      levelMatch?: 'tight' | 'normal' | 'loose';
+      gameType?: 'same' | 'even' | 'mixed';
+      avoidRepeat?: 'normal' | 'strong';
+    };
     /**
      * 대상 게임 모드(운영진 방식):
      *  · fill: 대기 게임(entryId)에 이미 들어간 1~3명은 고정, 나머지 자리를 채움("한두 명 먼저 넣고 나중에 채우기")
@@ -903,10 +909,30 @@ export async function suggestNextFoursome(
   // 그대로면 끈다 — 둘이 겹치면 운영진보다 남복·여복을 과하게 짠다(재생 평가: 71% → 61%, 운영진 59%).
   // 운영자가 직접 바꾼 값은 존중.
   // (이전엔 학습 스타일이 있으면 수동 동성 우선을 껐지만, 실제 운영에서 혼복이 과다해 운영진 피드백으로 유지.)
-  const tuning: Partial<SuggestTuning> = { ...opts.tuning, gameCycleSeconds: (gameMs / 1000) * ratio };
+  // ── 운영판 '편성 기준' 3가지(운영진 말) → 엔진 값. 선택지마다 결과가 눈에 띄게 달라지게 잡았다
+  //    (같은 출석 비교: scratchpad mode_cmp). 예전 클라이언트(mode·tuning)는 그대로 동작.
+  //  · 급수 맞추기: 딱 맞게 = 급수 폭 1단계까지만(2단계 금지, 대신 기다릴 수 있음) / 보통 = 2단계는 가끔 /
+  //    넉넉하게 = 2단계도 부담 없이(빨리 돌림, 3단계+는 여전히 금지)
+  //  · 게임 종류: 남복·여복 위주 / 골고루(혼복도 섞어) / 혼복 위주
+  //  · 같은 사람 또 만나기: 보통 / 최대한 피하기
+  const prefs = opts.prefs;
+  const levelMatch = prefs?.levelMatch ?? 'normal';
+  const gameType = prefs?.gameType ?? 'same';
+  let prefTuning: Partial<SuggestTuning> = {};
+  if (prefs) {
+    mode = 'similar';
+    prefTuning = {
+      levelWeight: levelMatch === 'tight' ? 2.5 : levelMatch === 'loose' ? 0 : style ? 0.5 : 1.5,
+      varietyWeight: prefs.avoidRepeat === 'strong' ? 3 : 1,
+      sameGenderWeight: gameType === 'same' ? 1.5 : gameType === 'even' ? 0.8 : 0,
+      typeVarietyWeight: gameType === 'even' ? 0.6 : 0,
+    };
+  }
+  const tuning: Partial<SuggestTuning> = { ...opts.tuning, ...prefTuning, gameCycleSeconds: (gameMs / 1000) * ratio };
   const tune = resolveTuning(tuning);
   let styleScorer: StyleScorer | undefined;
-  if (style) {
+  // 학습 스타일은 운영진 평소 방식(남복·여복 위주)을 담고 있어, 운영자가 게임 종류를 바꿨으면 끈다.
+  if (style && gameType === 'same') {
     const guestIds = new Set(
       (await prisma.user.findMany({ where: { id: { in: poolIds }, isGuest: true }, select: { id: true } })).map((u) => u.id),
     );
@@ -948,8 +974,9 @@ export async function suggestNextFoursome(
   // 규칙 안 4명이 없으면 억지로 짜지 않고 '곧 나올 사람'까지 보거나 기다린다(아래 슬롯 선택).
   // 급수 폭(보정): 0~1단계가 기본, 2단계는 가끔(큰 비용), 3단계+ 금지. 모임 기록 상한이 더 좁으면 그걸로.
   // 운영진 피드백(2026-10-24): "남복도 C·E·C·E처럼 섞여 들어간다 — 비슷한 급수나 1~2급 위와 치고 싶어 한다".
-  const spreadCap = Math.min(style?.spreadCap ?? DEFAULT_SPREAD_CAP, 2);
-  const SPREAD2_COST = 4; // 2단계 판 — 1단계 이하 조합이 있으면 그쪽(공평 4게임 상당)
+  const spreadCap = Math.min(style?.spreadCap ?? DEFAULT_SPREAD_CAP, levelMatch === 'tight' ? 1 : 2);
+  // 2단계 판 — 보통이면 1단계 이하 조합이 있으면 그쪽(공평 4게임 상당), 넉넉하게면 거의 부담 없이.
+  const SPREAD2_COST = levelMatch === 'loose' ? 0.5 : 4;
   const RULE_COST = 500;
   const effOf = (p: ModePlayer) => p.skill + (p.gender === 'F' ? tune.genderOffsetFemale : 0);
   // 혼복 2:2의 남녀 급수 관계: 남자가 여자보다 최대 3단계 높아도 됨(남자가 받쳐주는 구조, 여자 F조가
@@ -1001,14 +1028,19 @@ export async function suggestNextFoursome(
             // 여자 E조 이상은 여복이 기본(서로 랠리가 됨) → 그런 혼복은 비용.
             // F조 여자가 든 혼복은 정배 → 가산점(한 판씩 고르는 엔진이 남복으로 받쳐줄 남자를 먼저 써버리지 않게).
             const fCount = f.filter((p) => p.skill <= 1).length;
-            if (fCount === 0) c += 3;
-            else c -= 2.5 * fCount;
+            if (fCount > 0) c -= 2.5 * fCount;
+            else if (gameType === 'same') c += 3;
             // 남녀 차이는 허용하되 2단계를 넘으면 조금씩(남자가 받쳐주는 구조라도 차이가 작을수록 좋음).
             const gap = (m[0].skill + m[1].skill - f[0].skill - f[1].skill) / 2;
             if (gap > 2) c += 0.8 * (gap - 2);
           }
           // 여자 F조끼리 여복은 랠리가 어려움 → 남자가 받쳐주는 혼복 쪽으로(남자 후보가 있으면).
           if (f.length === 4 && f.some((p) => p.skill <= 1)) c += 3;
+          // 게임 종류 '골고루'·'혼복 위주' — 혼복은 2:2로(3:1은 덜), '혼복 위주'면 남복·여복에 비용.
+          if (gameType !== 'same') {
+            if (f.length === 1 || f.length === 3) c += 2;
+            if (gameType === 'mixed' && (f.length === 0 || m.length === 0)) c += 3;
+          }
         }
         const eff = (p: ModePlayer) => p.skill + (p.gender === 'F' ? tune.genderOffsetFemale : 0);
         for (let i = 0; i < ids.length; i++)

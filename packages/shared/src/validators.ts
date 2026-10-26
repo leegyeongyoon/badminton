@@ -467,6 +467,17 @@ export const suggestFoursomeSchema = z.object({
       typeVarietyWeight: z.number().min(0).max(2).optional(),
     })
     .optional(),
+  // 운영진 편성 기준(운영판 '편성 기준' 3가지) — 주면 mode·tuning(동성/순환)보다 우선.
+  //   levelMatch: 급수 맞추기 — tight 딱 맞게(2단계 금지) / normal 보통 / loose 넉넉하게(빨리 돌림)
+  //   gameType:   게임 종류 — same 남복·여복 위주 / even 골고루(혼복 섞어) / mixed 혼복 위주
+  //   avoidRepeat: 같은 사람 또 만나기 — normal 보통 / strong 최대한 피하기
+  prefs: z
+    .object({
+      levelMatch: z.enum(['tight', 'normal', 'loose']).optional(),
+      gameType: z.enum(['same', 'even', 'mixed']).optional(),
+      avoidRepeat: z.enum(['normal', 'strong']).optional(),
+    })
+    .optional(),
   // 대상 게임 모드 — fill: 대기 게임의 빈자리 채우기 / substitute: 땜빵 후보 3명(대기 게임 또는 코트 진행 중 게임)
   target: z
     .object({
