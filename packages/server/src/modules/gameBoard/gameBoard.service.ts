@@ -1025,6 +1025,7 @@ export async function suggestNextFoursome(
   // 오늘 편성용 급수 — 같이 칠 사람이 부족한 사람은 그날 출석이 많은 쪽으로 옮겨서 본다(아래 출석 구성 분석).
   const virtualSkill = new Map<string, number>();
   const realSkill = new Map<string, number>();
+  const sameScarce = new Set<string>(); // 같은 성별에서 1단계 안에 같이 칠 사람이 부족(여복·남복이 어려운 사람)
   const freeBy = (id: string, at: number) => {
     const av = availMs.get(id) ?? nowMs;
     if (av <= nowMs) return true;
@@ -1352,9 +1353,12 @@ export async function suggestNextFoursome(
     for (const p of modePool) realSkill.set(p.id, p.skill);
     const others = (p: ModePlayer) => modePool.filter((q) => q.id !== p.id && q.gender === p.gender);
     const NEED = 4; // 1단계 안에 같이 칠 사람이 이만큼 있으면 그대로(시뮬레이션 3·4·5명 비교에서 가장 고름)
-    const near = (p: ModePlayer, v: number) => others(p).filter((q) => Math.abs((realSkill.get(q.id) ?? q.skill) - v) <= 1).length;
+    // F조와 E조 사이는 실제로 한 단계보다 크다(운영진 피드백 2026-10-27) — 같이 칠 사람 셀 때 2단계로 본다.
+    const lvDist = (a: number, b: number) => Math.abs(a - b) + (Math.min(a, b) === 1 && Math.max(a, b) >= 2 ? 1 : 0);
+    const near = (p: ModePlayer, v: number) => others(p).filter((q) => lvDist(realSkill.get(q.id) ?? q.skill, v) <= 1).length;
     for (const p of modePool) {
       if (near(p, p.skill) >= NEED) continue;
+      sameScarce.add(p.id);
       let best = p.skill;
       let bestN = near(p, p.skill);
       for (let d = 1; d <= 3; d++) {
@@ -1438,7 +1442,9 @@ export async function suggestNextFoursome(
       if (sp > spreadCap) return `급수 폭 ${sp}단계`;
       const gap = mixedGap(g);
       // 여자 쪽 상한은 보정 급수(여자 2단계 후함)로 1단계까지 = 실제 급수로 3단계(여 A + 남 C는 실력이 맞는 혼복).
-      if (gap != null && (gap > 3 || gap < -3)) return `혼복 남녀 급수 차이 ${gap > 0 ? '+' : ''}${gap}`;
+      // 여자 F조가 든 혼복은 남자 급수가 높아도 괜찮다 — 센 남자가 받쳐주는 판(운영진 피드백 2026-10-27). 위쪽 상한 없음.
+      const hasFWoman = g.some((p) => p.gender === 'F' && (realSkill.get(p.id) ?? p.skill) <= 1);
+      if (gap != null && ((gap > 3 && !hasFWoman) || gap < -3)) return `혼복 남녀 급수 차이 ${gap > 0 ? '+' : ''}${gap}`;
     }
     return null;
   };
@@ -1518,7 +1524,17 @@ export async function suggestNextFoursome(
           if (mixTarget != null && !planEval) {
             const isMix = f.length > 0 && m.length > 0;
             const want = mixTarget * (gamesSoFar + 1);
-            if (isMix && mixSoFar + 1 > want + 0.5) c += MIX_RATIO_COST * pref * (mixSoFar + 1 - want);
+            // 혼복을 더 원하는 사람(급수별 혼복 비율 > 모임 목표)이 같은 성별끼리 칠 사람도 부족하고 조금이라도 밀렸으면
+            // 그 사람이 든 혼복은 비율 비용 없음(여F 1명뿐인 날). 여F가 많으면 여F끼리 여복으로 돈다.
+            const mixWanted = isMix && group.some((p) => {
+              const pct = levelSetting(p)?.mixedPct;
+              return pct != null && pct / 100 > mixTarget! && sameScarce.has(p.id) && priorityCost(p, tune.gameCycleSeconds) <= fairRef - 0.25;
+            });
+            // 남자끼리·여자끼리 급수가 맞는(각 1단계 이내) 혼복은 좋은 판 — 목표보다 2판까지는 비용을 약하게(대략적인 기준).
+            const sameSpread = (xs: ModePlayer[]) => (xs.length ? Math.max(...xs.map((x) => x.skill)) - Math.min(...xs.map((x) => x.skill)) : 0);
+            const balancedMix = isMix && f.length === 2 && sameSpread(f) <= 1 && sameSpread(m) <= 1;
+            const over = mixSoFar + 1 - want;
+            if (isMix && !mixWanted && over > 0.5) c += MIX_RATIO_COST * pref * (balancedMix && over <= 2 ? 0.3 : 1) * over;
             if (!isMix && mixSoFar < want - 0.5) c += MIX_RATIO_COST * pref * (want - mixSoFar);
           }
           // 게임 종류 '골고루'·'혼복 위주'·혼복 비율 — 혼복은 2:2로(3:1은 덜), '혼복 위주'면 남복·여복에 비용.

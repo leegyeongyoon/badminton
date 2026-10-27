@@ -2,7 +2,7 @@ import { Fragment, useState, useCallback, useEffect, useMemo, useRef } from 'rea
 import {
   View, Text, TextInput, TouchableOpacity, ScrollView, StyleSheet,
   SafeAreaView, ActivityIndicator, Animated as RNAnimated, LayoutAnimation,
-  Platform, UIManager, Modal, KeyboardAvoidingView, PanResponder,
+  Platform, UIManager, Modal, KeyboardAvoidingView, PanResponder, Pressable,
 } from 'react-native';
 import { useLocalSearchParams, useRouter, useFocusEffect } from 'expo-router';
 import { useGameBoard, GameBoardEntry } from '../../../hooks/useGameBoard';
@@ -564,6 +564,7 @@ export default function OperateScreen() {
   const [feeModal, setFeeModal] = useState(false);
   const [courtModal, setCourtModal] = useState(false);
   const [pollModal, setPollModal] = useState(false);
+  const [moreOpen, setMoreOpen] = useState(false);
   const [gameLogOpen, setGameLogOpen] = useState(false);
   // 테스트/데모용 랜덤 게스트 일괄 추가 진행 상태 (실제 출석 아님).
   const [addingTestGuests, setAddingTestGuests] = useState(false);
@@ -4292,44 +4293,6 @@ export default function OperateScreen() {
       </TouchableOpacity>
       <TouchableOpacity
         style={[styles.headerLink, headerLinkTouch, { borderColor: colors.border }]}
-        onPress={() => setCourtModal(true)}
-        activeOpacity={0.8}
-      >
-        <Icon name="court" size={16} color={colors.primary} />
-        <Text style={[styles.headerLinkText, { color: colors.primary }]}>코트 관리</Text>
-      </TouchableOpacity>
-      {!!clubId && (
-        <TouchableOpacity
-          style={[styles.headerLink, headerLinkTouch, { borderColor: colors.border }]}
-          onPress={() => {
-            setUnreadChat(0);
-            router.push(`/club/${clubId}/chat`);
-          }}
-          activeOpacity={0.8}
-          accessibilityLabel="채팅 건의"
-        >
-          <Text style={styles.headerChatIcon}>💬</Text>
-          <Text style={[styles.headerLinkText, { color: colors.primary }]}>건의</Text>
-          {unreadChat > 0 && (
-            <View style={[styles.unreadDot, { backgroundColor: colors.danger }]}>
-              <Text style={styles.unreadDotText}>{unreadChat > 9 ? '9+' : unreadChat}</Text>
-            </View>
-          )}
-        </TouchableOpacity>
-      )}
-      <TouchableOpacity
-        style={[styles.headerLink, headerLinkTouch, { borderColor: colors.primary }]}
-        onPress={() => setRequestsOpen(true)}
-        activeOpacity={0.8}
-        accessibilityLabel="요청·메모 열기"
-      >
-        <Text style={{ fontSize: 14 }}>📌</Text>
-        <Text style={[styles.headerLinkText, { color: colors.primary, fontWeight: '700' }]}>
-          요청{requests.length + memoLines.length > 0 ? ` ${requests.length + memoLines.length}` : ''}
-        </Text>
-      </TouchableOpacity>
-      <TouchableOpacity
-        style={[styles.headerLink, headerLinkTouch, { borderColor: colors.border }]}
         onPress={() => router.push(`/session/${clubSessionId}/ai-settings` as any)}
         activeOpacity={0.8}
         accessibilityLabel="AI 편성 설정"
@@ -4338,37 +4301,11 @@ export default function OperateScreen() {
       </TouchableOpacity>
       <TouchableOpacity
         style={[styles.headerLink, headerLinkTouch, { borderColor: colors.border }]}
-        onPress={() => setGuideOpen(true)}
-        activeOpacity={0.8}
-        accessibilityLabel="자동 편성 사용법"
-      >
-        <Text style={[styles.headerLinkText, { color: colors.primary }]}>사용법</Text>
-      </TouchableOpacity>
-      <TouchableOpacity
-        style={[styles.headerLink, headerLinkTouch, { borderColor: colors.border }]}
-        onPress={() => setPollModal(true)}
-        activeOpacity={0.8}
-        accessibilityLabel="투표 만들기"
-      >
-        <Icon name="stats" size={16} color={colors.primary} />
-        <Text style={[styles.headerLinkText, { color: colors.primary }]}>투표</Text>
-      </TouchableOpacity>
-      <TouchableOpacity
-        style={[styles.headerLink, headerLinkTouch, { borderColor: colors.border }]}
-        onPress={() => setGameLogOpen(true)}
-        activeOpacity={0.8}
-        accessibilityLabel="게임 기록"
-      >
-        <Text style={{ fontSize: 15 }}>📋</Text>
-        <Text style={[styles.headerLinkText, { color: colors.primary }]}>게임 기록</Text>
-      </TouchableOpacity>
-      <TouchableOpacity
-        style={[styles.headerLink, headerLinkTouch, { borderColor: colors.border }]}
-        onPress={() => router.push(`/session/${clubSessionId}/board`)}
+        onPress={() => setCourtModal(true)}
         activeOpacity={0.8}
       >
-        <Icon name="tv" size={16} color={colors.primary} />
-        <Text style={[styles.headerLinkText, { color: colors.primary }]}>현황 보드</Text>
+        <Icon name="court" size={16} color={colors.primary} />
+        <Text style={[styles.headerLinkText, { color: colors.primary }]}>코트 관리</Text>
       </TouchableOpacity>
       <TouchableOpacity
         style={[styles.headerLink, headerLinkTouch, { borderColor: colors.border }]}
@@ -4378,28 +4315,19 @@ export default function OperateScreen() {
         <Icon name="tv" size={16} color={colors.primary} />
         <Text style={[styles.headerLinkText, { color: colors.primary }]}>모니터 뷰</Text>
       </TouchableOpacity>
+      {/* 자주 안 쓰는 메뉴는 ☰ 더보기로(운영진 피드백 2026-10-27: 상단엔 자동 편성·AI 설정·코트 관리·모니터 뷰만). */}
       <TouchableOpacity
         style={[styles.headerLink, headerLinkTouch, { borderColor: colors.border }]}
-        onPress={() => router.push(`/session/${clubSessionId}/qr`)}
+        onPress={() => setMoreOpen(true)}
         activeOpacity={0.8}
-        accessibilityLabel="출석 QR"
+        accessibilityLabel="더보기 메뉴"
       >
-        <Icon name="qr" size={16} color={colors.primary} />
-        <Text style={[styles.headerLinkText, { color: colors.primary }]}>출석 QR</Text>
-      </TouchableOpacity>
-      <TouchableOpacity
-        style={[styles.headerLink, headerLinkTouch, { borderColor: colors.border }]}
-        onPress={copyAttendLink}
-        activeOpacity={0.8}
-        disabled={copyingLink}
-        accessibilityLabel="출석 링크 복사"
-      >
-        {copyingLink ? (
-          <ActivityIndicator size="small" color={colors.primary} />
-        ) : (
-          <Icon name="link" size={16} color={colors.primary} />
+        <Text style={[styles.headerLinkText, { color: colors.primary, fontWeight: '700' }]}>☰ 더보기</Text>
+        {unreadChat > 0 && (
+          <View style={[styles.unreadDot, { backgroundColor: colors.danger }]}>
+            <Text style={styles.unreadDotText}>{unreadChat > 9 ? '9+' : unreadChat}</Text>
+          </View>
         )}
-        <Text style={[styles.headerLinkText, { color: colors.primary }]}>출석 링크 복사</Text>
       </TouchableOpacity>
       <TouchableOpacity
         style={[styles.headerLink, headerLinkTouch, { borderColor: colors.danger, backgroundColor: colors.dangerBg }]}
@@ -4411,6 +4339,42 @@ export default function OperateScreen() {
         <Text style={[styles.headerLinkText, { color: colors.danger }]}>정모 종료</Text>
       </TouchableOpacity>
     </>
+  );
+
+  // ☰ 더보기 — 요청·건의·사용법·투표·게임 기록·현황 보드·출석 QR·출석 링크 복사.
+  const moreItems: { key: string; label: string; onPress: () => void; badge?: number }[] = [
+    { key: 'req', label: `📌 요청·메모${requests.length + memoLines.length > 0 ? ` ${requests.length + memoLines.length}` : ''}`, onPress: () => setRequestsOpen(true) },
+    ...(clubId ? [{ key: 'chat', label: '💬 건의', badge: unreadChat, onPress: () => { setUnreadChat(0); router.push(`/club/${clubId}/chat`); } }] : []),
+    { key: 'guide', label: '📖 사용법', onPress: () => setGuideOpen(true) },
+    { key: 'poll', label: '📊 투표', onPress: () => setPollModal(true) },
+    { key: 'log', label: '📋 게임 기록', onPress: () => setGameLogOpen(true) },
+    { key: 'board', label: '📺 현황 보드', onPress: () => router.push(`/session/${clubSessionId}/board`) },
+    { key: 'qr', label: '🔳 출석 QR', onPress: () => router.push(`/session/${clubSessionId}/qr`) },
+    { key: 'link', label: copyingLink ? '🔗 복사 중…' : '🔗 출석 링크 복사', onPress: () => { copyAttendLink(); } },
+  ];
+  const moreMenu = (
+    <Modal visible={moreOpen} transparent animationType="fade" onRequestClose={() => setMoreOpen(false)}>
+      <Pressable style={styles.moreBackdrop} onPress={() => setMoreOpen(false)} accessibilityLabel="더보기 닫기">
+        <View style={[styles.moreSheet, { backgroundColor: colors.surface, borderColor: colors.border, top: Platform.OS === 'web' ? 56 : 100 }]}>
+          {moreItems.map((it) => (
+            <TouchableOpacity
+              key={it.key}
+              style={[styles.moreItem, { borderBottomColor: colors.border }]}
+              onPress={() => { setMoreOpen(false); it.onPress(); }}
+              accessibilityRole="button"
+              accessibilityLabel={it.label.replace(/^\S+\s/, '')}
+            >
+              <Text style={[styles.moreItemText, { color: colors.text }]}>{it.label}</Text>
+              {!!it.badge && it.badge > 0 && (
+                <View style={[styles.unreadDot, { backgroundColor: colors.danger, position: 'relative', top: 0, right: 0 }]}>
+                  <Text style={styles.unreadDotText}>{it.badge > 9 ? '9+' : it.badge}</Text>
+                </View>
+              )}
+            </TouchableOpacity>
+          ))}
+        </View>
+      </Pressable>
+    </Modal>
   );
 
   const backButton = (
@@ -4720,6 +4684,7 @@ export default function OperateScreen() {
 
   const modals = (
     <>
+      {moreMenu}
       {requestModal}
       {requestsOpen && (
         <Modal visible transparent animationType="fade" onRequestClose={() => setRequestsOpen(false)}>
@@ -6928,6 +6893,10 @@ const styles = StyleSheet.create({
     paddingVertical: spacing.smd, paddingHorizontal: spacing.lg, minHeight: 44,
   },
   headerLinkText: { ...typography.buttonSm },
+  moreBackdrop: { flex: 1, backgroundColor: 'rgba(0,0,0,0.15)' },
+  moreSheet: { position: 'absolute', right: spacing.md, minWidth: 200, borderWidth: 1, borderRadius: radius.md, overflow: 'hidden' },
+  moreItem: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: spacing.md, paddingVertical: 12, borderBottomWidth: StyleSheet.hairlineWidth },
+  moreItemText: { ...typography.body2, fontWeight: '600' },
   headerChatIcon: { fontSize: 14 },
   unreadDot: {
     minWidth: 16, height: 16, borderRadius: 8, paddingHorizontal: 4,
