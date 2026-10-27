@@ -1019,9 +1019,20 @@ export async function suggestNextFoursome(
         !excludeIds.has(id) &&
         !waitingTurnIds.has(id),
     );
+  // 한 판 쉬기 면제 — 평균보다 밀린 사람(아래 modePool 계산 뒤 채움). 같이 칠 조합이 적은 급수(남S 3명뿐 →
+  // 남S끼리 둘이 들어가야 함)는 방금 친 S가 쉬면 남은 S가 짝이 없어 계속 밀렸다. 운영진도 '사람이 없으니 연달아'.
+  const restWaived = new Set<string>();
+  // 급수 폭 한 단계 풀기 — 평균보다 0.75판 넘게 밀린 사람이 든 판은, 두 팀 급수 합이 비슷하면(차이 2 이하)
+  // 급수 폭을 한 단계 더 허용(예: 남S + 남D vs 남C + 남C). 같이 칠 조합이 적은 급수(남S 3명뿐인 날)는 규칙
+  // 안에서는 S조 판이 한 번에 하나뿐이라 평균만큼 칠 방법이 없었다(시뮬레이션 남S −20%대). 운영진도 S조가
+  // 밀리면 하수와 팀 합을 맞춰 넣는다. '딱 맞게' 설정과 급수별 '같이 칠 범위'는 그대로 지킨다.
+  const levelRelaxed = new Set<string>();
+  const levelExtra = new Map<string, number>(); // 사람별로 넓힐 수 있는 단계(0·1·2)
+  const scarceLevel = new Set<string>(); // 같이 칠 사람이 0~2명뿐 — 밀리지 않아도 넓힘
   const freeBy = (id: string, at: number) => {
     const av = availMs.get(id) ?? nowMs;
-    return av <= nowMs ? true : av + REST_GAP_MS <= at + SLACK_MS;
+    if (av <= nowMs) return true;
+    return av + (restWaived.has(id) ? 0 : REST_GAP_MS) <= at + SLACK_MS;
   };
   // 지금 쉬는 사람 = 진행·대기 게임(및 이번 호출에서 짠 판) 일정이 없는 사람.
   const isIdle = (id: string) => (availMs.get(id) ?? 0) <= nowMs;
@@ -1279,6 +1290,15 @@ export async function suggestNextFoursome(
   }
   const tuning: Partial<SuggestTuning> = { ...opts.tuning, ...prefTuning, gameCycleSeconds: (gameMs / 1000) * ratio };
   const tune = resolveTuning(tuning);
+  // 한 판 쉬기 면제 대상(평균보다 0.75판 넘게 밀린 사람) — tune이 정해진 뒤에 계산.
+  {
+    const costs = modePool.map((p) => priorityCost(p, tune.gameCycleSeconds));
+    const ref = costs.reduce((a, b) => a + b, 0) / Math.max(1, costs.length);
+    modePool.forEach((p, i) => {
+      if (costs[i] <= ref - 0.75) restWaived.add(p.id);
+      if (costs[i] <= ref - 0.75) levelRelaxed.add(p.id);
+    });
+  }
   let styleScorer: StyleScorer | undefined;
   // 학습 스타일은 운영진 평소 방식(남복·여복 위주)을 담고 있어, 운영자가 게임 종류를 바꿨으면 끈다.
   if (style && (gameType === 'same' || gameType === 'ratio')) {
@@ -1329,6 +1349,21 @@ export async function suggestNextFoursome(
   // 운영진 피드백(2026-10-24): "남복도 C·E·C·E처럼 섞여 들어간다 — 비슷한 급수나 1~2급 위와 치고 싶어 한다".
   // 운영진이 AI 설정을 쓰면 그 설정이 이긴다(모임 기록 p95가 1이어도 '넉넉하게'면 2단계 허용). 예전 앱만 기록 상한.
   const spreadCap = levelMatch === 'tight' ? 1 : useSettings ? 2 : Math.min(style?.spreadCap ?? DEFAULT_SPREAD_CAP, 2);
+  {
+    // 출석 구성 분석: 같은 성별에서 급수 차이 cap 이내 사람 수(지금 코트·대기 게임에 있는 사람 포함).
+    const within = (p: ModePlayer, cap: number) => modePool.filter((q) => q.id !== p.id && q.gender === p.gender && Math.abs(q.skill - p.skill) <= cap).length;
+    for (const p of modePool) {
+      const n0 = within(p, spreadCap);
+      if (n0 >= 5) continue;
+      if (n0 <= 2) {
+        // 같이 칠 같은 성별이 3명 생길 때까지 넓힌다(최대 4단계 — 초보 모임의 S조 1명도 판이 돌게).
+        scarceLevel.add(p.id);
+        let k = 1;
+        while (k < 4 && within(p, spreadCap + k) < 3) k++;
+        levelExtra.set(p.id, k);
+      } else levelExtra.set(p.id, 1);
+    }
+  }
   // 2단계 차이 판 — 운영진이 정한 최대 비율(spread2Max) 안이면 약한 비용(1단계 이하가 있으면 그쪽),
   // 넘으면 큰 비용 + 잠깐 기다려 더 나은 판을 찾는다(softIssue).
   const SPREAD2_COST = spread2Max >= 0.3 ? 0.5 : 1.5;
@@ -1357,7 +1392,14 @@ export async function suggestNextFoursome(
     fairRef = ps.length ? ps.reduce((a, p) => a + priorityCost(p, tune.gameCycleSeconds), 0) / ps.length : 0;
   };
   const isOwed = (p: ModePlayer) => priorityCost(p, tune.gameCycleSeconds) <= fairRef - 0.75;
+  // 밀린 만큼 당기기 — 평균보다 0.5판 넘게 밀린 사람이 든 판은 밀린 만큼 비용을 깎는다. 4명 합으로 고르면
+  // 같이 칠 조합이 적은 사람(남S 3명뿐인 날의 남S, 맨 아래 F조)의 '밀림'이 나머지 3명에 묻혀 계속 뒤로
+  // 갔다(실시간 시뮬레이션 오늘 구성: 남S 시간당 판수 평균 대비 −23%). 급수·성별 규칙은 그대로.
+  const OWED_WEIGHT = 2;
+  const owedPull = (p: ModePlayer) => OWED_WEIGHT * Math.max(0, fairRef - priorityCost(p, tune.gameCycleSeconds) - 0.5);
   const RULE_COST = 500;
+  const RELAX_COST = 4; // 급수 폭을 넓힌 판(한 단계당) — 규칙 안의 판이 있으면 그쪽
+  const RELAX_COST_SCARCE = 1.5;
   const MIX_RATIO_COST = 8;
   const effOf = (p: ModePlayer) => p.skill + (p.gender === 'F' ? tune.genderOffsetFemale : 0);
   // 혼복 2:2의 남녀 급수 관계: 남자가 여자보다 최대 3단계 높아도 됨(남자가 받쳐주는 구조, 여자 F조가
@@ -1372,6 +1414,24 @@ export async function suggestNextFoursome(
     for (let i = 0; i < g.length; i++) for (let j = i + 1; j < g.length; j++) if (activeKeys.has(pkey(g[i].id, g[j].id))) return true;
     return false;
   };
+  const teamGap = (g: ModePlayer[]) => {
+    const e = g.map(effOf);
+    return Math.min(Math.abs(e[0] + e[1] - e[2] - e[3]), Math.abs(e[0] + e[2] - e[1] - e[3]), Math.abs(e[0] + e[3] - e[1] - e[2]));
+  };
+  // 그날 출석 구성에 맞춘 사람별 급수 폭 — 같은 성별에서 지금 규칙 범위 안에 같이 칠 사람이 몇 명인지로 정한다.
+  //   5명 이상: 그대로 / 3~4명: 평균보다 밀렸을 때만 +1 / 0~2명: 항상, 같이 칠 사람이 3명 될 때까지(최대 +4).
+  // 넓힌 판은 두 팀 급수 합 차이 3 이하(센 사람이 받쳐주는 구조)만. 실시간 시뮬레이션(오늘 구성, 남S 3명·남A·B 0명):
+  // 남S 시간당 판수 평균 대비 −23% → −10%. 초보 위주 모임의 A·S조 1명도 같은 방식으로 판이 돈다.
+  const allowedSpread = (g: ModePlayer[]) => {
+    let extra = 0;
+    for (const p of g) {
+      const e = levelExtra.get(p.id) ?? 0;
+      if (e === 0) continue;
+      if (scarceLevel.has(p.id) || levelRelaxed.has(p.id)) extra = Math.max(extra, e);
+    }
+    return spreadCap + extra;
+  };
+  const relaxedOk = (g: ModePlayer[], sp: number) => sp <= allowedSpread(g) && teamGap(g) <= 3;
   const ruleBreak = (g: ModePlayer[], activeKeys: Set<string>): string | null => {
     const f = g.filter((p) => p.gender === 'F');
     const m = g.filter((p) => p.gender === 'M');
@@ -1390,7 +1450,7 @@ export async function suggestNextFoursome(
         }
       }
       const sp = levelSpread(g, tune.genderOffsetFemale);
-      if (sp > spreadCap) return `급수 폭 ${sp}단계`;
+      if (sp > spreadCap && !relaxedOk(g, sp)) return `급수 폭 ${sp}단계`;
       const gap = mixedGap(g);
       // 여자 쪽 상한은 보정 급수(여자 2단계 후함)로 1단계까지 = 실제 급수로 3단계(여 A + 남 C는 실력이 맞는 혼복).
       if (gap != null && (gap > 3 || gap < -3)) return `혼복 남녀 급수 차이 ${gap > 0 ? '+' : ''}${gap}`;
@@ -1433,6 +1493,13 @@ export async function suggestNextFoursome(
         // 게임 종류 같은 '선호' 비용을 약하게 — 선호 때문에 사람이 굶지 않게. 급수·성별 규칙(하드)은 그대로.
         const owed = group.some(isOwed);
         const pref = owed ? 0.25 : 1;
+        for (const p of group) c -= owedPull(p);
+        // 급수 폭을 한 단계 푼 판은 비용(정말 필요할 때만 — 규칙 안의 판이 있으면 그쪽)
+        // 넓힌 판 비용 — 같이 칠 사람이 거의 없는 사람(scarce)이 든 판은 그 사람에겐 이게 '보통 판'이라 약하게.
+        if (group.length === 4) {
+          const sp = levelSpread(group, tune.genderOffsetFemale);
+          if (sp > spreadCap) c += (group.some((p) => scarceLevel.has(p.id)) ? RELAX_COST_SCARCE : RELAX_COST) * (sp - spreadCap);
+        }
         if (group.length === 4 && !hasRequestPair(group, activeKeys)) {
           if (levelSpread(group, tune.genderOffsetFemale) === 2) c += spread2Over() && !planEval ? SPREAD2_OVER_COST : SPREAD2_COST;
           // 게임 수 맞추기 — 이 판에 들어가면 최소 판수와 N판 넘게 벌어지는 사람마다 큰 비용.
@@ -1821,11 +1888,12 @@ export async function suggestNextFoursome(
     // 이 사람이 i번 판에 들어갈 수 있나 — 그 판 시작 전에 비고, 계획 안의 다른 판과 시간이 안 겹침.
     const canJoin = (id: string, i: number, except: number) => {
       const av = availBase.get(id) ?? 0;
-      if (av > nowMs && av + REST_GAP_MS > starts[i] + SLACK_MS) return false;
+      const gap = restWaived.has(id) ? 0 : REST_GAP_MS;
+      if (av > nowMs && av + gap > starts[i] + SLACK_MS) return false;
       for (let j = 0; j < K; j++) {
         if (j === i || j === except || !groups[j].includes(id)) continue;
         // 계획 안의 두 판 사이에도 한 판 쉬기(REST_GAP — SLACK만큼은 봐줌)
-        if (!(ends[j] + REST_GAP_MS <= starts[i] + SLACK_MS || ends[i] + REST_GAP_MS <= starts[j] + SLACK_MS)) return false;
+        if (!(ends[j] + gap <= starts[i] + SLACK_MS || ends[i] + gap <= starts[j] + SLACK_MS)) return false;
       }
       return true;
     };
