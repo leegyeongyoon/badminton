@@ -18,6 +18,7 @@ import {
   pushEntry,
   pushAllEntries,
   suggestNextFoursome,
+  replanStaleQueue,
   getSessionPace,
   setGameFormat,
   createQueueGame,
@@ -53,6 +54,15 @@ router.post(
     }
   },
 );
+
+// POST /club-sessions/:id/replan-stale — 늦게 온 사람이 생기면 '연속 출전' AI 대기 게임을 지워 다시 짜게 한다.
+router.post('/:id/replan-stale', authenticate, async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    res.json(await replanStaleQueue(req.params.id as string, req.user!.userId));
+  } catch (err) {
+    next(err);
+  }
+});
 
 // ── 운영진 편성 요청(파트너로 같이 N게임 / 같이 안 짜기) — 자동 편성이 지킨다. 대표/운영진만. ──
 // GET    /club-sessions/:id/requests

@@ -421,6 +421,47 @@ async function verifyBoardStaff(boardId: string, userId: string) {
   return board;
 }
 
+// 늦게 온 사람 반영 — 자동 편성이 매 패스 전에 부른다.
+// AI가 짠 뒤 손대지 않은 대기 게임 중 '지금 코트에서 치는 사람이 그대로 이어서 들어가는' 판이,
+// 그 판을 짠 뒤에 새로 체크인한 사람이 있고 지금 아무 일정 없이 쉬는 사람이 4명 이상이면 지운다
+// (자동 편성이 바로 다시 짠다). 처음 20명일 때 짠 '연속 출전' 판이, 20명이 더 온 뒤에도 그대로 남아
+// 방금 끝난 사람이 쉬지도 못하고 다시 들어가고 0게임인 사람은 기다리던 문제(실운영 2026-10-27).
+// 다시 짠 판은 마지막 체크인보다 나중에 만들어지므로 같은 판을 반복해서 지우지 않는다.
+// 운영진이 지운 게 아니라서 AI 학습 기록(AutoMatchEdit)은 남기지 않는다.
+export async function replanStaleQueue(clubSessionId: string, userId: string) {
+  const board = await prisma.gameBoard.findUnique({
+    where: { clubSessionId },
+    include: { entries: { where: { status: 'QUEUED' }, orderBy: { queueOrder: 'asc' } } },
+  });
+  if (!board) return { removed: 0 };
+  await verifyBoardStaff(board.id, userId);
+  const [checkins, playing] = await Promise.all([
+    prisma.checkIn.findMany({
+      where: { clubSessionId, checkedOutAt: null },
+      select: { userId: true, checkedInAt: true, restingAt: true, isInLesson: true },
+    }),
+    prisma.turnPlayer.findMany({
+      where: { turn: { clubSessionId, status: { in: ['PLAYING', 'WAITING'] } } },
+      select: { userId: true },
+    }),
+  ]);
+  const onCourt = new Set(playing.map((p) => p.userId));
+  const queuedIds = new Set(board.entries.flatMap((e) => (e.playerIds as string[]) ?? []));
+  const idle = checkins.filter((c) => !c.restingAt && !c.isInLesson && !onCourt.has(c.userId) && !queuedIds.has(c.userId));
+  if (idle.length < 4) return { removed: 0 };
+  const lastArrival = Math.max(...checkins.map((c) => c.checkedInAt.getTime()));
+  const stale = board.entries.filter((e) => {
+    const ids = (e.playerIds as string[]) ?? [];
+    const untouchedAi = e.aiPlayerIds.length === 4 && ids.length === 4 && e.aiPlayerIds.every((id) => ids.includes(id));
+    return untouchedAi && e.createdAt.getTime() < lastArrival && ids.some((id) => onCourt.has(id));
+  });
+  if (stale.length === 0) return { removed: 0 };
+  await prisma.gameBoardEntry.deleteMany({ where: { id: { in: stale.map((e) => e.id) }, status: 'QUEUED' } });
+  const io = getIO();
+  for (const e of stale) io.to(`facility:${board.facilityId}`).emit('gameBoard:entryRemoved', { entryId: e.id, boardId: board.id });
+  return { removed: stale.length };
+}
+
 // createQueueGame: court-less QUEUED game appended to the end of the global queue.
 // playerIds: 2 or 4. LEADER/STAFF only.
 export async function createQueueGame(

@@ -1841,6 +1841,15 @@ export default function OperateScreen() {
       }
       return; // 다음 패스에서 새 게임 준비량 다시 계산
     }
+    // 늦게 온 사람 반영 — 그 전에 짜둔 '연속 출전' AI 대기 게임은 지우고 다시 짠다(서버가 조건 판단).
+    if (clubSessionId) {
+      const removed = await gameBoardApi.replanStale(clubSessionId).then((r) => r.data?.removed ?? 0).catch(() => 0);
+      if (removed > 0) {
+        setAutoLastNote(`새로 온 사람 반영: 쉬지 못하고 이어서 치던 대기 게임 ${removed}개를 다시 짜요`);
+        loadBoard(); loadPool();
+        return; // 보드 갱신 뒤 다음 패스에서 다시 짠다
+      }
+    }
     const readyCount = queuedEntries.filter((e) => e.playerIds.length >= 4).length;
     // 시간 인지 — 빈 코트 + '곧 끝날' 코트에 더해 다음 게임을 '버퍼'개 앞서 준비(대기 인원이
     // 봐도 '내 다음 게임'이 보이게). 버퍼는 정모 인원수 기반 자동(또는 게임판 조율값). 공평은
@@ -1892,7 +1901,7 @@ export default function OperateScreen() {
         loadBoard(); loadPool();
       }
     }
-  }, [board, emptyCourts.length, courts.length, aboutToFinishCount, uniquePlayers.length, queuedEntries, suggestNext, createQueueGame, getPlayer, loadBoard, loadPool, fillEntry]);
+  }, [board, clubSessionId, emptyCourts.length, courts.length, aboutToFinishCount, uniquePlayers.length, queuedEntries, suggestNext, createQueueGame, getPlayer, loadBoard, loadPool, fillEntry]);
   useEffect(() => { runAutoFillRef.current = runAutoFillPass; }, [runAutoFillPass]);
 
   // 자동 편성이 반응할 준비량 지표(완성된 4인 대기 게임 수).
