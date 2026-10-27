@@ -525,6 +525,8 @@ model GameBoardEntry {
   playerIds  String[]
   // true면 playerIds 순서가 [A1, A2, B1, B2] 팀 구성(자동 편성이 급수 밸런스로 나눔).
   teamSplit  Boolean              @default(false)
+  // AI(자동 편성)가 처음 짠 4명 — 운영진이 고쳤는지 비교·학습용. 비어 있으면 사람이 짠 게임.
+  aiPlayerIds String[]            @default([])
   status     GameBoardEntryStatus @default(QUEUED)
   turnId     String?              @unique
   createdAt  DateTime             @default(now())
@@ -556,6 +558,8 @@ model ClubSession {
   checkInClosesAt   DateTime?
   // 자동 개설 슬롯 키("clubId:YYYY-MM-DD:HH:mm") — 같은 날 같은 슬롯 중복 개설 방지.
   autoSlotKey       String?           @unique
+  // 경기 방식: '21' | '25' | '15' (점). null = 21점. 판마다 경기 시간 예측에 쓴다.
+  gameFormat        String?
   startedAt         DateTime          @default(now())
   endedAt           DateTime?
 
@@ -1111,4 +1115,34 @@ model RallyResult {
   createdAt     DateTime @default(now())
 
   @@index([clubSessionId])
+}
+
+// AI 편성 결과 — AI가 짠 대기 게임이 코트에 들어갈 때(KEPT 그대로 / EDITED 운영진이 바꿈) 또는
+// 지워질 때(DELETED) 한 줄. 운영진이 고친 판은 '이 4명보다 저 4명이 낫다'는 학습 데이터(clubStyle).
+model AutoMatchEdit {
+  id             String   @id @default(uuid())
+  clubId         String
+  clubSessionId  String
+  aiPlayerIds    String[]
+  finalPlayerIds String[]
+  action         String // KEPT | EDITED | DELETED
+  createdAt      DateTime @default(now())
+
+  @@index([clubId, createdAt])
+}
+
+// 회원 경기 후 반응 — 끝난 판마다 한 번. rating GOOD | OK | BAD, reason(BAD일 때):
+// TOO_HARD(상대가 너무 셈) | TOO_EASY(너무 쉬움) | REPEAT(같은 사람과 또) | WAIT(너무 오래 기다림)
+model GameFeedback {
+  id            String   @id @default(uuid())
+  turnId        String
+  userId        String
+  clubId        String
+  clubSessionId String
+  rating        String
+  reason        String?
+  createdAt     DateTime @default(now())
+
+  @@unique([turnId, userId])
+  @@index([clubId, createdAt])
 }

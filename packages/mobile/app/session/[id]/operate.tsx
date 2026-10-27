@@ -336,6 +336,8 @@ export default function OperateScreen() {
   // 상태 스트립 표시용 — 편성 진행 중 여부 + 마지막 편성 안내.
   const [autoComposing, setAutoComposing] = useState(false);
   const [autoLastNote, setAutoLastNote] = useState<string | null>(null);
+  // 급수 외톨이 — 오늘 온 사람으로는 규칙 안 4명을 못 만들어 오래 기다리는 분(📌 요청으로 넣도록 안내).
+  const [stuckPlayers, setStuckPlayers] = useState<{ userId: string; name: string; level: string; waitMin: number }[]>([]);
   // 비동기 패스에서 최신 값을 읽는 미러 ref + 동시 실행 방지 락 + 최신 패스 fn ref.
   const autoPilotRef = useRef(false);
   useEffect(() => { autoPilotRef.current = autoPilot; }, [autoPilot]);
@@ -910,11 +912,13 @@ export default function OperateScreen() {
       .sort((a, b) => a.queueOrder - b.queueOrder),
     [board],
   );
+  // 코트에서 새 판이 시작되면 그 판의 예상 시간(서버 예측)을 다시 받는다.
+  const playingKey = courts.map((c) => c.currentTurn?.startedAt ?? '').join('|');
   // 대기 게임 수가 바뀌면(편성·삭제·투입) 오늘 현황(혼복·급수 차이·판수)을 다시 센다.
   useEffect(() => {
     const t = setTimeout(refreshPace, 1500);
     return () => clearTimeout(t);
-  }, [refreshPace, queuedEntries.length]);
+  }, [refreshPace, queuedEntries.length, playingKey]);
   // When the queue order/membership changes from the server (after a persisted
   // reorder, add, remove, …) AND no drag is in flight, snap every gap-shift back
   // to 0 so the new order renders flat, and prune anim values for gone entries.
@@ -1108,11 +1112,14 @@ export default function OperateScreen() {
       const startMs = new Date(startedAt).getTime();
       if (!Number.isFinite(startMs)) continue;
       const elapsedMin = Math.max(0, (nowTs - startMs) / 60000);
-      const remainMin = Math.max(0, gameCycleMin - elapsedMin);
+      // '자동'이면 서버가 이 4명·경기 방식으로 예측한 판 시간(같은 판일 때만), 아니면 게임 주기.
+      const eta = gameCycleChoice === 'auto' ? pace?.courtEtas?.find((x) => x.courtId === c.id) : undefined;
+      const etaOk = !!eta && Math.abs(new Date(eta.endsAt).getTime() - eta.predictedMin * 60000 - startMs) < 5000;
+      const remainMin = Math.max(0, (etaOk ? eta!.predictedMin : gameCycleMin) - elapsedMin);
       list.push({ id: c.id, name: c.name, elapsedMin, remainMin, aboutToFinish: remainMin <= AUTO_FINISH_SOON_MIN });
     }
     return list.sort((a, b) => a.remainMin - b.remainMin);
-  }, [courts, nowTs, gameCycleMin]);
+  }, [courts, nowTs, gameCycleMin, gameCycleChoice, pace]);
   const soonestCourt = courtTiming[0] ?? null;
   const aboutToFinishCount = courtTiming.filter((c) => c.aboutToFinish).length;
 
@@ -1859,6 +1866,7 @@ export default function OperateScreen() {
         try {
           // 방금 만든 대기 게임은 서버 시뮬레이션에 반영되므로 별도 제외 없이 요청(이어지는 판 가능).
           const r = await suggestNext();
+          setStuckPlayers(r.stuck ?? []);
           ids = r.playerIds ?? [];
           reason = r.reason || undefined;
           teamSplit = !!r.teamSplit;
@@ -4922,6 +4930,13 @@ export default function OperateScreen() {
               {autoAssign ? '✓ 코트 비면 자동 투입 (단독 사용)' : '코트 투입은 직접 · 탭해서 자동 투입 켜기'}
             </Text>
           </TouchableOpacity>
+          {stuckPlayers.length > 0 && (
+            <TouchableOpacity onPress={() => setRequestsOpen(true)} accessibilityRole="button" accessibilityLabel="급수 외톨이 요청으로 넣기">
+              <Text style={[styles.autoStripSub, { color: colors.warning, fontWeight: '700' }]} numberOfLines={3}>
+                {`⚠ ${stuckPlayers.map((p) => `${p.name}(${p.level}) ${p.waitMin}분째`).join(', ')} — 오늘 온 분 중 같이 칠 급수가 없어 AI가 못 넣고 있어요. 📌 요청에서 파트너를 정해주면 그 판은 급수 규칙 없이 짜요 ›`}
+              </Text>
+            </TouchableOpacity>
+          )}
           {/* AI 편성 설정 — 모임 단위(운영진 공유). 누르면 설정 화면(오늘 현황 + AI는 이렇게 짜요 + 급수별). */}
           <TouchableOpacity
             onPress={() => router.push(`/session/${clubSessionId}/ai-settings` as any)}
@@ -4945,6 +4960,32 @@ export default function OperateScreen() {
           {tuningOpen && (
             <View style={styles.tuningPanel}>
                 <>
+              {/* 경기 방식 — 정모 단위(서버 저장). 판 시간 예측·코트 남은 시간에 바로 반영. */}
+              <View style={styles.tuningRow}>
+                <Text style={[styles.tuningRowLabel, { color: colors.textSecondary }]}>경기 방식</Text>
+                <View style={styles.tuningSeg}>
+                  {(['21', '25', '15'] as const).map((f) => {
+                    const on = (pace?.gameFormat ?? '21') === f;
+                    return (
+                      <TouchableOpacity
+                        key={f}
+                        style={[styles.tuningSegItem, { borderColor: on ? colors.secondary : colors.border, backgroundColor: on ? colors.secondary : 'transparent' }]}
+                        onPress={() => {
+                          if (!clubSessionId) return;
+                          gameBoardApi.setGameFormat(clubSessionId, f).then(refreshPace).catch(() => showError('경기 방식을 바꾸지 못했어요'));
+                        }}
+                        accessibilityRole="button"
+                        accessibilityState={{ selected: on }}
+                        accessibilityLabel={`경기 방식 ${f}점`}
+                      >
+                        <Text style={[styles.tuningSegText, { color: on ? '#fff' : colors.textSecondary }]}>
+                          {`${f}점${pace?.formatMinutes ? ` · 약 ${Math.round(pace.formatMinutes[f])}분` : ''}`}
+                        </Text>
+                      </TouchableOpacity>
+                    );
+                  })}
+                </View>
+              </View>
               {/* 게임 주기 — '몇 분 남음' 추정 + 시간 인지 준비의 기준. */}
               <View style={styles.tuningRow}>
                 <Text style={[styles.tuningRowLabel, { color: colors.textSecondary }]}>게임 주기</Text>

@@ -4,7 +4,9 @@ import { useTheme } from '../../hooks/useTheme';
 import { typography, spacing, radius } from '../../constants/theme';
 import {
   gameBoardApi,
+  type AiInsights,
   type AutoLevelSetting,
+  type AutoMatchSettings,
   type ResolvedAutoSettings,
   type SessionPace,
 } from '../../services/gameBoard';
@@ -101,8 +103,10 @@ export function AutoSettingsPanel({
   const [allLevels, setAllLevels] = useState(false);
   const [openKey, setOpenKey] = useState<string | null>(null);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [insights, setInsights] = useState<AiInsights | null>(null);
 
   useEffect(() => {
+    gameBoardApi.aiInsights(clubSessionId).then(({ data }) => setInsights(data)).catch(() => {});
     gameBoardApi
       .getAutoSettings(clubSessionId)
       .then(({ data }) => setS(data.resolved))
@@ -127,6 +131,12 @@ export function AutoSettingsPanel({
   const updateLevel = (k: string, patch: Partial<AutoLevelSetting>) => {
     if (!s) return;
     update({ levels: { ...s.levels, [k]: { ...(s.levels[k] ?? levelDefault(k)), ...patch } as Required<AutoLevelSetting> } });
+  };
+
+  // 추천 적용 — 설정만 바꾸고, 같은 추천은 목록에서 뺀다.
+  const applyRec = (patch: AutoMatchSettings) => {
+    update(patch as Partial<ResolvedAutoSettings>);
+    setInsights((cur) => (cur ? { ...cur, recommendations: cur.recommendations.filter((r) => JSON.stringify(r.patch) !== JSON.stringify(patch)) } : cur));
   };
 
   const counts = pace?.levelCounts ?? {};
@@ -227,6 +237,58 @@ export function AutoSettingsPanel({
           <Text key={i} style={[styles.howLine, { color: colors.text }]}>{`• ${l}`}</Text>
         ))}
       </View>
+
+      {/* AI 학습 현황 — 운영진이 고친 판·회원 반응을 보고 AI가 배우는 것 + 설정 추천 */}
+      {!!insights && (
+        <View style={[styles.section, { borderColor: colors.border, backgroundColor: colors.surface }]}>
+          <Text style={[styles.sectionTitle, { color: colors.text }]}>{`📈 AI 학습 현황 (최근 ${insights.days}일)`}</Text>
+          {insights.ai.total > 0 ? (
+            <>
+              <Text style={[styles.howLine, { color: colors.text }]}>
+                {`AI가 짠 판 ${insights.ai.total}개 — 그대로 ${pct(insights.ai.kept, insights.ai.total)} · 운영진이 고침 ${pct(insights.ai.edited, insights.ai.total)} · 지움 ${pct(insights.ai.deleted, insights.ai.total)}`}
+              </Text>
+              {insights.ai.edited > 0 && (
+                <Text style={[styles.effect, { color: colors.textSecondary }]}>
+                  {`고친 판에서 운영진은 급수 차이를 ${insights.ai.tighter}번 줄이고 ${insights.ai.looser}번 늘렸어요${insights.ai.toSame + insights.ai.toMixed > 0 ? ` · 혼복→남복·여복 ${insights.ai.toSame}번, 반대 ${insights.ai.toMixed}번` : ''}. 고친 판은 '운영진이 더 나은 판'으로 AI가 매일 다시 배워요.`}
+                </Text>
+              )}
+            </>
+          ) : (
+            <Text style={[styles.effect, { color: colors.textSecondary }]}>아직 AI가 짠 판 기록이 없어요. 운영진이 AI 판을 고치면 그걸 보고 배워요.</Text>
+          )}
+          {pace?.style && (
+            <Text style={[styles.effect, { color: colors.textSecondary }]}>
+              {`배운 판: 모임 기록 ${pace.style.decisions.toLocaleString()}판${pace.style.editSamples ? ` + 운영진이 고친 판 ${pace.style.editSamples}개` : ''}${pace.style.testAccuracy != null ? ` · 운영진 선택 맞힘 ${pace.style.testAccuracy}%` : ''}`}
+            </Text>
+          )}
+          <Text style={[styles.howLine, { color: colors.text }]}>
+            {insights.feedback.total > 0
+              ? `회원 반응 ${insights.feedback.total}개 — 😊 ${pct(insights.feedback.GOOD, insights.feedback.total)} · 🙂 ${pct(insights.feedback.OK, insights.feedback.total)} · 😣 ${pct(insights.feedback.BAD, insights.feedback.total)}`
+              : '회원 반응: 아직 없어요(경기가 끝나면 회원 앱에 "방금 경기 어땠어요?"가 떠요)'}
+          </Text>
+          {insights.feedback.BAD > 0 && (
+            <Text style={[styles.effect, { color: colors.textSecondary }]}>
+              {`아쉬웠던 이유 — 상대가 너무 셌어요 ${insights.feedback.reasons.TOO_HARD} · 너무 쉬웠어요 ${insights.feedback.reasons.TOO_EASY} · 같은 사람과 또 ${insights.feedback.reasons.REPEAT} · 오래 기다림 ${insights.feedback.reasons.WAIT}`}
+            </Text>
+          )}
+          {insights.recommendations.map((r) => (
+            <View key={JSON.stringify(r.patch)} style={[styles.rec, { backgroundColor: colors.secondaryBg }]}>
+              <View style={{ flex: 1, minWidth: 0 }}>
+                <Text style={[styles.recTitle, { color: colors.text }]}>{`💡 ${r.text}`}</Text>
+                <Text style={[styles.effect, { color: colors.textSecondary }]}>{r.why}</Text>
+              </View>
+              <Pressable
+                onPress={() => applyRec(r.patch)}
+                style={[styles.chip, { borderColor: colors.secondary, backgroundColor: colors.secondary }]}
+                accessibilityRole="button"
+                accessibilityLabel={`추천 적용 ${r.text}`}
+              >
+                <Text style={[styles.chipText, { color: '#fff' }]}>적용</Text>
+              </Pressable>
+            </View>
+          ))}
+        </View>
+      )}
 
       <Text style={[styles.groupTitle, { color: colors.textSecondary }]}>모임 전체</Text>
       <Section
@@ -383,4 +445,6 @@ const styles = StyleSheet.create({
   qHint: { ...typography.caption },
   result: { ...typography.caption, fontWeight: '700', marginTop: 4 },
   link: { ...typography.caption, fontWeight: '700', paddingVertical: 4 },
+  rec: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, borderRadius: radius.sm, padding: spacing.sm },
+  recTitle: { fontSize: 13, fontWeight: '800' },
 });

@@ -480,6 +480,8 @@ export const suggestFoursomeSchema = z.object({
       avoidRepeat: z.enum(['normal', 'strong']).optional(),
     })
     .optional(),
+  // false면 '1시간 같이 짜기'(앞 판까지 같이 다듬기)를 끄고 한 판씩 고른다 — 비교·문제 확인용.
+  lookahead: z.boolean().optional(),
   // 대상 게임 모드 — fill: 대기 게임의 빈자리 채우기 / substitute: 땜빵 후보 3명(대기 게임 또는 코트 진행 중 게임)
   target: z
     .object({

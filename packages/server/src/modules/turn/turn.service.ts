@@ -1,4 +1,5 @@
 import { prisma } from '../../utils/prisma';
+import { askFeedback } from '../gameBoard/feedback.service';
 import { NotFoundError, BadRequestError, ForbiddenError } from '../../utils/errors';
 import { CourtStatus, TurnStatus, GameStatus, CourtGameType } from '@badminton/shared';
 import type { CourtTurnResponse, CourtDetailResponse } from '@badminton/shared';
@@ -439,6 +440,9 @@ async function completeTurnCore(turn: any): Promise<CourtTurnResponse> {
   });
 
   const courtId = turn.courtId;
+
+  // 정모 판이면 뛴 회원들에게 '방금 경기 어땠어요?'(회원 반응 → AI 학습 현황).
+  askFeedback(turn);
 
   // Promote waiting turns
   const waitingTurns = await prisma.courtTurn.findMany({

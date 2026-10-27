@@ -168,6 +168,7 @@ export function useGameBoard(clubSessionId: string | undefined) {
       teamSplit?: boolean;
       style?: ClubStyleSummary | null;
       mixToday?: { mixed: number; total: number };
+      stuck?: { userId: string; name: string; level: string; waitMin: number }[];
     }> => {
       if (!clubSessionId) return { playerIds: [] };
       setSuggesting(true);
@@ -189,6 +190,7 @@ export function useGameBoard(clubSessionId: string | undefined) {
           teamSplit: suggestions[0]?.teamSplit,
           style: (data?.style ?? null) as ClubStyleSummary | null,
           mixToday: data?.mixToday,
+          stuck: data?.stuck,
         };
       } catch (err: any) {
         setSuggestError(err.response?.data?.error || '추천에 실패했습니다');

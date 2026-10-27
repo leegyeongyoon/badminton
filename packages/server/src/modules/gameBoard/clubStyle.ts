@@ -20,6 +20,8 @@ const MIN_DECISIONS = 150;
 const TTL_MS = 12 * 3600 * 1000;
 const GAME_EST_SEC = 13 * 60;
 const NEG_PER_DECISION = 8;
+// 운영진이 AI 판을 고친 기록 1건의 가중(일반 기록 1판 = 대안 NEG_PER_DECISION개라 그보다 약간 작게).
+const EDIT_WEIGHT = 5;
 
 export const STYLE_FEATURES = [
   'skillSpread', // 급수 폭(최고−최저)
@@ -45,6 +47,8 @@ export interface ClubStyle {
   /** 표준화 가중치(영향력 비교용). */
   stdWeights: number[];
   decisions: number;
+  /** 학습에 들어간 '운영진이 고친 AI 판' 수. */
+  editSamples: number;
   testAccuracy: number | null;
   traits: string[];
   /** 학습 기간의 '정모 간' 함께 친 횟수(pairKey → 판수). 스코어링 때 단골 짝 판정에 쓴다. */
@@ -175,7 +179,18 @@ export async function trainClubStyle(clubId: string): Promise<ClubStyle | null> 
     }),
   ]);
 
-  const uids = Array.from(new Set([...checkins.map((c) => c.userId), ...turns.flatMap((t) => t.players.map((p) => p.userId))]));
+  // 운영진이 고친 AI 판(AutoMatchEdit EDITED) — 'AI가 짠 4명보다 운영진이 바꾼 4명이 낫다'는 정답 쌍.
+  const edits = await prisma.autoMatchEdit.findMany({
+    where: { clubId, action: 'EDITED', createdAt: { gte: since } },
+    select: { clubSessionId: true, aiPlayerIds: true, finalPlayerIds: true },
+  });
+  const uids = Array.from(
+    new Set([
+      ...checkins.map((c) => c.userId),
+      ...turns.flatMap((t) => t.players.map((p) => p.userId)),
+      ...edits.flatMap((e) => [...e.aiPlayerIds, ...e.finalPlayerIds]),
+    ]),
+  );
   const [users, profiles, members] = await Promise.all([
     prisma.user.findMany({ where: { id: { in: uids } }, select: { id: true, isGuest: true } }),
     prisma.playerProfile.findMany({ where: { userId: { in: uids } }, select: { userId: true, skillLevel: true, gender: true } }),
@@ -227,7 +242,11 @@ export async function trainClubStyle(clubId: string): Promise<ClubStyle | null> 
   const rows: { si: number; diff: number[] }[] = [];
   let decisions = 0;
 
+  // 고친 판의 특성은 '그 정모 시작 때'의 짝 기록으로 계산(그 뒤 기록이 섞이면 미래 정보 누수).
+  const editSessions = new Set(edits.map((e) => e.clubSessionId));
+  const historyAt = new Map<string, Map<string, number>>();
   sessions.forEach((s, si) => {
+    if (editSessions.has(s.id)) historyAt.set(s.id, new Map(history));
     const ts = (bySession.get(s.id) ?? []).sort((a, b) => a.dec - b.dec);
     const ck = ckBySession.get(s.id) ?? new Map();
     for (const t of ts) {
@@ -279,6 +298,18 @@ export async function trainClubStyle(clubId: string): Promise<ClubStyle | null> 
     }
   });
 
+  // 운영진 수정은 실제 운영 중 'AI 안을 보고 직접 고친' 판단이라 일반 기록보다 무겁게(EDIT_WEIGHT배) 넣는다.
+  let editSamples = 0;
+  for (const e of edits) {
+    if (e.finalPlayerIds.length !== 4 || e.aiPlayerIds.length !== 4 || new Set(e.finalPlayerIds).size !== 4) continue;
+    const h = historyAt.get(e.clubSessionId) ?? history;
+    const fc = styleFeatures(e.finalPlayerIds.map(player), h);
+    const fa = styleFeatures(e.aiPlayerIds.map(player), h);
+    // si = −1: 항상 학습 쪽(최근 정모라도 검증용으로 빠지면 고친 판이 학습에 안 들어간다).
+    for (let w = 0; w < EDIT_WEIGHT; w++) rows.push({ si: -1, diff: fc.map((v, j) => v - fa[j]) });
+    editSamples++;
+  }
+
   if (decisions < MIN_DECISIONS || rows.length === 0) return null;
 
   // 운영진 급수 폭 규칙 — 학습 기간 4인 판의 보정 급수 폭 95% 지점(1~3으로 제한).
@@ -327,6 +358,7 @@ export async function trainClubStyle(clubId: string): Promise<ClubStyle | null> 
     weights: model.weights,
     stdWeights: model.stdWeights,
     decisions,
+    editSamples,
     testAccuracy,
     traits: describe(model.stdWeights),
     history,

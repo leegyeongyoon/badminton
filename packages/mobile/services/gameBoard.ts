@@ -43,9 +43,21 @@ export type ResolvedAutoSettings = Required<Omit<AutoMatchSettings, 'levels'>> &
   levels: Record<string, Required<AutoLevelSetting>>;
 };
 
+// AI 학습 현황(최근 14일) — AI가 짠 판을 운영진이 그대로/고침/지움, 회원 반응, 설정 추천.
+export type AiInsights = {
+  days: number;
+  ai: { total: number; kept: number; edited: number; deleted: number; tighter: number; looser: number; toSame: number; toMixed: number };
+  feedback: { total: number; GOOD: number; OK: number; BAD: number; reasons: Record<'TOO_HARD' | 'TOO_EASY' | 'REPEAT' | 'WAIT', number> };
+  recommendations: { text: string; why: string; patch: AutoMatchSettings }[];
+};
+export type FeedbackRating = 'GOOD' | 'OK' | 'BAD';
+export type FeedbackReason = 'TOO_HARD' | 'TOO_EASY' | 'REPEAT' | 'WAIT';
+export type PendingFeedback = { turnId: string; courtName: string; completedAt: string; others: string[] };
+
 // 모임 학습 스타일 요약 — 서버가 이 모임의 과거 편성 기록에서 배운 '묶는 방식'.
 export type ClubStyleSummary = {
   decisions: number;            // 학습에 쓴 편성 수
+  editSamples?: number;         // 학습에 넣은 '운영진이 고친 AI 판' 수
   testAccuracy: number | null;  // 실제 조합을 맞힌 비율(%) — 최근 20% 정모로 검증
   traits: string[];             // 예: ['남복·여복 위주', '급수 비슷한 사람끼리']
   trainedAt: string;
@@ -68,6 +80,8 @@ export type SessionRequest = {
 };
 
 // 정모 페이스(실데이터) — 판당 시간 + 1인 주기 + 학습 스타일.
+export type GameFormat = '21' | '25' | '15';
+
 export type SessionPace = {
   medianGameMin: number;
   p75GameMin: number;
@@ -89,6 +103,12 @@ export type SessionPace = {
   gamesToday?: { min: number; max: number } | null;
   /** 지금 있는 사람 급수·성별별 인원(키 예 'FF'). */
   levelCounts?: Record<string, number>;
+  /** 경기 방식(점수) + 방식별 보통 판 예상(분) + 예측에 쓴 완료 판 수. */
+  gameFormat?: GameFormat;
+  formatMinutes?: Record<GameFormat, number>;
+  durationSample?: number;
+  /** 진행 중 코트별 예상 시간 — 이 4명·이 방식으로 예측. */
+  courtEtas?: { courtId: string; predictedMin: number; endsAt: string }[];
 };
 
 export const gameBoardApi = {
@@ -144,6 +164,14 @@ export const gameBoardApi = {
 
   // 이 모임 실데이터 판당 시간·1인 주기·학습 스타일(읽기 전용)
   pace: (clubSessionId: string) => api.get<SessionPace>(`/club-sessions/${clubSessionId}/pace`),
+  setGameFormat: (clubSessionId: string, format: GameFormat) =>
+    api.put<{ gameFormat: GameFormat }>(`/club-sessions/${clubSessionId}/game-format`, { format }),
+  aiInsights: (clubSessionId: string) => api.get<AiInsights>(`/club-sessions/${clubSessionId}/ai-insights`),
+  // 회원 경기 후 반응
+  pendingFeedback: (turnId?: string) =>
+    api.get<{ pending: PendingFeedback | null }>(`/club-sessions/feedback/pending`, { params: turnId ? { turnId } : {} }),
+  submitFeedback: (turnId: string, rating: FeedbackRating, reason?: FeedbackReason) =>
+    api.post(`/club-sessions/feedback`, { turnId, rating, ...(reason ? { reason } : {}) }),
   // AI 편성 설정 — 모임 단위(정모 id로 모임을 찾음). 운영진만.
   getAutoSettings: (clubSessionId: string) =>
     api.get<{ saved: AutoMatchSettings | null; resolved: ResolvedAutoSettings }>(`/club-sessions/${clubSessionId}/auto-settings`),

@@ -19,6 +19,7 @@ import {
   pushAllEntries,
   suggestNextFoursome,
   getSessionPace,
+  setGameFormat,
   createQueueGame,
   reorderQueue,
   assignEntry,
@@ -27,7 +28,8 @@ import {
 } from './gameBoard.service';
 
 import { listRequests, createRequest, deleteRequest } from './sessionRequest.service';
-import { getAutoSettings, saveAutoSettings } from './autoSettings';
+import { getAutoSettings, saveAutoSettings, getAiInsights } from './autoSettings';
+import { pendingFeedback, submitFeedback } from './feedback.service';
 
 const router = Router();
 
@@ -39,10 +41,10 @@ router.post(
   validate(suggestFoursomeSchema),
   async (req: Request, res: Response, next: NextFunction) => {
     try {
-      const { courtId, count, mode, exclude, tuning, prefs, target } = req.body;
+      const { courtId, count, mode, exclude, tuning, prefs, target, lookahead } = req.body;
       const result = await suggestNextFoursome(
         req.params.id as string,
-        { courtId, count, mode, exclude, tuning, prefs, target },
+        { courtId, count, mode, exclude, tuning, prefs, target, lookahead },
         req.user!.userId,
       );
       res.json(result);
@@ -83,6 +85,33 @@ router.delete('/:id/requests/:rid', authenticate, async (req: Request, res: Resp
   }
 });
 
+// 회원 경기 후 반응 — GET /club-sessions/feedback/pending(?turnId=) · POST /club-sessions/feedback
+router.get('/feedback/pending', authenticate, async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    res.json({ pending: await pendingFeedback(req.user!.userId, (req.query.turnId as string) || undefined) });
+  } catch (err) {
+    next(err);
+  }
+});
+router.post('/feedback', authenticate, async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { turnId, rating, reason } = req.body ?? {};
+    if (typeof turnId !== 'string') return res.status(400).json({ error: 'turnId가 필요해요' });
+    res.json(await submitFeedback(req.user!.userId, turnId, rating, reason));
+  } catch (err) {
+    next(err);
+  }
+});
+
+// GET /club-sessions/:id/ai-insights — AI 학습 현황(운영진 수정률·회원 반응·추천).
+router.get('/:id/ai-insights', authenticate, async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    res.json(await getAiInsights(req.params.id as string, req.user!.userId));
+  } catch (err) {
+    next(err);
+  }
+});
+
 // GET/PUT /club-sessions/:id/auto-settings — AI 편성 설정(모임 단위, 운영진 공유).
 router.get('/:id/auto-settings', authenticate, async (req: Request, res: Response, next: NextFunction) => {
   try {
@@ -103,6 +132,17 @@ router.put(
     }
   },
 );
+
+// PUT /club-sessions/:id/game-format — 경기 방식(21/25/15점).
+router.put('/:id/game-format', authenticate, async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const f = req.body?.format;
+    if (f !== '21' && f !== '25' && f !== '15') return res.status(400).json({ error: '경기 방식은 21·25·15점 중 하나예요' });
+    res.json(await setGameFormat(req.params.id as string, req.user!.userId, f));
+  } catch (err) {
+    next(err);
+  }
+});
 
 // GET /club-sessions/:id/pace — 이 클럽의 실데이터 판당 시간 + 정모 1인 주기.
 // 운영판 '코트 언제 비나' 예측 기본값 + 자동 편성 공평 주기 표시용. 읽기 전용.

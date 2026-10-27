@@ -11,6 +11,7 @@ import { clubSessionApi } from '../services/clubSession';
 import { showError, showSuccess } from '../utils/feedback';
 import { ToastContainer } from '../components/shared/Toast';
 import { TurnBanner } from '../components/shared/TurnBanner';
+import { GameFeedbackPrompt } from '../components/shared/GameFeedbackPrompt';
 import { ConfirmDialogContainer } from '../components/ui/ConfirmDialog';
 import { ErrorBoundary } from '../components/shared/ErrorBoundary';
 import { NetworkStatusBar } from '../components/shared/NetworkStatusBar';
@@ -333,6 +334,7 @@ function RootLayoutInner() {
         </Stack>
         <ToastContainer />
         <TurnBanner />
+        <GameFeedbackPrompt />
         <ConfirmDialogContainer />
         <AppInstallBanner />
         <AppGate />
