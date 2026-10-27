@@ -337,7 +337,8 @@ export default function OperateScreen() {
   const [autoComposing, setAutoComposing] = useState(false);
   const [autoLastNote, setAutoLastNote] = useState<string | null>(null);
   // 급수 외톨이 — 오늘 온 사람으로는 규칙 안 4명을 못 만들어 오래 기다리는 분(📌 요청으로 넣도록 안내).
-  const [stuckPlayers, setStuckPlayers] = useState<{ userId: string; name: string; level: string; waitMin: number }[]>([]);
+  const [stuckPlayers, setStuckPlayers] = useState<{ userId: string; name: string; level: string; waitMin: number; reason?: 'level' | 'busy' }[]>([]);
+  const stuckCheckAtRef = useRef(0); // 대기 게임이 충분해 새로 안 짤 때도 오래 기다린 사람 알림은 1분마다 갱신
   // 비동기 패스에서 최신 값을 읽는 미러 ref + 동시 실행 방지 락 + 최신 패스 fn ref.
   const autoPilotRef = useRef(false);
   useEffect(() => { autoPilotRef.current = autoPilot; }, [autoPilot]);
@@ -1084,6 +1085,8 @@ export default function OperateScreen() {
   const guestCount = useMemo(() => uniquePlayers.filter((p) => p.isGuest).length, [uniquePlayers]);
 
   // M/F balance over the 미편성 pool (who's free to build from).
+  // 출석 인원 머리줄: 전체 출석(남·여) + 그중 아직 편성 안 된 사람 수. 예전엔 미편성만 보여서
+  // '출석 인원 남 4·여 2'가 40명 온 날에도 떠 헷갈렸다.
   const genderCount = useMemo(() => {
     let male = 0;
     let female = 0;
@@ -1091,8 +1094,14 @@ export default function OperateScreen() {
       if (p.gender === 'M') male += 1;
       else if (p.gender === 'F') female += 1;
     }
-    return { male, female };
-  }, [freePool]);
+    let totalMale = 0;
+    let totalFemale = 0;
+    for (const p of uniquePlayers) {
+      if (p.gender === 'M') totalMale += 1;
+      else if (p.gender === 'F') totalFemale += 1;
+    }
+    return { male, female, totalMale, totalFemale, total: uniquePlayers.length };
+  }, [freePool, uniquePlayers]);
 
   // Empty (assignable) courts.
   const emptyCourts = useMemo(
@@ -1860,7 +1869,13 @@ export default function OperateScreen() {
     const maxGames = Math.ceil(uniquePlayers.length / 4);
     const target = Math.min(maxGames, emptyCourts.length + aboutToFinishCount + ahead);
     const need = target - readyCount;
-    if (need <= 0) return;                    // 이미 충분히 준비됨
+    if (need <= 0) {                          // 이미 충분히 준비됨 — 오래 기다린 사람 알림만 1분마다 갱신
+      if (Date.now() - stuckCheckAtRef.current > 60000) {
+        stuckCheckAtRef.current = Date.now();
+        suggestNext().then((r) => setStuckPlayers(r.stuck ?? [])).catch(() => {});
+      }
+      return;
+    }
     autoFillLockRef.current = true;
     setAutoComposing(true);
     const placed: string[] = [];             // 이번 패스에서 편성한 사람(중복 방지)
@@ -4944,7 +4959,9 @@ export default function OperateScreen() {
           {stuckPlayers.length > 0 && (
             <TouchableOpacity onPress={() => setRequestsOpen(true)} accessibilityRole="button" accessibilityLabel="급수 외톨이 요청으로 넣기">
               <Text style={[styles.autoStripSub, { color: colors.warning, fontWeight: '700' }]} numberOfLines={3}>
-                {`⚠ ${stuckPlayers.map((p) => `${p.name}(${p.level}) ${p.waitMin}분째`).join(', ')} — 오늘 온 분 중 같이 칠 급수가 없어 AI가 못 넣고 있어요. 📌 요청에서 파트너를 정해주면 그 판은 급수 규칙 없이 짜요 ›`}
+                {stuckPlayers.some((p) => p.reason !== 'busy')
+                  ? `⚠ ${stuckPlayers.map((p) => `${p.name}(${p.level}) ${p.waitMin}분째`).join(', ')} — 오늘 온 분 중 같이 칠 급수가 없어 AI가 못 넣고 있어요. 📌 요청에서 파트너를 정해주면 그 판은 급수 규칙 없이 짜요 ›`
+                  : `⚠ ${stuckPlayers.map((p) => `${p.name}(${p.level}) ${p.waitMin}분째 0게임`).join(', ')} — 같이 칠 급수 분들이 계속 경기·대기 게임에 잡혀 있어요. 📌 요청에서 파트너를 정해주면 그분이 끝나는 대로 같이 넣어요 ›`}
               </Text>
             </TouchableOpacity>
           )}
@@ -5933,12 +5950,13 @@ export default function OperateScreen() {
           {/* LEFT PANE — pool boxes + tray */}
           <View style={[styles.leftPane, { borderRightColor: colors.border }, leftPaneWidth != null && { width: leftPaneWidth }]}>
             <View style={styles.colHeaderRow}>
-              <Text style={[styles.colHeader, { color: colors.textSecondary }]}>출석 인원</Text>
-              {(genderCount.male > 0 || genderCount.female > 0) && (
+              <Text style={[styles.colHeader, { color: colors.textSecondary }]}>{`출석 ${genderCount.total}명`}</Text>
+              {genderCount.total > 0 && (
                 <Text style={[styles.genderCount, { color: colors.textLight }]}>
-                  <Text style={{ color: colors.genderMale }}>남 {genderCount.male}</Text>
+                  <Text style={{ color: colors.genderMale }}>남 {genderCount.totalMale}</Text>
                   {'  ·  '}
-                  <Text style={{ color: colors.genderFemale }}>여 {genderCount.female}</Text>
+                  <Text style={{ color: colors.genderFemale }}>여 {genderCount.totalFemale}</Text>
+                  {`  · 미편성 ${genderCount.male + genderCount.female}명`}
                 </Text>
               )}
             </View>
@@ -6014,12 +6032,13 @@ export default function OperateScreen() {
 
         {/* COMPOSE TRAY + ATTENDANCE POOL — full width */}
         <View style={styles.colHeaderRow}>
-          <Text style={[styles.colHeader, { color: colors.textSecondary }]}>출석 인원</Text>
-          {(genderCount.male > 0 || genderCount.female > 0) && (
+          <Text style={[styles.colHeader, { color: colors.textSecondary }]}>{`출석 ${genderCount.total}명`}</Text>
+          {genderCount.total > 0 && (
             <Text style={[styles.genderCount, { color: colors.textLight }]}>
-              <Text style={{ color: colors.genderMale }}>남 {genderCount.male}</Text>
+              <Text style={{ color: colors.genderMale }}>남 {genderCount.totalMale}</Text>
               {'  ·  '}
-              <Text style={{ color: colors.genderFemale }}>여 {genderCount.female}</Text>
+              <Text style={{ color: colors.genderFemale }}>여 {genderCount.totalFemale}</Text>
+              {`  · 미편성 ${genderCount.male + genderCount.female}명`}
             </Text>
           )}
         </View>

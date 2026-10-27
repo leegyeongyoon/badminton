@@ -222,7 +222,7 @@ router.patch(
       const extra: { note?: string | null; teamSplit?: boolean } = {};
       if (note === null || (typeof note === 'string' && note.length <= 100)) extra.note = note;
       if (typeof teamSplit === 'boolean') extra.teamSplit = teamSplit;
-      const entry = await updateEntry(req.params.id as string, req.params.entryId as string, playerIds, extra);
+      const entry = await updateEntry(req.params.id as string, req.params.entryId as string, playerIds, req.user!.userId, extra);
       res.json(entry);
     } catch (err) {
       next(err);
@@ -236,7 +236,7 @@ router.delete(
   authenticate,
   async (req: Request, res: Response, next: NextFunction) => {
     try {
-      await deleteEntry(req.params.id as string, req.params.entryId as string);
+      await deleteEntry(req.params.id as string, req.params.entryId as string, req.user!.userId);
       res.status(204).send();
     } catch (err) {
       next(err);

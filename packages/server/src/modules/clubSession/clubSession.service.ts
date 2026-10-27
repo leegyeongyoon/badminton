@@ -822,7 +822,8 @@ export async function addRandomGuests(
   for (let i = 0; i < count; i++) {
     const name = `${pickRandom(RANDOM_GUEST_SURNAMES)}${pickRandom(RANDOM_GUEST_GIVEN_NAMES)}`;
     const skillLevel = pickRandom(RANDOM_GUEST_SKILL_SPREAD);
-    const gender = Math.random() < 0.5 ? 'M' : 'F';
+    // 실제 모임처럼 남자가 조금 더 많게(남 60 : 여 40).
+    const gender = Math.random() < 0.6 ? 'M' : 'F';
 
     const guest = await prisma.user.create({
       data: {

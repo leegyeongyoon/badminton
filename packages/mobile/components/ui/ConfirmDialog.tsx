@@ -27,6 +27,8 @@ interface ConfirmDialogProps {
   onConfirm: () => void;
   onCancel: () => void;
   variant?: 'default' | 'danger';
+  /** 알림(확인 버튼 하나) — 웹 showAlert 용 */
+  alertOnly?: boolean;
 }
 
 export function ConfirmDialog({
@@ -38,6 +40,7 @@ export function ConfirmDialog({
   onConfirm,
   onCancel,
   variant = 'default',
+  alertOnly = false,
 }: ConfirmDialogProps) {
   const { colors, shadows } = useTheme();
   const scale = useSharedValue(0.9);
@@ -94,12 +97,14 @@ export function ConfirmDialog({
             </Text>
           )}
           <View style={styles.actions}>
-            <Button
-              title={cancelLabel}
-              onPress={onCancel}
-              variant="outline"
-              size="md"
-            />
+            {!alertOnly && (
+              <Button
+                title={cancelLabel}
+                onPress={onCancel}
+                variant="outline"
+                size="md"
+              />
+            )}
             <Button
               title={confirmLabel}
               onPress={onConfirm}
@@ -120,6 +125,7 @@ interface ConfirmRequest {
   confirmLabel?: string;
   cancelLabel?: string;
   variant?: 'default' | 'danger';
+  alertOnly?: boolean;
   onConfirm: () => void;
   onCancel?: () => void;
 }
@@ -181,6 +187,7 @@ export function ConfirmDialogContainer() {
       onConfirm={handleConfirm}
       onCancel={handleCancel}
       variant={request.variant}
+      alertOnly={request.alertOnly}
     />
   );
 }

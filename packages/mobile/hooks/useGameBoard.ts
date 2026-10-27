@@ -168,7 +168,7 @@ export function useGameBoard(clubSessionId: string | undefined) {
       teamSplit?: boolean;
       style?: ClubStyleSummary | null;
       mixToday?: { mixed: number; total: number };
-      stuck?: { userId: string; name: string; level: string; waitMin: number }[];
+      stuck?: { userId: string; name: string; level: string; waitMin: number; reason?: 'level' | 'busy' }[];
     }> => {
       if (!clubSessionId) return { playerIds: [] };
       setSuggesting(true);

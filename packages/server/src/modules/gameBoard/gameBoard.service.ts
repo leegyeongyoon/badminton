@@ -336,6 +336,7 @@ export async function addEntry(
   note?: string,
   teamSplit = false,
 ) {
+  await verifyBoardStaff(boardId, userId);
   const board = await prisma.gameBoard.findUnique({
     where: { id: boardId },
     include: { entries: { where: { status: 'QUEUED' } } },
@@ -574,8 +575,10 @@ export async function updateEntry(
   boardId: string,
   entryId: string,
   playerIds: string[],
+  userId: string,
   extra: { note?: string | null; teamSplit?: boolean } = {},
 ) {
+  await verifyBoardStaff(boardId, userId);
   const entry = await prisma.gameBoardEntry.findUnique({ where: { id: entryId } });
   if (!entry || entry.boardId !== boardId) throw new NotFoundError('게임 편성');
   if (entry.status !== 'QUEUED') throw new BadRequestError('편성된 상태에서만 수정할 수 있습니다');
@@ -603,7 +606,8 @@ export async function updateEntry(
   return formatted;
 }
 
-export async function deleteEntry(boardId: string, entryId: string) {
+export async function deleteEntry(boardId: string, entryId: string, userId: string) {
+  await verifyBoardStaff(boardId, userId);
   const entry = await prisma.gameBoardEntry.findUnique({ where: { id: entryId } });
   if (!entry || entry.boardId !== boardId) throw new NotFoundError('게임 편성');
   if (entry.status !== 'QUEUED') throw new BadRequestError('편성된 상태에서만 삭제할 수 있습니다');
@@ -637,6 +641,7 @@ export async function deleteEntry(boardId: string, entryId: string) {
 
 // pushEntry: 대기 게임을 특정 코트에 걸기 (courtId 필수)
 export async function pushEntry(boardId: string, entryId: string, courtId: string, userId: string) {
+  await verifyBoardStaff(boardId, userId);
   const entry = await prisma.gameBoardEntry.findUnique({ where: { id: entryId } });
   if (!entry || entry.boardId !== boardId) throw new NotFoundError('게임 편성');
   if (entry.status !== 'QUEUED') throw new BadRequestError('편성된 상태에서만 코트에 걸 수 있습니다');
@@ -1835,11 +1840,25 @@ export async function suggestNextFoursome(
   }
   // ── 급수 외톨이 알림 — 오래 기다린 사람 중 오늘 온 사람으로는 규칙(급수·성별) 안 4명을 아예 만들 수 없는
   //    사람(예: C·D조만 온 날의 S조 1명). 엔진이 억지로 짜지 않으니 운영진에게 알려 📌 요청으로 넣게 한다.
-  const stuck: { userId: string; name: string; level: string; waitMin: number }[] = [];
+  //    + 같이 칠 급수는 있지만 그분들이 다 경기·대기 게임에 잡혀 30분 넘게 0게임인 사람(예: 남S 3명뿐인 날
+  //    1명 — 실운영 2026-10-27). 이번에 짠 판에도 없으면 알린다(reason 'busy').
+  const stuck: { userId: string; name: string; level: string; waitMin: number; reason: 'level' | 'busy' }[] = [];
   {
     const nowPool = poolIds.filter((id) => !restingIds.has(id)).map((id) => toModePlayer(id, nowMs));
     const longWait = nowPool.filter((p) => p.waitSeconds >= 1.5 * tune.gameCycleSeconds && p.waitSeconds >= 20 * 60);
+    const plannedNow = new Set(slotPlayerIds.flat());
     for (const p of longWait) {
+      const zeroGames = (playedGames[p.id] ?? 0) + (committedGames[p.id] ?? 0) === 0;
+      if (zeroGames && p.waitSeconds >= 30 * 60 && !plannedNow.has(p.id)) {
+        stuck.push({
+          userId: p.id,
+          name: poolNames.get(p.id) ?? '',
+          level: `${p.gender === 'F' ? '여' : p.gender === 'M' ? '남' : ''}${NUM_TO_SKILL[Math.min(7, Math.max(1, p.skill))]}`,
+          waitMin: Math.round(p.waitSeconds / 60),
+          reason: 'busy',
+        });
+        continue;
+      }
       const others = nowPool.filter((q) => q.id !== p.id);
       let possible = false;
       outer: for (let a = 0; a < others.length; a++)
@@ -1852,6 +1871,7 @@ export async function suggestNextFoursome(
           name: poolNames.get(p.id) ?? '',
           level: `${p.gender === 'F' ? '여' : p.gender === 'M' ? '남' : ''}${NUM_TO_SKILL[Math.min(7, Math.max(1, p.skill))]}`,
           waitMin: Math.round(p.waitSeconds / 60),
+          reason: 'level',
         });
     }
   }
