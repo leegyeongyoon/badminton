@@ -1912,19 +1912,20 @@ export default function OperateScreen() {
     return () => clearInterval(iv);
   }, [autoPilot]);
 
-  // ── 코트 투입까지 자동 ── 빈 코트가 있고 준비된 4인 게임이 있으면 맨 위 게임을 투입.
-  // 맨 위 게임 선수 중 누가 아직 다른 코트에서 치는 중이면 그 게임은 건너뛰지 않고 기다린다
-  // (대기 순서 존중 — 수동 투입과 같은 규칙). 한 번에 한 코트씩, 락으로 중복 투입 방지.
+  // ── 코트 투입까지 자동 ── 빈 코트가 있으면 '4명 모두 쉬고 있는' 대기 게임 중 맨 위 것을 투입.
+  // 맨 위 게임에 아직 다른 코트에서 치는 사람이 있으면 그 판은 그 사람이 끝날 때까지 못 시작하니,
+  // 빈 코트를 비워 두지 않고 다음 판을 먼저 넣는다(서버 시간 시뮬레이션도 같은 방식). 막힌 판은 순서를
+  // 유지한 채 맨 위에 남아 그 사람이 끝나면 바로 들어간다. 한 번에 한 코트씩, 락으로 중복 투입 방지.
   const autoAssignLockRef = useRef(false);
   const autoAssignFailRef = useRef<{ entryId: string; at: number } | null>(null);
   useEffect(() => {
     if (!autoPilot || !autoAssign || !board || autoAssignLockRef.current) return;
     const court = emptyCourts[0];
-    const next = queuedEntries[0];
-    if (!court || !next || next.playerIds.length < 4) return;
+    if (!court) return;
     const onCourt = new Set<string>();
     playingByCourtId.forEach((e) => (e.playerIds || []).forEach((id) => onCourt.add(id)));
-    if (next.playerIds.some((id) => onCourt.has(id))) return;
+    const next = queuedEntries.find((e) => e.playerIds.length >= 4 && !e.playerIds.some((id) => onCourt.has(id)));
+    if (!next) return;
     // 같은 게임이 방금 실패했다면(경합·권한 등) 20초 쉬었다 다시.
     const fail = autoAssignFailRef.current;
     if (fail && fail.entryId === next.id && Date.now() - fail.at < 20000) return;

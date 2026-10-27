@@ -880,6 +880,16 @@ export async function suggestNextFoursome(
     for (let j = 1; j < courtFree.length; j++) if (courtFree[j] < courtFree[i]) i = j;
     return courtFree.splice(i, 1)[0];
   };
+  // 대기 게임 배치용: 선수가 아직 앞 판을 치는 중이면(ready가 나중) 지금 빈 코트를 잡고 기다리지 않는다 —
+  // ready 전에 비는 코트 중 가장 늦게 비는 코트를 쓴다(없으면 가장 먼저 비는 코트). 그래야 뒤 대기 게임이
+  // 빈 코트에 바로 들어간다(운영판 자동 투입도 막힌 판을 건너뛰고 다 쉬는 판을 먼저 넣는다).
+  const popFor = (ready: number) => {
+    let best = -1;
+    for (let j = 0; j < courtFree.length; j++)
+      if (courtFree[j] <= ready && (best < 0 || courtFree[j] > courtFree[best])) best = j;
+    if (best < 0) return popEarliest();
+    return courtFree.splice(best, 1)[0];
+  };
 
   // ② 이미 짠 대기 게임을 순서대로 코트에 배치
   // 대상 게임 모드: 그 게임 앞 순서까지만 시뮬레이션 → 그 게임의 시작 예상 시각. 뒤 순서 게임에 잡힌
@@ -909,7 +919,8 @@ export async function suggestNextFoursome(
       ids.forEach((id) => laterIds.add(id));
       continue;
     }
-    const start = Math.max(popEarliest(), ...ids.map((id) => availMs.get(id) ?? nowMs));
+    const ready = Math.max(nowMs, ...ids.map((id) => availMs.get(id) ?? nowMs));
+    const start = Math.max(popFor(ready), ready);
     const end = start + (ids.length === 4 ? predictMs(durOf(ids), start) : gameMs);
     courtFree.push(end);
     for (const id of ids) {
