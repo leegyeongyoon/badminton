@@ -140,7 +140,7 @@ export const gameBoardApi = {
   // mode: 매칭 전략 (fair/similar/balanced/competitive/fresh), 기본 fair
   // exclude: 이미 트레이에 올려둔/큐에 편성된 인원 → 풀에서 제외 (연속 편성 시 새 인원)
   // target: 대상 게임 모드 — fill(대기 게임 빈자리 채우기) / substitute(땜빵 후보 3명; 대기 게임 entryId 또는 코트 turnId)
-  // 늦게 온 사람이 생기면 '연속 출전'으로 짜둔(손대지 않은) AI 대기 게임을 지운다 — 자동 편성이 다시 짠다.
+  // 늦게 온 사람·짜둔 판에서 빠져 오래 기다린 사람이 생기면 손대지 않은 AI 대기 게임을 지운다 — 자동 편성이 다시 짠다.
   replanStale: (clubSessionId: string) =>
     api.post<{ removed: number }>(`/club-sessions/${clubSessionId}/replan-stale`, {}, { _silent: true } as any),
 

@@ -1841,11 +1841,12 @@ export default function OperateScreen() {
       }
       return; // 다음 패스에서 새 게임 준비량 다시 계산
     }
-    // 늦게 온 사람 반영 — 그 전에 짜둔 '연속 출전' AI 대기 게임은 지우고 다시 짠다(서버가 조건 판단).
+    // 늦게 온 사람·짜둔 판에서 빠져 20분 넘게 기다린 사람 반영 — 그 전에 짠 AI 대기 게임은 지우고
+    // 다시 짠다(서버가 조건 판단, 운영진이 손댄 판은 그대로).
     if (clubSessionId) {
       const removed = await gameBoardApi.replanStale(clubSessionId).then((r) => r.data?.removed ?? 0).catch(() => 0);
       if (removed > 0) {
-        setAutoLastNote(`새로 온 사람 반영: 쉬지 못하고 이어서 치던 대기 게임 ${removed}개를 다시 짜요`);
+        setAutoLastNote(`새로 온 사람·오래 기다린 사람 반영: 대기 게임 ${removed}개를 다시 짜요`);
         loadBoard(); loadPool();
         return; // 보드 갱신 뒤 다음 패스에서 다시 짠다
       }

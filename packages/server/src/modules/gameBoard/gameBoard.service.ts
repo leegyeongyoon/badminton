@@ -448,13 +448,35 @@ export async function replanStaleQueue(clubSessionId: string, userId: string) {
   const onCourt = new Set(playing.map((p) => p.userId));
   const queuedIds = new Set(board.entries.flatMap((e) => (e.playerIds as string[]) ?? []));
   const idle = checkins.filter((c) => !c.restingAt && !c.isInLesson && !onCourt.has(c.userId) && !queuedIds.has(c.userId));
-  if (idle.length < 4) return { removed: 0 };
-  const lastArrival = Math.max(...checkins.map((c) => c.checkedInAt.getTime()));
-  const stale = board.entries.filter((e) => {
+  if (idle.length === 0) return { removed: 0 };
+  const untouchedAi = (e: (typeof board.entries)[number]) => {
     const ids = (e.playerIds as string[]) ?? [];
-    const untouchedAi = e.aiPlayerIds.length === 4 && ids.length === 4 && e.aiPlayerIds.every((id) => ids.includes(id));
-    return untouchedAi && e.createdAt.getTime() < lastArrival && ids.some((id) => onCourt.has(id));
+    return e.aiPlayerIds.length === 4 && ids.length === 4 && e.aiPlayerIds.every((id) => ids.includes(id));
+  };
+  // ① 늦게 온 사람: 마지막 체크인 전에 짠 '연속 출전' 판(쉬는 사람이 4명 이상일 때).
+  const lastArrival = Math.max(...checkins.map((c) => c.checkedInAt.getTime()));
+  const lateArrival = (e: (typeof board.entries)[number]) =>
+    idle.length >= 4 && e.createdAt.getTime() < lastArrival && ((e.playerIds as string[]) ?? []).some((id) => onCourt.has(id));
+  // ② 빠진 사람: 짜둔 판 없이 20분 넘게 기다린 사람이 있으면, 그 사람이 20분을 넘기 전에 짠 판을 다시 짠다.
+  //    (대기 게임을 많이 미리 짜두면 앞에서 한 번 빠진 사람 — 예: 남S 3명 중 1명 — 이 판이 다 빌 때까지
+  //    0게임으로 기다리던 문제. 넘은 뒤에 짠 판은 이미 그 사람을 알고 짠 것이라 다시 안 짠다 → 반복 없음.)
+  const LEFT_OUT_MS = 20 * 60 * 1000;
+  const lastEnds = await prisma.courtTurn.findMany({
+    where: { clubSessionId, status: 'COMPLETED', players: { some: { userId: { in: idle.map((c) => c.userId) } } } },
+    select: { completedAt: true, players: { select: { userId: true } } },
   });
+  const lastEnd = new Map<string, number>();
+  for (const t of lastEnds)
+    for (const p of t.players) {
+      const at = t.completedAt?.getTime() ?? 0;
+      if (at > (lastEnd.get(p.userId) ?? 0)) lastEnd.set(p.userId, at);
+    }
+  const nowMs = Date.now();
+  const crossAts = idle
+    .map((c) => Math.max(c.checkedInAt.getTime(), lastEnd.get(c.userId) ?? 0) + LEFT_OUT_MS)
+    .filter((at) => at <= nowMs);
+  const leftOutBefore = crossAts.length ? Math.max(...crossAts) : 0;
+  const stale = board.entries.filter((e) => untouchedAi(e) && (lateArrival(e) || e.createdAt.getTime() < leftOutBefore));
   if (stale.length === 0) return { removed: 0 };
   await prisma.gameBoardEntry.deleteMany({ where: { id: { in: stale.map((e) => e.id) }, status: 'QUEUED' } });
   const io = getIO();
