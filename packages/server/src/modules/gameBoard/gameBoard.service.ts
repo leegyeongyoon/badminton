@@ -859,6 +859,11 @@ export async function suggestNextFoursome(
   // 실제 코트 투입은 registerTurn 가드가 '다른 코트에서 게임 중'이면 막으므로 물리적 모순 없음.
   // ─────────────────────────────────────────────────────────────────────────
   const SLACK_MS = 2 * 60 * 1000;
+  // 한 판 쉬기 — 아직 코트에서 치는(또는 앞 대기 게임에 잡힌) 사람은 예상 종료 + REST_GAP 뒤에 시작하는 판에만
+  // 후보로 넣는다. 실제 경기 시간은 예상보다 들쭉날쭉하고, 그 사람이 든 판은 끝날 때까지 맨 위에서 기다렸다가
+  // 끝나자마자 들어가서 휴식 0분이 됐다(실시간 시뮬레이션 40명·6코트: 쉬던 사람 두고 연속 출전의 대부분이
+  // '코트에서 곧 끝나는 1명' 판). 6분: 쉬던 사람 두고 연속 출전 13.8→1.5회, 빈 코트도 줄어듦. 지금 쉬는 사람은 그대로(SLACK만).
+  const REST_GAP_MS = 6 * 60 * 1000;
 
   const checkins = await prisma.checkIn.findMany({
     where: { clubSessionId, checkedOutAt: null },
@@ -1014,7 +1019,10 @@ export async function suggestNextFoursome(
         !excludeIds.has(id) &&
         !waitingTurnIds.has(id),
     );
-  const freeBy = (id: string, at: number) => (availMs.get(id) ?? nowMs) <= at + SLACK_MS;
+  const freeBy = (id: string, at: number) => {
+    const av = availMs.get(id) ?? nowMs;
+    return av <= nowMs ? true : av + REST_GAP_MS <= at + SLACK_MS;
+  };
   // 지금 쉬는 사람 = 진행·대기 게임(및 이번 호출에서 짠 판) 일정이 없는 사람.
   const isIdle = (id: string) => (availMs.get(id) ?? 0) <= nowMs;
   if (target && !targetFixed) throw new NotFoundError('대기 게임');
@@ -1812,10 +1820,12 @@ export async function suggestNextFoursome(
     };
     // 이 사람이 i번 판에 들어갈 수 있나 — 그 판 시작 전에 비고, 계획 안의 다른 판과 시간이 안 겹침.
     const canJoin = (id: string, i: number, except: number) => {
-      if ((availBase.get(id) ?? 0) > starts[i] + SLACK_MS) return false;
+      const av = availBase.get(id) ?? 0;
+      if (av > nowMs && av + REST_GAP_MS > starts[i] + SLACK_MS) return false;
       for (let j = 0; j < K; j++) {
         if (j === i || j === except || !groups[j].includes(id)) continue;
-        if (!(ends[j] <= starts[i] || ends[i] <= starts[j])) return false;
+        // 계획 안의 두 판 사이에도 한 판 쉬기(REST_GAP — SLACK만큼은 봐줌)
+        if (!(ends[j] + REST_GAP_MS <= starts[i] + SLACK_MS || ends[i] + REST_GAP_MS <= starts[j] + SLACK_MS)) return false;
       }
       return true;
     };
