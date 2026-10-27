@@ -1,5 +1,5 @@
 import { useCallback, useMemo, useState } from 'react';
-import { View, Text, StyleSheet, ScrollView, Pressable, ActivityIndicator, Platform, Alert, Image, Linking } from 'react-native';
+import { View, Text, StyleSheet, ScrollView, Pressable, ActivityIndicator, Image, Linking } from 'react-native';
 import { useLocalSearchParams, useRouter, useFocusEffect } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -9,6 +9,7 @@ import { BackButton } from '../../../components/ui/BackButton';
 import { coachJobApi, APPLICATION_STATUS_LABEL, AUDIENCE_LABEL, EMPLOYMENT_LABEL, ddayLabel, type JobPostDetail, type OfferTerms } from '../../../services/coachJob';
 import { showSuccess } from '../../../utils/feedback';
 import { absolutizeUploadUrl } from '../../../services/upload';
+import { showModalConfirm } from '../../../utils/alert';
 
 // ─────────────────────────────────────────────────────────────
 // 공고 상세(원티드식 슬림) — 공고 내용에 집중.
@@ -18,17 +19,9 @@ import { absolutizeUploadUrl } from '../../../services/upload';
 
 const DAY_KO = ['일', '월', '화', '수', '목', '금', '토'];
 
-const confirmAsk = (title: string, message: string, onOk: () => void) => {
-  if (Platform.OS === 'web') {
-    // eslint-disable-next-line no-alert
-    if (window.confirm(`${title}\n${message}`)) onOk();
-  } else {
-    Alert.alert(title, message, [
-      { text: '취소', style: 'cancel' },
-      { text: '확인', style: 'destructive', onPress: onOk },
-    ]);
-  }
-};
+// 웹도 앱 안 확인창(브라우저 기본 창은 페이지 전체를 멈춤), 네이티브는 OS 알림 — utils/alert.
+const confirmAsk = (title: string, message: string, onOk: () => void) =>
+  showModalConfirm(title, message, onOk, '확인', '취소', 'danger');
 
 export default function JobPostDetailScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();

@@ -1,18 +1,25 @@
 import { useCallback, useEffect, useState } from 'react';
 import { View, Text, StyleSheet, Pressable, AppState } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { usePathname } from 'expo-router';
+import { useResponsiveLayout } from '../../hooks/useResponsiveLayout';
 import { useTheme } from '../../hooks/useTheme';
 import { useSocketEvent } from '../../hooks/useSocket';
 import { useAuthStore } from '../../store/authStore';
 import { gameBoardApi, type FeedbackRating, type FeedbackReason, type PendingFeedback } from '../../services/gameBoard';
 import { showSuccess } from '../../utils/feedback';
-import { spacing, radius, typography } from '../../constants/theme';
+import { breakpoints, spacing, radius, typography } from '../../constants/theme';
 
 // ─────────────────────────────────────────────────────────────
 // 회원 경기 후 반응 — 정모 판이 끝나면(서버 'game:feedbackAsk') 화면 아래에 "방금 경기 어땠어요?".
 // 😊/🙂는 한 번 누르면 끝, 😣는 이유 하나 더(급수가 안 맞음·같은 사람·오래 기다림). AI 학습 현황과
 // 설정 추천에 쓰인다. 앱을 다시 열었을 때도 40분 안의 끝난 판이면 한 번 물어본다. ✕로 넘기면 그 판은 다시 안 물음.
+// 회원이 주로 보는 화면(탭 화면·정모 현황판)에서만 띄운다 — 화면 아래 고정 버튼(지원자 [불합격]·결제 등)을
+// 가리지 않게. 아래 탭 바가 있는 폭이면 탭 바 위로 올린다.
 // ─────────────────────────────────────────────────────────────
+
+const TAB_PATHS = ['/', '/my-status', '/more', '/coach-hub', '/profile', '/settings'];
+const TAB_BAR_HEIGHT = 64;
 
 const REASONS: { v: FeedbackReason | null; label: string }[] = [
   { v: 'TOO_HARD', label: '상대가 너무 셌어요' },
@@ -25,6 +32,10 @@ const REASONS: { v: FeedbackReason | null; label: string }[] = [
 export function GameFeedbackPrompt() {
   const { colors, shadows } = useTheme();
   const insets = useSafeAreaInsets();
+  const pathname = usePathname();
+  const { width } = useResponsiveLayout();
+  const onTab = TAB_PATHS.includes(pathname);
+  const allowed = onTab || pathname === '/guest-status' || /^\/session\/[^/]+\/board$/.test(pathname);
   const isAuthenticated = useAuthStore((s) => s.isAuthenticated);
   const [pending, setPending] = useState<PendingFeedback | null>(null);
   const [askReason, setAskReason] = useState(false);
@@ -65,9 +76,10 @@ export function GameFeedbackPrompt() {
       .catch(() => {});
   };
 
-  if (!pending) return null;
+  if (!pending || !allowed) return null;
+  const tabBarOffset = onTab && width < breakpoints.tablet ? TAB_BAR_HEIGHT : 0;
   return (
-    <View pointerEvents="box-none" style={[styles.wrap, { bottom: insets.bottom + spacing.md }]}>
+    <View pointerEvents="box-none" style={[styles.wrap, { bottom: insets.bottom + spacing.md + tabBarOffset }]}>
       <View style={[styles.card, shadows?.lg, { backgroundColor: colors.surface, borderColor: colors.border }]}>
         <View style={styles.head}>
           <View style={{ flex: 1, minWidth: 0 }}>

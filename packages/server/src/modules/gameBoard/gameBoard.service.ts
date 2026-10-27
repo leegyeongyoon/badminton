@@ -1019,7 +1019,42 @@ export async function suggestNextFoursome(
   const isIdle = (id: string) => (availMs.get(id) ?? 0) <= nowMs;
   if (target && !targetFixed) throw new NotFoundError('대기 게임');
   if (!target && baseIds.filter((id) => freeBy(id, slotStart)).length < 4) {
-    return { suggestions: [] };
+    // 대기 게임이 거의 모두를 잡고 있어 새로 짤 4명이 없을 때도, 그 사이 30분 넘게 0게임으로 남은
+    // 사람은 알린다(아래 본 계산까지 못 가므로 간단히 — 실운영에서 남S 1명이 이 경로로 빠졌다).
+    const idleIds = baseIds.filter((id) => isIdle(id));
+    const stuck: { userId: string; name: string; level: string; waitMin: number; reason: 'busy' }[] = [];
+    if (idleIds.length > 0) {
+      const [done, people] = await Promise.all([
+        prisma.turnPlayer.findMany({
+          where: { userId: { in: idleIds }, turn: { clubSessionId, status: { in: ['COMPLETED', 'PLAYING'] } } },
+          select: { userId: true },
+        }),
+        prisma.user.findMany({
+          where: { id: { in: idleIds } },
+          select: { id: true, name: true, profile: { select: { skillLevel: true, gender: true } } },
+        }),
+      ]);
+      const overrides = await prisma.clubMember.findMany({
+        where: { clubId: clubSession.clubId, userId: { in: idleIds } },
+        select: { userId: true, skillLevel: true },
+      });
+      const ov = new Map(overrides.map((o) => [o.userId, o.skillLevel] as const));
+      const played = new Set(done.map((d) => d.userId));
+      const checkinAt = new Map(checkins.map((c) => [c.userId, c.checkedInAt.getTime()] as const));
+      for (const u of people) {
+        const waitMs = nowMs - (checkinAt.get(u.id) ?? nowMs);
+        if (played.has(u.id) || waitMs < 30 * 60 * 1000) continue;
+        const g = u.profile?.gender;
+        stuck.push({
+          userId: u.id,
+          name: u.name ?? '',
+          level: `${g === 'F' ? '여' : g === 'M' ? '남' : ''}${NUM_TO_SKILL[Math.min(7, Math.max(1, skillToNum(ov.get(u.id) ?? u.profile?.skillLevel)))]}`,
+          waitMin: Math.round(waitMs / 60000),
+          reason: 'busy',
+        });
+      }
+    }
+    return { suggestions: [], stuck };
   }
   // 대상 게임의 고정 인원도 급수·성별·이름을 불러오도록 풀 목록에 포함(후보에선 제외).
   const poolIds = targetFixed
@@ -1841,37 +1876,44 @@ export async function suggestNextFoursome(
   // ── 급수 외톨이 알림 — 오래 기다린 사람 중 오늘 온 사람으로는 규칙(급수·성별) 안 4명을 아예 만들 수 없는
   //    사람(예: C·D조만 온 날의 S조 1명). 엔진이 억지로 짜지 않으니 운영진에게 알려 📌 요청으로 넣게 한다.
   //    + 같이 칠 급수는 있지만 그분들이 다 경기·대기 게임에 잡혀 30분 넘게 0게임인 사람(예: 남S 3명뿐인 날
-  //    1명 — 실운영 2026-10-27). 이번에 짠 판에도 없으면 알린다(reason 'busy').
+  //    1명 — 실운영 2026-10-27). 이번에 실제로 짜는 판에도 없으면 알린다(reason 'busy').
   const stuck: { userId: string; name: string; level: string; waitMin: number; reason: 'level' | 'busy' }[] = [];
   {
-    const nowPool = poolIds.filter((id) => !restingIds.has(id)).map((id) => toModePlayer(id, nowMs));
+    // 대기 시간은 이번 호출의 계획(뒤쪽 판까지 일정을 잡아 둠)이 아니라 계획 전 일정 기준으로 잰다.
+    const nowPool = poolIds
+      .filter((id) => !restingIds.has(id))
+      .map((id) => {
+        const p = toModePlayer(id, nowMs);
+        const last = Math.max(checkedInAtMs[id] ?? nowMs, lastEndMs[id] ?? 0, availBase.get(id) ?? 0);
+        return { ...p, waitSeconds: Math.max(0, (nowMs - last) / 1000) };
+      });
     const longWait = nowPool.filter((p) => p.waitSeconds >= 1.5 * tune.gameCycleSeconds && p.waitSeconds >= 20 * 60);
-    const plannedNow = new Set(slotPlayerIds.flat());
+    // 1시간 계획의 뒤쪽 판은 대기 게임이 차 있는 동안 계속 밀릴 수 있어서, '이번에 실제로 짜는 판' 중
+    // 15분 안에 시작하는 판에 든 사람만 '곧 친다'로 본다(대기 게임이 길면 이번 판도 한참 뒤라서).
+    const plannedNow = new Set(
+      slotPlayerIds.slice(0, count).filter((_, i) => (slotStarts[i] ?? nowMs) - nowMs <= 15 * 60 * 1000).flat(),
+    );
     for (const p of longWait) {
-      const zeroGames = (playedGames[p.id] ?? 0) + (committedGames[p.id] ?? 0) === 0;
-      if (zeroGames && p.waitSeconds >= 30 * 60 && !plannedNow.has(p.id)) {
-        stuck.push({
-          userId: p.id,
-          name: poolNames.get(p.id) ?? '',
-          level: `${p.gender === 'F' ? '여' : p.gender === 'M' ? '남' : ''}${NUM_TO_SKILL[Math.min(7, Math.max(1, p.skill))]}`,
-          waitMin: Math.round(p.waitSeconds / 60),
-          reason: 'busy',
-        });
-        continue;
-      }
       const others = nowPool.filter((q) => q.id !== p.id);
       let possible = false;
       outer: for (let a = 0; a < others.length; a++)
         for (let b = a + 1; b < others.length; b++)
           for (let c = b + 1; c < others.length; c++)
             if (!ruleBreak([p, others[a], others[b], others[c]], slotActive)) { possible = true; break outer; }
-      if (!possible)
+      const zeroGames = (playedGames[p.id] ?? 0) + (committedGames[p.id] ?? 0) === 0;
+      // 규칙상 4명이 아예 안 되면 'level', 되긴 하지만 30분 넘게 0게임이고 이번 계획에도 없으면 'busy'.
+      const reason: 'level' | 'busy' | null = !possible
+        ? 'level'
+        : zeroGames && p.waitSeconds >= 30 * 60 && !plannedNow.has(p.id)
+          ? 'busy'
+          : null;
+      if (reason)
         stuck.push({
           userId: p.id,
           name: poolNames.get(p.id) ?? '',
           level: `${p.gender === 'F' ? '여' : p.gender === 'M' ? '남' : ''}${NUM_TO_SKILL[Math.min(7, Math.max(1, p.skill))]}`,
           waitMin: Math.round(p.waitSeconds / 60),
-          reason: 'level',
+          reason,
         });
     }
   }

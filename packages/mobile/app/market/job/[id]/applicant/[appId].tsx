@@ -1,5 +1,5 @@
 import { useCallback, useState } from 'react';
-import { View, Text, StyleSheet, ScrollView, Pressable, Image, ActivityIndicator, Platform, Alert, TextInput } from 'react-native';
+import { View, Text, StyleSheet, ScrollView, Pressable, Image, ActivityIndicator, Platform, TextInput } from 'react-native';
 import { useLocalSearchParams, useRouter, useFocusEffect } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -12,23 +12,16 @@ import { coachJobApi, APPLICATION_STATUS_LABEL, type JobApplicantRow, type Offer
 import { coachApi, coachChatApi, type CoachDetail } from '../../../../../services/coach';
 import { absolutizeUploadUrl } from '../../../../../services/upload';
 import { showSuccess } from '../../../../../utils/feedback';
+import { showModalConfirm } from '../../../../../utils/alert';
 
 // ─────────────────────────────────────────────────────────────
 // 지원자 상세(원티드식) — 이력서 전문 + 지원 메시지 + 하단 단계 액션 바.
 // 지원자 관리 리스트에서 진입. 면접 제안 시 채팅이 열린다.
 // ─────────────────────────────────────────────────────────────
 
-const confirmAsk = (title: string, message: string, onOk: () => void) => {
-  if (Platform.OS === 'web') {
-    // eslint-disable-next-line no-alert
-    if (window.confirm(`${title}\n${message}`)) onOk();
-  } else {
-    Alert.alert(title, message, [
-      { text: '취소', style: 'cancel' },
-      { text: '확인', style: 'destructive', onPress: onOk },
-    ]);
-  }
-};
+// 웹도 앱 안 확인창(브라우저 기본 창은 페이지 전체를 멈춤), 네이티브는 OS 알림 — utils/alert.
+const confirmAsk = (title: string, message: string, onOk: () => void) =>
+  showModalConfirm(title, message, onOk, '확인', '취소', 'danger');
 
 export default function ApplicantDetail() {
   const { id: postId, appId } = useLocalSearchParams<{ id: string; appId: string }>();

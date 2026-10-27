@@ -1,5 +1,5 @@
 import { useCallback, useState } from 'react';
-import { View, Text, StyleSheet, ScrollView, TextInput, Pressable, ActivityIndicator, Platform, Alert } from 'react-native';
+import { View, Text, StyleSheet, ScrollView, TextInput, Pressable, ActivityIndicator, Platform } from 'react-native';
 import { useFocusEffect } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -8,23 +8,16 @@ import { typography, spacing } from '../../constants/theme';
 import { BackButton } from '../../components/ui/BackButton';
 import { paymentApi, cardBrandLabel, type PaymentMethod } from '../../services/payment';
 import { showSuccess, showError } from '../../utils/feedback';
+import { showModalConfirm } from '../../utils/alert';
 
 // ─────────────────────────────────────────────────────────────
 // 결제 수단 관리 — 카드 등록(빌링키 발급), 목록, 기본 카드, 삭제.
 // 카드번호는 서버·DB 어디에도 저장되지 않고 빌링키만 남는다(실 PG 원칙 동일).
 // ─────────────────────────────────────────────────────────────
 
-const confirmAsk = (title: string, message: string, onOk: () => void) => {
-  if (Platform.OS === 'web') {
-    // eslint-disable-next-line no-alert
-    if (window.confirm(`${title}\n${message}`)) onOk();
-  } else {
-    Alert.alert(title, message, [
-      { text: '취소', style: 'cancel' },
-      { text: '확인', style: 'destructive', onPress: onOk },
-    ]);
-  }
-};
+// 웹도 앱 안 확인창(브라우저 기본 창은 페이지 전체를 멈춤), 네이티브는 OS 알림 — utils/alert.
+const confirmAsk = (title: string, message: string, onOk: () => void) =>
+  showModalConfirm(title, message, onOk, '확인', '취소', 'danger');
 
 export default function PaymentMethods() {
   const { colors, shadows } = useTheme();
@@ -176,7 +169,7 @@ export default function PaymentMethods() {
                     <Text style={[styles.actionLink, { color: colors.textSecondary }]}>기본으로</Text>
                   </Pressable>
                 )}
-                <Pressable onPress={() => remove(c)} hitSlop={6}>
+                <Pressable onPress={() => remove(c)} hitSlop={6} accessibilityRole="button" accessibilityLabel={`카드 삭제 ****${c.cardLast4}`}>
                   <Ionicons name="trash-outline" size={16} color={colors.danger} />
                 </Pressable>
               </View>

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import { View, Text, StyleSheet, ScrollView, Pressable, TextInput, ActivityIndicator, Switch, Alert, Platform, Image } from 'react-native';
+import { View, Text, StyleSheet, ScrollView, Pressable, TextInput, ActivityIndicator, Switch, Image } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import { useTheme } from '../../hooks/useTheme';
@@ -8,6 +8,7 @@ import { showSuccess, showError } from '../../utils/feedback';
 import type { LessonApi, LessonOffer, LessonApplicationRow } from '../../services/lab';
 import { coachApi, type CoachCard } from '../../services/coach';
 import { absolutizeUploadUrl } from '../../services/upload';
+import { showModalConfirm } from '../../utils/alert';
 
 // ─────────────────────────────────────────────────────────────
 // 레슨 관리(공용) — 실험실(최고관리자)과 모임 관리(운영진) 양쪽에서
@@ -32,17 +33,9 @@ const num = (s: string): number | null => {
   return isNaN(n) || n <= 0 ? null : n;
 };
 
-const confirmAsk = (title: string, message: string, onOk: () => void) => {
-  if (Platform.OS === 'web') {
-    // eslint-disable-next-line no-alert
-    if (window.confirm(`${title}\n${message}`)) onOk();
-  } else {
-    Alert.alert(title, message, [
-      { text: '취소', style: 'cancel' },
-      { text: '확인', style: 'destructive', onPress: onOk },
-    ]);
-  }
-};
+// 웹도 앱 안 확인창(브라우저 기본 창은 페이지 전체를 멈춤), 네이티브는 OS 알림 — utils/alert.
+const confirmAsk = (title: string, message: string, onOk: () => void) =>
+  showModalConfirm(title, message, onOk, '확인', '취소', 'danger');
 
 export function LessonManager({ clubs, api }: { clubs: LessonClub[]; api: LessonApi }) {
   const { colors, shadows } = useTheme();
