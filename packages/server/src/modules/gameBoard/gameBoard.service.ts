@@ -1022,13 +1022,9 @@ export async function suggestNextFoursome(
   // 한 판 쉬기 면제 — 평균보다 밀린 사람(아래 modePool 계산 뒤 채움). 같이 칠 조합이 적은 급수(남S 3명뿐 →
   // 남S끼리 둘이 들어가야 함)는 방금 친 S가 쉬면 남은 S가 짝이 없어 계속 밀렸다. 운영진도 '사람이 없으니 연달아'.
   const restWaived = new Set<string>();
-  // 급수 폭 한 단계 풀기 — 평균보다 0.75판 넘게 밀린 사람이 든 판은, 두 팀 급수 합이 비슷하면(차이 2 이하)
-  // 급수 폭을 한 단계 더 허용(예: 남S + 남D vs 남C + 남C). 같이 칠 조합이 적은 급수(남S 3명뿐인 날)는 규칙
-  // 안에서는 S조 판이 한 번에 하나뿐이라 평균만큼 칠 방법이 없었다(시뮬레이션 남S −20%대). 운영진도 S조가
-  // 밀리면 하수와 팀 합을 맞춰 넣는다. '딱 맞게' 설정과 급수별 '같이 칠 범위'는 그대로 지킨다.
-  const levelRelaxed = new Set<string>();
-  const levelExtra = new Map<string, number>(); // 사람별로 넓힐 수 있는 단계(0·1·2)
-  const scarceLevel = new Set<string>(); // 같이 칠 사람이 0~2명뿐 — 밀리지 않아도 넓힘
+  // 오늘 편성용 급수 — 같이 칠 사람이 부족한 사람은 그날 출석이 많은 쪽으로 옮겨서 본다(아래 출석 구성 분석).
+  const virtualSkill = new Map<string, number>();
+  const realSkill = new Map<string, number>();
   const freeBy = (id: string, at: number) => {
     const av = availMs.get(id) ?? nowMs;
     if (av <= nowMs) return true;
@@ -1190,8 +1186,9 @@ export async function suggestNextFoursome(
   // 급수·성별별 설정(같이 칠 범위·혼복 비율·판수 비중) — 키 'M'|'F' + 급수 글자.
   const levelKey = (p: { gender: 'M' | 'F' | null; skill: number }) =>
     p.gender ? `${p.gender}${NUM_TO_SKILL[Math.min(7, Math.max(1, p.skill))]}` : null;
-  const levelSetting = (p: { gender: 'M' | 'F' | null; skill: number }) => {
-    const k = levelKey(p);
+  const levelSetting = (p: { id?: string; gender: 'M' | 'F' | null; skill: number }) => {
+    // 운영진 급수별 설정은 실제 급수 기준(오늘 편성용 급수로 옮겨 본 사람도).
+    const k = levelKey(p.id && realSkill.has(p.id) ? { gender: p.gender, skill: realSkill.get(p.id)! } : p);
     return useSettings && k ? settings.levels[k] : undefined;
   };
   // 선수별 고정 정보 + 슬롯 시각 기준으로 계산되는 공평 정보.
@@ -1211,7 +1208,7 @@ export async function suggestNextFoursome(
     const lastActivity = Math.max(checkin, lastEndMs[id] ?? 0, availMs.get(id) ?? 0);
     return {
       id,
-      skill: skillToNum(skillOverrideMap.get(id) ?? prof?.skillLevel),
+      skill: virtualSkill.get(id) ?? skillToNum(skillOverrideMap.get(id) ?? prof?.skillLevel),
       // 판수 비중(급수별 설정): '많이'는 실제보다 적게 친 것처럼, '적게'는 많이 친 것처럼 봐서 차례를 조절.
       games: ((playedGames[id] ?? 0) + (committedGames[id] ?? 0) + (extraGames[id] ?? 0)) / gamesWeight(id),
       gender: g === 'M' || g === 'F' ? g : null,
@@ -1294,10 +1291,7 @@ export async function suggestNextFoursome(
   {
     const costs = modePool.map((p) => priorityCost(p, tune.gameCycleSeconds));
     const ref = costs.reduce((a, b) => a + b, 0) / Math.max(1, costs.length);
-    modePool.forEach((p, i) => {
-      if (costs[i] <= ref - 0.75) restWaived.add(p.id);
-      if (costs[i] <= ref - 0.75) levelRelaxed.add(p.id);
-    });
+    modePool.forEach((p, i) => { if (costs[i] <= ref - 0.75) restWaived.add(p.id); });
   }
   let styleScorer: StyleScorer | undefined;
   // 학습 스타일은 운영진 평소 방식(남복·여복 위주)을 담고 있어, 운영자가 게임 종류를 바꿨으면 끈다.
@@ -1350,19 +1344,30 @@ export async function suggestNextFoursome(
   // 운영진이 AI 설정을 쓰면 그 설정이 이긴다(모임 기록 p95가 1이어도 '넉넉하게'면 2단계 허용). 예전 앱만 기록 상한.
   const spreadCap = levelMatch === 'tight' ? 1 : useSettings ? 2 : Math.min(style?.spreadCap ?? DEFAULT_SPREAD_CAP, 2);
   {
-    // 출석 구성 분석: 같은 성별에서 급수 차이 cap 이내 사람 수(지금 코트·대기 게임에 있는 사람 포함).
-    const within = (p: ModePlayer, cap: number) => modePool.filter((q) => q.id !== p.id && q.gender === p.gender && Math.abs(q.skill - p.skill) <= cap).length;
+    // 출석 구성 분석 → 오늘 편성용 급수. 같은 성별에서 1단계 안에 같이 칠 사람이 4명이 안 되는 사람은, 그날
+    // 많이 온 쪽으로 한 단계씩 옮겨 1단계 안에 4명이 되는 가장 가까운 급수로 본다(최대 3단계 — 2단계 차이 판
+    // 비율 제한에 걸려 계속 밀리지 않게, 비슷한 급수처럼 돌도록). 예: 남S 1명 +
+    // 남C 5·D 3 → 남S를 'B조'로 편성 → C·D와 자연스럽게 돌고, 팀은 실력 합으로 나뉘어 약한 사람과 한 팀.
+    // (운영진 피드백 2026-10-27: '없으면 그 다른 급수에 맞게 돌아야지'.) 급수별 설정·이유 문구는 실제 급수.
+    for (const p of modePool) realSkill.set(p.id, p.skill);
+    const others = (p: ModePlayer) => modePool.filter((q) => q.id !== p.id && q.gender === p.gender);
+    const NEED = 4; // 1단계 안에 같이 칠 사람이 이만큼 있으면 그대로(시뮬레이션 3·4·5명 비교에서 가장 고름)
+    const near = (p: ModePlayer, v: number) => others(p).filter((q) => Math.abs((realSkill.get(q.id) ?? q.skill) - v) <= 1).length;
     for (const p of modePool) {
-      const n0 = within(p, spreadCap);
-      if (n0 >= 5) continue;
-      if (n0 <= 2) {
-        // 같이 칠 같은 성별이 3명 생길 때까지 넓힌다(최대 4단계 — 초보 모임의 S조 1명도 판이 돌게).
-        scarceLevel.add(p.id);
-        let k = 1;
-        while (k < 4 && within(p, spreadCap + k) < 3) k++;
-        levelExtra.set(p.id, k);
-      } else levelExtra.set(p.id, 1);
+      if (near(p, p.skill) >= NEED) continue;
+      let best = p.skill;
+      let bestN = near(p, p.skill);
+      for (let d = 1; d <= 3; d++) {
+        for (const v of [p.skill - d, p.skill + d]) {
+          if (v < 1 || v > 7) continue;
+          const n = near(p, v);
+          if (n > bestN) { best = v; bestN = n; }
+        }
+        if (bestN >= NEED) break;
+      }
+      if (best !== p.skill) virtualSkill.set(p.id, best);
     }
+    for (const p of modePool) { const v = virtualSkill.get(p.id); if (v != null) p.skill = v; }
   }
   // 2단계 차이 판 — 운영진이 정한 최대 비율(spread2Max) 안이면 약한 비용(1단계 이하가 있으면 그쪽),
   // 넘으면 큰 비용 + 잠깐 기다려 더 나은 판을 찾는다(softIssue).
@@ -1398,8 +1403,6 @@ export async function suggestNextFoursome(
   const OWED_WEIGHT = 2;
   const owedPull = (p: ModePlayer) => OWED_WEIGHT * Math.max(0, fairRef - priorityCost(p, tune.gameCycleSeconds) - 0.5);
   const RULE_COST = 500;
-  const RELAX_COST = 4; // 급수 폭을 넓힌 판(한 단계당) — 규칙 안의 판이 있으면 그쪽
-  const RELAX_COST_SCARCE = 1.5;
   const MIX_RATIO_COST = 8;
   const effOf = (p: ModePlayer) => p.skill + (p.gender === 'F' ? tune.genderOffsetFemale : 0);
   // 혼복 2:2의 남녀 급수 관계: 남자가 여자보다 최대 3단계 높아도 됨(남자가 받쳐주는 구조, 여자 F조가
@@ -1414,24 +1417,6 @@ export async function suggestNextFoursome(
     for (let i = 0; i < g.length; i++) for (let j = i + 1; j < g.length; j++) if (activeKeys.has(pkey(g[i].id, g[j].id))) return true;
     return false;
   };
-  const teamGap = (g: ModePlayer[]) => {
-    const e = g.map(effOf);
-    return Math.min(Math.abs(e[0] + e[1] - e[2] - e[3]), Math.abs(e[0] + e[2] - e[1] - e[3]), Math.abs(e[0] + e[3] - e[1] - e[2]));
-  };
-  // 그날 출석 구성에 맞춘 사람별 급수 폭 — 같은 성별에서 지금 규칙 범위 안에 같이 칠 사람이 몇 명인지로 정한다.
-  //   5명 이상: 그대로 / 3~4명: 평균보다 밀렸을 때만 +1 / 0~2명: 항상, 같이 칠 사람이 3명 될 때까지(최대 +4).
-  // 넓힌 판은 두 팀 급수 합 차이 3 이하(센 사람이 받쳐주는 구조)만. 실시간 시뮬레이션(오늘 구성, 남S 3명·남A·B 0명):
-  // 남S 시간당 판수 평균 대비 −23% → −10%. 초보 위주 모임의 A·S조 1명도 같은 방식으로 판이 돈다.
-  const allowedSpread = (g: ModePlayer[]) => {
-    let extra = 0;
-    for (const p of g) {
-      const e = levelExtra.get(p.id) ?? 0;
-      if (e === 0) continue;
-      if (scarceLevel.has(p.id) || levelRelaxed.has(p.id)) extra = Math.max(extra, e);
-    }
-    return spreadCap + extra;
-  };
-  const relaxedOk = (g: ModePlayer[], sp: number) => sp <= allowedSpread(g) && teamGap(g) <= 3;
   const ruleBreak = (g: ModePlayer[], activeKeys: Set<string>): string | null => {
     const f = g.filter((p) => p.gender === 'F');
     const m = g.filter((p) => p.gender === 'M');
@@ -1450,7 +1435,7 @@ export async function suggestNextFoursome(
         }
       }
       const sp = levelSpread(g, tune.genderOffsetFemale);
-      if (sp > spreadCap && !relaxedOk(g, sp)) return `급수 폭 ${sp}단계`;
+      if (sp > spreadCap) return `급수 폭 ${sp}단계`;
       const gap = mixedGap(g);
       // 여자 쪽 상한은 보정 급수(여자 2단계 후함)로 1단계까지 = 실제 급수로 3단계(여 A + 남 C는 실력이 맞는 혼복).
       if (gap != null && (gap > 3 || gap < -3)) return `혼복 남녀 급수 차이 ${gap > 0 ? '+' : ''}${gap}`;
@@ -1494,12 +1479,6 @@ export async function suggestNextFoursome(
         const owed = group.some(isOwed);
         const pref = owed ? 0.25 : 1;
         for (const p of group) c -= owedPull(p);
-        // 급수 폭을 한 단계 푼 판은 비용(정말 필요할 때만 — 규칙 안의 판이 있으면 그쪽)
-        // 넓힌 판 비용 — 같이 칠 사람이 거의 없는 사람(scarce)이 든 판은 그 사람에겐 이게 '보통 판'이라 약하게.
-        if (group.length === 4) {
-          const sp = levelSpread(group, tune.genderOffsetFemale);
-          if (sp > spreadCap) c += (group.some((p) => scarceLevel.has(p.id)) ? RELAX_COST_SCARCE : RELAX_COST) * (sp - spreadCap);
-        }
         if (group.length === 4 && !hasRequestPair(group, activeKeys)) {
           if (levelSpread(group, tune.genderOffsetFemale) === 2) c += spread2Over() && !planEval ? SPREAD2_OVER_COST : SPREAD2_COST;
           // 게임 수 맞추기 — 이 판에 들어가면 최소 판수와 N판 넘게 벌어지는 사람마다 큰 비용.
@@ -1614,8 +1593,12 @@ export async function suggestNextFoursome(
       for (let j = i + 1; j < ordered.length; j++)
         if ((pairCount[pkey(ordered[i].id, ordered[j].id)] ?? 0) > 0) repeats++;
     parts.push(repeats === 0 ? '오늘 처음 만나는 조합' : `오늘 겹침 ${repeats}쌍`);
+    for (const p of ordered) {
+      const v = virtualSkill.get(p.id);
+      if (v != null) parts.push(`${poolNames.get(p.id) ?? ''} 오늘 ${NUM_TO_SKILL[v]}조로 편성`);
+    }
     if (ordered.length === 4) {
-      const lv = (p: ModePlayer) => NUM_TO_SKILL[p.skill] ?? '?';
+      const lv = (p: ModePlayer) => NUM_TO_SKILL[realSkill.get(p.id) ?? p.skill] ?? '?';
       parts.push(`${lv(ordered[0])}${lv(ordered[1])} vs ${lv(ordered[2])}${lv(ordered[3])}`);
     }
     return parts.join(' · ').slice(0, 100);
@@ -1694,7 +1677,7 @@ export async function suggestNextFoursome(
       const substitutes = ranked.map((r) => {
         const id = r.playerIds.find((x) => !fixedIds.has(x))!;
         const p = byId.get(id)!;
-        const bits = [`${NUM_TO_SKILL[p.skill] ?? '?'}${p.gender === 'F' ? '·여' : p.gender === 'M' ? '·남' : ''}`];
+        const bits = [`${NUM_TO_SKILL[realSkill.get(p.id) ?? p.skill] ?? '?'}${p.gender === 'F' ? '·여' : p.gender === 'M' ? '·남' : ''}`];
         if (p.waitSeconds >= 60) bits.push(`${Math.round(p.waitSeconds / 60)}분 대기`);
         bits.push(`오늘 ${p.games}판`);
         if (playingNowIds.has(id)) bits.push('코트에서 곧 끝남');
@@ -1989,7 +1972,7 @@ export async function suggestNextFoursome(
         stuck.push({
           userId: p.id,
           name: poolNames.get(p.id) ?? '',
-          level: `${p.gender === 'F' ? '여' : p.gender === 'M' ? '남' : ''}${NUM_TO_SKILL[Math.min(7, Math.max(1, p.skill))]}`,
+          level: `${p.gender === 'F' ? '여' : p.gender === 'M' ? '남' : ''}${NUM_TO_SKILL[Math.min(7, Math.max(1, realSkill.get(p.id) ?? p.skill))]}`,
           waitMin: Math.round(p.waitSeconds / 60),
           reason,
         });
