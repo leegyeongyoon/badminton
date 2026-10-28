@@ -1859,7 +1859,7 @@ export default function OperateScreen() {
     if (clubSessionId) {
       const removed = await gameBoardApi.replanStale(clubSessionId).then((r) => r.data?.removed ?? 0).catch(() => 0);
       if (removed > 0) {
-        setAutoLastNote(`새로 온 사람·오래 기다린 사람 반영: 대기 게임 ${removed}개를 다시 짜요`);
+        setAutoLastNote(`새로 온 분·오래 기다린 분·쉬던 분 먼저 반영: 대기 게임 ${removed}개를 다시 짜요`);
         loadBoard(); loadPool();
         return; // 보드 갱신 뒤 다음 패스에서 다시 짠다
       }
@@ -1961,6 +1961,16 @@ export default function OperateScreen() {
     autoAssignLockRef.current = true;
     const t = setTimeout(async () => {
       try {
+        // 넣기 직전에 한 번 더 — 판이 예상보다 일찍 끝나 '쉬던 사람을 두고 방금 친 사람'이 든 판이 됐으면
+        // 서버가 지우고(자동 편성이 바로 다시 짬) 이번엔 넣지 않는다.
+        if (clubSessionId) {
+          const removed = await gameBoardApi.replanStale(clubSessionId).then((r) => r.data?.removed ?? 0).catch(() => 0);
+          if (removed > 0) {
+            setAutoLastNote(`쉬던 분 먼저: 대기 게임 ${removed}개를 다시 짜요`);
+            loadBoard(); loadPool();
+            return;
+          }
+        }
         await assignEntry(next.id, court.id);
         setAutoLastNote(`${court.name || '코트'} 자동 투입: ${next.playerNames?.slice(0, 2).join('·') || ''} 외`);
         loadBoard(); loadCourts(); loadPool();
@@ -1972,7 +1982,7 @@ export default function OperateScreen() {
       }
     }, 1200); // 게임 종료 직후 화면이 따라올 틈 + 다른 운영진과의 동시 투입 완화
     return () => { clearTimeout(t); autoAssignLockRef.current = false; };
-  }, [autoPilot, autoAssign, board, emptyCourts, queuedEntries, playingByCourtId, assignEntry, loadBoard, loadCourts, loadPool]);
+  }, [autoPilot, autoAssign, board, clubSessionId, emptyCourts, queuedEntries, playingByCourtId, assignEntry, loadBoard, loadCourts, loadPool]);
 
   // 게임 중 코트의 선수 1명을 교체(서버 replacePlayer). 성공 시 풀/보드/코트 갱신.
   const handleReplaceRunning = useCallback(async (replacementId: string) => {

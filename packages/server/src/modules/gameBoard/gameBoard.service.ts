@@ -477,7 +477,56 @@ export async function replanStaleQueue(clubSessionId: string, userId: string) {
     .map((c) => Math.max(c.checkedInAt.getTime(), lastEnd.get(c.userId) ?? 0) + LEFT_OUT_MS)
     .filter((at) => at <= nowMs);
   const leftOutBefore = crossAts.length ? Math.max(...crossAts) : 0;
-  const stale = board.entries.filter((e) => untouchedAi(e) && (lateArrival(e) || e.createdAt.getTime() < leftOutBefore));
+  // ③ 쉬던 사람 두고: 짠 판에 방금 친(또는 아직 치는) 사람이 있는데, 같은 성별·실제 급수 1단계 안·판수가 같거나
+  //    적고 그보다 3분 넘게 먼저 쉬기 시작한 사람이 아무 판 없이 쉬고 있으면 다시 짠다. 판 길이가 예상과 달라
+  //    (다른 코트가 먼저 끝남) 짤 때는 몰랐던 경우 — 짠 시각 뒤에 그 사람이 쉬기 시작했거나 이 사람이 끝났을 때만
+  //    (다시 짠 판은 그 뒤에 만들어지므로 같은 판을 반복해서 지우지 않는다).
+  const RESTED_MS = 3 * 60 * 1000;
+  const REST_GAP_MS = 6 * 60 * 1000;
+  const cs = await prisma.clubSession.findUnique({ where: { id: clubSessionId }, select: { clubId: true } });
+  const allIds = checkins.map((c) => c.userId);
+  const [profs, members, myTurns] = await Promise.all([
+    prisma.playerProfile.findMany({ where: { userId: { in: allIds } }, select: { userId: true, skillLevel: true, gender: true } }),
+    cs ? prisma.clubMember.findMany({ where: { clubId: cs.clubId, userId: { in: allIds } }, select: { userId: true, skillLevel: true } }) : [],
+    prisma.turnPlayer.findMany({
+      where: { userId: { in: allIds }, turn: { clubSessionId, status: { in: ['COMPLETED', 'PLAYING', 'WAITING'] } } },
+      select: { userId: true, turn: { select: { status: true, completedAt: true } } },
+    }),
+  ]);
+  const prof = new Map(profs.map((p) => [p.userId, p]));
+  const memberSkill = new Map(members.map((m) => [m.userId, m.skillLevel]));
+  const skillOf = (id: string) => skillToNum(memberSkill.get(id) ?? prof.get(id)?.skillLevel);
+  const gamesOf = new Map<string, number>();
+  const endOf = new Map<string, number>();
+  for (const t of myTurns) {
+    gamesOf.set(t.userId, (gamesOf.get(t.userId) ?? 0) + 1);
+    const at = t.turn.completedAt?.getTime() ?? 0;
+    if (t.turn.status === 'COMPLETED' && at > (endOf.get(t.userId) ?? 0)) endOf.set(t.userId, at);
+  }
+  const checkinAt = new Map(checkins.map((c) => [c.userId, c.checkedInAt.getTime()]));
+  // 쉬기 시작한 시각(아직 코트면 지금 — 적어도 지금보다 늦게 끝남)
+  const restFrom = (id: string) => (onCourt.has(id) ? nowMs : Math.max(checkinAt.get(id) ?? 0, endOf.get(id) ?? 0));
+  const cutsLine = (e: (typeof board.entries)[number]) => {
+    const made = e.createdAt.getTime();
+    return ((e.playerIds as string[]) ?? []).some((x) => {
+      const rx = restFrom(x);
+      if (rx <= nowMs - REST_GAP_MS) return false;
+      const g = prof.get(x)?.gender;
+      if (g !== 'M' && g !== 'F') return false;
+      return idle.some((c) => {
+        const y = c.userId;
+        const ry = restFrom(y);
+        return (
+          prof.get(y)?.gender === g &&
+          ry <= rx - RESTED_MS &&
+          Math.abs(skillOf(y) - skillOf(x)) <= 1 &&
+          (gamesOf.get(y) ?? 0) <= (gamesOf.get(x) ?? 0) &&
+          made < Math.max(ry, onCourt.has(x) ? 0 : rx)
+        );
+      });
+    });
+  };
+  const stale = board.entries.filter((e) => untouchedAi(e) && (lateArrival(e) || e.createdAt.getTime() < leftOutBefore || cutsLine(e)));
   if (stale.length === 0) return { removed: 0 };
   await prisma.gameBoardEntry.deleteMany({ where: { id: { in: stale.map((e) => e.id) }, status: 'QUEUED' } });
   const io = getIO();
@@ -1770,6 +1819,27 @@ export async function suggestNextFoursome(
   const games0 = gamesSoFar;
   const spread20 = spread2SoFar;
   const slotActives: Set<string>[] = []; // 판마다 그때 유효했던 파트너 요청(계획 다듬기에서 요청을 깨지 않게)
+  // 쉬던 사람 먼저(하드) — 방금 친(또는 아직 치는) 사람은, 같은 성별·실제 급수 1단계 안·판수가 같거나 적고
+  // 그보다 3분 넘게 먼저 쉬기 시작한(아직 코트에 있으면 먼저 끝나는) 사람보다 먼저 넣지 않는다. 판은 예상보다
+  // 일찍 시작되기 일쑤라(다른 코트가 먼저 빔) '지금 쉬는 중'만 보면 놓친다. 같은 4명·겹침을 피하려다 쉬던 사람을 두고 방금 친 사람이
+  // 또 들어갔다(3시간 시뮬레이션 4회: 7~13회 — 운영진: '판수는 비슷해도 되지만 순서는 공정해야').
+  const RESTED_MS = 3 * 60 * 1000;
+  const restFrom = (id: string) => Math.max(checkedInAtMs[id] ?? nowMs, lastEndMs[id] ?? 0, availBase.get(id) ?? 0);
+  const baseGames = (id: string) => ((playedGames[id] ?? 0) + (committedGames[id] ?? 0)) / gamesWeight(id);
+  const rsk = (id: string) => realSkill.get(id) ?? skillToNum(skillOverrideMap.get(id) ?? profileMap.get(id)?.skillLevel);
+  const restedBefore = new Map<string, string[]>(); // 방금 친 사람 → 그보다 먼저 들어가야 할 쉬던 사람들
+  for (const x of poolIds) {
+    if (restFrom(x) <= nowMs - REST_GAP_MS) continue;
+    const gx = genderOf.get(x);
+    if (gx !== 'M' && gx !== 'F') continue;
+    const ys = poolIds.filter(
+      (y) => y !== x && genderOf.get(y) === gx && restFrom(y) <= restFrom(x) - RESTED_MS && Math.abs(rsk(y) - rsk(x)) <= 1 && baseGames(y) <= baseGames(x) + 1e-9,
+    );
+    if (ys.length) restedBefore.set(x, ys);
+  }
+  // 이 판(그때 비는 사람 avail)에 쉬던 사람을 두고 들어간 사람이 있나
+  const cutsLine = (group: string[], avail: Set<string>) =>
+    group.some((x) => restedBefore.get(x)?.some((y) => avail.has(y) && !group.includes(y)));
   for (let slot = 0; slot < horizon; slot++) {
     // 쉬는 사람이 4명 이상이면 그들 중에서(지금 기준), 아니면 시간 기준(이 판 시작 시각에 비는 사람).
     const idleIds = poolIds.filter(isIdle);
@@ -1786,7 +1856,15 @@ export async function suggestNextFoursome(
     // 규칙은 지키지만 아쉬운 판(2단계 차이 · 혼복 비율 목표에서 벗어남)이면 바로 짜지 않고 다음 시점(코트에서
     // 나올 사람까지)도 본다 — 운영진이 '조금 기다리면 맞는 사람이 나온다'며 기다리는 방식. 끝까지 없으면 첫 후보.
     let fallback: { pk: { playerIds: string[] }; m: Map<string, ModePlayer>; at: number; sev: number } | null = null;
+    // 시점마다 먼저 '쉬던 사람 먼저'를 지킨 후보로, 안 되면 전체로(그 판은 크게 아쉬움 — 다른 시점이 낫다면 그쪽).
+    const tries: { at: number; ids: string[] }[] = [];
     for (const att of attempts) {
+      const set = new Set(att.ids);
+      const fair = att.ids.filter((x) => !restedBefore.get(x)?.some((y) => set.has(y)));
+      if (fair.length >= 4 && fair.length < att.ids.length) tries.push({ at: att.at, ids: fair });
+      tries.push(att);
+    }
+    for (const att of tries) {
       if (att.ids.length < 4) continue;
       const available = att.ids.map((id) => toModePlayer(id, att.at));
       gapAt = att.at;
@@ -1798,7 +1876,7 @@ export async function suggestNextFoursome(
       const m = new Map(available.map((p) => [p.id, p]));
       const g = pk4.playerIds.map((id) => m.get(id)!);
       if (ruleBreak(g, slotActive)) continue;
-      const sev = softIssue(g, slotActive);
+      const sev = softIssue(g, slotActive) + (cutsLine(pk4.playerIds, new Set(att.ids)) ? 10 : 0);
       if (sev > 0) {
         if (!fallback || sev < fallback.sev) fallback = { pk: pk4, m, at: att.at, sev };
         continue;
@@ -1943,6 +2021,8 @@ export async function suggestNextFoursome(
                 if (inRequestPair(i, x) || inRequestPair(j, y)) continue;
                 // 이번에 돌려줄 판(앞 count판)에서 오래 기다린 사람을 뒤 판으로 보내지 않는다.
                 if ((i < count && j >= count && waitedLong.has(x)) || (j < count && i >= count && waitedLong.has(y))) continue;
+                // 쉬던 사람 먼저 — 방금 친 y를 앞 판(i)으로 당기면서 그보다 먼저여야 할 쉬던 x를 뒤 판(j)으로 보내지 않는다.
+                if (restedBefore.get(y)?.includes(x)) continue;
                 groups[i][a] = y;
                 groups[j][b] = x;
                 if (canJoin(y, i, j) && canJoin(x, j, i)) {
