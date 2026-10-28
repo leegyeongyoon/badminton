@@ -1220,6 +1220,12 @@ export async function suggestNextFoursome(
     };
   };
   const modePool = poolIds.map((id) => toModePlayer(id, slotStart));
+  // 팀 나누기는 실제 급수로 — '오늘 편성용 급수'(virtualSkill)는 누구와 같이 칠지 고르는 데만 쓴다.
+  // 편성용 급수로 나누면 남E 둘 vs 남F 둘(둘 다 오늘 E조로 편성)이 '균형'으로 잡혀 한쪽이 계속 지는 판이 됐다.
+  const splitTeamsReal = (group: ModePlayer[], ...rest: Parameters<typeof splitTeams> extends [unknown, ...infer R] ? R : never): ModePlayer[] => {
+    const orig = new Map(group.map((p) => [p.id, p] as const));
+    return splitTeams(group.map((p) => ({ ...p, skill: realSkill.get(p.id) ?? p.skill })), ...rest).map((p) => orig.get(p.id) ?? p);
+  };
 
   // ── 짝 기록(겹침 회피, 최근일수록 무겁게) — 대기 게임은 '곧 칠 판'이라 최대 가중 ──
   const pairWeight: Record<string, number> = {};
@@ -1254,6 +1260,26 @@ export async function suggestNextFoursome(
     addPairWeight(g.players.map((p) => p.userId), t ? new Date(t).getTime() : 0);
   }
   for (const e of queued) addPairWeight((e.playerIds as string[]) ?? [], nowMs);
+  // 같은 4명이 또 한 판 — 짝마다 겹침(최대 6)보다 훨씬 지루하다(3시간 시뮬레이션: 같은 4명 다시 10~12회,
+  // 끝나자마자 같은 팀 그대로 다시 붙는 판 다수). 4명 묶음 단위로 따로 무겁게, 최근일수록 더.
+  const fourKey = (ids: string[]) => [...ids].sort().join('|');
+  const fourLast = new Map<string, number>();
+  for (const g of sessionGames) {
+    const ids = g.players.map((p) => p.userId);
+    if (ids.length !== 4) continue;
+    const t = g.turn?.completedAt ?? g.turn?.startedAt ?? g.updatedAt ?? g.createdAt;
+    const ms = t ? new Date(t).getTime() : 0;
+    const k = fourKey(ids);
+    fourLast.set(k, Math.max(fourLast.get(k) ?? 0, ms));
+  }
+  for (const e of queued) if (((e.playerIds as string[]) ?? []).length === 4) fourLast.set(fourKey(e.playerIds as string[]), nowMs);
+  const SAME_FOUR_COST = 40;
+  const sameFourCost = (ids: string[]): number => {
+    if (ids.length !== 4) return 0;
+    const last = fourLast.get(fourKey(ids));
+    if (last == null) return 0;
+    return SAME_FOUR_COST * Math.max(0.4, decay(last));
+  };
 
   let mode: SuggestMode = opts.mode ?? 'fair';
 
@@ -1453,6 +1479,9 @@ export async function suggestNextFoursome(
   const softIssue = (g: ModePlayer[], activeKeys: Set<string>): number => {
     if (g.length !== 4 || hasRequestPair(g, activeKeys)) return 0;
     let sev = 0;
+    // 방금 같이 친 4명 그대로 — 정모 초반 코트 하나가 먼저 끝나면 비는 사람이 그 4명뿐이라 바로 또 붙었다.
+    // 다른 코트가 곧 끝나면 그때 섞어서 짠다(3시간 시뮬레이션 2회: 정모 시작 직후 같은 4명 다시 4~5판).
+    if (sameFourCost(g.map((p) => p.id)) > 0) sev += 3;
     if (levelSpread(g, tune.genderOffsetFemale) >= 2 && spread2Over()) sev += 3;
     sev += 2 * g.filter(gapOver).length;
     // 한참 못 친 사람이 든 판이면 혼복 비율 때문에 기다리지 않는다(차례가 먼저).
@@ -1480,6 +1509,7 @@ export async function suggestNextFoursome(
         const ids = group.map((p) => p.id);
         const inGroup = new Set(ids);
         let c = ruleBreak(group, activeKeys) ? RULE_COST : 0;
+        if (!hasRequestPair(group, activeKeys)) c += sameFourCost(ids);
         // 차례 지키기: 밀린 사람(지금 후보들 평균보다 0.75판 이상 덜 침)이 든 판은 혼복 비율·급수별 혼복·
         // 게임 종류 같은 '선호' 비용을 약하게 — 선호 때문에 사람이 굶지 않게. 급수·성별 규칙(하드)은 그대로.
         const owed = group.some(isOwed);
@@ -1709,7 +1739,7 @@ export async function suggestNextFoursome(
         mode,
         note: `급수·성별 규칙(급수 폭 ${spreadCap}단계, 여자 C 이하 혼복·여복)에 맞는 사람이 아직 없어요 — 코트에서 나오면 채워요`,
       };
-    const ordered = splitTeams(ranked[0].playerIds.map((id) => byId.get(id)!).filter(Boolean), tune.genderOffsetFemale, pairWeight, slotActive);
+    const ordered = splitTeamsReal(ranked[0].playerIds.map((id) => byId.get(id)!).filter(Boolean), tune.genderOffsetFemale, pairWeight, slotActive);
     return {
       suggestions: [
         {
@@ -1791,7 +1821,7 @@ export async function suggestNextFoursome(
     slotStart = chosenAt;
 
     // 팀까지 짜준다 — 실효 급수 합이 가장 비슷한 2:2(남녀 2:2면 각 팀 남녀 1명씩), 순서 [A1, A2, B1, B2].
-    const ordered = splitTeams(
+    const ordered = splitTeamsReal(
       picked.playerIds.map((id) => byId.get(id)!).filter(Boolean),
       tune.genderOffsetFemale,
       pairWeight,
@@ -1945,7 +1975,7 @@ export async function suggestNextFoursome(
     for (let i = 0; i < K; i++) {
       if (groups[i].every((id) => slotPlayerIds[i].includes(id))) continue;
       slotActive = slotActives[i]; // 이유 문구의 '요청: A·B 파트너'도 그 판 기준
-      const ordered = splitTeams(groups[i].map((id) => mp(id, i)), tune.genderOffsetFemale, pairWeight, slotActives[i]);
+      const ordered = splitTeamsReal(groups[i].map((id) => mp(id, i)), tune.genderOffsetFemale, pairWeight, slotActives[i]);
       slotPlayerIds[i] = ordered.map((p) => p.id);
       slotReasons[i] = buildReason(ordered, starts[i]);
     }
