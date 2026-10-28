@@ -4570,6 +4570,52 @@ export default function OperateScreen() {
     </View>
   );
 
+  // 게임판 아래 고정 한 줄 — 요청·메모를 작게 보여주고 바로 입력. 전체 관리는 탭하면 창으로.
+  const reqCount = requests.length + memoLines.length;
+  const requestsDock = (
+    <View style={[styles.reqDock, { left: narrowSlots ? 8 : 108, backgroundColor: colors.surface, borderColor: colors.border }]}>
+      <TouchableOpacity onPress={() => setRequestsOpen(true)} style={styles.reqDockHead} accessibilityLabel="요청·메모 전체 보기">
+        <Text style={[styles.reqDockTitle, { color: colors.text }]}>📌 요청·메모{reqCount > 0 ? ` ${reqCount}` : ''}</Text>
+      </TouchableOpacity>
+      <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ flexShrink: 1, flexGrow: 1, minWidth: 0 }} contentContainerStyle={styles.reqDockChips} keyboardShouldPersistTaps="handled">
+        {requestIssues.size > 0 && (
+          <TouchableOpacity onPress={regenForRequests} disabled={regenerating} style={[styles.reqDockChip, { backgroundColor: colors.warning }]} accessibilityLabel="요청대로 대기 게임 다시 짜기">
+            <Text style={[styles.reqDockChipT, { color: '#fff' }]}>⚠ 요청과 다름 {requestIssues.size} · 다시 짜기</Text>
+          </TouchableOpacity>
+        )}
+        {requests.map((r) => (
+          <TouchableOpacity key={r.id} onPress={() => setRequestsOpen(true)} style={[styles.reqDockChip, { backgroundColor: r.kind === 'APART' ? colors.dangerBg : colors.primaryBg, opacity: r.kind === 'TOGETHER' && r.remaining === 0 ? 0.55 : 1 }]}>
+            <Text style={[styles.reqDockChipT, { color: colors.text }]} numberOfLines={1}>{r.kind === 'APART' ? '🚫' : '🤝'} {r.aName}·{r.bName} <Text style={{ color: r.kind === 'APART' ? colors.danger : colors.primary }}>{reqDesc(r)}</Text></Text>
+          </TouchableOpacity>
+        ))}
+        {memoLines.map((l, i) => {
+          const { tag, rest } = parseMemoLine(l);
+          return (
+            <TouchableOpacity key={`m${i}`} onPress={() => setRequestsOpen(true)} style={[styles.reqDockChip, { borderWidth: 1, borderColor: colors.border }]}>
+              <Text style={[styles.reqDockChipT, { color: colors.text }]} numberOfLines={1}>{tag ? `[${tag}] ` : ''}{rest || l}</Text>
+            </TouchableOpacity>
+          );
+        })}
+      </ScrollView>
+      <TextInput
+        value={askText}
+        onChangeText={setAskText}
+        onSubmitEditing={askAI}
+        returnKeyType="send"
+        placeholder="부탁·메모 입력"
+        placeholderTextColor={colors.textLight}
+        style={[styles.reqDockInput, { color: colors.text, backgroundColor: colors.surfaceSecondary }]}
+        accessibilityLabel="요청이나 메모 입력"
+      />
+      <TouchableOpacity onPress={askAI} disabled={!askText.trim() || asking} style={[styles.reqDockBtn, { backgroundColor: askText.trim() ? colors.primary : colors.surfaceSecondary }]} accessibilityLabel="AI로 요청 적용">
+        {asking ? <ActivityIndicator size="small" color="#fff" /> : <Text style={[styles.reqDockBtnT, { color: askText.trim() ? '#fff' : colors.textLight }]}>🤖 AI</Text>}
+      </TouchableOpacity>
+      <TouchableOpacity onPress={saveAsMemo} disabled={!askText.trim()} style={[styles.reqDockBtn, { borderWidth: 1, borderColor: colors.border }]} accessibilityLabel="메모로 남기기">
+        <Text style={[styles.reqDockBtnT, { color: askText.trim() ? colors.text : colors.textLight }]}>메모</Text>
+      </TouchableOpacity>
+    </View>
+  );
+
   // 요청 고르기 창 — 두 사람 탭 → 파트너(1/2/3게임/계속) 또는 같이 안 짜기.
   // (훅 아님 — 이 아래엔 조건부 return 뒤에서도 실행되는 코드가 있어 useMemo를 쓰면 훅 개수가 달라진다)
   const reqQuery = (reqModal?.q || '').trim();
@@ -5720,6 +5766,7 @@ export default function OperateScreen() {
 
       {/* 아래: 게임판(가운데) + 대기=게임 기록(오른쪽) */}
       <View style={styles.m2Body}>
+        <View style={{ flex: 1, minWidth: 0 }}>
         <ScrollView style={styles.m2Center} contentContainerStyle={styles.m2CenterScroll} keyboardShouldPersistTaps="handled">
           <Text style={[styles.m2SectionLabel, { color: colors.textSecondary }]}>다음 게임 · {GAME_COL}개씩 세로 · 선수 탭/드래그로 편성</Text>
           <View style={styles.m2GameCols}>
@@ -5729,9 +5776,9 @@ export default function OperateScreen() {
               </View>
             ))}
           </View>
-          {/* 📌 요청·메모 — 게임판 아래(오른쪽 대기 명단을 좁히지 않게). */}
-          <View style={{ marginTop: spacing.md }}>{requestsPanel}</View>
         </ScrollView>
+        {requestsDock}
+        </View>
         {/* 분할 디바이더 — 끌어서 가운데 게임판 ↔ 오른쪽 대기판 크기 조절(모드1 분할처럼) */}
         <View style={[styles.m2Divider, Platform.OS === 'web' ? ({ cursor: 'col-resize' } as any) : null]} {...m2DividerPan.panHandlers}>
           <View style={[styles.m2DividerBar, { backgroundColor: colors.border }]} />
@@ -7520,6 +7567,15 @@ const styles = StyleSheet.create({
   vsInline: { fontSize: 12, fontWeight: '800', alignSelf: 'center', paddingHorizontal: 2 },
   vsRow: { width: '100%', textAlign: 'center', fontSize: 11, fontWeight: '800', marginVertical: -2 },
   autoReason: { fontSize: 11, marginTop: 4 },
+  reqDock: { position: 'absolute', right: 8, bottom: 14, height: 44, flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 8, borderWidth: 1, borderRadius: 22, shadowColor: '#000', shadowOpacity: 0.12, shadowRadius: 6, shadowOffset: { width: 0, height: 2 }, elevation: 4 },
+  reqDockHead: { paddingHorizontal: 6, paddingVertical: 4 },
+  reqDockTitle: { fontSize: 13, fontWeight: '800' },
+  reqDockChips: { gap: 5, alignItems: 'center' },
+  reqDockChip: { height: 28, paddingHorizontal: 10, borderRadius: 14, justifyContent: 'center', maxWidth: 260 },
+  reqDockChipT: { fontSize: 12, fontWeight: '600' },
+  reqDockInput: { width: 170, height: 32, borderRadius: 16, paddingHorizontal: 12, fontSize: 13 },
+  reqDockBtn: { height: 32, paddingHorizontal: 12, borderRadius: 16, justifyContent: 'center', alignItems: 'center' },
+  reqDockBtnT: { fontSize: 12, fontWeight: '700' },
   reqPanel: { borderWidth: 1.5, borderRadius: radius.md, padding: 10, gap: 6, marginBottom: 10 },
   reqHead: { flexDirection: 'row', alignItems: 'center', gap: 6 },
   reqTitle: { fontSize: 15, fontWeight: '800' },
