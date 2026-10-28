@@ -5392,7 +5392,7 @@ export default function OperateScreen() {
     { key: 'm30', label: '⏱ 30분 이상 편성 안 됨', color: colors.warning, ids: wb.m30 },
     { key: 'm15', label: '⏱ 15분 이상 편성 안 됨', color: '#CA8A04', ids: wb.m15 },
     { key: 'fresh', label: '아직 안 친 선수 · 급수순', color: colors.textSecondary, ids: wb.fresh },
-    { key: 'recent', label: '방금 끝난 게임 (15분 이내)', color: colors.textLight, ids: wb.recent },
+    { key: 'recent', label: '방금 끝남 · 쉬는 중 (곧 다음 판)', color: colors.textLight, ids: wb.recent },
   ] as Array<{ key: string; label: string; color: string; ids: string[] }>).filter((s) => s.ids.length > 0);
   const chunk4 = (arr: string[]): string[][] => { const out: string[][] = []; for (let i = 0; i < arr.length; i += 4) out.push(arr.slice(i, i + 4)); return out; };
   // 코트에 들어간(게임 중) 묶음 — 대기 맨 아래에 묶음으로 보여 '게임 치는 동안 다음 게임 미리 편성'.
@@ -5827,6 +5827,12 @@ export default function OperateScreen() {
         {/* 오른쪽 대기판 = 대기 명단을 '같이 나온 4명'끼리 한 줄로 정렬. 그 4명을 탭→다음 게임으로 재편성. */}
         <View style={[styles.m2PoolRight, { borderLeftColor: colors.border, width: m2RightWidth }]}>
           <Text style={[styles.m2PanelTitle, { color: colors.text }]}>대기 명단 ({pool.length}) · 급수순</Text>
+          {/* 자동 편성 중엔 '왜 이 사람들은 아직 게임에 없나'를 한 줄로 — 대기 게임은 일부러 몇 판만 미리 짠다. */}
+          {autoPilot && (
+            <Text style={[styles.m2AutoHint, { color: colors.textSecondary, backgroundColor: colors.surfaceSecondary }]}>
+              🤖 대기 게임 {queuedEntries.filter((e) => e.playerIds.length >= 4).length}판 미리 짜둠 · 여기 {pool.length}명은 코트가 비는 대로 이어서 짜요(방금 친 분은 조금 쉬고)
+            </Text>
+          )}
           {/* 대기 명단 검색 + 성별 필터 — 가운데 게임은 그대로, 대기만 추림 */}
           <View style={styles.m2PoolSearchRow}>
             {/* 대기 검색창 제거 — 굳이 검색 안 해도 되어 성별/급수 필터만 둔다(PC·태블릿 공통). */}
@@ -5864,7 +5870,8 @@ export default function OperateScreen() {
                     {waitSections.map((sec) => {
                       // 태블릿/폰: 이미 편성된(inQueue) 선수는 빈칸으로 남기지 않고 빼서 대기자만
                       // 4명씩 깔끔히 묶는다(흩어짐 방지). 데스크톱은 기존대로 자리 유지.
-                      const secIds = narrowSlots ? sec.ids.filter((id) => !inQueue.has(id)) : sec.ids;
+                      // 자동 편성 중엔 대기 게임에 든 사람 빈칸을 남기지 않는다 — 몇 명만 남으면 흩어져 보여 '빠진 사람'처럼 보임.
+                      const secIds = narrowSlots || autoPilot ? sec.ids.filter((id) => !inQueue.has(id)) : sec.ids;
                       if (secIds.length === 0) return null;
                       return (
                       <View key={sec.key} style={{ gap: 3 }}>
@@ -7281,6 +7288,7 @@ const styles = StyleSheet.create({
   gameDelBtn: { padding: 3, marginLeft: 4, borderRadius: radius.sm },
   gameOrderBtn: { paddingHorizontal: 3, paddingVertical: 1 },
   gameOrderT: { fontSize: 11, fontWeight: '900', lineHeight: 13 },
+  m2AutoHint: { fontSize: 11, lineHeight: 15, borderRadius: 8, paddingHorizontal: 8, paddingVertical: 5, marginBottom: 6 },
   m2LeftHead: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: spacing.sm, marginBottom: 8 },
   m2CmdWrap: { flex: 1, flexDirection: 'row', alignItems: 'center', gap: 5, paddingHorizontal: 8, height: 34, borderWidth: 1.5, borderRadius: radius.md },
   m2CmdInput: { flex: 1, minWidth: 0, ...typography.body2 },
