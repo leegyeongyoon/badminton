@@ -51,6 +51,8 @@ export function GameFeedbackPrompt() {
           if (p && !skipped.has(p.turnId)) {
             setPending(p);
             setAskReason(false);
+          } else if (!turnId) {
+            setPending(null); // 다시 확인했더니 물을 판이 없음(다음 판을 치는 중 등) → 카드 내림
           }
         })
         .catch(() => {});
@@ -64,6 +66,8 @@ export function GameFeedbackPrompt() {
     return () => sub.remove();
   }, [check]);
   useSocketEvent<{ turnId: string }>('game:feedbackAsk', (d) => { if (d?.turnId) check(d.turnId); });
+  // 내가 다음 판에 들어가면 서버가 '치는 중'이라 안 물어본다 → 카드도 내린다.
+  useSocketEvent('turn:started', () => { if (pending) check(); });
 
   const send = (rating: FeedbackRating, reason?: FeedbackReason | null) => {
     if (!pending) return;

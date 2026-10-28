@@ -73,6 +73,14 @@ export async function pendingFeedback(userId: string, turnId?: string) {
         .then((t) => (t ? turnForFeedback(t.id) : null));
   if (!turn || turn.status !== 'COMPLETED' || !turn.clubSessionId || !turn.players.some((p) => p.userId === userId)) return null;
   if (!turn.completedAt || turn.completedAt < since) return null;
+  // 지금 다른 판을 치는 중이면 묻지 않는다(코트 위에서 폰 볼 일 없음 — 끝나면 그 판을 묻는다).
+  const playingNow = await prisma.courtTurn.count({ where: { status: 'PLAYING', players: { some: { userId } } } });
+  if (playingNow > 0) return null;
+  // 그 판 뒤에 다른 정모에 출석했다면 이전 정모 판은 묻지 않는다(모임이 여러 개거나 다음 정모가 바로 이어질 때).
+  const newer = await prisma.checkIn.count({
+    where: { userId, checkedInAt: { gt: turn.completedAt }, clubSessionId: { not: turn.clubSessionId } },
+  });
+  if (newer > 0) return null;
   const done = await prisma.gameFeedback.findUnique({ where: { turnId_userId: { turnId: turn.id, userId } } });
   if (done) return null;
   return {

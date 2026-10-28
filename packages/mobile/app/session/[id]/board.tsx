@@ -27,6 +27,8 @@ import api from '../../../services/api';
 import { typography, spacing, radius, palette, breakpoints } from '../../../constants/theme';
 
 const POLL_INTERVAL_MS = 7000;
+// 내 대기 게임 예상 시간 계산용 한 판 길이(분) — 대략값.
+const GAME_MIN = 13;
 
 interface Player {
   userId: string;
@@ -36,6 +38,7 @@ interface Player {
   status: string;
   gamesPlayedToday?: number;
   isGuest?: boolean;
+  lastPlayedAt?: string | null;
 }
 
 /**
@@ -196,13 +199,16 @@ export default function ViewBoardScreen() {
     return s;
   }, [playingByCourtId]);
 
-  // Waiting line = checked-in players not currently on a court (available + resting),
+  // 대기 게임(다음 게임 대기열)에 든 사람 — 머리줄·내 상태에서 '대기 게임'과 '아직 안 잡힘'을 나눠 보여준다.
+  const queuedIds = useMemo(() => new Set(queuedEntries.flatMap((e) => e.playerIds)), [queuedEntries]);
+
+  // Waiting line = checked-in players not on a court and not yet in a queued game (available + resting),
   // sorted by fewest games (the rough fairness order).
   const waiting = useMemo(
     () => uniquePlayers
-      .filter((p) => !onCourtPlayerIds.has(p.userId) && (p.status === 'AVAILABLE' || p.status === 'RESTING'))
+      .filter((p) => !onCourtPlayerIds.has(p.userId) && !queuedIds.has(p.userId) && (p.status === 'AVAILABLE' || p.status === 'RESTING'))
       .sort((a, b) => (a.gamesPlayedToday ?? 0) - (b.gamesPlayedToday ?? 0)),
-    [uniquePlayers, onCourtPlayerIds],
+    [uniquePlayers, onCourtPlayerIds, queuedIds],
   );
 
   // /courts 응답이 이미 "이 정모의 코트"만 authoritative 하게 돌려주므로, courtIds로
@@ -226,6 +232,30 @@ export default function ViewBoardScreen() {
     () => !!user?.id && !myCourtId && waiting.some((p) => p.userId === user.id),
     [user?.id, myCourtId, waiting],
   );
+
+  // 내가 든 대기 게임 — 몇 번째인지·대략 몇 분 뒤인지·같이 칠 사람. 예상 시간은 코트마다 '한 판 ≈ GAME_MIN분'으로
+  // 지금 판이 끝나는 순서대로 대기 게임을 차례로 넣어 본 값(대략 — 판 길이·운영진 조정에 따라 달라짐).
+  const myQueue = useMemo(() => {
+    if (!user?.id || myCourtId) return null;
+    const idx = queuedEntries.findIndex((e) => e.playerIds.includes(user.id));
+    if (idx < 0) return null;
+    const free = displayCourts.map((c) => {
+      const pl = playingByCourtId.get(c.id);
+      if (!pl) return 0;
+      const el = pl.startedAt ? (nowTs - new Date(pl.startedAt).getTime()) / 60000 : 0;
+      return Math.max(1, GAME_MIN - el);
+    }).sort((a, b) => a - b);
+    let eta = 0;
+    for (let k = 0; k <= idx && free.length; k++) { free.sort((a, b) => a - b); eta = free[0]; free[0] += GAME_MIN; }
+    const entry = queuedEntries[idx];
+    const others = entry.playerIds.map((id, i) => (id === user.id ? null : getPlayer(id)?.userName || entry.playerNames?.[i] || '')).filter(Boolean) as string[];
+    return { pos: idx + 1, eta: Math.round(eta), others };
+  }, [user?.id, myCourtId, queuedEntries, displayCourts, playingByCourtId, nowTs, getPlayer]);
+  // 아직 대기 게임에 없을 때 — 방금 쳤으면 쉬는 중, 아니면 다음 판 짜는 중.
+  const meRestingJustPlayed = useMemo(() => {
+    const lp = user?.id ? getPlayer(user.id)?.lastPlayedAt : null;
+    return !!lp && nowTs - new Date(lp).getTime() < 8 * 60000;
+  }, [user?.id, getPlayer, nowTs]);
 
   // ─────────────────────────────────────────────────────────
   // Sub-renderers
@@ -353,7 +383,7 @@ export default function ViewBoardScreen() {
               {clubName ? `${clubName} 현황 보드` : '게임 현황 보드'}
             </Text>
             <Text style={[styles.headerSub, { color: colors.textSecondary }]}>
-              코트 {displayCourts.length}개 · 대기 {waiting.length}명
+              코트 {displayCourts.length}개 · 다음 게임 {queuedIds.size}명 · 편성 전 {waiting.length}명
             </Text>
           </View>
           <View style={[styles.liveDotWrap, { backgroundColor: colors.secondaryLight }]}>
@@ -375,11 +405,27 @@ export default function ViewBoardScreen() {
               <Text style={styles.myBannerCourt}>{myCourtName || '코트'}로 입장하세요</Text>
             </View>
           </View>
+        ) : myQueue ? (
+          <View style={[styles.myBannerWait, { backgroundColor: colors.primaryBg, borderColor: colors.primary }]}>
+            <Icon name="waiting" size={18} color={colors.primary} />
+            <View style={{ flex: 1 }}>
+              <Text style={[styles.myBannerWaitText, { color: colors.primary }]}>
+                다음 게임 {myQueue.pos}번째예요 · {myQueue.eta <= 1 ? '곧 들어가요' : `약 ${myQueue.eta}분 뒤`}
+              </Text>
+              {myQueue.others.length > 0 && (
+                <Text style={[styles.myBannerWaitSub, { color: colors.textSecondary }]} numberOfLines={1}>같이 쳐요: {myQueue.others.join(' · ')}</Text>
+              )}
+            </View>
+          </View>
         ) : isMeWaiting ? (
           <View style={[styles.myBannerWait, { backgroundColor: colors.surface, borderColor: colors.primary }]}>
             <Icon name="waiting" size={18} color={colors.primary} />
             <Text style={[styles.myBannerWaitText, { color: colors.primary }]}>
-              대기 중이에요 — 배정되면 여기에서 바로 보여요
+              {meRestingJustPlayed
+                ? '방금 치셨어요 — 잠깐 쉬고 다음 판에 들어가요'
+                : queuedEntries.length > 0
+                  ? `다음 판을 짜고 있어요 · 앞에 대기 게임 ${queuedEntries.length}판`
+                  : '다음 판을 짜고 있어요 — 잡히면 여기에서 바로 보여요'}
             </Text>
           </View>
         ) : null}
@@ -492,10 +538,10 @@ export default function ViewBoardScreen() {
         )}
 
         {/* Waiting line — scannable grid so spectators see who's up next at a glance */}
-        <Text style={[styles.sectionTitle, { color: colors.textSecondary }]}>대기 중 {waiting.length}명</Text>
+        <Text style={[styles.sectionTitle, { color: colors.textSecondary }]}>아직 다음 게임에 없는 분 {waiting.length}명</Text>
         {waiting.length === 0 ? (
           <View style={styles.waitWrap}>
-            <Text style={[styles.empty, { color: colors.textLight }]}>대기 중인 사람이 없어요</Text>
+            <Text style={[styles.empty, { color: colors.textLight }]}>모두 코트나 다음 게임에 있어요</Text>
           </View>
         ) : (
           <View style={styles.waitGrid}>
@@ -564,6 +610,7 @@ const styles = StyleSheet.create({
     borderRadius: radius.card, borderWidth: 1.5, padding: spacing.md, marginBottom: spacing.sm,
   },
   myBannerWaitText: { ...typography.subtitle2, flex: 1 },
+  myBannerWaitSub: { ...typography.caption, marginTop: 2 },
 
   sectionTitle: { ...typography.subtitle2, fontSize: 15, marginTop: spacing.md, marginBottom: spacing.sm, paddingHorizontal: spacing.xs },
 

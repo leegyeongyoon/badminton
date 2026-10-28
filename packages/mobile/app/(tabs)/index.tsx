@@ -240,7 +240,8 @@ export default function HomeScreen() {
           <Text style={[styles.headerName, { color: colors.text }]} numberOfLines={1}>
             {greetingName}님
           </Text>
-          {!!skillLevel && <Tag label={`${skillLevel}조`} />}
+          {/* 모임마다 급수가 다를 수 있어 모임이 있으면 급수는 모임별로(아래 오늘 정모·내 모임)에 보여준다. */}
+          {!!skillLevel && clubs.length === 0 && <Tag label={`${skillLevel}조`} />}
           <View style={{ flex: 1 }} />
           <Pressable onPress={() => router.push('/notifications')} hitSlop={8}>
             <Icon name="notification" size={20} color={colors.textSecondary} />
@@ -316,7 +317,10 @@ export default function HomeScreen() {
                     <Text style={[styles.sessionSub, { color: colors.textSecondary }]} numberOfLines={1}>
                       {dateLabel} · {session.facilityName}
                     </Text>
-                    <Text style={[styles.mineState, { color: mineTint }]}>{mineLabel}</Text>
+                    <Text style={[styles.mineState, { color: mineTint }]}>
+                      {mineLabel}
+                      {(() => { const lv = clubs.find((c) => c.id === session.clubId)?.mySkillLevel ?? skillLevel; return lv ? <Text style={{ color: colors.textSecondary }}>{`  ·  이 모임 ${lv}조`}</Text> : null; })()}
+                    </Text>
 
                     <View style={styles.sessionActions}>
                       {isStaff ? (
@@ -368,6 +372,7 @@ export default function HomeScreen() {
                     </View>
                     <Text style={[styles.clubName, { color: colors.text }]} numberOfLines={1}>{c.name}</Text>
                     {isStaff && <Tag label="운영진" variant="primary" />}
+                    {!!(c.mySkillLevel ?? skillLevel) && <Tag label={`${c.mySkillLevel ?? skillLevel}조`} />}
                     <View style={{ flex: 1 }} />
                     {c.memberCount != null && (
                       <Text style={[styles.clubMeta, { color: colors.textLight }]}>{c.memberCount}명</Text>

@@ -3,6 +3,7 @@ import { View, Text, ActivityIndicator, StyleSheet } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useAuthStore } from '../store/authStore';
 import { usePendingAttendStore } from '../store/pendingAttendStore';
+import { useOnboardingStore } from '../store/onboardingStore';
 import { useTheme } from '../hooks/useTheme';
 import { typography, spacing } from '../constants/theme';
 
@@ -20,6 +21,7 @@ export default function AttendScreen() {
   const { session } = useLocalSearchParams<{ session?: string }>();
   const { isAuthenticated } = useAuthStore();
   const { setPendingAttendSessionId } = usePendingAttendStore();
+  const completeOnboarding = useOnboardingStore((s) => s.completeOnboarding);
   const { colors } = useTheme();
   const handledRef = useRef(false);
 
@@ -37,6 +39,8 @@ export default function AttendScreen() {
 
       // Persist the pending 정모 id so it survives login + profile-setup.
       await setPendingAttendSessionId(trimmed);
+      // QR로 온 사람은 체육관에서 바로 내 순서를 보고 싶다 — 앱 소개 슬라이드는 건너뛴다.
+      await completeOnboarding();
 
       // If not authenticated, send them to login. The id stays pending and the
       // gate will consume it once they're authenticated with a complete profile.

@@ -11,6 +11,7 @@ interface Club {
   memberCount: number;
   role?: string;
   isLeader?: boolean;
+  mySkillLevel?: string | null; // 이 모임에서의 내 급수
 }
 
 interface ClubMember {

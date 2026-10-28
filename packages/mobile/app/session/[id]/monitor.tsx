@@ -154,7 +154,7 @@ export default function MonitorScreen() {
         </View>
         <View style={styles.topRight}>
           <Text style={[styles.checkinCount, { color: colors.text }]}>체크인 {checkedInCount}명</Text>
-          <Text style={[styles.waitCount, { color: colors.primary }]}>대기 {waiting.length}명</Text>
+          <Text style={[styles.waitCount, { color: colors.primary }]}>다음 게임 {new Set(queuedEntries.flatMap((e) => e.playerIds)).size}명 · 편성 전 {waiting.length}명</Text>
           <Text style={[styles.clock, { color: colors.textSecondary }]}>{nowClock}</Text>
           <Pressable onPress={() => router.back()} hitSlop={12} style={styles.exitBtn} accessibilityLabel="모니터 닫기">
             <Icon name="close" size={24} color={colors.textSecondary} />
@@ -196,7 +196,7 @@ export default function MonitorScreen() {
       {/* 대기 중(편성 전) — 얇은 스트립 */}
       {waiting.length > 0 && (
         <View style={[styles.waitStrip, { borderTopColor: colors.border, backgroundColor: colors.surface }]}>
-          <Text style={[styles.stripLabel, { color: colors.textSecondary }]}>대기 중 {waiting.length}</Text>
+          <Text style={[styles.stripLabel, { color: colors.textSecondary }]}>편성 전 {waiting.length}</Text>
           <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.waitRow}>
             {waiting.map((p) => {
               const skill = getSkillMeta(p.skillLevel);

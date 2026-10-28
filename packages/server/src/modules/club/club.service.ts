@@ -280,6 +280,7 @@ export async function listMyClubs(userId: string, role?: string) {
     clubType: m.club.clubType,
     memberCount: m.club._count.members,
     role: m.role,
+    mySkillLevel: m.skillLevel ?? null, // 이 모임에서의 내 급수(모임마다 다를 수 있음)
     createdAt: m.club.createdAt.toISOString(),
   }));
 }
