@@ -4571,21 +4571,82 @@ export default function OperateScreen() {
     </View>
   );
 
-  // 게임판 오른쪽 아래에 떠 있는 토글 — 누르면 요청·메모 패널이 위로 펼쳐짐(명령 버튼과 같은 방식).
+  // 게임판 오른쪽 아래에 떠 있는 작은 토글 — 누르면 작은 요청·메모 창이 위로 펼쳐짐. 큰 관리 창은 더보기 메뉴에.
   const reqCount = requests.length + memoLines.length;
   const requestsDock = (
     <View pointerEvents="box-none" style={styles.reqDock}>
       {reqDockOpen && (
-        <View style={[styles.reqDockCard, { backgroundColor: colors.surface, borderColor: colors.border }]}>
-          <ScrollView style={{ maxHeight: 460, borderRadius: radius.md }} keyboardShouldPersistTaps="handled"><View style={{ marginBottom: -10 }}>{requestsPanel}</View></ScrollView>
+        <View style={[styles.rdCard, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+          <View style={styles.rdHead}>
+            <Text style={[styles.rdTitle, { color: colors.text }]}>요청·메모</Text>
+            <Text style={[styles.rdSub, { color: colors.textLight }]} numberOfLines={1}>자동 편성이 지켜요</Text>
+            <View style={{ flex: 1 }} />
+            <TouchableOpacity onPress={() => setReqModal({ kind: 'TOGETHER', aId: null, bId: null, games: 1, q: '' })} hitSlop={6} accessibilityLabel="요청 추가">
+              <Text style={[styles.rdLink, { color: colors.primary }]}>+ 요청</Text>
+            </TouchableOpacity>
+          </View>
+          {requestIssues.size > 0 && (
+            <TouchableOpacity onPress={regenForRequests} disabled={regenerating} style={[styles.rdWarn, { backgroundColor: colors.warningBg }]} accessibilityLabel="요청대로 대기 게임 다시 짜기">
+              {regenerating ? <ActivityIndicator size="small" color={colors.warning} /> : (
+                <Text style={[styles.rdRowT, { color: colors.warning }]} numberOfLines={1}>⚠ 요청과 다른 대기 게임 {requestIssues.size}개 · 다시 짜기</Text>
+              )}
+            </TouchableOpacity>
+          )}
+          <ScrollView style={{ maxHeight: 220 }} keyboardShouldPersistTaps="handled">
+            {reqCount === 0 && <Text style={[styles.rdEmpty, { color: colors.textLight }]}>예) 철수 영희 파트너 2게임 · 코트3 셔틀 교체</Text>}
+            {requests.map((r) => (
+              <View key={r.id} style={[styles.rdRow, { borderBottomColor: colors.divider, opacity: r.kind === 'TOGETHER' && r.remaining === 0 ? 0.5 : 1 }]}>
+                <Text style={styles.rdIcon}>{r.kind === 'APART' ? '🚫' : '🤝'}</Text>
+                <Text style={[styles.rdRowT, { color: colors.text, flex: 1 }]} numberOfLines={1}>
+                  {r.aName}·{r.bName} <Text style={{ color: r.kind === 'APART' ? colors.danger : colors.primary }}>{reqDesc(r)}</Text>
+                </Text>
+                <TouchableOpacity onPress={() => removeRequest(r.id)} hitSlop={8} accessibilityLabel={`요청 삭제: ${r.aName} ${r.bName}`}>
+                  <Text style={[styles.rdDel, { color: colors.textLight }]}>✕</Text>
+                </TouchableOpacity>
+              </View>
+            ))}
+            {memoLines.map((l, i) => {
+              const { tag, rest } = parseMemoLine(l);
+              return (
+                <View key={`m${i}`} style={[styles.rdRow, { borderBottomColor: colors.divider }]}>
+                  <Text style={styles.rdIcon}>📝</Text>
+                  <TouchableOpacity style={{ flex: 1, minWidth: 0 }} onPress={() => editMemoLine(i)} accessibilityLabel={`메모 수정: ${rest}`}>
+                    <Text style={[styles.rdRowT, { color: colors.text }]} numberOfLines={2}>{tag ? `[${tag}] ` : ''}{rest || l}</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity onPress={() => removeMemoLine(i)} hitSlop={8} accessibilityLabel="메모 삭제">
+                    <Text style={[styles.rdDel, { color: colors.textLight }]}>✕</Text>
+                  </TouchableOpacity>
+                </View>
+              );
+            })}
+          </ScrollView>
+          <View style={[styles.rdInputRow, { borderColor: colors.border, backgroundColor: colors.surfaceSecondary }]}>
+            <TextInput
+              value={askText}
+              onChangeText={setAskText}
+              onSubmitEditing={askAI}
+              returnKeyType="send"
+              placeholder="부탁하거나 메모"
+              placeholderTextColor={colors.textLight}
+              style={[styles.rdInput, { color: colors.text }]}
+              accessibilityLabel="요청이나 메모 입력"
+            />
+            <TouchableOpacity onPress={saveAsMemo} disabled={!askText.trim()} hitSlop={4} accessibilityLabel="메모로 남기기">
+              <Text style={[styles.rdLink, { color: askText.trim() ? colors.textSecondary : colors.textLight }]}>메모</Text>
+            </TouchableOpacity>
+            <TouchableOpacity onPress={askAI} disabled={!askText.trim() || asking} style={[styles.rdSend, { backgroundColor: askText.trim() ? colors.primary : colors.border }]} accessibilityLabel="AI로 요청 적용">
+              {asking ? <ActivityIndicator size="small" color="#fff" /> : <Text style={styles.rdSendT}>AI 적용</Text>}
+            </TouchableOpacity>
+          </View>
         </View>
       )}
       <TouchableOpacity
         onPress={() => setReqDockOpen((v) => !v)}
-        style={[styles.reqDockFab, { backgroundColor: reqDockOpen ? colors.surface : colors.primary, borderColor: colors.primary }]}
+        style={[styles.reqDockFab, { backgroundColor: colors.surface, borderColor: reqDockOpen || reqCount > 0 ? colors.primary : colors.border }]}
         accessibilityLabel={reqDockOpen ? '요청·메모 닫기' : '요청·메모 열기'}
       >
-        <Text style={[styles.reqDockFabT, { color: reqDockOpen ? colors.primary : '#fff' }]}>📌 요청·메모{reqCount > 0 ? ` ${reqCount}` : ''}{requestIssues.size > 0 ? ' ⚠' : ''} {reqDockOpen ? '▾' : '▴'}</Text>
+        <Text style={[styles.reqDockFabT, { color: colors.text }]}>📌 요청·메모</Text>
+        {reqCount > 0 && <View style={[styles.rdBadge, { backgroundColor: requestIssues.size > 0 ? colors.warning : colors.primary }]}><Text style={styles.rdBadgeT}>{reqCount}</Text></View>}
       </TouchableOpacity>
     </View>
   );
@@ -7541,10 +7602,26 @@ const styles = StyleSheet.create({
   vsInline: { fontSize: 12, fontWeight: '800', alignSelf: 'center', paddingHorizontal: 2 },
   vsRow: { width: '100%', textAlign: 'center', fontSize: 11, fontWeight: '800', marginVertical: -2 },
   autoReason: { fontSize: 11, marginTop: 4 },
-  reqDock: { position: 'absolute', right: 12, bottom: 14, alignItems: 'flex-end', gap: 8 },
-  reqDockCard: { width: 380, maxWidth: '100%', borderRadius: radius.md, shadowColor: '#000', shadowOpacity: 0.18, shadowRadius: 10, shadowOffset: { width: 0, height: 3 }, elevation: 8 },
-  reqDockFab: { height: 44, paddingHorizontal: 16, borderRadius: 22, borderWidth: 1.5, justifyContent: 'center', shadowColor: '#000', shadowOpacity: 0.22, shadowRadius: 8, shadowOffset: { width: 0, height: 2 }, elevation: 8 },
-  reqDockFabT: { fontSize: 14, fontWeight: '800' },
+  reqDock: { position: 'absolute', right: 12, bottom: 14, alignItems: 'flex-end', gap: 6 },
+  reqDockFab: { flexDirection: 'row', alignItems: 'center', gap: 6, height: 34, paddingHorizontal: 12, borderRadius: 17, borderWidth: 1, shadowColor: '#000', shadowOpacity: 0.14, shadowRadius: 6, shadowOffset: { width: 0, height: 2 }, elevation: 5 },
+  reqDockFabT: { fontSize: 12, fontWeight: '700' },
+  rdBadge: { minWidth: 18, height: 18, borderRadius: 9, paddingHorizontal: 5, alignItems: 'center', justifyContent: 'center' },
+  rdBadgeT: { color: '#fff', fontSize: 11, fontWeight: '800' },
+  rdCard: { width: 300, borderWidth: 1, borderRadius: 12, padding: 10, gap: 6, shadowColor: '#000', shadowOpacity: 0.16, shadowRadius: 10, shadowOffset: { width: 0, height: 3 }, elevation: 8 },
+  rdHead: { flexDirection: 'row', alignItems: 'baseline', gap: 6 },
+  rdTitle: { fontSize: 13, fontWeight: '800' },
+  rdSub: { fontSize: 11 },
+  rdLink: { fontSize: 12, fontWeight: '700' },
+  rdWarn: { borderRadius: 8, paddingHorizontal: 8, paddingVertical: 6 },
+  rdEmpty: { fontSize: 11, paddingVertical: 4 },
+  rdRow: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingVertical: 5, borderBottomWidth: StyleSheet.hairlineWidth },
+  rdIcon: { fontSize: 12 },
+  rdRowT: { fontSize: 12, fontWeight: '600' },
+  rdDel: { fontSize: 12, paddingHorizontal: 2 },
+  rdInputRow: { flexDirection: 'row', alignItems: 'center', gap: 8, borderWidth: 1, borderRadius: 18, paddingLeft: 12, paddingRight: 3, height: 36 },
+  rdInput: { flex: 1, minWidth: 0, fontSize: 12, height: 34 },
+  rdSend: { height: 28, paddingHorizontal: 10, borderRadius: 14, alignItems: 'center', justifyContent: 'center' },
+  rdSendT: { color: '#fff', fontSize: 11, fontWeight: '800' },
   reqPanel: { borderWidth: 1.5, borderRadius: radius.md, padding: 10, gap: 6, marginBottom: 10 },
   reqHead: { flexDirection: 'row', alignItems: 'center', gap: 6 },
   reqTitle: { fontSize: 15, fontWeight: '800' },
