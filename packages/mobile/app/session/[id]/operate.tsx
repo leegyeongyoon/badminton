@@ -5729,6 +5729,8 @@ export default function OperateScreen() {
               </View>
             ))}
           </View>
+          {/* 📌 요청·메모 — 게임판 아래(오른쪽 대기 명단을 좁히지 않게). */}
+          <View style={{ marginTop: spacing.md }}>{requestsPanel}</View>
         </ScrollView>
         {/* 분할 디바이더 — 끌어서 가운데 게임판 ↔ 오른쪽 대기판 크기 조절(모드1 분할처럼) */}
         <View style={[styles.m2Divider, Platform.OS === 'web' ? ({ cursor: 'col-resize' } as any) : null]} {...m2DividerPan.panHandlers}>
@@ -5742,7 +5744,6 @@ export default function OperateScreen() {
         </View>
         {/* 오른쪽 대기판 = 대기 명단을 '같이 나온 4명'끼리 한 줄로 정렬. 그 4명을 탭→다음 게임으로 재편성. */}
         <View style={[styles.m2PoolRight, { borderLeftColor: colors.border, width: m2RightWidth }]}>
-          {requestsPanel}
           <Text style={[styles.m2PanelTitle, { color: colors.text }]}>대기 명단 ({pool.length}) · 급수순</Text>
           {/* 대기 명단 검색 + 성별 필터 — 가운데 게임은 그대로, 대기만 추림 */}
           <View style={styles.m2PoolSearchRow}>
@@ -7127,7 +7128,7 @@ const styles = StyleSheet.create({
   // flex:1 + minWidth:0 — 세로 스크롤. 대기(m2RightWidth)가 넓어지면 게임판이 자동 축소된다
   // (세로 스크롤은 가로폭을 강제하지 않아 flex 축소가 정상 동작 → 넘침 없음).
   m2Center: { flex: 1, minWidth: 0, paddingLeft: spacing.smd },
-  m2CenterScroll: { paddingRight: spacing.smd, paddingBottom: 56 },
+  m2CenterScroll: { paddingRight: spacing.smd, paddingBottom: 72 },
   m2PlayColHead: { ...typography.caption, fontWeight: '800', marginBottom: 2 },
   m2PoolRight: { width: 430, borderLeftWidth: 1, paddingHorizontal: spacing.sm, paddingTop: spacing.xs },
   m2PoolSearchRow: { flexDirection: 'row', alignItems: 'center', gap: 5, marginBottom: 6 },
