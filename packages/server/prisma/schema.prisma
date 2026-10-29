@@ -1125,7 +1125,7 @@ model AutoMatchEdit {
   clubSessionId  String
   aiPlayerIds    String[]
   finalPlayerIds String[]
-  action         String // KEPT | EDITED | DELETED
+  action         String // KEPT | EDITED | DELETED | SHADOW(운영진이 직접 짠 판 — aiPlayerIds = 그 순간 AI라면)
   createdAt      DateTime @default(now())
 
   @@index([clubId, createdAt])

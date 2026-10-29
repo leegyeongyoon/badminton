@@ -256,6 +256,11 @@ export function AutoSettingsPanel({
           ) : (
             <Text style={[styles.effect, { color: colors.textSecondary }]}>아직 AI가 짠 판 기록이 없어요. 운영진이 AI 판을 고치면 그걸 보고 배워요.</Text>
           )}
+          {(insights.shadow?.total ?? 0) > 0 && (
+            <Text style={[styles.effect, { color: colors.textSecondary }]}>
+              {`운영진이 직접 짠 ${insights.shadow!.total}판과 비교 — AI도 같은 4명을 고른 판 ${pct(insights.shadow!.exact, insights.shadow!.total)} · 평균 ${insights.shadow!.avgSame}명 겹침`}
+            </Text>
+          )}
           {pace?.style && (
             <Text style={[styles.effect, { color: colors.textSecondary }]}>
               {`배운 판: 모임 기록 ${pace.style.decisions.toLocaleString()}판${pace.style.editSamples ? ` + 운영진이 고친 판 ${pace.style.editSamples}개` : ''}${pace.style.testAccuracy != null ? ` · 운영진 선택 맞힘 ${pace.style.testAccuracy}%` : ''}`}

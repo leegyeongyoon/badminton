@@ -835,6 +835,19 @@ export async function pushEntry(boardId: string, entryId: string, courtId: strin
   });
   if (!board) throw new NotFoundError('모임판');
 
+  // 운영진이 직접 짠 판이면 그 순간 AI라면 누구를 골랐을지 같이 남긴다(SHADOW — 'AI가 운영진 선택을 얼마나
+  // 맞히나'를 실데이터로 재는 용도, 학습엔 안 씀). 자동 편성을 안 켜는 모임에서도 쌓인다. 코트 투입이
+  // 늦어지지 않게 1.5초 넘으면 건너뛴다.
+  let shadowIds: string[] | null = null;
+  if (entry.aiPlayerIds.length !== 4 && entry.playerIds.length === 4 && board.clubSessionId) {
+    shadowIds = await Promise.race([
+      suggestNextFoursome(board.clubSessionId, { count: 1, shadowOf: entry.id }, userId)
+        .then((r: any) => (r?.suggestions?.[0]?.playerIds as string[] | undefined) ?? null)
+        .catch(() => null),
+      new Promise<null>((res) => setTimeout(() => res(null), 1500)),
+    ]);
+  }
+
   // Use existing registerTurn to create CourtTurn
   const turn = await registerTurn(
     courtId,
@@ -851,6 +864,10 @@ export async function pushEntry(boardId: string, entryId: string, courtId: strin
   });
   // AI가 짠 게임이면 그대로 쳤는지/운영진이 고쳤는지 기록(학습용).
   await recordAutoEdit(entry, board.clubSession.clubId, board.clubSessionId, 'PLAYED');
+  if (shadowIds?.length === 4 && board.clubSessionId)
+    await prisma.autoMatchEdit
+      .create({ data: { clubId: board.clubSession.clubId, clubSessionId: board.clubSessionId, aiPlayerIds: shadowIds, finalPlayerIds: entry.playerIds, action: 'SHADOW' } })
+      .catch(() => {});
 
   // 자동 편성 팀 구성([A1, A2, B1, B2])이면 실제 순번 선수에 제안 팀을 기록(파트너 통계용).
   if (entry.teamSplit && entry.playerIds.length === 4) {
@@ -1002,6 +1019,8 @@ export async function suggestNextFoursome(
     target?: { kind: 'fill' | 'substitute'; entryId?: string; turnId?: string; outUserId?: string };
     /** false면 1시간 같이 짜기 끔(한 판씩). */
     lookahead?: boolean;
+    /** 이 대기 게임은 없는 셈 치고 짠다 — 운영진이 직접 짠 판을 코트에 넣을 때 'AI라면 누구'를 비교하려고. */
+    shadowOf?: string;
   },
   userId: string,
 ) {
@@ -1100,7 +1119,7 @@ export async function suggestNextFoursome(
     where: { clubSessionId },
     include: { entries: { where: { status: 'QUEUED' }, select: { id: true, playerIds: true, queueOrder: true } } },
   });
-  const queued = [...(board?.entries ?? [])].sort((a, b) => a.queueOrder - b.queueOrder);
+  const queued = [...(board?.entries ?? [])].filter((e) => e.id !== opts.shadowOf).sort((a, b) => a.queueOrder - b.queueOrder);
   const simIds = Array.from(
     new Set([...courts.flatMap((c) => (c.turns[0]?.players ?? []).map((p) => p.userId)), ...queued.flatMap((e) => (e.playerIds as string[]) ?? [])]),
   );

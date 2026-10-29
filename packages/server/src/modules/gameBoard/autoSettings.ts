@@ -77,7 +77,7 @@ export async function getAiInsights(clubSessionId: string, userId: string) {
   const clubId = await clubOfSession(clubSessionId, userId);
   const since = new Date(Date.now() - INSIGHT_DAYS * 24 * 3600 * 1000);
   const [edits, feedback, club] = await Promise.all([
-    prisma.autoMatchEdit.findMany({ where: { clubId, createdAt: { gte: since } }, select: { action: true, aiPlayerIds: true, finalPlayerIds: true } }),
+    prisma.autoMatchEdit.findMany({ where: { clubId, createdAt: { gte: since }, action: { in: ['KEPT', 'EDITED', 'DELETED'] } }, select: { action: true, aiPlayerIds: true, finalPlayerIds: true } }),
     prisma.gameFeedback.findMany({ where: { clubId, createdAt: { gte: since } }, select: { rating: true, reason: true } }),
     prisma.club.findUnique({ where: { id: clubId }, select: { autoMatchSettings: true } }),
   ]);
@@ -210,8 +210,21 @@ export async function getAiInsights(clubSessionId: string, userId: string) {
     };
   });
 
+  // 운영진이 직접 짠 판 vs 그 순간 AI라면(SHADOW) — 같은 4명을 고른 비율·평균 겹친 인원.
+  const shadows = await prisma.autoMatchEdit.findMany({
+    where: { clubId, createdAt: { gte: since }, action: 'SHADOW' },
+    select: { aiPlayerIds: true, finalPlayerIds: true },
+  });
+  const overlap = shadows.map((e) => e.aiPlayerIds.filter((id) => e.finalPlayerIds.includes(id)).length);
+  const shadow = {
+    total: shadows.length,
+    exact: overlap.filter((n) => n === 4).length,
+    avgSame: overlap.length ? Math.round((overlap.reduce((a, b) => a + b, 0) / overlap.length) * 10) / 10 : 0,
+  };
+
   return {
     days: INSIGHT_DAYS,
+    shadow,
     levelHints,
     ai: { total: edits.length, kept, edited: edited.length, deleted, tighter, looser, toSame, toMixed },
     feedback: { total: fbTotal, ...fb, reasons },

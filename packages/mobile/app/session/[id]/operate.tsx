@@ -1924,6 +1924,42 @@ export default function OperateScreen() {
   }, [board, clubSessionId, emptyCourts.length, courts.length, aboutToFinishCount, uniquePlayers.length, queuedEntries, suggestNext, createQueueGame, getPlayer, loadBoard, loadPool, fillEntry]);
   useEffect(() => { runAutoFillRef.current = runAutoFillPass; }, [runAutoFillPass]);
 
+  // ─── 손으로 짤 때 'AI라면 다음 게임' 한 줄 — 자동 편성을 안 켠 운영진도 한 번 눌러 쓸 수 있게.
+  // 쓰면 AI 판으로 기록돼(그대로/고침) 'AI가 운영진 선택을 얼마나 맞히나'를 잴 수 있다(실운영: 직접 짠 판 96%).
+  // 대기 명단·대기 게임·코트가 바뀌면 잠깐 뒤 다시 계산.
+  const [aiRec, setAiRec] = useState<{ playerIds: string[]; teamSplit: boolean; reason: string } | null>(null);
+  const [aiRecBusy, setAiRecBusy] = useState(false);
+  const aiRecKey = `${uniquePlayers.length}|${queuedEntries.map((e) => `${e.id}:${e.playerIds.join('.')}`).join(',')}|${[...playingByCourtId.keys()].join(',')}`;
+  const loadAiRec = useCallback(async () => {
+    if (!clubSessionId) return;
+    try {
+      const { data } = await gameBoardApi.suggest(clubSessionId, { count: 1 });
+      const sg = (data as any)?.suggestions?.[0];
+      setAiRec(sg?.playerIds?.length === 4 ? { playerIds: sg.playerIds, teamSplit: !!sg.teamSplit, reason: sg.reason || '' } : null);
+    } catch {
+      setAiRec(null);
+    }
+  }, [clubSessionId]);
+  useEffect(() => {
+    if (autoPilot || !board) { setAiRec(null); return; }
+    const t = setTimeout(loadAiRec, 1200);
+    return () => clearTimeout(t);
+  }, [autoPilot, board?.id, aiRecKey, loadAiRec]);
+  const applyAiRec = useCallback(async () => {
+    if (!aiRec || aiRecBusy) return;
+    setAiRecBusy(true);
+    try {
+      await createQueueGame(aiRec.playerIds, aiRec.reason || undefined, aiRec.teamSplit);
+      showSuccess('AI 추천 게임을 대기에 넣었어요');
+      setAiRec(null);
+      loadBoard(); loadPool();
+    } catch (err: any) {
+      showAlert('AI 추천', err?.response?.data?.error || '넣지 못했어요');
+    } finally {
+      setAiRecBusy(false);
+    }
+  }, [aiRec, aiRecBusy, createQueueGame, loadBoard, loadPool]);
+
   // 자동 편성이 반응할 준비량 지표(완성된 4인 대기 게임 수).
   const readyQueuedCount = queuedEntries.filter((e) => e.playerIds.length >= 4).length;
 
@@ -5814,6 +5850,26 @@ export default function OperateScreen() {
         <View style={{ flex: 1, minWidth: 0 }}>
         <ScrollView style={styles.m2Center} contentContainerStyle={styles.m2CenterScroll} keyboardShouldPersistTaps="handled">
           <Text style={[styles.m2SectionLabel, { color: colors.textSecondary }]}>다음 게임 · {GAME_COL}개씩 세로 · 선수 탭/드래그로 편성</Text>
+          {!autoPilot && aiRec && (
+            <View style={[styles.aiRecRow, { borderColor: colors.border, backgroundColor: colors.surface }]}>
+              <Text style={[styles.aiRecLabel, { color: colors.primary }]}>🤖 AI라면</Text>
+              <View style={{ flex: 1, minWidth: 0 }}>
+                <Text style={[styles.aiRecNames, { color: colors.text }]} numberOfLines={1}>
+                  {(() => {
+                    const n = aiRec.playerIds.map((id) => getPlayer(id)?.userName || '?');
+                    return aiRec.teamSplit ? `${n[0]}·${n[1]}  vs  ${n[2]}·${n[3]}` : n.join(' · ');
+                  })()}
+                </Text>
+                {!!aiRec.reason && <Text style={[styles.aiRecWhy, { color: colors.textSecondary }]} numberOfLines={1}>{aiRec.reason}</Text>}
+              </View>
+              <TouchableOpacity onPress={loadAiRec} hitSlop={8} accessibilityLabel="AI 추천 다른 조합" style={styles.aiRecIconBtn}>
+                <Text style={{ color: colors.textSecondary, fontSize: 14 }}>↻</Text>
+              </TouchableOpacity>
+              <TouchableOpacity onPress={applyAiRec} disabled={aiRecBusy} accessibilityLabel="AI 추천 게임 넣기" style={[styles.aiRecBtn, { backgroundColor: colors.primary }]}>
+                <Text style={styles.aiRecBtnT}>{aiRecBusy ? '…' : '+ 넣기'}</Text>
+              </TouchableOpacity>
+            </View>
+          )}
           <View style={styles.m2GameCols}>
             {gameColumns.map((col, ci) => (
               <View key={ci} style={styles.m2GameCol}>
@@ -7284,6 +7340,13 @@ const styles = StyleSheet.create({
   // ── 모드2 게임판(번호 칸) + 풀 ──
   m2Scroll: { paddingHorizontal: spacing.smd, paddingBottom: spacing.xl },
   m2SectionLabel: { ...typography.caption, fontWeight: '800', marginBottom: 6 },
+  aiRecRow: { flexDirection: 'row', alignItems: 'center', gap: 8, borderWidth: 1, borderRadius: radius.md, paddingVertical: 6, paddingHorizontal: 10, marginBottom: 8 },
+  aiRecLabel: { fontSize: 12, fontWeight: '800' },
+  aiRecNames: { fontSize: 13, fontWeight: '700' },
+  aiRecWhy: { fontSize: 11, marginTop: 1 },
+  aiRecIconBtn: { paddingHorizontal: 4, paddingVertical: 2 },
+  aiRecBtn: { borderRadius: 999, paddingHorizontal: 12, paddingVertical: 5 },
+  aiRecBtnT: { color: '#fff', fontSize: 12, fontWeight: '800' },
   m2GameGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm },
   // 다음 게임: 4개씩 세로 컬럼(여러 컬럼 가로로)
   m2GameCols: { flexDirection: 'row', alignItems: 'flex-start', gap: spacing.sm },
