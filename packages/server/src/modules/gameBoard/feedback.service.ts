@@ -8,7 +8,7 @@ import { getIO } from '../../socket';
 // 둘 다 AI 설정 화면의 '학습 현황'과 clubStyle 재학습에 쓴다.
 
 export const FEEDBACK_RATINGS = ['GOOD', 'OK', 'BAD'] as const;
-export const FEEDBACK_REASONS = ['TOO_HARD', 'TOO_EASY', 'REPEAT', 'WAIT'] as const;
+export const FEEDBACK_REASONS = ['TOO_HARD', 'TOO_EASY', 'UNBALANCED', 'REPEAT', 'WAIT'] as const;
 const PENDING_WINDOW_MS = 40 * 60 * 1000; // 끝난 뒤 40분 안의 판만 물어본다
 
 export async function recordAutoEdit(

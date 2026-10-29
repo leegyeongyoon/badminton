@@ -47,11 +47,13 @@ export type ResolvedAutoSettings = Required<Omit<AutoMatchSettings, 'levels'>> &
 export type AiInsights = {
   days: number;
   ai: { total: number; kept: number; edited: number; deleted: number; tighter: number; looser: number; toSame: number; toMixed: number };
-  feedback: { total: number; GOOD: number; OK: number; BAD: number; reasons: Record<'TOO_HARD' | 'TOO_EASY' | 'REPEAT' | 'WAIT', number> };
+  feedback: { total: number; GOOD: number; OK: number; BAD: number; reasons: Record<'TOO_HARD' | 'TOO_EASY' | 'REPEAT' | 'WAIT', number> & { UNBALANCED?: number } };
   recommendations: { text: string; why: string; patch: AutoMatchSettings }[];
+  // 경기 반응으로 본 '급수 확인이 필요해 보이는 회원'(최근 60일, 한쪽으로 3번+). 자동으로 바꾸지 않음.
+  levelHints?: { userId: string; name: string; level: string | null; hard: number; easy: number; suggest: 'down' | 'up' }[];
 };
 export type FeedbackRating = 'GOOD' | 'OK' | 'BAD';
-export type FeedbackReason = 'TOO_HARD' | 'TOO_EASY' | 'REPEAT' | 'WAIT';
+export type FeedbackReason = 'TOO_HARD' | 'TOO_EASY' | 'UNBALANCED' | 'REPEAT' | 'WAIT';
 export type PendingFeedback = { turnId: string; courtName: string; completedAt: string; others: string[] };
 
 // 모임 학습 스타일 요약 — 서버가 이 모임의 과거 편성 기록에서 배운 '묶는 방식'.

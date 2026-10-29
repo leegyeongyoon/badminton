@@ -447,10 +447,18 @@ export async function replanStaleQueue(clubSessionId: string, userId: string) {
     }),
   ]);
   const onCourt = new Set(playing.map((p) => p.userId));
+  // 휴식·레슨 중인 사람이 대기 게임에 남아 있으면 뺀다(휴식 버튼 경로 밖에서 바뀐 경우까지 — 코트에 투입되지 않게).
+  const away = new Set(checkins.filter((c) => c.restingAt || c.isInLesson).map((c) => c.userId));
+  for (const e of board.entries) {
+    const ids = (e.playerIds as string[]) ?? [];
+    if (!ids.some((id) => away.has(id))) continue;
+    for (const id of ids.filter((x) => away.has(x))) await dropFromQueuedEntries(clubSessionId, id);
+    e.playerIds = ids.filter((x) => !away.has(x));
+  }
   const queuedIds = new Set(board.entries.flatMap((e) => (e.playerIds as string[]) ?? []));
   const idle = checkins.filter((c) => !c.restingAt && !c.isInLesson && !onCourt.has(c.userId) && !queuedIds.has(c.userId));
-  if (idle.length === 0) return { removed: 0 };
-  const untouchedAi = (e: (typeof board.entries)[number]) => {
+  // (쉬는 사람이 없어도 ④ 순서 바꾸기는 해야 한다 — 모두가 코트·대기 게임에 있을 때가 바로 그 경우)
+  const untouchedAi = (e: { playerIds: string[]; aiPlayerIds: string[] }) => {
     const ids = (e.playerIds as string[]) ?? [];
     return e.aiPlayerIds.length === 4 && ids.length === 4 && e.aiPlayerIds.every((id) => ids.includes(id));
   };
@@ -527,11 +535,137 @@ export async function replanStaleQueue(clubSessionId: string, userId: string) {
     });
   };
   const stale = board.entries.filter((e) => untouchedAi(e) && (lateArrival(e) || e.createdAt.getTime() < leftOutBefore || cutsLine(e)));
-  if (stale.length === 0) return { removed: 0 };
+  // ④ 순서 바꾸기: 쉬던 사람이 이미 뒤쪽 대기 게임(또는 코트에서 치는 사람 때문에 막힌 앞 게임)에 있으면,
+  //    방금 친 사람이 든 먼저 들어갈 게임과 그 둘을 맞바꾼다. 다시 짜기로는 못 잡던 경우
+  //    (상황별 시험: 쉬던 사람 두고 연속의 대부분이 '쉬던 사람은 막힌 판·뒤 판에 있음').
+  //    AI가 짜고 손대지 않은 판끼리만, 요청이 걸린 사람은 건드리지 않고, 같은 성별 급수 폭이 넓어지지 않을 때만.
+  const swapped = await swapRestedForward(board, stale, untouchedAi, {
+    onCourt, nowMs, restFrom, skillOf, gamesOf, gender: (id: string) => prof.get(id)?.gender ?? null, clubSessionId,
+  });
+  if (stale.length === 0) return { removed: 0, swapped };
   await prisma.gameBoardEntry.deleteMany({ where: { id: { in: stale.map((e) => e.id) }, status: 'QUEUED' } });
   const io = getIO();
   for (const e of stale) io.to(`facility:${board.facilityId}`).emit('gameBoard:entryRemoved', { entryId: e.id, boardId: board.id });
-  return { removed: stale.length };
+  return { removed: stale.length, swapped };
+}
+
+type QueuedEntry = { id: string; boardId: string; playerIds: string[]; aiPlayerIds: string[]; teamSplit: boolean; queueOrder: number };
+async function swapRestedForward(
+  board: { id: string; facilityId: string; entries: QueuedEntry[] },
+  stale: { id: string }[],
+  untouchedAi: (e: { playerIds: string[]; aiPlayerIds: string[] }) => boolean,
+  ctx: {
+    onCourt: Set<string>;
+    nowMs: number;
+    restFrom: (id: string) => number;
+    skillOf: (id: string) => number;
+    gamesOf: Map<string, number>;
+    gender: (id: string) => string | null;
+    clubSessionId: string;
+  },
+): Promise<number> {
+  const RESTED_MS = 3 * 60 * 1000;
+  const REST_GAP_MS = 6 * 60 * 1000;
+  const staleIds = new Set(stale.map((e) => e.id));
+  const list = board.entries
+    .filter((e) => !staleIds.has(e.id) && untouchedAi(e))
+    .map((e) => ({ ...e, playerIds: [...(e.playerIds ?? [])] }))
+    .sort((a, b) => a.queueOrder - b.queueOrder);
+  if (list.length < 2) return 0;
+  const reqs = await prisma.sessionRequest.findMany({ where: { clubSessionId: ctx.clubSessionId }, select: { aId: true, bId: true } });
+  const inRequest = new Set(reqs.flatMap((r) => [r.aId, r.bId]));
+  const blocked = (e: QueuedEntry) => e.playerIds.some((id) => ctx.onCourt.has(id));
+  // 코트가 비면 실제로 들어가는 순서: 막히지 않은 판이 queueOrder 순, 막힌 판은 그 뒤
+  const order = (e: QueuedEntry) => (blocked(e) ? 1000 : 0) + e.queueOrder;
+  const spread = (ids: string[]) => {
+    let w = 0;
+    for (const g of ['M', 'F']) {
+      const sk = ids.filter((id) => ctx.gender(id) === g).map(ctx.skillOf);
+      if (sk.length > 1) w = Math.max(w, Math.max(...sk) - Math.min(...sk));
+    }
+    return w;
+  };
+  const games = (id: string) => ctx.gamesOf.get(id) ?? 0;
+  const touched = new Set<string>();
+  let swaps = 0;
+  for (let guard = 0; guard < 6; guard++) {
+    let done = false;
+    for (const ei of [...list].sort((a, b) => order(a) - order(b))) {
+      if (blocked(ei)) continue; // 코트가 비어도 지금은 못 들어가는 판
+      for (const x of ei.playerIds) {
+        const rx = ctx.restFrom(x);
+        if (rx <= ctx.nowMs - REST_GAP_MS || inRequest.has(x)) continue;
+        const gx = ctx.gender(x);
+        if (gx !== 'M' && gx !== 'F') continue;
+        for (const ej of list) {
+          if (ej === ei || order(ej) <= order(ei) || ej.playerIds.includes(x)) continue;
+          const y = ej.playerIds.find(
+            (c) => !ei.playerIds.includes(c) && !ctx.onCourt.has(c) && !inRequest.has(c) && ctx.gender(c) === gx &&
+              Math.abs(ctx.skillOf(c) - ctx.skillOf(x)) <= 1 && games(c) <= games(x) && ctx.restFrom(c) <= rx - RESTED_MS,
+          );
+          if (!y) continue;
+          const ni = ei.playerIds.map((id) => (id === x ? y : id));
+          const nj = ej.playerIds.map((id) => (id === y ? x : id));
+          if (spread(ni) > Math.max(2, spread(ei.playerIds)) || spread(nj) > Math.max(2, spread(ej.playerIds))) continue;
+          ei.playerIds = ni;
+          ej.playerIds = nj;
+          touched.add(ei.id);
+          touched.add(ej.id);
+          swaps++;
+          done = true;
+          break;
+        }
+        if (done) break;
+      }
+      if (done) break;
+    }
+    if (!done) break;
+  }
+  if (!swaps) return 0;
+  const io = getIO();
+  const off = resolveTuning().genderOffsetFemale;
+  for (const e of list) {
+    if (!touched.has(e.id)) continue;
+    // 바뀐 4명으로 팀을 다시 나눈다(실제 급수) — AI가 짠 판으로 남겨 학습 기록도 그대로.
+    const mp: ModePlayer[] = e.playerIds.map((id) => {
+      const g = ctx.gender(id);
+      return { id, skill: ctx.skillOf(id), games: games(id), gender: g === 'M' || g === 'F' ? g : null, waitSeconds: 0, timePresentSeconds: 0, mixedGames: 0, sameGames: 0 };
+    });
+    const ids = e.teamSplit && mp.length === 4 ? splitTeams(mp, off).map((p) => p.id) : e.playerIds;
+    await prisma.gameBoardEntry.update({ where: { id: e.id }, data: { playerIds: ids, aiPlayerIds: ids.length === 4 ? ids : e.aiPlayerIds } });
+    io.to(`facility:${board.facilityId}`).emit('gameBoard:entryUpdated', { id: e.id, boardId: e.boardId, playerIds: ids, status: 'QUEUED', queueOrder: e.queueOrder } as any);
+  }
+  return swaps;
+}
+
+// 휴식·레슨으로 빠진 사람은 대기 게임에서 뺀다(퇴장과 같음) — 안 빼면 쉬는 사람이 그대로 코트에 투입됐다
+// (상황별 시험 'churn'에서 발견). 빈자리는 자동 편성이 채우거나 운영진이 채운다.
+export async function dropFromQueuedEntries(clubSessionId: string, userId: string) {
+  const board = await prisma.gameBoard.findUnique({
+    where: { clubSessionId },
+    include: { entries: { where: { status: 'QUEUED' } } },
+  });
+  if (!board) return;
+  const io = getIO();
+  for (const entry of board.entries) {
+    if (!entry.playerIds.includes(userId)) continue;
+    const playerIds = entry.playerIds.filter((id) => id !== userId);
+    await prisma.gameBoardEntry.update({ where: { id: entry.id }, data: { playerIds } });
+    io.to(`facility:${board.facilityId}`).emit('gameBoard:entryUpdated', {
+      id: entry.id,
+      boardId: entry.boardId,
+      courtId: entry.courtId || null,
+      courtName: '',
+      position: entry.position,
+      queueOrder: entry.queueOrder ?? 0,
+      note: entry.note ?? null,
+      playerIds,
+      playerNames: [],
+      status: entry.status,
+      turnId: entry.turnId,
+      createdAt: entry.createdAt.toISOString(),
+    } as any);
+  }
 }
 
 // createQueueGame: court-less QUEUED game appended to the end of the global queue.
@@ -1368,6 +1502,10 @@ export async function suggestNextFoursome(
     const costs = modePool.map((p) => priorityCost(p, tune.gameCycleSeconds));
     const ref = costs.reduce((a, b) => a + b, 0) / Math.max(1, costs.length);
     modePool.forEach((p, i) => { if (costs[i] <= ref - 0.75) restWaived.add(p.id); });
+    // 남는 사람이 4명이 안 되는 작은 정모(코트 2개에 9명 등)는 어차피 거의 쉬지 못한다. 한 판 쉬기를 고집하면
+    // 코트마다 같은 4~5명만 계속 돌았다(상황별 시험 small9: 여자 4명이 2시간 내내 같은 판). 쉬기 면제 →
+    // 다른 코트가 끝날 때 두 코트 사람을 섞어 짤 수 있다. 순서(쉬던 사람 먼저)는 그대로 지킨다.
+    if (rotatingCount - 4 * courts.length < 4) for (const p of modePool) restWaived.add(p.id);
   }
   let styleScorer: StyleScorer | undefined;
   // 학습 스타일은 운영진 평소 방식(남복·여복 위주)을 담고 있어, 운영자가 게임 종류를 바꿨으면 끈다.
@@ -1827,13 +1965,15 @@ export async function suggestNextFoursome(
   const restFrom = (id: string) => Math.max(checkedInAtMs[id] ?? nowMs, lastEndMs[id] ?? 0, availBase.get(id) ?? 0);
   const baseGames = (id: string) => ((playedGames[id] ?? 0) + (committedGames[id] ?? 0)) / gamesWeight(id);
   const rsk = (id: string) => realSkill.get(id) ?? skillToNum(skillOverrideMap.get(id) ?? profileMap.get(id)?.skillLevel);
+  // 성별은 오늘 참가자 전체 프로필에서(genderOf는 오늘 친 사람만 담고 있어 0판인 쉬던 사람을 놓쳤다).
+  const poolGender = (id: string) => profileMap.get(id)?.gender;
   const restedBefore = new Map<string, string[]>(); // 방금 친 사람 → 그보다 먼저 들어가야 할 쉬던 사람들
   for (const x of poolIds) {
     if (restFrom(x) <= nowMs - REST_GAP_MS) continue;
-    const gx = genderOf.get(x);
+    const gx = poolGender(x);
     if (gx !== 'M' && gx !== 'F') continue;
     const ys = poolIds.filter(
-      (y) => y !== x && genderOf.get(y) === gx && restFrom(y) <= restFrom(x) - RESTED_MS && Math.abs(rsk(y) - rsk(x)) <= 1 && baseGames(y) <= baseGames(x) + 1e-9,
+      (y) => y !== x && poolGender(y) === gx && restFrom(y) <= restFrom(x) - RESTED_MS && Math.abs(rsk(y) - rsk(x)) <= 1 && baseGames(y) <= baseGames(x) + 1e-9,
     );
     if (ys.length) restedBefore.set(x, ys);
   }
@@ -1876,7 +2016,10 @@ export async function suggestNextFoursome(
       const m = new Map(available.map((p) => [p.id, p]));
       const g = pk4.playerIds.map((id) => m.get(id)!);
       if (ruleBreak(g, slotActive)) continue;
-      const sev = softIssue(g, slotActive) + (cutsLine(pk4.playerIds, new Set(att.ids)) ? 10 : 0);
+      // 기다리는 만큼 코트가 빈다 — 1.5분마다 아쉬움 1(같은 4명·2단계 차이(3)를 피하려고 4~5분까지만 기다림).
+      // 이 항이 없으면 작은 정모(9명·2코트)에서 같은 4명을 피하려 코트를 2시간에 60분 넘게 비웠다.
+      const idlePenalty = Math.max(0, att.at - slotStart) / 90000;
+      const sev = softIssue(g, slotActive) + (cutsLine(pk4.playerIds, new Set(att.ids)) ? 10 : 0) + idlePenalty;
       if (sev > 0) {
         if (!fallback || sev < fallback.sev) fallback = { pk: pk4, m, at: att.at, sev };
         continue;

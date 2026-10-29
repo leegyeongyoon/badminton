@@ -6,6 +6,7 @@ import { getGameBoard } from '../gameBoard/gameBoard.service';
 import { UserRole, ClubSessionStatus } from '@badminton/shared';
 import { sendPushToUser } from '../notification/notification.service';
 import { openSession } from '../session/session.service';
+import { dropFromQueuedEntries } from '../gameBoard/gameBoard.service';
 import QRCode from 'qrcode';
 import type {
   ClubSessionResponse,
@@ -1101,6 +1102,7 @@ export async function setPlayerLesson(
     where: { id: active.id },
     data: { isInLesson: inLesson },
   });
+  if (inLesson) await dropFromQueuedEntries(sessionId, targetUserId);
 
   // Refresh every operator board (same event the checkout / edit / addGuest emit).
   await emitPlayersUpdated(session.facilityId, sessionId);

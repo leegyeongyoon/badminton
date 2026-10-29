@@ -121,7 +121,7 @@ export async function getAiInsights(clubSessionId: string, userId: string) {
   }
 
   const fb = { GOOD: 0, OK: 0, BAD: 0 } as Record<string, number>;
-  const reasons: Record<string, number> = { TOO_HARD: 0, TOO_EASY: 0, REPEAT: 0, WAIT: 0 };
+  const reasons: Record<string, number> = { TOO_HARD: 0, TOO_EASY: 0, UNBALANCED: 0, REPEAT: 0, WAIT: 0 };
   for (const f of feedback) {
     fb[f.rating] = (fb[f.rating] ?? 0) + 1;
     if (f.reason) reasons[f.reason] = (reasons[f.reason] ?? 0) + 1;
@@ -176,8 +176,43 @@ export async function getAiInsights(clubSessionId: string, userId: string) {
     return true;
   });
 
+  // 급수 확인이 필요해 보이는 회원 — 본인이 '상대가 너무 셌어요'/'너무 쉬웠어요'를 한쪽으로 반복해서 남긴 사람
+  // (최근 60일, 같은 방향 3번 이상이고 반대 방향의 3배 이상). 급수는 운영진이 정하므로 자동으로 바꾸지 않고 알려만 준다.
+  const LEVEL_DAYS = 60;
+  const levelFb = await prisma.gameFeedback.findMany({
+    where: { clubId, createdAt: { gte: new Date(Date.now() - LEVEL_DAYS * 24 * 3600 * 1000) }, reason: { in: ['TOO_HARD', 'TOO_EASY'] } },
+    select: { userId: true, reason: true },
+  });
+  const byUser = new Map<string, { hard: number; easy: number }>();
+  for (const f of levelFb) {
+    const v = byUser.get(f.userId) ?? { hard: 0, easy: 0 };
+    if (f.reason === 'TOO_HARD') v.hard++;
+    else v.easy++;
+    byUser.set(f.userId, v);
+  }
+  const hintIds = [...byUser].filter(([, v]) => (v.hard >= 3 && v.hard >= 3 * v.easy) || (v.easy >= 3 && v.easy >= 3 * v.hard)).map(([id]) => id);
+  const [hintUsers, hintProfiles, hintMembers] = hintIds.length
+    ? await Promise.all([
+        prisma.user.findMany({ where: { id: { in: hintIds } }, select: { id: true, name: true } }),
+        prisma.playerProfile.findMany({ where: { userId: { in: hintIds } }, select: { userId: true, skillLevel: true } }),
+        prisma.clubMember.findMany({ where: { clubId, userId: { in: hintIds } }, select: { userId: true, skillLevel: true } }),
+      ])
+    : [[], [], []];
+  const levelHints = hintIds.map((id) => {
+    const v = byUser.get(id)!;
+    return {
+      userId: id,
+      name: hintUsers.find((u) => u.id === id)?.name ?? '',
+      level: hintMembers.find((m) => m.userId === id)?.skillLevel ?? hintProfiles.find((p) => p.userId === id)?.skillLevel ?? null,
+      hard: v.hard,
+      easy: v.easy,
+      suggest: (v.hard > v.easy ? 'down' : 'up') as 'down' | 'up',
+    };
+  });
+
   return {
     days: INSIGHT_DAYS,
+    levelHints,
     ai: { total: edits.length, kept, edited: edited.length, deleted, tighter, looser, toSame, toMixed },
     feedback: { total: fbTotal, ...fb, reasons },
     recommendations: uniqueRecs,

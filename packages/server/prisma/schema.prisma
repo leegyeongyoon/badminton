@@ -1132,7 +1132,7 @@ model AutoMatchEdit {
 }
 
 // 회원 경기 후 반응 — 끝난 판마다 한 번. rating GOOD | OK | BAD, reason(BAD일 때):
-// TOO_HARD(상대가 너무 셈) | TOO_EASY(너무 쉬움) | REPEAT(같은 사람과 또) | WAIT(너무 오래 기다림)
+// TOO_HARD(상대가 너무 셈) | TOO_EASY(너무 쉬움) | UNBALANCED(팀 실력 차이) | REPEAT(같은 사람과 또) | WAIT(너무 오래 기다림)
 model GameFeedback {
   id            String   @id @default(uuid())
   turnId        String

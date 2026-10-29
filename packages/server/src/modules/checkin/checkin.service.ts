@@ -11,6 +11,7 @@ import { getIO } from '../../socket';
 import { haversineMeters } from '../../utils/geo';
 import { generateTokens } from '../auth/auth.service';
 import { logger } from '../../utils/logger';
+import { dropFromQueuedEntries } from '../gameBoard/gameBoard.service';
 
 export interface CheckInParams {
   qrData?: string;
@@ -920,6 +921,7 @@ export async function setResting(userId: string) {
     where: { id: active.id },
     data: { restingAt: new Date() },
   });
+  if (active.clubSessionId) await dropFromQueuedEntries(active.clubSessionId, userId);
 
   await emitPlayersUpdated(active.facilityId);
 

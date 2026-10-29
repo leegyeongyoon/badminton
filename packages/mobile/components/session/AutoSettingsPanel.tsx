@@ -268,8 +268,21 @@ export function AutoSettingsPanel({
           </Text>
           {insights.feedback.BAD > 0 && (
             <Text style={[styles.effect, { color: colors.textSecondary }]}>
-              {`아쉬웠던 이유 — 상대가 너무 셌어요 ${insights.feedback.reasons.TOO_HARD} · 너무 쉬웠어요 ${insights.feedback.reasons.TOO_EASY} · 같은 사람과 또 ${insights.feedback.reasons.REPEAT} · 오래 기다림 ${insights.feedback.reasons.WAIT}`}
+              {`아쉬웠던 이유 — 상대가 너무 셌어요 ${insights.feedback.reasons.TOO_HARD} · 너무 쉬웠어요 ${insights.feedback.reasons.TOO_EASY} · 팀 실력 차이 ${insights.feedback.reasons.UNBALANCED ?? 0} · 같은 사람과 또 ${insights.feedback.reasons.REPEAT} · 오래 기다림 ${insights.feedback.reasons.WAIT}`}
             </Text>
+          )}
+          {(insights.levelHints?.length ?? 0) > 0 && (
+            <View style={[styles.rec, { backgroundColor: colors.secondaryBg }]}>
+              <View style={{ flex: 1, minWidth: 0 }}>
+                <Text style={[styles.recTitle, { color: colors.text }]}>🎯 급수 확인이 필요해 보여요</Text>
+                {insights.levelHints!.map((h) => (
+                  <Text key={h.userId} style={[styles.effect, { color: colors.textSecondary }]}>
+                    {`${h.name}${h.level ? ` (${h.level}조)` : ''} — ${h.suggest === 'down' ? `'상대가 너무 셌어요' ${h.hard}번 · 한 단계 낮춰 보세요` : `'너무 쉬웠어요' ${h.easy}번 · 한 단계 올려 보세요`}`}
+                  </Text>
+                ))}
+                <Text style={[styles.effect, { color: colors.textLight }]}>최근 60일 경기 반응 기준 · 급수는 참가자 목록에서 바꿀 수 있어요</Text>
+              </View>
+            </View>
           )}
           {insights.recommendations.map((r) => (
             <View key={JSON.stringify(r.patch)} style={[styles.rec, { backgroundColor: colors.secondaryBg }]}>
