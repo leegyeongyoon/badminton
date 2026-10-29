@@ -52,6 +52,22 @@ export async function sendPushToUser(userId: string, payload: PushPayload) {
   }
 }
 
+// 조용한 알림 — 소리·팝업 없이 알림 센터에만(안드로이드 'quiet' 채널 = 낮은 중요도, iOS 소리 없음).
+// 알림함 기록은 '읽음'으로 남겨 안 읽은 배지를 늘리지 않는다. 푸시 토큰이 없으면 아무것도 안 한다.
+export async function sendQuietPush(userId: string, payload: PushPayload) {
+  const user = await prisma.user.findUnique({ where: { id: userId }, select: { expoPushToken: true } });
+  if (!user?.expoPushToken || !Expo.isExpoPushToken(user.expoPushToken)) return false;
+  await prisma.notification.create({ data: { userId, title: payload.title, body: payload.body, data: payload.data || {}, read: true } });
+  try {
+    await expo.sendPushNotificationsAsync([
+      { to: user.expoPushToken, title: payload.title, body: payload.body, data: payload.data, channelId: 'quiet', priority: 'normal' },
+    ]);
+  } catch (err) {
+    logger.error(`Failed to send quiet push to user ${userId}:`, err);
+  }
+  return true;
+}
+
 export async function sendPushToUsers(userIds: string[], payload: PushPayload) {
   for (const userId of userIds) {
     await sendPushToUser(userId, payload);

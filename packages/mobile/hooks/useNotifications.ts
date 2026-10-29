@@ -21,12 +21,11 @@ const TURN_START_TYPES = new Set([
 // shouldShowAlert is deprecated.
 if (Platform.OS !== 'web') {
   Notifications.setNotificationHandler({
-    handleNotification: async () => ({
-      shouldShowBanner: true,
-      shouldShowList: true,
-      shouldPlaySound: true,
-      shouldSetBadge: false,
-    }),
+    // 앱을 보고 있을 때 온 '경기 어땠어요?'는 배너·소리 없이(화면 안 카드가 같은 걸 물어본다).
+    handleNotification: async (n) => {
+      const quiet = (n.request.content.data as { type?: string } | undefined)?.type === 'feedbackAsk';
+      return { shouldShowBanner: !quiet, shouldShowList: true, shouldPlaySound: !quiet, shouldSetBadge: false };
+    },
   });
 }
 
@@ -70,6 +69,11 @@ export function useNotifications() {
         | undefined;
       if (isTurnStart(data)) {
         router.push('/(tabs)/my-status');
+        return;
+      }
+      // '방금 경기 어땠어요?' — 홈으로(화면 아래 반응 카드가 바로 뜬다).
+      if (data?.type === 'feedbackAsk') {
+        router.push('/(tabs)' as never);
         return;
       }
       // 정모 투표: 현황 보드로 이동(투표 카드가 상단에 보인다).

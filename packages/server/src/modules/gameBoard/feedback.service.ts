@@ -1,6 +1,7 @@
 import { prisma } from '../../utils/prisma';
 import { BadRequestError, ForbiddenError, NotFoundError } from '../../utils/errors';
 import { getIO } from '../../socket';
+import { sendQuietPush } from '../notification/notification.service';
 
 // ─── 회원 경기 후 반응 + AI 편성 결과 기록 ───────────────────────────────
 // · 회원: 판이 끝나면 그 판 선수에게 'game:feedbackAsk' → 앱이 "방금 경기 어땠어요?"를 띄우고 한 번 누른다.
@@ -105,4 +106,52 @@ export async function submitFeedback(userId: string, turnId: string, rating: str
     update: data,
   });
   return { ok: true };
+}
+
+/**
+ * 정모를 마칠 때(정모 종료·중간에 나감) 한 번만 조용히 "방금 경기 어땠어요?" — 정모 중엔 폰을 안 봐서
+ * 앱 안 카드만으로는 반응이 거의 안 모였다(실운영 30일: 알림 켠 회원 자리 2,226개 중 반응 18개).
+ * 불편하지 않게: 정모당 한 사람 한 번, 소리·팝업 없음, 이번 정모에 이미 반응했으면 안 보냄,
+ * 마지막 판이 40분 안에 끝났을 때만(눌러서 열면 그 판 카드가 바로 뜨는 경우만).
+ */
+export async function askFeedbackOnLeave(clubSessionId: string, onlyUserIds?: string[]) {
+  const since = new Date(Date.now() - PENDING_WINDOW_MS);
+  const turns = await prisma.courtTurn.findMany({
+    where: {
+      clubSessionId,
+      status: 'COMPLETED',
+      completedAt: { gte: since },
+      ...(onlyUserIds ? { players: { some: { userId: { in: onlyUserIds } } } } : {}),
+    },
+    select: { players: { select: { userId: true } } },
+  });
+  let ids = Array.from(new Set(turns.flatMap((t) => t.players.map((p) => p.userId))));
+  if (onlyUserIds) ids = ids.filter((id) => onlyUserIds.includes(id));
+  if (ids.length === 0) return 0;
+  const answered = new Set(
+    (await prisma.gameFeedback.findMany({ where: { clubSessionId, userId: { in: ids } }, select: { userId: true } })).map((f) => f.userId),
+  );
+  const asked = new Set(
+    (
+      await prisma.notification.findMany({
+        where: {
+          userId: { in: ids },
+          AND: [{ data: { path: ['type'], equals: 'feedbackAsk' } }, { data: { path: ['clubSessionId'], equals: clubSessionId } }],
+        },
+        select: { userId: true },
+      })
+    ).map((n) => n.userId),
+  );
+  let sent = 0;
+  for (const id of ids) {
+    if (answered.has(id) || asked.has(id)) continue;
+    if (!(await pendingFeedback(id))) continue;
+    const ok = await sendQuietPush(id, {
+      title: '방금 경기 어땠어요?',
+      body: '한 번만 눌러 주시면 다음 정모 편성에 반영할게요',
+      data: { type: 'feedbackAsk', clubSessionId },
+    });
+    if (ok) sent++;
+  }
+  return sent;
 }

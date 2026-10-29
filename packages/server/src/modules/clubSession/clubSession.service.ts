@@ -7,6 +7,7 @@ import { UserRole, ClubSessionStatus } from '@badminton/shared';
 import { sendPushToUser } from '../notification/notification.service';
 import { openSession } from '../session/session.service';
 import { dropFromQueuedEntries } from '../gameBoard/gameBoard.service';
+import { askFeedbackOnLeave } from '../gameBoard/feedback.service';
 import QRCode from 'qrcode';
 import type {
   ClubSessionResponse,
@@ -554,6 +555,9 @@ export async function endSession(
     where: { clubSessionId: sessionId, checkedOutAt: null },
     data: { checkedOutAt: new Date() },
   });
+
+  // 마친 분들께 마지막 판 반응을 한 번만 조용히 묻는다(종료 응답을 늦추지 않게 기다리지 않음).
+  void askFeedbackOnLeave(sessionId).catch(() => {});
 
   // 열려 있던 즉석 투표는 정모 종료와 함께 자동 마감.
   await prisma.sessionPoll.updateMany({

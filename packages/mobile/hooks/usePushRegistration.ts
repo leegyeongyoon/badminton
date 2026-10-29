@@ -22,6 +22,12 @@ async function registerForPushNotifications(): Promise<void> {
         name: 'default',
         importance: Notifications.AndroidImportance.HIGH,
       });
+      // 조용한 알림(경기 반응 묻기 등) — 소리·팝업 없이 알림 목록에만.
+      await Notifications.setNotificationChannelAsync('quiet', {
+        name: '조용한 알림',
+        importance: Notifications.AndroidImportance.LOW,
+        sound: null,
+      });
     }
 
     const { status: existing } = await Notifications.getPermissionsAsync();

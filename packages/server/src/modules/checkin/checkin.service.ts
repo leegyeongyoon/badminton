@@ -12,6 +12,7 @@ import { haversineMeters } from '../../utils/geo';
 import { generateTokens } from '../auth/auth.service';
 import { logger } from '../../utils/logger';
 import { dropFromQueuedEntries } from '../gameBoard/gameBoard.service';
+import { askFeedbackOnLeave } from '../gameBoard/feedback.service';
 
 export interface CheckInParams {
   qrData?: string;
@@ -495,6 +496,8 @@ export async function checkOut(userId: string) {
   // (in-progress game) is left intact — the game finishes naturally.
   const clubSessionId = active.clubSessionId ?? undefined;
   await cleanupTurnsOnCheckout(userId, active.facilityId, clubSessionId);
+  // 정모를 먼저 나가는 분께 마지막 판 반응을 한 번만 조용히(기다리지 않음).
+  if (clubSessionId) void askFeedbackOnLeave(clubSessionId, [userId]).catch(() => {});
 
   const io = getIO();
   const leftPayload = {
@@ -573,6 +576,7 @@ export async function operatorCheckOut(
   // entries, leave PLAYING intact). Pass the session id explicitly so board
   // cleanup is unambiguous even for a facility-scoped check-in row.
   await cleanupTurnsOnCheckout(targetUserId, session.facilityId, clubSessionId);
+  void askFeedbackOnLeave(clubSessionId, [targetUserId]).catch(() => {});
 
   // Mirror the self-checkout socket events so member/guest clients react too.
   const io = getIO();
