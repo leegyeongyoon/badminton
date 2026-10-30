@@ -4,7 +4,7 @@
 // 이름은 서버가 명단에 맞춰 확정하고, 애매하면 되묻는다(clarify). 모든 호출은 AiCommandLog 에 남겨
 // 실제 문장 평가 세트(scripts/ai-command-eval)로 프롬프트·모델 변경을 숫자로 비교한다.
 
-export const PROMPT_VERSION = 'v2-2026-10-30';
+export const PROMPT_VERSION = 'v2.1-2026-10-30';
 
 export interface RosterPlayer {
   userId: string;
@@ -46,11 +46,12 @@ export function buildCommandPrompt(ctx: CommandContext): string {
     '- reorder {from, to}                 // 대기 게임 순서 이동("3번 맨 앞으로" → from 3, to 1)',
     '- swap {out, in}                     // 선수 교체(게임에 있는 사람 out ↔ 넣을 사람 in)',
     '- remove {name}                      // 대기 게임에서 빼기',
-    '- end {court}                        // 코트 게임 종료',
+    '- end {court}                        // 코트 게임 종료 — "끝내/종료/끝났어"라고 말했을 때만. "다음 게임 넣어"만으로는 end 아님',
     '- delete {gameNo}                    // N번 대기 게임 삭제',
     '- editSkill {name, skill}            // 급수 변경(S/A/B/C/D/E/F)',
     '- editName {name, newName}           // 이름 변경',
-    '- checkInAll {} · checkout {name} · lesson {name}(레슨 토글) · addGuest {guestName, skill?} · autoFill {}(자동 편성)',
+    '- checkInAll {} · lesson {name}(레슨 토글) · addGuest {guestName, skill?} · autoFill {}(자동 편성)',
+    '- checkout {name}                    // 정모에서 퇴장("먼저 갔어/집에 갔어/퇴장/오늘 끝"). 대기 게임에서만 빼는 건 remove',
     '- pairTogether {names:[2명], games?} // 두 사람을 같은 팀으로("대회 파트너", "같이 2게임" → games 2, 판수 말 없으면 생략)',
     '- pairApart {names:[2명]}            // 두 사람을 같은 게임에 넣지 않기("같이 안 짜줘/떼어줘/붙이지 마")',
     '- unknown {reason}                   // 못 알아듣거나 명단에 없는 사람',
@@ -65,6 +66,7 @@ export function buildCommandPrompt(ctx: CommandContext): string {
     '예) "안지민 게임 짜줘" → {"actions":[{"action":"compose","names":["안지민"]}]}',
     '예) "혼복 한 판 가볍게" → {"actions":[{"action":"compose","names":[],"want":{"gameType":"mixed","level":"down"}}]}',
     '예) "철수랑 영희 넣고 빡세게 3코트에" → {"actions":[{"action":"assign","court":3,"names":["철수","영희"],"want":{"level":"up"}}]}',
+    '예) "2코트 다음 게임 넣어" → {"actions":[{"action":"assign","court":2,"names":[]}]}',
     '예) "2코트 끝내고 다음 게임 넣어" → {"actions":[{"action":"end","court":2},{"action":"assign","court":2,"names":[]}]}',
     '예) "1번에서 민수 빼고 지훈 넣어" → {"actions":[{"action":"swap","out":"민수","in":"지훈"}]}',
     '예) "3번 게임 지우고 자동으로 채워" → {"actions":[{"action":"delete","gameNo":3},{"action":"autoFill"}]}',
@@ -135,6 +137,8 @@ export function normalizeActions(raw: any, roster: RosterPlayer[], text = ''): a
       out.push({ action: 'unknown', reason: '알아듣지 못했어요' });
       break;
     }
+    // 게임 종료는 되돌리기 어렵다 — 문장에 끝내라는 말이 없으면 LLM이 덧붙여도 뺀다.
+    if (a0.action === 'end' && text && !/(끝|종료|마치|마감|그만)/.test(text)) continue;
     const a = { ...a0 };
     let stop: any = null;
     const fix = (v: any): string | null => {
