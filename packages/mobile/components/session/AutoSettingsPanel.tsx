@@ -282,10 +282,14 @@ export function AutoSettingsPanel({
                 <Text style={[styles.recTitle, { color: colors.text }]}>🎯 급수 확인이 필요해 보여요</Text>
                 {insights.levelHints!.map((h) => (
                   <Text key={h.userId} style={[styles.effect, { color: colors.textSecondary }]}>
-                    {`${h.name}${h.level ? ` (${h.level}조)` : ''} — ${h.suggest === 'down' ? `'상대가 너무 셌어요' ${h.hard}번 · 한 단계 낮춰 보세요` : `'너무 쉬웠어요' ${h.easy}번 · 한 단계 올려 보세요`}`}
+                    {`${h.name}${h.level ? ` (${h.level}조)` : ''} — ${[
+                      h.suggest === 'down' && h.hard > 0 ? `'상대가 너무 셌어요' ${h.hard}번` : null,
+                      h.suggest === 'up' && h.easy > 0 ? `'너무 쉬웠어요' ${h.easy}번` : null,
+                      h.games ? `기록된 ${h.games}판 중 ${h.wins ?? 0}승` : null,
+                    ].filter(Boolean).join(' · ')} · 한 단계 ${h.suggest === 'down' ? '낮춰' : '올려'} 보세요`}
                   </Text>
                 ))}
-                <Text style={[styles.effect, { color: colors.textLight }]}>최근 60일 경기 반응 기준 · 급수는 참가자 목록에서 바꿀 수 있어요</Text>
+                <Text style={[styles.effect, { color: colors.textLight }]}>경기 반응(60일)·운영판 승패 기록 기준 · 급수는 참가자 목록에서 바꿀 수 있어요</Text>
               </View>
             </View>
           )}

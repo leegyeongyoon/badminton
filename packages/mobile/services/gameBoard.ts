@@ -52,7 +52,7 @@ export type AiInsights = {
   // 운영진이 직접 짠 판 vs 그 순간 AI라면 — 같은 4명 판 수·평균 겹친 인원.
   shadow?: { total: number; exact: number; avgSame: number };
   // 경기 반응으로 본 '급수 확인이 필요해 보이는 회원'(최근 60일, 한쪽으로 3번+). 자동으로 바꾸지 않음.
-  levelHints?: { userId: string; name: string; level: string | null; hard: number; easy: number; suggest: 'down' | 'up' }[];
+  levelHints?: { userId: string; name: string; level: string | null; hard: number; easy: number; games?: number; wins?: number; suggest: 'down' | 'up' }[];
 };
 export type FeedbackRating = 'GOOD' | 'OK' | 'BAD';
 export type FeedbackReason = 'TOO_HARD' | 'TOO_EASY' | 'UNBALANCED' | 'REPEAT' | 'WAIT';

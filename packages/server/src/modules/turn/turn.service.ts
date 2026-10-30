@@ -9,6 +9,7 @@ import { sendPushToUser } from '../notification/notification.service';
 import { scheduleJob, cancelJob } from '../scheduler/scheduler.service';
 import { emitPlayersUpdated } from '../checkin/checkin.service';
 import { verifyClubStaff, isSuperAdmin } from '../clubSession/clubSession.service';
+import { invalidateClubRatings } from '../gameBoard/rating';
 
 // True when `userId` is LEADER/STAFF of the 정모 that owns this turn — i.e. the
 // operator, who may complete/cancel any game on their board.
@@ -518,7 +519,7 @@ async function completeTurnCore(turn: any): Promise<CourtTurnResponse> {
 export async function completeActiveTurnByCourt(
   courtId: string,
   userId: string,
-): Promise<CourtDetailResponse & { cleared: boolean }> {
+): Promise<CourtDetailResponse & { cleared: boolean; ended: { turnId: string; teams: string[][] } | null }> {
   const court = await prisma.court.findUnique({
     where: { id: courtId },
     include: { facility: { include: { policy: true } }, clubSession: true },
@@ -559,9 +560,13 @@ export async function completeActiveTurnByCourt(
     orderBy: { startedAt: 'desc' },
     include: COMPLETE_TURN_INCLUDE,
   });
+  // 승패 한 탭 기록용 — 끝나기 전에 팀을 잡아 둔다(운영판이 '누가 이겼어요?'를 띄움).
+  let ended: { turnId: string; teams: string[][] } | null = null;
   if (playingTurn) {
+    const teams = await turnTeams(playingTurn.id);
     await completeTurnCore(playingTurn);
     cleared = true;
+    if (teams) ended = { turnId: playingTurn.id, teams };
   }
 
   // 3) Make sure the court itself is EMPTY (completeTurnCore already sets EMPTY
@@ -580,7 +585,39 @@ export async function completeActiveTurnByCourt(
 
   // Return the refreshed court/board state.
   const detail = await getCourtTurns(courtId);
-  return { ...detail, cleared };
+  return { ...detail, cleared, ended };
+}
+
+/** 판의 두 팀 — 자동 편성 팀(A/B) → 대기 게임 순서([0,1] vs [2,3], 운영판 카드의 vs 기준) → 들어간 순서. 4명 아니면 null. */
+export async function turnTeams(turnId: string): Promise<string[][] | null> {
+  const t = await prisma.courtTurn.findUnique({
+    where: { id: turnId },
+    select: { players: { select: { userId: true, team: true } }, gameBoardEntry: { select: { playerIds: true } } },
+  });
+  if (!t || t.players.length !== 4) return null;
+  const ids = t.players.map((p) => p.userId);
+  const a = t.players.filter((p) => p.team === 'A').map((p) => p.userId);
+  const b = t.players.filter((p) => p.team === 'B').map((p) => p.userId);
+  if (a.length === 2 && b.length === 2) return [a, b];
+  const order = (t.gameBoardEntry?.playerIds ?? []).filter((id) => ids.includes(id));
+  const o = order.length === 4 ? order : ids;
+  return [o.slice(0, 2), o.slice(2)];
+}
+
+/** 이긴 두 사람 기록(운영진, 선택). [] 이면 지움. 진행 중·끝난 판 모두 가능. */
+export async function setTurnWinner(turnId: string, userId: string, winnerIds: string[]) {
+  const turn = await prisma.courtTurn.findUnique({
+    where: { id: turnId },
+    select: { id: true, status: true, clubSession: { select: { clubId: true } }, players: { select: { userId: true } } },
+  });
+  if (!turn || !turn.clubSession) throw new NotFoundError('게임');
+  await verifyClubStaff(turn.clubSession.clubId, userId);
+  const ids = turn.players.map((p) => p.userId);
+  const w = Array.from(new Set((winnerIds ?? []).filter((id) => ids.includes(id))));
+  if (w.length !== 0 && (w.length !== 2 || ids.length !== 4)) throw new BadRequestError('이긴 두 사람을 골라 주세요');
+  await prisma.courtTurn.update({ where: { id: turnId }, data: { winnerIds: w } });
+  invalidateClubRatings(turn.clubSession.clubId);
+  return { turnId, winnerIds: w };
 }
 
 // Cancel a stuck WAITING turn during a court-clear: mark it CANCELLED, transition

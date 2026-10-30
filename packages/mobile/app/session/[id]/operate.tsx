@@ -2077,6 +2077,57 @@ export default function OperateScreen() {
   // can't otherwise be cleared is freed here, so the assign guard stops blocking
   // those players. `forceClear` only changes the confirm copy (the endpoint is
   // robust either way).
+  // ─── 승패 한 탭(선택) — 게임 종료 뒤 '누가 이겼어요?' 한 줄. 안 눌러도 되고 1분 뒤 사라짐, 모임별로 끌 수 있음.
+  // 쌓인 승패로 실제 실력을 추정해 같은 급수 안에서 팀을 더 고르게 나누고, 급수 확인 알림의 근거로 쓴다.
+  type WinAsk = { turnId: string; court: string; teams: string[][]; names: Record<string, string>; at: number };
+  const [winAsks, setWinAsks] = useState<WinAsk[]>([]);
+  const [winAskOff, setWinAskOff] = useState(false);
+  const winOffKey = clubId ? `operate_winask_off_${clubId}` : null;
+  useEffect(() => {
+    if (!winOffKey) return;
+    getItem(winOffKey).then((v) => setWinAskOff(v === '1')).catch(() => {});
+  }, [winOffKey]);
+  const askWinner = useCallback((turnId: string, court: string, teams: string[][]) => {
+    if (winAskOff) return;
+    const names: Record<string, string> = {};
+    teams.flat().forEach((id) => { names[id] = getPlayer(id)?.userName || '?'; });
+    setWinAsks((prev) => [{ turnId, court, teams, names, at: Date.now() }, ...prev.filter((w) => w.turnId !== turnId)].slice(0, 3));
+  }, [winAskOff, getPlayer]);
+  useEffect(() => {
+    if (winAsks.length === 0) return;
+    const t = setTimeout(() => setWinAsks((prev) => prev.filter((w) => Date.now() - w.at < 60000)), 5000);
+    return () => clearTimeout(t);
+  }, [winAsks]);
+  const pickWinner = useCallback(async (w: WinAsk, team: string[]) => {
+    setWinAsks((prev) => prev.filter((x) => x.turnId !== w.turnId));
+    try { await courtApi.setWinner(w.turnId, team); } catch { /* 선택 기록 — 실패해도 운영엔 영향 없음 */ }
+  }, []);
+  const turnOffWinAsk = useCallback(() => {
+    setWinAskOff(true); setWinAsks([]);
+    if (winOffKey) setItem(winOffKey, '1').catch(() => {});
+    showSuccess('승패 묻기를 껐어요 (더보기에서 다시 켤 수 있어요)');
+  }, [winOffKey]);
+  const winStrip = winAsks.length > 0 ? (
+    <View pointerEvents="box-none" style={styles.winWrap}>
+      {winAsks.map((w) => (
+        <View key={w.turnId} style={[styles.winCard, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+          <Text style={[styles.winQ, { color: colors.text }]} numberOfLines={1}>{w.court} · 누가 이겼어요?</Text>
+          {w.teams.map((tm, i) => (
+            <TouchableOpacity key={i} onPress={() => pickWinner(w, tm)} style={[styles.winBtn, { borderColor: colors.primary }]} accessibilityLabel={`${tm.map((id) => w.names[id]).join(' ')} 승`}>
+              <Text style={[styles.winBtnT, { color: colors.primary }]} numberOfLines={1}>{tm.map((id) => w.names[id]).join('·')} 승</Text>
+            </TouchableOpacity>
+          ))}
+          <TouchableOpacity onPress={() => setWinAsks((prev) => prev.filter((x) => x.turnId !== w.turnId))} hitSlop={8} accessibilityLabel="승패 건너뛰기">
+            <Text style={[styles.winSkip, { color: colors.textLight }]}>건너뛰기</Text>
+          </TouchableOpacity>
+          <TouchableOpacity onPress={turnOffWinAsk} hitSlop={8} accessibilityLabel="승패 묻기 끄기">
+            <Text style={[styles.winSkip, { color: colors.textLight }]}>끄기</Text>
+          </TouchableOpacity>
+        </View>
+      ))}
+    </View>
+  ) : null;
+
   const handleEndGame = useCallback(
     (courtId: string, forceClear = false) => {
       const court = courts.find((c) => c.id === courtId);
@@ -2087,9 +2138,10 @@ export default function OperateScreen() {
           : `${court?.name || '코트'}의 게임을 종료할까요?`,
         async () => {
           try {
-            await courtApi.completeActiveByCourt(courtId);
+            const { data: done } = await courtApi.completeActiveByCourt(courtId);
             // 종료 성공 → 방금 나온 목록에 이 4명을 쌓는다(풀 갱신 전에 캡처).
             pushRecentOut(courtId);
+            if (!forceClear && done?.ended?.teams?.length === 2) askWinner(done.ended.turnId, court?.name || '코트', done.ended.teams);
             loadBoard();
             loadCourts();
             loadPool();
@@ -2101,7 +2153,7 @@ export default function OperateScreen() {
         forceClear ? '비우기' : '종료', '취소', 'danger',
       );
     },
-    [courts, loadBoard, loadCourts, loadPool, pushRecentOut],
+    [courts, loadBoard, loadCourts, loadPool, pushRecentOut, askWinner],
   );
 
   // 코트 이동 — 진행 중인 게임을 다른 빈 코트로. (코트 잘못 넣었을 때 코트명 변경 대신)
@@ -4462,6 +4514,10 @@ export default function OperateScreen() {
     { key: 'board', label: '📺 현황 보드', onPress: () => router.push(`/session/${clubSessionId}/board`) },
     { key: 'qr', label: '🔳 출석 QR', onPress: () => router.push(`/session/${clubSessionId}/qr`) },
     { key: 'link', label: copyingLink ? '🔗 복사 중…' : '🔗 출석 링크 복사', onPress: () => { copyAttendLink(); } },
+    { key: 'win', label: winAskOff ? '🏸 승패 묻기 켜기' : '🏸 승패 묻기 끄기', onPress: () => {
+      if (winAskOff) { setWinAskOff(false); if (winOffKey) setItem(winOffKey, '0').catch(() => {}); showSuccess('게임 종료 때 누가 이겼는지 물어볼게요(선택)'); }
+      else turnOffWinAsk();
+    } },
   ];
   const moreMenu = (
     <Modal visible={moreOpen} transparent animationType="fade" onRequestClose={() => setMoreOpen(false)}>
@@ -4875,6 +4931,7 @@ export default function OperateScreen() {
 
   const modals = (
     <>
+      {winStrip}
       {moreMenu}
       {requestModal}
       {requestsOpen && (
@@ -7404,6 +7461,12 @@ const styles = StyleSheet.create({
   // ── 모드2 게임판(번호 칸) + 풀 ──
   m2Scroll: { paddingHorizontal: spacing.smd, paddingBottom: spacing.xl },
   m2SectionLabel: { ...typography.caption, fontWeight: '800', marginBottom: 6 },
+  winWrap: { position: 'absolute', left: 16, right: 16, bottom: 88, alignItems: 'center', gap: 6, zIndex: 50 },
+  winCard: { flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', gap: 8, paddingHorizontal: 12, paddingVertical: 8, borderRadius: 12, borderWidth: 1, maxWidth: 720, shadowColor: '#000', shadowOpacity: 0.12, shadowRadius: 8, shadowOffset: { width: 0, height: 2 }, elevation: 4 },
+  winQ: { fontSize: 13, fontWeight: '700' },
+  winBtn: { borderWidth: 1, borderRadius: 999, paddingHorizontal: 10, paddingVertical: 5, maxWidth: 220 },
+  winBtnT: { fontSize: 13, fontWeight: '700' },
+  winSkip: { fontSize: 12, fontWeight: '600' },
   aiRecRow: { flexDirection: 'row', alignItems: 'center', gap: 8, borderWidth: 1, borderRadius: radius.md, paddingVertical: 6, paddingHorizontal: 10, marginBottom: 8 },
   aiRecLabel: { fontSize: 12, fontWeight: '800' },
   aiRecNames: { fontSize: 13, fontWeight: '700' },

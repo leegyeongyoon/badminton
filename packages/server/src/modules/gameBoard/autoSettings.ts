@@ -1,5 +1,6 @@
 import type { AutoMatchSettings } from '@badminton/shared';
 import { prisma } from '../../utils/prisma';
+import { getClubRatings, type PlayerRating } from './rating';
 import { NotFoundError, ForbiddenError } from '../../utils/errors';
 
 // AI 편성 설정(모임 단위) — 운영판 'AI 편성 설정'에서 운영진이 정하고, 자동 편성 엔진이 읽는다.
@@ -190,7 +191,12 @@ export async function getAiInsights(clubSessionId: string, userId: string) {
     else v.easy++;
     byUser.set(f.userId, v);
   }
-  const hintIds = [...byUser].filter(([, v]) => (v.hard >= 3 && v.hard >= 3 * v.easy) || (v.easy >= 3 && v.easy >= 3 * v.hard)).map(([id]) => id);
+  const fbHintIds = [...byUser].filter(([, v]) => (v.hard >= 3 && v.hard >= 3 * v.easy) || (v.easy >= 3 && v.easy >= 3 * v.hard)).map(([id]) => id);
+  // 승패 기록 근거 — 10판 이상 기록되고 급수 라벨보다 1.2단계 넘게 잘/못 하는 사람(팀 Elo residual).
+  const ratings = await getClubRatings(clubId);
+  const resultHint = new Map<string, PlayerRating>();
+  for (const [id, r] of ratings) if (r.games >= 10 && Math.abs(r.residual) >= 120) resultHint.set(id, r);
+  const hintIds = Array.from(new Set([...fbHintIds, ...resultHint.keys()]));
   const [hintUsers, hintProfiles, hintMembers] = hintIds.length
     ? await Promise.all([
         prisma.user.findMany({ where: { id: { in: hintIds } }, select: { id: true, name: true } }),
@@ -198,17 +204,26 @@ export async function getAiInsights(clubSessionId: string, userId: string) {
         prisma.clubMember.findMany({ where: { clubId, userId: { in: hintIds } }, select: { userId: true, skillLevel: true } }),
       ])
     : [[], [], []];
-  const levelHints = hintIds.map((id) => {
-    const v = byUser.get(id)!;
-    return {
-      userId: id,
-      name: hintUsers.find((u) => u.id === id)?.name ?? '',
-      level: hintMembers.find((m) => m.userId === id)?.skillLevel ?? hintProfiles.find((p) => p.userId === id)?.skillLevel ?? null,
-      hard: v.hard,
-      easy: v.easy,
-      suggest: (v.hard > v.easy ? 'down' : 'up') as 'down' | 'up',
-    };
-  });
+  const levelHints = hintIds
+    .map((id) => {
+      const v = fbHintIds.includes(id) ? byUser.get(id)! : { hard: 0, easy: 0 };
+      const r = resultHint.get(id);
+      const fbDir = v.hard + v.easy > 0 ? (v.hard > v.easy ? 'down' : 'up') : null;
+      const rDir = r ? (r.residual > 0 ? 'up' : 'down') : null;
+      // 반응과 승패가 서로 반대면 확신이 없으니 빼 둔다.
+      if (fbDir && rDir && fbDir !== rDir) return null;
+      return {
+        userId: id,
+        name: hintUsers.find((u) => u.id === id)?.name ?? '',
+        level: hintMembers.find((m) => m.userId === id)?.skillLevel ?? hintProfiles.find((p) => p.userId === id)?.skillLevel ?? null,
+        hard: v.hard,
+        easy: v.easy,
+        games: r?.games ?? 0,
+        wins: r?.wins ?? 0,
+        suggest: (fbDir ?? rDir) as 'down' | 'up',
+      };
+    })
+    .filter((x): x is NonNullable<typeof x> => !!x);
 
   // 운영진이 직접 짠 판 vs 그 순간 AI라면(SHADOW) — 같은 4명을 고른 비율·평균 겹친 인원.
   const shadows = await prisma.autoMatchEdit.findMany({

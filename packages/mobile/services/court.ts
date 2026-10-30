@@ -29,8 +29,12 @@ export const courtApi = {
   // 게임 종료 / 코트 비우기 BY COURT — robust: the server resolves whatever is
   // actually PLAYING on this court and completes it (+ cancels leftover WAITING
   // turns), so it can't get stuck on a stale client turnId. Frees the players.
+  // ended: 방금 끝난 판(팀 [[A1,A2],[B1,B2]]) — 운영판이 '누가 이겼어요?'(선택)를 띄운다.
   completeActiveByCourt: (courtId: string) =>
-    api.post(`/courts/${courtId}/complete-active`),
+    api.post<{ ended?: { turnId: string; teams: string[][] } | null }>(`/courts/${courtId}/complete-active`),
+  // 이긴 두 사람 기록(선택) — 승패로 실제 실력을 추정해 팀 나누기·급수 확인에 쓴다. [] 이면 지움.
+  setWinner: (turnId: string, winnerIds: string[]) =>
+    api.post(`/turns/${turnId}/winner`, { winnerIds }),
   // 진행 중인 게임을 다른 빈 코트로 이동(코트 잘못 넣었을 때).
   moveGame: (courtId: string, targetCourtId: string) =>
     api.post(`/courts/${courtId}/move-game`, { targetCourtId }),

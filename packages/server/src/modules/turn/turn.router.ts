@@ -65,6 +65,14 @@ router.post('/:turnId/complete', authenticate, async (req: Request, res: Respons
   } catch (err) { next(err); }
 });
 
+// POST /api/v1/turns/:turnId/winner - 이긴 두 사람 기록(운영진, 선택 · [] 이면 지움)
+router.post('/:turnId/winner', authenticate, async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const result = await turnService.setTurnWinner(req.params.turnId as string, req.user!.userId, req.body?.winnerIds ?? []);
+    res.json(result);
+  } catch (err) { next(err); }
+});
+
 // POST /api/v1/turns/:turnId/cancel - cancel a turn
 router.post('/:turnId/cancel', authenticate, async (req: Request, res: Response, next: NextFunction) => {
   try {

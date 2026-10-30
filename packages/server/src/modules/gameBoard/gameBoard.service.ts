@@ -22,6 +22,7 @@ import { getClubStyle, styleUtility, type ClubStyle, DEFAULT_SPREAD_CAP } from '
 import { activeRequestsForEngine } from './sessionRequest.service';
 import { resolveAutoSettings } from './autoSettings';
 import { recordAutoEdit } from './feedback.service';
+import { getClubRatings, ratingSkillAdjust, type PlayerRating } from './rating';
 import { getDurationModel, predictGameMin, normalizeFormat, type DurationPlayer } from './gameDuration';
 
 // Map a SkillLevel enum (S strongest … F weakest; null=미설정) to a number used
@@ -1054,6 +1055,7 @@ export async function suggestNextFoursome(
   const now = new Date();
   const nowMs = now.getTime();
   const count = opts.count ?? 1;
+  const clubRatings = await getClubRatings(clubSession.clubId).catch(() => new Map<string, PlayerRating>());
 
   // ─────────────────────────────────────────────────────────────────────────
   // 후보: '쉬는 사람 우선, 모자라면 시간 기준'(혼합). 터닝 재생 평가(뒤 20% 정모 596편성):
@@ -1443,7 +1445,8 @@ export async function suggestNextFoursome(
   // 편성용 급수로 나누면 남E 둘 vs 남F 둘(둘 다 오늘 E조로 편성)이 '균형'으로 잡혀 한쪽이 계속 지는 판이 됐다.
   const splitTeamsReal = (group: ModePlayer[], ...rest: Parameters<typeof splitTeams> extends [unknown, ...infer R] ? R : never): ModePlayer[] => {
     const orig = new Map(group.map((p) => [p.id, p] as const));
-    return splitTeams(group.map((p) => ({ ...p, skill: realSkill.get(p.id) ?? p.skill })), ...rest).map((p) => orig.get(p.id) ?? p);
+    // 승패 기록이 쌓인 사람은 같은 급수 안에서 ±0.5단계까지 보정(라벨보다 잘/못 하는 정도) — 한쪽이 계속 지는 판을 줄인다.
+    return splitTeams(group.map((p) => ({ ...p, skill: (realSkill.get(p.id) ?? p.skill) + ratingSkillAdjust(clubRatings.get(p.id)) })), ...rest).map((p) => orig.get(p.id) ?? p);
   };
 
   // ── 짝 기록(겹침 회피, 최근일수록 무겁게) — 대기 게임은 '곧 칠 판'이라 최대 가중 ──
