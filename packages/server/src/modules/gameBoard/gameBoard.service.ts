@@ -800,6 +800,10 @@ export async function deleteEntry(boardId: string, entryId: string, userId: stri
     const b = await prisma.gameBoard.findUnique({ where: { id: boardId }, select: { clubSessionId: true, clubSession: { select: { clubId: true } } } });
     if (b) await recordAutoEdit(entry, b.clubSession.clubId, b.clubSessionId, 'DELETED');
   }
+  // AI 명령으로 만든 게임을 10분 안에 지우면 '되돌림' — 명령 평가 세트에서 오답 후보로 본다.
+  void prisma.aiCommandLog
+    .updateMany({ where: { entryIds: { has: entryId }, createdAt: { gte: new Date(Date.now() - 10 * 60000) } }, data: { outcome: 'UNDONE' } })
+    .catch(() => {});
 
   // Reorder positions for remaining QUEUED entries
   const remaining = await prisma.gameBoardEntry.findMany({
@@ -1017,6 +1021,13 @@ export async function suggestNextFoursome(
      *    나머지를 고정하고 빈 1자리 후보를 점수순 3명 추천
      */
     target?: { kind: 'fill' | 'substitute'; entryId?: string; turnId?: string; outUserId?: string };
+    /**
+     * 채우기(fill) 조건 — 운영진이 말로 한 요청("혼복으로", "가볍게", "빡세게")을 AI가 뽑아 넘긴다.
+     *  · gameType: mixed 남2여2 / men 남복 / women 여복 / same 남복·여복 — 맞는 조합이 없으면 못 채운다고 알린다.
+     *  · level: up 고정된 사람보다 잘하는 쪽 / down 낮은 쪽으로 기운다(규칙 안에서).
+     * fill 에 entryId 가 없으면 '대기 맨 뒤 새 게임'을 0명 고정으로 짠다.
+     */
+    want?: { gameType?: 'mixed' | 'men' | 'women' | 'same'; level?: 'up' | 'down' };
     /** false면 1시간 같이 짜기 끔(한 판씩). */
     lookahead?: boolean;
     /** 이 대기 게임은 없는 셈 치고 짠다 — 운영진이 직접 짠 판을 코트에 넣을 때 'AI라면 누구'를 비교하려고. */
@@ -1202,6 +1213,12 @@ export async function suggestNextFoursome(
       availMs.set(id, end);
       committedGames[id] = (committedGames[id] ?? 0) + 1;
     }
+  }
+
+  // 대기 맨 뒤 새 게임 채우기(고정 0명) — 앞 대기 게임을 모두 놓은 뒤의 시작 예상.
+  if (target?.kind === 'fill' && !target.entryId && !target.turnId) {
+    targetFixed = [];
+    targetStart = Math.max(nowMs, Math.min(...courtFree));
   }
 
   // 이유 문구용: 지금 실제로 코트에서 치는 사람(진행 중 게임).
@@ -1895,6 +1912,42 @@ export async function suggestNextFoursome(
         },
       };
     }
+    // 말로 한 조건(채우기) — 성별 구성은 비용으로 끌어오고 아래에서 걸러 확정, 급수는 기울기만.
+    const want = target.kind === 'fill' ? opts.want : undefined;
+    const wantGenders = (ps: ModePlayer[]) => {
+      const gt = want?.gameType;
+      if (!gt) return true;
+      const m = ps.filter((p) => p.gender === 'M').length;
+      const f = ps.filter((p) => p.gender === 'F').length;
+      if (gt === 'mixed') return m === 2 && f === 2;
+      if (gt === 'men') return m === 4;
+      if (gt === 'women') return f === 4;
+      return m === 4 || f === 4;
+    };
+    if (want?.gameType || want?.level) {
+      const prev = hooks;
+      const effSkill = (p: ModePlayer) => p.skill + (p.gender === 'F' ? tune.genderOffsetFemale : 0);
+      const refPool = fixedMP.length ? fixedMP : available;
+      const ref = refPool.reduce((sum, p) => sum + effSkill(p), 0) / Math.max(1, refPool.length);
+      hooks = {
+        companions: prev?.companions,
+        score: (g) => {
+          let c = prev?.score ? prev.score(g) : 0;
+          const gt = want.gameType;
+          if (gt) {
+            const m = g.filter((p) => p.gender === 'M').length;
+            const f = g.filter((p) => p.gender === 'F').length;
+            const off = gt === 'mixed' ? Math.abs(m - 2) + Math.abs(f - 2) : gt === 'men' ? 4 - m : gt === 'women' ? 4 - f : Math.min(4 - m, 4 - f);
+            c += 40 * off;
+          }
+          if (want.level) {
+            const dir = want.level === 'up' ? 1 : -1;
+            for (const p of g) if (!fixedIds.has(p.id)) c -= 3 * dir * (effSkill(p) - ref);
+          }
+          return c;
+        },
+      };
+    }
     // 땜빵은 한 자리 끼우기 — 혼복/동성복 '순환' 항은 끈다(같은 성별·급수가 우선).
     const targetTuning = target.kind === 'substitute' ? { ...tuning, typeVarietyWeight: 0 } : tuning;
     // 규칙(급수 폭·여자 C 이하 3:1) 안 조합만. 채우기는 쉬는 사람으로 안 되면 그 게임 시작 때 비는 사람까지.
@@ -1902,6 +1955,7 @@ export async function suggestNextFoursome(
       const m = new Map([...pool, ...fixed].map((p) => [p.id, p]));
       return completeGroup(pool, fixed, need, mode, pairWeight, targetTuning, styleScorer, hooks, 12)
         .filter((r) => !ruleBreak(r.playerIds.map((id) => m.get(id)!), slotActive))
+        .filter((r) => wantGenders(r.playerIds.map((id) => m.get(id)!)))
         .slice(0, k);
     };
     let ranked = valid(available, fixedMP, target.kind === 'substitute' ? 3 : 1);
@@ -1939,6 +1993,12 @@ export async function suggestNextFoursome(
       });
       return { suggestions: [], substitutes, mode };
     }
+    if (ranked.length === 0 && want?.gameType)
+      return {
+        suggestions: [],
+        mode,
+        note: `${{ mixed: '혼복(남2·여2)', men: '남복', women: '여복', same: '남복·여복' }[want.gameType]}으로 짤 사람이 지금은 없어요 — 급수·성별 규칙 안에서 찾았어요`,
+      };
     if (ranked.length === 0)
       return {
         suggestions: [],

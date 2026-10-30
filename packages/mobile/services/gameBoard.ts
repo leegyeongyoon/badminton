@@ -158,6 +158,8 @@ export const gameBoardApi = {
       tuning?: SuggestTuning;
       prefs?: SuggestPrefs;
       target?: { kind: 'fill' | 'substitute'; entryId?: string; turnId?: string; outUserId?: string };
+      // 채우기 조건(AI 명령) — fill 에 entryId 가 없으면 대기 맨 뒤 새 게임을 처음부터 짠다.
+      want?: { gameType?: 'mixed' | 'men' | 'women' | 'same'; level?: 'up' | 'down' };
     },
   ) => api.post(`/club-sessions/${clubSessionId}/suggest`, body ?? {}),
 

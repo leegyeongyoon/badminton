@@ -305,6 +305,25 @@ router.post(
   },
 );
 
+// POST /api/v1/club-sessions/:id/ai-commands/:logId/outcome - AI 명령 실행 결과(OK/FAIL) 기록 (LEADER/STAFF)
+router.post(
+  '/:id/ai-commands/:logId/outcome',
+  authenticate,
+  async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const result = await clubSessionService.reportCommandOutcome(
+        req.params.id as string,
+        req.user!.userId,
+        req.params.logId as string,
+        req.body,
+      );
+      res.json(result);
+    } catch (err) {
+      next(err);
+    }
+  },
+);
+
 // GET /api/v1/club-sessions/:id/memo - 운영 공유 메모 조회 (LEADER/STAFF)
 router.get(
   '/:id/memo',

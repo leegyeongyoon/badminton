@@ -2186,12 +2186,80 @@ export default function OperateScreen() {
       default: return null;
     }
   };
+  // AI 편성: 말한 사람만 먼저 넣고 빈자리는 편성 엔진이 채운다(쉬던 사람 먼저·급수·같은 4명 피하기·요청을
+  // AI가 우회하지 않게). want = 말로 한 조건(혼복/남복/여복, 가볍게/빡세게). assign 이면 그 코트에 바로 투입.
+  const WANT_LABEL: Record<string, string> = { mixed: '혼복', men: '남복', women: '여복', same: '남복·여복', up: '빡세게', down: '가볍게' };
+  const composeByEngine = async (a: any): Promise<{ ok: boolean; msg: string; entryId?: string }> => {
+    const ids: string[] = [];
+    for (const nm of (a.names || []) as string[]) {
+      const p = uniquePlayers.find((m) => m.userName === nm);
+      if (!p) return { ok: false, msg: `'${nm}' 없음` };
+      if (!ids.includes(p.userId)) ids.push(p.userId);
+    }
+    let court: any = null;
+    if (a.action === 'assign') {
+      court = courts.find((c) => (c.name || '').replace(/\s/g, '') === `코트${a.court}`);
+      if (!court) return { ok: false, msg: `코트${a.court ?? ''} 이 없어요` };
+    }
+    const want = a.want && (a.want.gameType || a.want.level) ? a.want : undefined;
+    const wantTxt = want ? ` (${[want.gameType, want.level].filter(Boolean).map((k: string) => WANT_LABEL[k]).join('·')})` : '';
+    let entryId: string | undefined;
+    let playerIds = ids;
+    let note: string | undefined;
+    let teamSplit = false;
+    if (ids.length < 4) {
+      let entry: any = null;
+      if (ids.length > 0) entry = await createQueueGame(ids);
+      const { data } = await gameBoardApi.suggest(clubSessionId!, { target: entry?.id ? { kind: 'fill', entryId: entry.id } : { kind: 'fill' }, want });
+      const sg = data?.suggestions?.[0];
+      if (!sg?.playerIds || sg.playerIds.length !== 4) {
+        if (entry?.id) { loadBoard(); return { ok: false, msg: `${ids.length}명만 대기에 넣어뒀어요 — ${data?.note || '지금 채울 사람이 없어요'}`, entryId: entry.id }; }
+        return { ok: false, msg: data?.note || '지금 짤 수 있는 사람이 없어요' };
+      }
+      playerIds = sg.playerIds; note = sg.reason || undefined; teamSplit = !!sg.teamSplit;
+      if (entry?.id) { await updateEntry(entry.id, playerIds, { note: note || null, teamSplit }); entryId = entry.id; }
+    }
+    if (!entryId) { const e: any = await createQueueGame(playerIds, note, teamSplit); entryId = e?.id; }
+    if (court && entryId) await assignEntry(entryId, court.id);
+    loadBoard(); loadPool(); loadCourts();
+    const names = playerIds.map((id) => getPlayer(id)?.userName || '?').join(' ');
+    return { ok: true, msg: `${court ? `${court.name} 투입` : '편성'}${wantTxt}: ${names}`, entryId };
+  };
+  // AI가 돌려준 동작들을 순서대로 실행. 되물음(clarify)·못 알아들음(unknown)에서 멈춘다. 결과는 서버 기록(평가 세트).
+  const runAiActions = async (data: any, fallbackErr: string): Promise<void> => {
+    const list: any[] = Array.isArray(data?.actions) ? data.actions : data?.action ? [data.action] : [];
+    const entryIds: string[] = [];
+    let failed: string | null = null;
+    for (const a of list) {
+      if (a?.action === 'clarify' || a?.action === 'unknown') { pushLog('bot', a.reason || fallbackErr, false); if (a.action === 'unknown') failed = a.reason || 'unknown'; break; }
+      const nNames = Array.isArray(a?.names) ? a.names.length : 0;
+      const engine = (a?.action === 'compose' && (nNames < 4 || a.want)) || (a?.action === 'assign' && ((nNames > 0 && nNames < 4) || !!a.want));
+      if (engine) {
+        try {
+          const r = await composeByEngine(a);
+          pushLog('bot', `🤖 ${r.msg}`, r.ok);
+          if (r.entryId) entryIds.push(r.entryId);
+          if (!r.ok) { failed = r.msg; break; }
+        } catch (e: any) { failed = e?.response?.data?.error || '편성 실패'; pushLog('bot', failed!, false); break; }
+        continue;
+      }
+      const canon = actionToText(a);
+      if (!canon) { failed = '실행할 수 없는 동작'; pushLog('bot', fallbackErr, false); break; }
+      pushLog('bot', `🤖 ${canon}`, true);
+      const st = { failed: false };
+      await runParse(canon, false, st);
+      if (st.failed) { failed = canon; break; }
+    }
+    if (data?.logId && clubSessionId && list.length && list[list.length - 1]?.action !== 'clarify') {
+      clubSessionApi.reportCommandOutcome(clubSessionId, data.logId, { outcome: failed ? 'FAIL' : 'OK', detail: failed || undefined, entryIds }).catch(() => {});
+    }
+  };
   // 키워드로 먼저 파싱 → 못 알아들은 자유 문장만 AI(OpenAI)로 해석해 같은 핸들러로 실행(하이브리드).
-  const runParse = async (raw: string, allowAI: boolean): Promise<void> => {
+  const runParse = async (raw: string, allowAI: boolean, status?: { failed: boolean }): Promise<void> => {
     if (!raw) return;
     // 이 함수 안의 결과/오류 메시지는 채팅 로그(bot)로 남긴다 — showAlert/showSuccess 를 로그로 가로챔.
     const showSuccess = (m: string) => pushLog('bot', m, true);
-    const showAlert = (_t: string, m: string) => pushLog('bot', m, false);
+    const showAlert = (_t: string, m: string) => { if (status) status.failed = true; pushLog('bot', m, false); };
     const tokens = raw.split(/[\s,]+/).filter(Boolean);
     // 한글 초성 추출(가-힣 → ㄱ..ㅎ). "ㅅㅇㅈ" 같은 초성 입력으로도 이름 검색.
     const CHO = 'ㄱㄲㄴㄷㄸㄹㅁㅂㅃㅅㅆㅇㅈㅉㅊㅋㅌㅍㅎ';
@@ -2384,9 +2452,7 @@ export default function OperateScreen() {
       if (allowAI) {
         try {
           const { data } = await clubSessionApi.parseCommand(clubSessionId, raw);
-          const canon = actionToText(data?.action);
-          if (canon) { pushLog('bot', `🤖 ${canon}`, true); await runParse(canon, false); return; }
-          showAlert('명령', data?.action?.reason || errs.join('\n')); return;
+          done(); await runAiActions(data, errs.join('\n')); return;
         } catch (e: any) { showAlert('명령', `${errs.join('\n')}\n(AI 해석 실패: ${e?.response?.data?.error || '오류'})`); return; }
       }
       showAlert('명령', errs.join('\n')); return;
@@ -2396,9 +2462,7 @@ export default function OperateScreen() {
       if (allowAI && tokens.length > 0) {
         try {
           const { data } = await clubSessionApi.parseCommand(clubSessionId, raw);
-          const canon = actionToText(data?.action);
-          if (canon) { pushLog('bot', `🤖 ${canon}`, true); await runParse(canon, false); return; }
-          showAlert('명령', data?.action?.reason || '이름을 입력하세요'); return;
+          done(); await runAiActions(data, '이름을 입력하세요'); return;
         } catch { showAlert('명령', '이름을 입력하세요 (예: 신예준 김도윤 이지유 강수아)'); return; }
       }
       showAlert('명령', '이름을 입력하세요 (예: 신예준 김도윤 이지유 강수아)'); return;

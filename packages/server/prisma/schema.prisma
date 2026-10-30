@@ -380,6 +380,8 @@ model CourtTurn {
   startedAt     DateTime?
   completedAt   DateTime?
   timeLimitAt   DateTime?
+  // 이긴 두 사람(운영진이 코트 종료 때 선택으로 한 번 누름). 비면 기록 안 함 — 승패로 실제 실력을 추정한다.
+  winnerIds     String[]      @default([])
 
   court           Court             @relation(fields: [courtId], references: [id], onDelete: Cascade)
   createdBy       User              @relation("TurnCreator", fields: [createdById], references: [id])
@@ -1129,6 +1131,27 @@ model AutoMatchEdit {
   createdAt      DateTime @default(now())
 
   @@index([clubId, createdAt])
+}
+
+// 운영판 AI 명령 기록 — 문장 → 해석된 동작 → 결과. 프롬프트·모델을 바꿀 때 실제 문장으로 정확도를 비교하는 평가 세트의 재료.
+// outcome: OK(실행됨) | FAIL(실행 실패/못 알아들음) | CLARIFY(되물음) | UNDONE(만든 게임을 곧바로 지움) | null(아직 모름)
+model AiCommandLog {
+  id            String   @id @default(uuid())
+  clubId        String
+  clubSessionId String
+  userId        String
+  text          String
+  actions       Json
+  model         String
+  promptVersion String
+  latencyMs     Int
+  outcome       String?
+  detail        String?
+  entryIds      String[] @default([])
+  createdAt     DateTime @default(now())
+
+  @@index([clubId, createdAt])
+  @@index([clubSessionId])
 }
 
 // 회원 경기 후 반응 — 끝난 판마다 한 번. rating GOOD | OK | BAD, reason(BAD일 때):

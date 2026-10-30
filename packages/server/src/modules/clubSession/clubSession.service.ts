@@ -8,6 +8,7 @@ import { sendPushToUser } from '../notification/notification.service';
 import { openSession } from '../session/session.service';
 import { dropFromQueuedEntries } from '../gameBoard/gameBoard.service';
 import { askFeedbackOnLeave } from '../gameBoard/feedback.service';
+import { buildCommandPrompt, callCommandModel, normalizeActions, PROMPT_VERSION, type RosterPlayer } from './aiCommand';
 import QRCode from 'qrcode';
 import type {
   ClubSessionResponse,
@@ -1444,8 +1445,8 @@ export async function getMyStatus(userId: string): Promise<MyStatusResponse | nu
 }
 
 // ─── AI 명령 파싱 (운영판 키보드 명령의 자유 문장 폴백) ───
-// 운영자가 자유로운 한국어 문장으로 말하면 OpenAI가 "하나의 구조화된 동작(JSON)"으로 바꿔준다.
-// 모바일은 이 action 을 받아 기존 핸들러(편성/투입/교체/…)로 실행한다. LEADER/STAFF 전용.
+// 자유 문장 → 동작 목록(aiCommand.ts). 편성은 '말한 사람 + 조건'만 돌려주고 빈자리는 편성 엔진이 채운다.
+// 모바일은 actions 를 순서대로 기존 핸들러로 실행하고 결과를 reportCommandOutcome 으로 알린다. LEADER/STAFF 전용.
 export async function parseCommand(
   sessionId: string,
   userId: string,
@@ -1458,15 +1459,13 @@ export async function parseCommand(
   if (!session) throw new NotFoundError('모임 세션');
   await verifyClubStaff(session.clubId, userId);
 
-  const apiKey = process.env.OPENAI_API_KEY;
-  if (!apiKey) throw new AppError(503, 'AI 명령이 설정되지 않았어요 (OPENAI_API_KEY 없음)');
   const text = (input?.text || '').trim();
   if (!text) throw new BadRequestError('명령을 입력하세요');
 
-  // 맥락: 출석자(급수)·코트·대기 게임 — LLM이 이름/코트/게임번호를 정확히 매칭하도록
-  const players = await getAvailablePlayers(session.facilityId, sessionId);
+  // 맥락: 출석자(급수)·코트·대기 게임 — 이름/코트/게임번호를 정확히 매칭하도록
+  const players: RosterPlayer[] = await getAvailablePlayers(session.facilityId, sessionId);
   const courts = await getSessionCourts(sessionId);
-  const nameById = new Map<string, string>(players.map((p: any) => [p.userId, p.userName]));
+  const nameById = new Map<string, string>(players.map((p) => [p.userId, p.userName]));
   let queueLines: string[] = [];
   try {
     const board: any = await getGameBoard(sessionId);
@@ -1478,91 +1477,57 @@ export async function parseCommand(
   } catch {
     /* 보드 없음 → 빈 큐 */
   }
-  const roster = players
-    .map(
-      (p: any) =>
-        `${p.userName}(${p.skillLevel || '-'},${p.gender === 'M' ? '남' : p.gender === 'F' ? '여' : '?'},${p.gamesPlayedToday ?? 0}판${p.isInLesson ? ',레슨중' : ''})`,
-    )
-    .join(', ');
-  const courtNames = courts.map((c: any) => c.name).join(', ');
-
-  const sys = [
-    '너는 배드민턴 정모 운영판의 명령 파서다. 운영자가 한국어 자유 문장으로 말하면 정확히 하나의 동작을 JSON으로만 출력한다.',
-    `출석자(이름·급수·성별·오늘 판수): ${roster || '(없음)'}`,
-    `코트: ${courtNames || '(없음)'}`,
-    `대기 게임: ${queueLines.join(' | ') || '(없음)'}`,
-    '가능한 action 과 필드:',
-    '- compose {names:[]}            // 그 사람들로 새 게임 편성',
-    '- assign {court:번호, names:[]}  // 편성+코트 투입 (names 비면 다음 게임 투입)',
-    '- addToGame {gameNo:번호, names:[]}  // N번째 "대기 게임"으로 사람 이동/추가. "1번에 넣어줘 / 1번 게임으로 변경 / 1번으로 옮겨" 모두 이것. (다른 게임에 있으면 거기서 빠지고 옮겨짐 = 복사 아님)',
-    '- reorder {from:번호, to:번호}  // 대기 게임 순서 이동. 예: "3번 게임 맨 앞으로" → {from:3,to:1}',
-    '- swap {out, in}                // 선수 교체',
-    '- remove {name}                 // 대기로 빼기',
-    '- end {court:번호}              // 코트 게임 종료',
-    '- delete {gameNo:번호}          // N번째 대기 게임 삭제',
-    '- editSkill {name, skill}       // 급수 변경 (S/A/B/C/D/E/F)',
-    '- editName {name, newName}      // 이름 변경',
-    '- checkInAll {}                 // 전체 출석',
-    '- checkout {name}               // 퇴장',
-    '- lesson {name}                 // 레슨 토글',
-    '- addGuest {guestName, skill?}  // 게스트 추가',
-    '- autoFill {}                   // 자동 편성',
-    '- pairTogether {names:[두 명], games?:숫자}  // 두 사람을 파트너(같은 팀)로 같이 치게 하는 요청. "철수 영희 대회 파트너", "철수랑 영희 같이 2게임 짜줘" → games=2. 판수를 말 안 하면 games 생략(정모 내내).',
-    '- pairApart {names:[두 명]}      // 두 사람을 같은 게임에 넣지 않는 요청. "철수 영희 같이 안 짜줘 / 떼어줘 / 붙이지 마".',
-    '- unknown {reason}              // 못 알아듣거나 애매함',
-    '편성(compose/assign)에서 사람을 고를 때 names 에 4명을 채워라(사용자가 일부만 말하면 나머지는 네가 골라 4명, 말한 사람은 반드시 포함).',
-    '고르는 기본 원칙: ① 급수를 비슷하게 — 특히 이름이 주어지면(예: "안지민 게임 짜줘", 안지민=C) 그 사람과 급수 차가 작은 사람들로 채운다(C면 B~D 위주). 급수가 멀리 떨어진 조합(예: C와 F, A와 F를 한 게임)은 피한다. ② 오늘 판수가 적어 오래 기다린 사람 우선 ③ 레슨중이거나 이미 위 "대기 게임"에 든 사람은 제외. (명단 앞에서부터 그냥 4명 집지 마라 — 반드시 급수를 보고 골라라.)',
-    '단, 사용자 요청 뉘앙스를 항상 우선(융통성): "덜 빡세게/가볍게"=급수 낮추거나 섞어서, "빡세게/잘하는 사람들로"=높은 급수, "초심/입문이랑"=낮은 급수(E·F 위주), "OO랑 같이/OO 포함"=그 사람 반드시 포함. 딱 맞는 급수가 모자라면 가장 가까운 걸로 융통성 있게 — 완벽을 억지로 맞추진 마라.',
-    '혼복(혼합복식) 처리(중요): "혼복"이 들어가면 출석자의 남/여 표시를 직접 세서 남자 정확히 2명 + 여자 정확히 2명을 골라 names 에 넣어라(급수는 서로 비슷하게). 한 성별이 3명 이상이면 안 된다. 예) names=["남자A","남자B","여자C","여자D"].',
-    '출력 형식: 반드시 {"action":"<위 이름 중 하나>", ...나머지필드} — action 은 문자열 한 개. 필드는 같은 레벨에 둔다(중첩 금지).',
-    '예) {"action":"compose","names":["홍길동","김철수","이영희","박민수"]}',
-    '예) {"action":"swap","out":"홍길동","in":"김철수"}',
-    '예) {"action":"assign","court":3,"names":["홍길동","김철수","이영희","박민수"]}',
-    '예) {"action":"delete","gameNo":2}   예) {"action":"checkInAll"}   예) {"action":"autoFill"}',
-    '예) {"action":"pairTogether","names":["홍길동","김철수"],"games":2}   예) {"action":"pairApart","names":["이영희","박민수"]}',
-    '규칙: names/name/out/in 의 사람 이름은 반드시 위 출석자 명단의 "정확한 이름"으로 출력(급수 괄호 제외). 명단에 없거나 애매하면 {"action":"unknown","reason":"..."}. court/gameNo 는 숫자. 설명 없이 JSON 객체 하나만 출력.',
-  ].join('\n');
-
-  let res: globalThis.Response;
+  const system = buildCommandPrompt({ roster: players, courtNames: courts.map((c: any) => c.name), queueLines });
+  let called: Awaited<ReturnType<typeof callCommandModel>>;
   try {
-    res = await fetch('https://api.openai.com/v1/chat/completions', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` },
-      body: JSON.stringify({
-        model: process.env.OPENAI_MODEL || 'gpt-4o-mini',
-        messages: [
-          { role: 'system', content: sys },
-          { role: 'user', content: text },
-        ],
-        response_format: { type: 'json_object' },
-        temperature: 0,
-        max_tokens: 200,
-      }),
-    });
-  } catch {
-    throw new AppError(502, 'AI 호출에 실패했어요');
+    called = await callCommandModel(system, text);
+  } catch (e: any) {
+    throw new AppError(e?.status || 502, e?.message || 'AI 호출에 실패했어요');
   }
-  if (!res.ok) {
-    const t = await res.text().catch(() => '');
-    throw new AppError(502, `AI 파싱 실패 (${res.status})${t ? `: ${t.slice(0, 120)}` : ''}`);
-  }
-  const data: any = await res.json();
-  const content = data?.choices?.[0]?.message?.content || '{}';
-  let action: any;
-  try {
-    action = JSON.parse(content);
-  } catch {
-    throw new AppError(502, 'AI 응답 형식 오류');
-  }
-  // 정규화: AI가 {"compose":{"names":[]}} 처럼 중첩으로 주면 {"action":"compose","names":[]} 로 평탄화.
-  if (action && typeof action === 'object' && typeof action.action !== 'string') {
-    const keys = Object.keys(action);
-    if (keys.length === 1) {
-      const inner = action[keys[0]];
-      action = inner && typeof inner === 'object' ? { action: keys[0], ...inner } : { action: keys[0] };
-    }
-  }
-  return { action };
+  const actions = normalizeActions(called.raw, players, text);
+  const last = actions[actions.length - 1]?.action;
+  const log = await prisma.aiCommandLog
+    .create({
+      data: {
+        clubId: session.clubId,
+        clubSessionId: sessionId,
+        userId,
+        text: text.slice(0, 500),
+        actions: { raw: called.raw, actions },
+        model: called.model,
+        promptVersion: PROMPT_VERSION,
+        latencyMs: called.latencyMs,
+        outcome: last === 'clarify' ? 'CLARIFY' : last === 'unknown' && actions.length === 1 ? 'FAIL' : null,
+      },
+      select: { id: true },
+    })
+    .catch(() => null);
+  // action: 예전 앱(한 동작만 처리) 호환 — 첫 동작.
+  return { actions, action: actions[0], logId: log?.id ?? null };
+}
+
+/** 모바일이 AI 명령을 실행한 결과(OK/FAIL) + 만든 대기 게임 id(곧바로 지우면 UNDONE 으로 바뀐다). */
+export async function reportCommandOutcome(
+  sessionId: string,
+  userId: string,
+  logId: string,
+  input: { outcome?: string; detail?: string; entryIds?: string[] },
+) {
+  const log = await prisma.aiCommandLog.findUnique({ where: { id: logId } });
+  if (!log || log.clubSessionId !== sessionId) throw new NotFoundError('AI 명령 기록');
+  await verifyClubStaff(log.clubId, userId);
+  const outcome = input?.outcome === 'OK' || input?.outcome === 'FAIL' ? input.outcome : null;
+  if (!outcome) throw new BadRequestError('outcome 은 OK 또는 FAIL');
+  await prisma.aiCommandLog.update({
+    where: { id: logId },
+    data: {
+      // 이미 되돌림(UNDONE)으로 바뀐 기록은 덮지 않는다.
+      outcome: log.outcome === 'UNDONE' ? 'UNDONE' : outcome,
+      detail: (input.detail || '').slice(0, 300) || null,
+      entryIds: Array.isArray(input.entryIds) ? input.entryIds.filter((x) => typeof x === 'string').slice(0, 8) : [],
+    },
+  });
+  return { ok: true };
 }
 
 // ─────────────────────────────────────────────────────────────

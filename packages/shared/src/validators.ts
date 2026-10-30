@@ -490,7 +490,15 @@ export const suggestFoursomeSchema = z.object({
       turnId: z.string().uuid().optional(),
       outUserId: z.string().uuid().optional(),
     })
-    .refine((t) => !!t.entryId !== !!t.turnId, { message: 'entryId 또는 turnId 중 하나만' })
+    // fill 은 둘 다 없으면 '대기 맨 뒤 새 게임'(고정 0명). substitute 는 하나만.
+    .refine((t) => !(t.entryId && t.turnId) && (t.kind === 'fill' || !!t.entryId !== !!t.turnId), { message: 'entryId 또는 turnId 중 하나만' })
+    .optional(),
+  // 채우기 조건(AI 명령이 말에서 뽑음) — gameType 성별 구성, level 급수 기울기
+  want: z
+    .object({
+      gameType: z.enum(['mixed', 'men', 'women', 'same']).optional(),
+      level: z.enum(['up', 'down']).optional(),
+    })
     .optional(),
 });
 

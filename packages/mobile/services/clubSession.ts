@@ -246,8 +246,12 @@ export const clubSessionApi = {
 
   // ─── 운영자: 자유 문장 명령을 AI(OpenAI)로 구조화된 동작으로 파싱 (LEADER/STAFF) ───
   // 키워드로 못 알아들은 자유 문장을 서버가 OpenAI에 보내 {action,...} 으로 돌려준다.
+  // actions: 순서대로 실행할 동작들(편성은 '말한 사람 + 조건'만 — 빈자리는 엔진이 채움). action: 예전 앱 호환(첫 동작).
   parseCommand: (clubSessionId: string, text: string) =>
-    api.post<{ action: any }>(`/club-sessions/${clubSessionId}/parse-command`, { text }),
+    api.post<{ action: any; actions?: any[]; logId?: string | null }>(`/club-sessions/${clubSessionId}/parse-command`, { text }),
+  // AI 명령 실행 결과 — 명령 평가 세트(실제 문장 정답률)의 재료.
+  reportCommandOutcome: (clubSessionId: string, logId: string, body: { outcome: 'OK' | 'FAIL'; detail?: string; entryIds?: string[] }) =>
+    api.post(`/club-sessions/${clubSessionId}/ai-commands/${logId}/outcome`, body, { _silent: true } as any),
 
   // ─── 운영 공유 메모 (실시간) — 여러 운영진이 편성 히스토리·파트너 조합 등 맥락 공유 (LEADER/STAFF) ───
   getOperatorMemo: (clubSessionId: string) =>
