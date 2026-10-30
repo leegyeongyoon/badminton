@@ -115,6 +115,7 @@ function summarizeStyle(style: ClubStyle | null) {
   return {
     decisions: style.decisions,
     editSamples: style.editSamples,
+    shadowSamples: style.shadowSamples,
     testAccuracy: style.testAccuracy,
     traits: style.traits,
     trainedAt: style.trainedAt,

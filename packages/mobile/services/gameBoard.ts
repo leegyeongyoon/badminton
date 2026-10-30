@@ -62,6 +62,7 @@ export type PendingFeedback = { turnId: string; courtName: string; completedAt: 
 export type ClubStyleSummary = {
   decisions: number;            // 학습에 쓴 편성 수
   editSamples?: number;         // 학습에 넣은 '운영진이 고친 AI 판' 수
+  shadowSamples?: number;       // 학습에 넣은 '운영진이 직접 짠 판이 AI 안과 달랐던' 수
   testAccuracy: number | null;  // 실제 조합을 맞힌 비율(%) — 최근 20% 정모로 검증
   traits: string[];             // 예: ['남복·여복 위주', '급수 비슷한 사람끼리']
   trainedAt: string;

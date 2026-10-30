@@ -263,7 +263,7 @@ export function AutoSettingsPanel({
           )}
           {pace?.style && (
             <Text style={[styles.effect, { color: colors.textSecondary }]}>
-              {`배운 판: 모임 기록 ${pace.style.decisions.toLocaleString()}판${pace.style.editSamples ? ` + 운영진이 고친 판 ${pace.style.editSamples}개` : ''}${pace.style.testAccuracy != null ? ` · 운영진 선택 맞힘 ${pace.style.testAccuracy}%` : ''}`}
+              {`배운 판: 모임 기록 ${pace.style.decisions.toLocaleString()}판${pace.style.editSamples ? ` + 운영진이 고친 판 ${pace.style.editSamples}개` : ''}${pace.style.shadowSamples ? ` + AI와 다르게 짠 판 ${pace.style.shadowSamples}개` : ''}${pace.style.testAccuracy != null ? ` · 운영진 선택 맞힘 ${pace.style.testAccuracy}%` : ''}`}
             </Text>
           )}
           <Text style={[styles.howLine, { color: colors.text }]}>

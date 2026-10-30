@@ -22,6 +22,8 @@ const GAME_EST_SEC = 13 * 60;
 const NEG_PER_DECISION = 8;
 // 운영진이 AI 판을 고친 기록 1건의 가중(일반 기록 1판 = 대안 NEG_PER_DECISION개라 그보다 약간 작게).
 const EDIT_WEIGHT = 5;
+// 운영진이 직접 짠 판 vs 그 순간 AI라면(SHADOW)이 달랐던 판 — AI 안을 보고 고친 건 아니라서 EDITED 보다 가볍게.
+const SHADOW_WEIGHT = 2;
 
 export const STYLE_FEATURES = [
   'skillSpread', // 급수 폭(최고−최저)
@@ -49,6 +51,8 @@ export interface ClubStyle {
   decisions: number;
   /** 학습에 들어간 '운영진이 고친 AI 판' 수. */
   editSamples: number;
+  /** 학습에 들어간 '운영진이 직접 짠 판이 AI 안과 달랐던' 수. */
+  shadowSamples: number;
   testAccuracy: number | null;
   traits: string[];
   /** 학습 기간의 '정모 간' 함께 친 횟수(pairKey → 판수). 스코어링 때 단골 짝 판정에 쓴다. */
@@ -181,8 +185,8 @@ export async function trainClubStyle(clubId: string): Promise<ClubStyle | null> 
 
   // 운영진이 고친 AI 판(AutoMatchEdit EDITED) — 'AI가 짠 4명보다 운영진이 바꾼 4명이 낫다'는 정답 쌍.
   const edits = await prisma.autoMatchEdit.findMany({
-    where: { clubId, action: 'EDITED', createdAt: { gte: since } },
-    select: { clubSessionId: true, aiPlayerIds: true, finalPlayerIds: true },
+    where: { clubId, action: { in: ['EDITED', 'SHADOW'] }, createdAt: { gte: since } },
+    select: { clubSessionId: true, aiPlayerIds: true, finalPlayerIds: true, action: true },
   });
   const uids = Array.from(
     new Set([
@@ -300,8 +304,19 @@ export async function trainClubStyle(clubId: string): Promise<ClubStyle | null> 
 
   // 운영진 수정은 실제 운영 중 'AI 안을 보고 직접 고친' 판단이라 일반 기록보다 무겁게(EDIT_WEIGHT배) 넣는다.
   let editSamples = 0;
+  let shadowSamples = 0;
   for (const e of edits) {
     if (e.finalPlayerIds.length !== 4 || e.aiPlayerIds.length !== 4 || new Set(e.finalPlayerIds).size !== 4) continue;
+    if (e.action === 'SHADOW') {
+      // 같은 4명이면 배울 게 없다(차이 0).
+      if (e.aiPlayerIds.every((id) => e.finalPlayerIds.includes(id))) continue;
+      const h = historyAt.get(e.clubSessionId) ?? history;
+      const fc = styleFeatures(e.finalPlayerIds.map(player), h);
+      const fa = styleFeatures(e.aiPlayerIds.map(player), h);
+      for (let w = 0; w < SHADOW_WEIGHT; w++) rows.push({ si: -1, diff: fc.map((v, j) => v - fa[j]) });
+      shadowSamples++;
+      continue;
+    }
     const h = historyAt.get(e.clubSessionId) ?? history;
     const fc = styleFeatures(e.finalPlayerIds.map(player), h);
     const fa = styleFeatures(e.aiPlayerIds.map(player), h);
@@ -359,6 +374,7 @@ export async function trainClubStyle(clubId: string): Promise<ClubStyle | null> 
     stdWeights: model.stdWeights,
     decisions,
     editSamples,
+    shadowSamples,
     testAccuracy,
     traits: describe(model.stdWeights),
     history,
