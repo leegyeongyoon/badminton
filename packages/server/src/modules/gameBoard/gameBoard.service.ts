@@ -1772,7 +1772,12 @@ export async function suggestNextFoursome(
             else if (gameType === 'same') c += 3 * pref;
             // 남녀 차이는 허용하되 2단계를 넘으면 조금씩(남자가 받쳐주는 구조라도 차이가 작을수록 좋음).
             const gap = (m[0].skill + m[1].skill - f[0].skill - f[1].skill) / 2;
-            if (gap > 2) c += 0.8 * (gap - 2);
+            // 실운영(터닝 10/31): 남A 둘 + 여E 둘 혼복을 운영진이 계속 남복·여복으로 고쳤다 — 성별 안에서는 급수가 같아
+            // '맞는 판'으로 잡히고 이 비용이 0.8이라 거의 안 막았다. 실제 급수로 남녀 평균 2단계 넘게 벌어지면 크게.
+            const rk = (p: ModePlayer) => realSkill.get(p.id) ?? p.skill;
+            const realGap = (rk(m[0]) + rk(m[1]) - rk(f[0]) - rk(f[1])) / 2;
+            if (realGap > 2) c += 20 * (realGap - 2);
+            else if (gap > 2) c += 0.8 * (gap - 2);
           }
           // 여자 F조끼리 여복은 랠리가 어려움 → 남자가 받쳐주는 혼복 쪽으로(남자 후보가 있으면).
           if (f.length === 4 && f.some((p) => p.skill <= 1)) c += 3 * pref;
@@ -1789,7 +1794,8 @@ export async function suggestNextFoursome(
             });
             // 남자끼리·여자끼리 급수가 맞는(각 1단계 이내) 혼복은 좋은 판 — 목표보다 2판까지는 비용을 약하게(대략적인 기준).
             const sameSpread = (xs: ModePlayer[]) => (xs.length ? Math.max(...xs.map((x) => x.skill)) - Math.min(...xs.map((x) => x.skill)) : 0);
-            const balancedMix = isMix && f.length === 2 && sameSpread(f) <= 1 && sameSpread(m) <= 1;
+            // 혼복 비율을 0~10%로 정한 모임(혼복 싫음)엔 '맞는 혼복' 할인을 안 준다.
+            const balancedMix = mixTarget > 0.1 && isMix && f.length === 2 && sameSpread(f) <= 1 && sameSpread(m) <= 1;
             const over = mixSoFar + 1 - want;
             if (isMix && !mixWanted && over > 0.5) c += MIX_RATIO_COST * pref * (balancedMix && over <= 2 ? 0.3 : 1) * over;
             if (!isMix && mixSoFar < want - 0.5) c += MIX_RATIO_COST * pref * (want - mixSoFar);
