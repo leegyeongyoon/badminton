@@ -185,7 +185,8 @@ export async function trainClubStyle(clubId: string): Promise<ClubStyle | null> 
 
   // 운영진이 고친 AI 판(AutoMatchEdit EDITED) — 'AI가 짠 4명보다 운영진이 바꾼 4명이 낫다'는 정답 쌍.
   const edits = await prisma.autoMatchEdit.findMany({
-    where: { clubId, action: { in: ['EDITED', 'SHADOW'] }, createdAt: { gte: since } },
+    // SHADOW 학습은 실운영에서 혼복 쏠림이 보고돼 끔(2026-10-31) — 원인 확인 전까지 EDITED 만.
+    where: { clubId, action: 'EDITED', createdAt: { gte: since } },
     select: { clubSessionId: true, aiPlayerIds: true, finalPlayerIds: true, action: true },
   });
   const uids = Array.from(
