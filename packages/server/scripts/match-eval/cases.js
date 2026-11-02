@@ -76,8 +76,9 @@ for (const wl of 'CDEF')
     });
 
 // 5) 혼복 0% 설정 — 남녀 같은 급수 4명씩 → 남복이나 여복.
+//    (여자 F조는 급수별 기본 설정이 혼복 70% — 모임 설정보다 급수별 설정이 앞서므로 여기선 뺀다)
 for (const ml of 'ABCDE')
-  for (const wl of 'ABCDEF')
+  for (const wl of 'ABCDE')
     add('혼복 0% 설정', `남${ml}×4 + 여${wl}×4`, {
       settings: { mixedRatio: 0 },
       people: [...many(4, 'M' + ml), ...many(4, 'F' + wl)],
@@ -91,6 +92,7 @@ for (const ml of 'ABCD')
     allowEmpty: true,
     expect: (ch, ps) => {
       const m = ch.map((i) => ps[i]);
+      if (m.some((p) => gOf(p) === 'F')) return null; // 남복 규칙 — 여자가 든 판은 해당 없음
       return m.some((p) => p.code === 'MF') && m.some((p) => lvOf(p) >= 3) ? '남F와 D 이상이 한 판' : null;
     },
   });
@@ -138,6 +140,43 @@ for (const g of ['M', 'F'])
       expect: (ch) => (ch.includes(0) && ch.includes(1) ? '떼기 요청한 둘이 한 판' : null),
     });
 
+// 12) 판수 1판 차이도 지킴 — 같은 급수 8명, 4명은 1판 더 침(쉰 시간 같음) → 덜 친 4명.
+for (const g of ['M', 'F'])
+  for (const l of LV)
+    for (const games of [0, 2, 4])
+      add('판수 1판 차이', `${g}${l} 8명 · ${games}판 vs ${games + 1}판`, {
+        people: [...many(4, g + l, { g: games + 1, rest: 10 }), ...many(4, g + l, { g: games, rest: 10 })],
+        expect: (ch) => (ch.every((i) => i >= 4 && i < 8) ? null : `덜 친 4명이 아님 — 많이 친 ${ch.filter((i) => i < 4).length}명`),
+      });
+
+// 13) 판수 세 층 — 같은 급수 12명이 g·g+1·g+2판 → 가장 덜 친 4명.
+for (const g of ['M', 'F'])
+  for (const l of LV)
+    for (const games of [0, 3])
+      add('판수 세 층', `${g}${l} 12명 · ${games}/${games + 1}/${games + 2}판`, {
+        people: [...many(4, g + l, { g: games + 2, rest: 10 }), ...many(4, g + l, { g: games + 1, rest: 10 }), ...many(4, g + l, { g: games, rest: 10 })],
+        expect: (ch) => (ch.every((i) => i >= 8 && i < 12) ? null : `가장 덜 친 4명이 아님 — ${ch.filter((i) => i < 8).length}명 더 친 사람`),
+      });
+
+// 14) 남녀 섞여도 판수 먼저 — 남·여(여자 2단계 후하게 맞춘 급수) 2명씩 덜 친 4명 + 2판 더 친 4명 → 덜 친 4명.
+for (let i = 2; i < 7; i++)
+  for (const games of [0, 2, 4])
+    add('남녀 섞여도 판수 먼저', `남${LV[i]}·여${LV[i - 2]} · ${games}판 vs ${games + 2}판`, {
+      people: [
+        ...many(2, 'M' + LV[i], { g: games + 2, rest: 10 }), ...many(2, 'F' + LV[i - 2], { g: games + 2, rest: 10 }),
+        ...many(2, 'M' + LV[i], { g: games, rest: 10 }), ...many(2, 'F' + LV[i - 2], { g: games, rest: 10 }),
+      ],
+      expect: (ch) => (ch.every((x) => x >= 4 && x < 8) ? null : `덜 친 4명이 아님 — 많이 친 ${ch.filter((x) => x < 4).length}명`),
+    });
+
+// 15) 30분 넘게 0판인 사람은 꼭 — 같은 급수 8명 중 1명만 0판(30분 전 도착, 한 번도 못 침), 나머지 2판.
+for (const g of ['M', 'F'])
+  for (const l of LV)
+    add('0판인 사람 먼저', `${g}${l} 8명 · 1명 0판 30분`, {
+      people: [P(g + l, { g: 0, rest: 30 }), ...many(7, g + l, { g: 2, rest: 10 })],
+      expect: (ch) => (ch.includes(0) ? null : '30분 동안 0판인 사람을 뺌'),
+    });
+
 // ── 방해꾼 변형 ───────────────────────────────────────────────
 // 정답에 영향을 주면 안 되는 사람(대부분 반대 성별, 급수 무작위, 판수 더 많고 방금 끝남)을 4명·8명 섞고 코트 수를 바꿔
 // 같은 규칙을 다시 본다 — 출석이 많아져도 규칙이 지켜지는지. 결정적 난수라 매번 같은 케이스.
@@ -150,8 +189,8 @@ for (const g of ['M', 'F'])
     const g0 = c.people[0].code[0];
     const other = g0 === 'M' ? 'F' : 'M';
     const maxG = Math.max(...c.people.map((p) => p.g));
-    for (const k of [4, 8])
-      for (const v of [1, 2]) {
+    for (const k of [4, 8, 12, 16])
+      for (const v of [1, 2, 3]) {
         const noise = Array.from({ length: k }, () => P((rnd() < 0.75 ? other : g0) + LV[Math.floor(rnd() * 7)], { g: maxG + 3, rest: 0 }));
         cases.push({ ...c, name: `${c.name} · 방해 ${k}명#${v}`, people: [...c.people, ...noise] });
       }
@@ -222,7 +261,7 @@ async function runCase(c, where, T) {
   c.together.forEach((grp, k) => q.push(turn(grp.map((i) => ids[i]), 140 - k * 14, 128 - k * 14, 'COMPLETED')));
   psql(q.join('\n'));
   for (const [a, b] of c.apart ?? []) await api('POST', `/club-sessions/${sid}/requests`, { kind: 'APART', aId: ids[a], bId: ids[b] });
-  const r = await api('POST', `/club-sessions/${sid}/suggest`, { count: 1 });
+  const r = await api('POST', `/club-sessions/${sid}/suggest`, { count: 1, ...(c.suggest ?? {}) });
   await api('POST', `/club-sessions/${sid}/end`);
   const sg = r?.suggestions?.[0];
   if (!sg?.playerIds?.length) return c.allowEmpty ? { ok: true, note: '제안 없음(허용)' } : { ok: false, why: `제안 없음 — ${r?.note ?? r?.error ?? ''}`.slice(0, 120) };

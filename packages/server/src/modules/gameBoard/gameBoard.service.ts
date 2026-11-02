@@ -1786,7 +1786,10 @@ export async function suggestNextFoursome(
         // 차례 지키기: 밀린 사람(지금 후보들 평균보다 0.75판 이상 덜 침)이 든 판은 혼복 비율·급수별 혼복·
         // 게임 종류 같은 '선호' 비용을 약하게 — 선호 때문에 사람이 굶지 않게. 급수·성별 규칙(하드)은 그대로.
         const owed = group.some(isOwed);
-        const pref = owed ? 0.25 : 1;
+        // 계획 다듬기(여러 판을 한꺼번에 평가)에서는 깎지 않는다 — 판마다 깎아 주면 밀린 사람을 여러 판에 한 명씩
+        // 흩어 놓을수록 모든 판이 할인을 받아, 밀린 4명이 같이 들어가지 못하고 뒤 판으로 쪼개졌다(결정 단위 테스트:
+        // 여자 F조 8명, 0판 4명 vs 2판 4명에서 2판 친 사람이 끼어 듦). 순서는 계획의 '차례(urgency)' 항이 맡는다.
+        const pref = owed && !planEval ? 0.25 : 1;
         for (const p of group) c -= owedPull(p);
         if (group.length === 4 && !hasRequestPair(group, activeKeys)) {
           if (levelSpread(group, tune.genderOffsetFemale) === 2) c += spread2Over() && !planEval ? SPREAD2_OVER_COST : SPREAD2_COST;
