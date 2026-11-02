@@ -251,7 +251,6 @@ export const clubSessionApi = {
     api.post<{ action: any; actions?: any[]; logId?: string | null }>(`/club-sessions/${clubSessionId}/parse-command`, { text }),
   // 오늘 정모 리포트(운영진) — 기록에서 계산한 숫자 + AI 2~3줄 요약.
   report: (clubSessionId: string) => api.get<SessionReport>(`/club-sessions/${clubSessionId}/report`),
-  aiQuizLink: (clubSessionId: string) => api.get<{ url: string }>(`/club-sessions/${clubSessionId}/ai-quiz-link`),
   // AI 명령 실행 결과 — 명령 평가 세트(실제 문장 정답률)의 재료.
   reportCommandOutcome: (clubSessionId: string, logId: string, body: { outcome: 'OK' | 'FAIL'; detail?: string; entryIds?: string[] }) =>
     api.post(`/club-sessions/${clubSessionId}/ai-commands/${logId}/outcome`, body, { _silent: true } as any),

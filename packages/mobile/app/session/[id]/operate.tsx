@@ -2647,19 +2647,6 @@ export default function OperateScreen() {
     }
   }, [clubSessionId, copyingLink]);
 
-  // AI 편성 퀴즈 링크 — 운영진끼리 로그인 없이 풀고, 답은 이 모임의 AI 편성 학습에 쓰인다.
-  const copyQuizLink = useCallback(async () => {
-    if (!clubSessionId) return;
-    try {
-      const { data } = await clubSessionApi.aiQuizLink(clubSessionId);
-      if (!data?.url) { showError('퀴즈 링크를 불러오지 못했어요'); return; }
-      if (await copyToClipboard(data.url)) showSuccess('AI 편성 퀴즈 링크 복사됨 — 운영진 단톡에 붙여 넣어 주세요');
-      else showError('복사하지 못했어요');
-    } catch (err: any) {
-      showError(err?.response?.data?.error || '퀴즈 링크를 불러오지 못했어요');
-    }
-  }, [clubSessionId]);
-
   // ─── 운영자: 특정 참가자를 정모에서 체크아웃 ───
   // Self-checkout과 동일한 정리를 서버에서 수행. 성공 시 모달을 닫고 풀/보드를
   // 갱신(소켓 players:updated 도 함께 갱신). 실수 방지를 위해 확인 단계를 둠.
@@ -4567,7 +4554,6 @@ export default function OperateScreen() {
     { key: 'poll', label: '📊 투표', onPress: () => setPollModal(true) },
     { key: 'log', label: '📋 게임 기록', onPress: () => setGameLogOpen(true) },
     { key: 'report', label: '📝 오늘 정모 리포트', onPress: () => setReportOpen(true) },
-    { key: 'quiz', label: '🧩 AI 편성 퀴즈 링크 복사', onPress: () => { copyQuizLink(); } },
     { key: 'board', label: '📺 현황 보드', onPress: () => router.push(`/session/${clubSessionId}/board`) },
     { key: 'qr', label: '🔳 출석 QR', onPress: () => router.push(`/session/${clubSessionId}/qr`) },
     { key: 'link', label: copyingLink ? '🔗 복사 중…' : '🔗 출석 링크 복사', onPress: () => { copyAttendLink(); } },
