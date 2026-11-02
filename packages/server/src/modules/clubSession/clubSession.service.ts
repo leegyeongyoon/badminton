@@ -1,3 +1,4 @@
+import { quizKey } from '../aiQuiz/aiQuiz.service';
 import { prisma } from '../../utils/prisma';
 import { NotFoundError, BadRequestError, ForbiddenError, AppError } from '../../utils/errors';
 import { getIO } from '../../socket/index';
@@ -8,6 +9,7 @@ import { sendPushToUser } from '../notification/notification.service';
 import { openSession } from '../session/session.service';
 import { dropFromQueuedEntries } from '../gameBoard/gameBoard.service';
 import { askFeedbackOnLeave } from '../gameBoard/feedback.service';
+import { buildSessionReport } from './sessionReport';
 import { buildCommandPrompt, callCommandModel, normalizeActions, PROMPT_VERSION, type RosterPlayer } from './aiCommand';
 import QRCode from 'qrcode';
 import type {
@@ -1504,6 +1506,22 @@ export async function parseCommand(
     .catch(() => null);
   // action: 예전 앱(한 동작만 처리) 호환 — 첫 동작.
   return { actions, action: actions[0], logId: log?.id ?? null };
+}
+
+/** 오늘 정모 리포트(운영진) — 숫자는 기록에서 계산, AI는 그 숫자로 2~3줄 요약만. */
+export async function getSessionReport(sessionId: string, userId: string) {
+  const session = await prisma.clubSession.findUnique({ where: { id: sessionId }, select: { clubId: true } });
+  if (!session) throw new NotFoundError('모임 세션');
+  await verifyClubStaff(session.clubId, userId);
+  return buildSessionReport(sessionId);
+}
+
+/** AI 편성 퀴즈 링크의 모임 키(운영진만). 링크 주소는 라우터가 요청 호스트로 만든다. */
+export async function getAiQuizKey(sessionId: string, userId: string) {
+  const session = await prisma.clubSession.findUnique({ where: { id: sessionId }, select: { clubId: true } });
+  if (!session) throw new NotFoundError('모임 세션');
+  await verifyClubStaff(session.clubId, userId);
+  return { clubId: session.clubId, key: quizKey(session.clubId) };
 }
 
 /** 모바일이 AI 명령을 실행한 결과(OK/FAIL) + 만든 대기 게임 id(곧바로 지우면 UNDONE 으로 바뀐다). */

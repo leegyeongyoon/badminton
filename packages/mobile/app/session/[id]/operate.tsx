@@ -16,6 +16,7 @@ import { Icon } from '../../../components/ui/Icon';
 import { CreatePollModal } from '../../../components/session/CreatePollModal';
 import { FloatingMatchupPanel } from '../../../components/session/FloatingMatchupPanel';
 import { GameLog } from '../../../components/session/GameLog';
+import { SessionReport } from '../../../components/session/SessionReport';
 import { getSkillMeta, SKILL_LEVELS } from '../../../constants/skill';
 import { getGenderMeta, getGameType, GENDER_META, type Gender } from '../../../constants/gender';
 import { GenderMarker } from '../../../components/ui/GenderMarker';
@@ -566,6 +567,7 @@ export default function OperateScreen() {
   const [pollModal, setPollModal] = useState(false);
   const [moreOpen, setMoreOpen] = useState(false);
   const [gameLogOpen, setGameLogOpen] = useState(false);
+  const [reportOpen, setReportOpen] = useState(false);
   // 테스트/데모용 랜덤 게스트 일괄 추가 진행 상태 (실제 출석 아님).
   const [addingTestGuests, setAddingTestGuests] = useState(false);
   // Matchup popup: the player whose "오늘 함께 친 사람" sheet is open (null = closed).
@@ -1623,6 +1625,21 @@ export default function OperateScreen() {
       loadBoard(); loadPool();
     }
   }, [clubSessionId, updateEntry, loadBoard, loadPool]);
+  // '같이 안 짜기'를 저장하면 이미 짜 둔 대기 게임도 바로 고친다 — 두 사람이 든 판에서 뒤 사람을 빼고 엔진이 채운다
+  // (요청 전에 짜인 판이 그대로 코트에 들어가 같이 치는 일이 실제 시험에서 나왔다).
+  const fixApartConflicts = useCallback(async (aId: string, bId: string): Promise<number> => {
+    let fixed = 0;
+    for (const e of queuedEntries) {
+      if (!(e.playerIds.includes(aId) && e.playerIds.includes(bId))) continue;
+      try {
+        await updateEntry(e.id!, e.playerIds.filter((id) => id !== bId));
+        await fillEntry(e.id!, true);
+        fixed++;
+      } catch { /* 이 판은 ⚠ 표시로 남는다 */ }
+    }
+    if (fixed) { loadBoard(); loadPool(); }
+    return fixed;
+  }, [queuedEntries, updateEntry, fillEntry, loadBoard, loadPool]);
   // 땜빵 추천 — 교체 창(대기 게임 자리 / 코트 진행 중 선수)을 열면 빠지는 사람과 같은 성별·비슷한 급수 3명.
   const [subRecs, setSubRecs] = useState<{ userId: string; name: string; reason: string }[] | null>(null);
   useEffect(() => {
@@ -2128,6 +2145,24 @@ export default function OperateScreen() {
     </View>
   ) : null;
 
+  // 실제 종료 — 확인창 없이. 운영자가 말로 '끝내고 …'라고 시킨 AI 명령은 다음 동작이 빈 코트를 기다리므로 이걸 바로 부른다.
+  const endCourtNow = useCallback(async (courtId: string, forceClear = false): Promise<boolean> => {
+    const court = courts.find((c) => c.id === courtId);
+    try {
+      const { data: done } = await courtApi.completeActiveByCourt(courtId);
+      // 종료 성공 → 방금 나온 목록에 이 4명을 쌓는다(풀 갱신 전에 캡처).
+      pushRecentOut(courtId);
+      if (!forceClear && done?.ended?.teams?.length === 2) askWinner(done.ended.turnId, court?.name || '코트', done.ended.teams);
+      loadBoard();
+      loadCourts();
+      loadPool();
+      showSuccess(forceClear ? '코트를 비웠어요' : '게임 종료!');
+      return true;
+    } catch (err: any) {
+      showAlert('오류', err.response?.data?.error || (forceClear ? '비우기 실패' : '종료 실패'));
+      return false;
+    }
+  }, [courts, loadBoard, loadCourts, loadPool, pushRecentOut, askWinner]);
   const handleEndGame = useCallback(
     (courtId: string, forceClear = false) => {
       const court = courts.find((c) => c.id === courtId);
@@ -2136,24 +2171,11 @@ export default function OperateScreen() {
         forceClear
           ? `${court?.name || '코트'}을(를) 강제로 비울까요? 진행 중인 게임이 종료되고 선수들이 풀려요.`
           : `${court?.name || '코트'}의 게임을 종료할까요?`,
-        async () => {
-          try {
-            const { data: done } = await courtApi.completeActiveByCourt(courtId);
-            // 종료 성공 → 방금 나온 목록에 이 4명을 쌓는다(풀 갱신 전에 캡처).
-            pushRecentOut(courtId);
-            if (!forceClear && done?.ended?.teams?.length === 2) askWinner(done.ended.turnId, court?.name || '코트', done.ended.teams);
-            loadBoard();
-            loadCourts();
-            loadPool();
-            showSuccess(forceClear ? '코트를 비웠어요' : '게임 종료!');
-          } catch (err: any) {
-            showAlert('오류', err.response?.data?.error || (forceClear ? '비우기 실패' : '종료 실패'));
-          }
-        },
+        () => { void endCourtNow(courtId, forceClear); },
         forceClear ? '비우기' : '종료', '취소', 'danger',
       );
     },
-    [courts, loadBoard, loadCourts, loadPool, pushRecentOut, askWinner],
+    [courts, endCourtNow],
   );
 
   // 코트 이동 — 진행 중인 게임을 다른 빈 코트로. (코트 잘못 넣었을 때 코트명 변경 대신)
@@ -2246,8 +2268,11 @@ export default function OperateScreen() {
     for (const nm of (a.names || []) as string[]) {
       const p = uniquePlayers.find((m) => m.userName === nm);
       if (!p) return { ok: false, msg: `'${nm}' 없음` };
+      // 지금 코트에서 치는 사람도 넣는다 — 운영진도 70%는 '곧 끝날 사람'을 다음 판에 미리 넣고, 엔진이 끝나는 시각에 맞춰 짠다.
       if (!ids.includes(p.userId)) ids.push(p.userId);
     }
+    // 이미 다른 대기 게임에 있는 사람은 새 판으로 '옮긴다'(한 사람이 두 판에 들어가지 않게) — 새 판이 다 짜진 뒤에 뺀다.
+    const moveFrom = queuedEntries.filter((e) => e.playerIds.some((id) => ids.includes(id)));
     let court: any = null;
     if (a.action === 'assign') {
       court = courts.find((c) => (c.name || '').replace(/\s/g, '') === `코트${a.court}`);
@@ -2265,13 +2290,20 @@ export default function OperateScreen() {
       const { data } = await gameBoardApi.suggest(clubSessionId!, { target: entry?.id ? { kind: 'fill', entryId: entry.id } : { kind: 'fill' }, want });
       const sg = data?.suggestions?.[0];
       if (!sg?.playerIds || sg.playerIds.length !== 4) {
-        if (entry?.id) { loadBoard(); return { ok: false, msg: `${ids.length}명만 대기에 넣어뒀어요 — ${data?.note || '지금 채울 사람이 없어요'}`, entryId: entry.id }; }
+        // 말한 조건으로 4명이 안 되면 만든 판을 지우고 이유만 알린다(1~3명짜리 판이 대기 맨 위를 막지 않게).
+        if (entry?.id) { await deleteEntry(entry.id).catch(() => {}); loadBoard(); }
         return { ok: false, msg: data?.note || '지금 짤 수 있는 사람이 없어요' };
       }
       playerIds = sg.playerIds; note = sg.reason || undefined; teamSplit = !!sg.teamSplit;
       if (entry?.id) { await updateEntry(entry.id, playerIds, { note: note || null, teamSplit }); entryId = entry.id; }
     }
     if (!entryId) { const e: any = await createQueueGame(playerIds, note, teamSplit); entryId = e?.id; }
+    for (const e of moveFrom) {
+      const rest = e.playerIds.filter((id) => !playerIds.includes(id));
+      if (rest.length === e.playerIds.length) continue;
+      if (rest.length === 0) await deleteEntry(e.id!).catch(() => {});
+      else await updateEntry(e.id!, rest).catch(() => {});
+    }
     if (court && entryId) await assignEntry(entryId, court.id);
     loadBoard(); loadPool(); loadCourts();
     const names = playerIds.map((id) => getPlayer(id)?.userName || '?').join(' ');
@@ -2293,6 +2325,15 @@ export default function OperateScreen() {
           if (r.entryId) entryIds.push(r.entryId);
           if (!r.ok) { failed = r.msg; break; }
         } catch (e: any) { failed = e?.response?.data?.error || '편성 실패'; pushLog('bot', failed!, false); break; }
+        continue;
+      }
+      // '끝내고 …' — 운영자가 말로 시켰으니 확인창 없이 바로 끝내고(뒤 동작이 빈 코트를 기다림) 다음으로.
+      if (a?.action === 'end') {
+        const court = courts.find((c) => (c.name || '').replace(/\s/g, '') === `코트${a.court}`);
+        if (!court) { failed = `코트${a.court ?? ''} 없음`; pushLog('bot', `코트${a.court ?? ''} 이 없어요`, false); break; }
+        pushLog('bot', `🤖 ${court.name} 게임 종료`, true);
+        if (!(await endCourtNow(court.id))) { failed = 'end'; break; }
+        await loadCourts();
         continue;
       }
       const canon = actionToText(a);
@@ -2359,7 +2400,8 @@ export default function OperateScreen() {
       if (ok) {
         const an = getPlayer(a.id!)?.userName || tokens[1];
         const bn = getPlayer(b.id!)?.userName || tokens[2];
-        showSuccess(apart ? `🚫 ${an}·${bn} 같이 안 짜기 — 자동 편성이 지켜요` : `🤝 ${an}·${bn} 파트너${Number.isFinite(n) && n > 0 ? ` ${n}게임` : ' (계속)'} — 자동 편성이 같은 팀으로 짜요`);
+        const fixed = apart ? await fixApartConflicts(a.id!, b.id!) : 0;
+        showSuccess(apart ? `🚫 ${an}·${bn} 같이 안 짜기 — 자동 편성이 지켜요${fixed ? ` · 이미 짠 ${fixed}게임에서 ${bn} 빼고 다시 채움` : ''}` : `🤝 ${an}·${bn} 파트너${Number.isFinite(n) && n > 0 ? ` ${n}게임` : ' (계속)'} — 자동 편성이 같은 팀으로 짜요`);
       }
       done(); return;
     }
@@ -2604,6 +2646,19 @@ export default function OperateScreen() {
       setCopyingLink(false);
     }
   }, [clubSessionId, copyingLink]);
+
+  // AI 편성 퀴즈 링크 — 운영진끼리 로그인 없이 풀고, 답은 이 모임의 AI 편성 학습에 쓰인다.
+  const copyQuizLink = useCallback(async () => {
+    if (!clubSessionId) return;
+    try {
+      const { data } = await clubSessionApi.aiQuizLink(clubSessionId);
+      if (!data?.url) { showError('퀴즈 링크를 불러오지 못했어요'); return; }
+      if (await copyToClipboard(data.url)) showSuccess('AI 편성 퀴즈 링크 복사됨 — 운영진 단톡에 붙여 넣어 주세요');
+      else showError('복사하지 못했어요');
+    } catch (err: any) {
+      showError(err?.response?.data?.error || '퀴즈 링크를 불러오지 못했어요');
+    }
+  }, [clubSessionId]);
 
   // ─── 운영자: 특정 참가자를 정모에서 체크아웃 ───
   // Self-checkout과 동일한 정리를 서버에서 수행. 성공 시 모달을 닫고 풀/보드를
@@ -4511,6 +4566,8 @@ export default function OperateScreen() {
     { key: 'guide', label: '📖 사용법', onPress: () => setGuideOpen(true) },
     { key: 'poll', label: '📊 투표', onPress: () => setPollModal(true) },
     { key: 'log', label: '📋 게임 기록', onPress: () => setGameLogOpen(true) },
+    { key: 'report', label: '📝 오늘 정모 리포트', onPress: () => setReportOpen(true) },
+    { key: 'quiz', label: '🧩 AI 편성 퀴즈 링크 복사', onPress: () => { copyQuizLink(); } },
     { key: 'board', label: '📺 현황 보드', onPress: () => router.push(`/session/${clubSessionId}/board`) },
     { key: 'qr', label: '🔳 출석 QR', onPress: () => router.push(`/session/${clubSessionId}/qr`) },
     { key: 'link', label: copyingLink ? '🔗 복사 중…' : '🔗 출석 링크 복사', onPress: () => { copyAttendLink(); } },
@@ -4890,6 +4947,10 @@ export default function OperateScreen() {
               onPress={async () => {
                 if (!reqModal.aId || !reqModal.bId) return;
                 const ok = await addRequest(reqModal.kind, reqModal.aId, reqModal.bId, reqModal.kind === 'TOGETHER' ? reqModal.games : null);
+                if (ok && reqModal.kind === 'APART') {
+                  const fixed = await fixApartConflicts(reqModal.aId, reqModal.bId);
+                  if (fixed) showSuccess(`이미 짠 ${fixed}게임도 요청대로 고쳤어요`);
+                }
                 if (ok) setReqModal(null);
               }}
               style={[styles.reqBtn, { backgroundColor: reqModal.aId && reqModal.bId ? colors.primary : colors.surfaceSecondary }]}
@@ -4948,6 +5009,7 @@ export default function OperateScreen() {
       )}
       {pollModal && clubSessionId && <CreatePollModal clubSessionId={clubSessionId} onClose={() => setPollModal(false)} />}
       {gameLogOpen && clubSessionId && <GameLog clubSessionId={clubSessionId} onClose={() => setGameLogOpen(false)} />}
+      {reportOpen && clubSessionId && <SessionReport clubSessionId={clubSessionId} onClose={() => setReportOpen(false)} />}
       {guestModal && <AddGuestModal sessionId={clubSessionId!} colors={colors} onClose={() => setGuestModal(false)} onAdded={() => { setGuestModal(false); loadPool(); }} />}
       {feeModal && <GuestFeeModal sessionId={clubSessionId!} colors={colors} onClose={() => setFeeModal(false)} />}
       {courtModal && facilityId && (

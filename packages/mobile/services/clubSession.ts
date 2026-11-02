@@ -249,6 +249,9 @@ export const clubSessionApi = {
   // actions: 순서대로 실행할 동작들(편성은 '말한 사람 + 조건'만 — 빈자리는 엔진이 채움). action: 예전 앱 호환(첫 동작).
   parseCommand: (clubSessionId: string, text: string) =>
     api.post<{ action: any; actions?: any[]; logId?: string | null }>(`/club-sessions/${clubSessionId}/parse-command`, { text }),
+  // 오늘 정모 리포트(운영진) — 기록에서 계산한 숫자 + AI 2~3줄 요약.
+  report: (clubSessionId: string) => api.get<SessionReport>(`/club-sessions/${clubSessionId}/report`),
+  aiQuizLink: (clubSessionId: string) => api.get<{ url: string }>(`/club-sessions/${clubSessionId}/ai-quiz-link`),
   // AI 명령 실행 결과 — 명령 평가 세트(실제 문장 정답률)의 재료.
   reportCommandOutcome: (clubSessionId: string, logId: string, body: { outcome: 'OK' | 'FAIL'; detail?: string; entryIds?: string[] }) =>
     api.post(`/club-sessions/${clubSessionId}/ai-commands/${logId}/outcome`, body, { _silent: true } as any),
@@ -266,4 +269,23 @@ export const clubSessionApi = {
   // ─── 정모 종료 요약 리포트 (ACTIVE/ENDED 모두 동작) ───
   getSummary: (clubSessionId: string) =>
     api.get<SessionSummary>(`/club-sessions/${clubSessionId}/summary`),
+};
+
+export type SessionReport = {
+  sessionId: string;
+  ended: boolean;
+  minutes: number;
+  games: number;
+  players: number;
+  avgGameMin: number | null;
+  gamesPerPerson: { min: number; median: number; max: number };
+  mixedPct: number | null;
+  longWaits: { name: string; minutes: number }[];
+  noGames: { name: string; stayedMin: number }[];
+  fewGames: { name: string; games: number; perHour: number }[];
+  sameFourRepeats: number;
+  ai: { games: number; kept: number; edited: number; deleted: number; commands: number; commandsOk: number };
+  feedback: { total: number; good: number; ok: number; bad: number; reasons: Record<string, number> };
+  resultsRecorded: number;
+  summary: string[] | null;
 };

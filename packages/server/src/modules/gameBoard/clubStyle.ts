@@ -24,6 +24,8 @@ const NEG_PER_DECISION = 8;
 const EDIT_WEIGHT = 5;
 // 운영진이 직접 짠 판 vs 그 순간 AI라면(SHADOW)이 달랐던 판 — AI 안을 보고 고친 건 아니라서 EDITED 보다 가볍게.
 const SHADOW_WEIGHT = 2;
+// AI 편성 퀴즈 답 1건 — 운영진이 차분히 보고 고른 판단이라 운영진 수정과 같은 무게.
+const QUIZ_WEIGHT = 5;
 
 export const STYLE_FEATURES = [
   'skillSpread', // 급수 폭(최고−최저)
@@ -53,6 +55,8 @@ export interface ClubStyle {
   editSamples: number;
   /** 학습에 들어간 '운영진이 직접 짠 판이 AI 안과 달랐던' 수. */
   shadowSamples: number;
+  /** 학습에 들어간 AI 편성 퀴즈 답 수(운영진 판 vs AI 안 중 고른 쪽). */
+  quizSamples: number;
   testAccuracy: number | null;
   traits: string[];
   /** 학습 기간의 '정모 간' 함께 친 횟수(pairKey → 판수). 스코어링 때 단골 짝 판정에 쓴다. */
@@ -189,11 +193,23 @@ export async function trainClubStyle(clubId: string): Promise<ClubStyle | null> 
     where: { clubId, action: 'EDITED', createdAt: { gte: since } },
     select: { clubSessionId: true, aiPlayerIds: true, finalPlayerIds: true, action: true },
   });
+  // AI 편성 퀴즈 답 — 문제(SHADOW 기록)의 두 판 중 사람이 고른 쪽이 정답. '둘 다 별로'는 쌍이 없어 뺀다.
+  const quizAnswers = await prisma.aiQuizAnswer.findMany({
+    where: { clubId, createdAt: { gte: since }, choice: { in: ['OPERATOR', 'AI'] } },
+    select: { editId: true, choice: true },
+  });
+  const quizEdits = quizAnswers.length
+    ? await prisma.autoMatchEdit.findMany({
+        where: { id: { in: Array.from(new Set(quizAnswers.map((q) => q.editId))) }, clubId },
+        select: { id: true, clubSessionId: true, aiPlayerIds: true, finalPlayerIds: true },
+      })
+    : [];
   const uids = Array.from(
     new Set([
       ...checkins.map((c) => c.userId),
       ...turns.flatMap((t) => t.players.map((p) => p.userId)),
       ...edits.flatMap((e) => [...e.aiPlayerIds, ...e.finalPlayerIds]),
+      ...quizEdits.flatMap((e) => [...e.aiPlayerIds, ...e.finalPlayerIds]),
     ]),
   );
   const [users, profiles, members] = await Promise.all([
@@ -248,7 +264,7 @@ export async function trainClubStyle(clubId: string): Promise<ClubStyle | null> 
   let decisions = 0;
 
   // 고친 판의 특성은 '그 정모 시작 때'의 짝 기록으로 계산(그 뒤 기록이 섞이면 미래 정보 누수).
-  const editSessions = new Set(edits.map((e) => e.clubSessionId));
+  const editSessions = new Set([...edits.map((e) => e.clubSessionId), ...quizEdits.map((e) => e.clubSessionId)]);
   const historyAt = new Map<string, Map<string, number>>();
   sessions.forEach((s, si) => {
     if (editSessions.has(s.id)) historyAt.set(s.id, new Map(history));
@@ -326,6 +342,19 @@ export async function trainClubStyle(clubId: string): Promise<ClubStyle | null> 
     editSamples++;
   }
 
+  let quizSamples = 0;
+  const quizEditOf = new Map(quizEdits.map((e) => [e.id, e]));
+  for (const q of quizAnswers) {
+    const e = quizEditOf.get(q.editId);
+    if (!e || e.finalPlayerIds.length !== 4 || e.aiPlayerIds.length !== 4) continue;
+    const h = historyAt.get(e.clubSessionId) ?? history;
+    const [win, lose] = q.choice === 'OPERATOR' ? [e.finalPlayerIds, e.aiPlayerIds] : [e.aiPlayerIds, e.finalPlayerIds];
+    const fw = styleFeatures(win.map(player), h);
+    const fl = styleFeatures(lose.map(player), h);
+    for (let w = 0; w < QUIZ_WEIGHT; w++) rows.push({ si: -1, diff: fw.map((v, j) => v - fl[j]) });
+    quizSamples++;
+  }
+
   if (decisions < MIN_DECISIONS || rows.length === 0) return null;
 
   // 운영진 급수 폭 규칙 — 학습 기간 4인 판의 보정 급수 폭 95% 지점(1~3으로 제한).
@@ -376,6 +405,7 @@ export async function trainClubStyle(clubId: string): Promise<ClubStyle | null> 
     decisions,
     editSamples,
     shadowSamples,
+    quizSamples,
     testAccuracy,
     traits: describe(model.stdWeights),
     history,

@@ -1133,6 +1133,22 @@ model AutoMatchEdit {
   @@index([clubId, createdAt])
 }
 
+// AI 편성 퀴즈 답 — 운영진 판 vs 그 순간 AI 안(SHADOW, editId) 중 사람이 고른 쪽. clubStyle 학습의 정답 쌍.
+// choice: OPERATOR | AI | NEITHER. 로그인 없는 퀴즈라 사람은 이름으로만 구분(같은 이름이 다시 답하면 덮어씀).
+model AiQuizAnswer {
+  id        String   @id @default(uuid())
+  clubId    String
+  editId    String
+  name      String
+  choice    String
+  reasons   String[] @default([])
+  note      String?
+  createdAt DateTime @default(now())
+
+  @@index([clubId, createdAt])
+  @@index([editId])
+}
+
 // 운영판 AI 명령 기록 — 문장 → 해석된 동작 → 결과. 프롬프트·모델을 바꿀 때 실제 문장으로 정확도를 비교하는 평가 세트의 재료.
 // outcome: OK(실행됨) | FAIL(실행 실패/못 알아들음) | CLARIFY(되물음) | UNDONE(만든 게임을 곧바로 지움) | null(아직 모름)
 model AiCommandLog {

@@ -305,6 +305,27 @@ router.post(
   },
 );
 
+// GET /api/v1/club-sessions/:id/report - 오늘 정모 리포트(숫자 + AI 요약) (LEADER/STAFF)
+router.get('/:id/report', authenticate, async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    res.json(await clubSessionService.getSessionReport(req.params.id as string, req.user!.userId));
+  } catch (err) {
+    next(err);
+  }
+});
+
+// GET /api/v1/club-sessions/:id/ai-quiz-link - AI 편성 퀴즈 공유 링크(로그인 없이 푸는 페이지, LEADER/STAFF)
+router.get('/:id/ai-quiz-link', authenticate, async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { clubId, key } = await clubSessionService.getAiQuizKey(req.params.id as string, req.user!.userId);
+    const host = req.get('host') ?? 'api.badmintoncourt.store';
+    const proto = /^(localhost|127\.0\.0\.1)(:|$)/.test(host) ? req.protocol : 'https';
+    res.json({ url: `${proto}://${host}/api/v1/ai-quiz?c=${clubId}&k=${key}` });
+  } catch (err) {
+    next(err);
+  }
+});
+
 // POST /api/v1/club-sessions/:id/ai-commands/:logId/outcome - AI 명령 실행 결과(OK/FAIL) 기록 (LEADER/STAFF)
 router.post(
   '/:id/ai-commands/:logId/outcome',

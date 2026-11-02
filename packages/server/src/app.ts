@@ -31,6 +31,7 @@ import coachJobRouter from './modules/coachJob/coachJob.router';
 import paymentRouter from './modules/payment/payment.router';
 import rallyGameRouter from './modules/rallyGame/rallyGame.router';
 import { pollRouter } from './modules/poll/poll.router';
+import aiQuizRouter from './modules/aiQuiz/aiQuiz.router';
 import { noteRequest } from './modules/admin/metrics.service';
 
 const app = express();
@@ -102,6 +103,7 @@ app.use('/api/v1/coach-chat', coachChatRouter);        // 코치 문의 채팅(�
 app.use('/api/v1/coach-jobs', coachJobRouter);         // 코치 구인 공고 + 지원 관리(원티드식)
 app.use('/api/v1/payments', paymentRouter);            // 결제 수단·내역·정산(MOCK 게이트)
 app.use('/api/v1/rally', rallyGameRouter);              // 콕고 랠리 PvP 대결 신청(인메모리 매치)
+app.use('/api/v1/ai-quiz', aiQuizRouter);               // AI 편성 퀴즈(공개, 모임 키 + rate-limit)
 // Client crash/error sink. Use a tight body limit so a runtime error report
 // (message + stack) can't carry an oversized payload. Mounted before the
 // errorHandler. The global express.json() above already parsed the body; the
