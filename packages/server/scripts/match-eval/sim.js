@@ -27,7 +27,10 @@ function rng(seed) {
  *       events?: [{ t, type: 'leave'|'rest'|'back'|'lesson'|'unlesson'|'together'|'apart', who: [pop 인덱스] }],
  *       operatorEditEvery?: 분(AI 대기 게임 하나에서 한 명을 쉬는 사람으로 바꿈), longGames?: 비율 }
  */
-async function runScenario(sc, seed = 1) {
+// where: { club, facility } — 여러 시나리오를 동시에 돌릴 때 모임을 나눠 쓴다(정모는 모임당 하나).
+async function runScenario(sc, seed = 1, where = {}) {
+  const CLUB_ID = where.club ?? CLUB;
+  const FACILITY_ID = where.facility ?? FACILITY;
   const drnd = rng(seed * 104729 + 7);
   const ornd = rng(seed * 7919 + 13);
   const gauss = () => Math.sqrt(-2 * Math.log(drnd() + 1e-9)) * Math.cos(2 * Math.PI * drnd());
@@ -41,9 +44,9 @@ async function runScenario(sc, seed = 1) {
     const t = await r.text();
     try { return JSON.parse(t); } catch { return t; }
   };
-  const act = await api('GET', `/clubs/${CLUB}/sessions/active`);
+  const act = await api('GET', `/clubs/${CLUB_ID}/sessions/active`);
   if (act?.id) await api('POST', `/club-sessions/${act.id}/end`);
-  const sid = (await api('POST', `/clubs/${CLUB}/sessions`, { facilityId: FACILITY, courtCount: sc.courts })).id;
+  const sid = (await api('POST', `/clubs/${CLUB_ID}/sessions`, { facilityId: FACILITY_ID, courtCount: sc.courts })).id;
   await api('PUT', `/club-sessions/${sid}/auto-settings`, {});
   const board = (await api('POST', `/club-sessions/${sid}/game-board`)).id;
   const cs = await api('GET', `/club-sessions/${sid}/courts`);

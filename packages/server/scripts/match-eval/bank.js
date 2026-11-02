@@ -1,0 +1,58 @@
+// 시나리오 은행 일괄 실행 — 실제 정모 출석 구성으로 만든 수백 개 시나리오를 시뮬레이션 모임 여러 개에 나눠 동시에 돌린다.
+// 은행 파일(bank.json)은 저장소 밖에서 만든다(운영 데이터 기반, 성별·급수·도착/퇴장 분만 담김).
+//
+// 사용(로컬 DB·서버 + 시뮬 모임 6개가 있어야 함):
+//   node scripts/match-eval/bank.js <bank.json> [--par 6] [--limit 50] [--only real] [--seed 1] [--out 결과.json]
+const fs = require('fs');
+const { runScenario } = require('./sim');
+const { score } = require('./run');
+
+const args = process.argv.slice(2);
+const opt = (k, d) => {
+  const i = args.indexOf(`--${k}`);
+  return i >= 0 ? args[i + 1] : d;
+};
+const bank = JSON.parse(fs.readFileSync(args[0], 'utf8'));
+const only = opt('only');
+const list = bank.filter((s) => !only || new RegExp(only).test(s.name)).slice(0, Number(opt('limit', bank.length)));
+const par = Number(opt('par', 6));
+const seed = Number(opt('seed', 1));
+// 시뮬 모임 i(1~6): 모임·체육관 id 끝자리만 다르다.
+const slot = (i) => ({
+  club: `cc2112ad-3e60-45e3-9b3d-${String(i).padStart(12, '0')}`,
+  facility: `cf36ec5f-d6a8-4cbd-aa19-${String(i).padStart(12, '0')}`,
+});
+
+(async () => {
+  const t0 = Date.now();
+  const results = [];
+  let next = 0;
+  const worker = async (w) => {
+    while (next < list.length) {
+      const sc = list[next++];
+      try {
+        const r = await runScenario(sc, seed, slot(w));
+        const s = score(r);
+        results.push({ name: sc.name, courts: sc.courts, people: sc.pop.length, checks: Object.fromEntries(s.checks.map((c) => [c.k, c.v])), fails: s.checks.filter((c) => !c.ok).map((c) => c.k), info: s.info });
+      } catch (e) {
+        results.push({ name: sc.name, error: String(e?.message ?? e) });
+      }
+      process.stdout.write(`\r${results.length}/${list.length} (${Math.round((Date.now() - t0) / 1000)}초)`);
+    }
+  };
+  await Promise.all(Array.from({ length: par }, (_, i) => worker(i + 1)));
+  console.log('');
+  const ok = results.filter((r) => !r.error);
+  const keys = Object.keys(ok[0]?.checks ?? {});
+  console.log(`시나리오 ${ok.length}개 (오류 ${results.length - ok.length}) · 전부 통과 ${ok.filter((r) => !r.fails.length).length}개`);
+  for (const k of keys) {
+    const vs = ok.map((r) => r.checks[k]);
+    const failN = ok.filter((r) => r.fails.includes(k)).length;
+    const avg = vs.reduce((a, b) => a + b, 0) / vs.length;
+    console.log(`  ${k.padEnd(22)} 평균 ${avg.toFixed(2).padStart(7)} · 미달 ${String(failN).padStart(3)}개`);
+  }
+  const worst = [...ok].sort((a, b) => b.fails.length - a.fails.length).slice(0, 10);
+  console.log('가장 많이 어긴 시나리오:');
+  for (const r of worst) console.log(`  ${r.name} (${r.courts}코트·${r.people}명) ${r.fails.join(', ') || '-'}`);
+  if (opt('out')) fs.writeFileSync(opt('out'), JSON.stringify(results));
+})();

@@ -109,7 +109,7 @@ function score(r) {
   };
 }
 
-(async () => {
+if (require.main === module) (async () => {
   const args = process.argv.slice(2);
   const si = args.indexOf('--seeds');
   const seeds = si >= 0 ? args[si + 1].split(',').map(Number) : [1, 2];
@@ -136,4 +136,4 @@ function score(r) {
   process.exitCode = fails ? 1 : 0;
 })();
 
-module.exports = { SCENARIOS, LV };
+module.exports = { SCENARIOS, LV, score };
