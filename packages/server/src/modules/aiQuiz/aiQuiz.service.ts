@@ -13,7 +13,12 @@ const LOOKBACK_DAYS = 90;
 const MAX_QUESTIONS = 150;
 const LEVELS = ['S', 'A', 'B', 'C', 'D', 'E', 'F'];
 const CIRCLED = '①②③④⑤⑥⑦⑧⑨⑩⑪⑫⑬⑭⑮⑯⑰⑱⑲⑳';
-export const QUIZ_CHOICES = ['OPERATOR', 'AI', 'NEITHER'] as const;
+// BOTH = 둘 다 괜찮음(이 정도 차이는 상관없음), NEITHER = 둘 다 별로.
+export const QUIZ_CHOICES = ['OPERATOR', 'AI', 'BOTH', 'NEITHER'] as const;
+// 급수 숫자(F–E는 2단계로 본다 — 운영진 규칙). 팀 힘은 여자 2단계 보정.
+const SPREAD_NUM: Record<string, number> = { S: 7, A: 6, B: 5, C: 4, D: 3, E: 2, F: 0 };
+const POWER_NUM: Record<string, number> = { S: 7, A: 6, B: 5, C: 4, D: 3, E: 2, F: 1 };
+const pairKey = (a: string, b: string) => (a < b ? a + '|' + b : b + '|' + a);
 
 export function quizKey(clubId: string): string {
   return crypto
@@ -83,16 +88,35 @@ export async function listQuizQuestions(clubIdRaw: unknown, key: unknown) {
     return `${p?.gender === 'F' ? '여' : p?.gender === 'M' ? '남' : '?'}${lv ?? '?'}`;
   };
   const startOf = new Map(sessions.map((s) => [s.id, s.startedAt.getTime()]));
+  const gameType = (ids: string[]) => {
+    const m = ids.filter((id) => base(id)[0] === '남').length;
+    const f = ids.filter((id) => base(id)[0] === '여').length;
+    if (f === 0) return '남복';
+    if (m === 0) return '여복';
+    return m === f ? '혼복' : '혼복 ' + Math.max(m, f) + ':' + Math.min(m, f);
+  };
 
   const questions = edits.map((e) => {
     const T = e.createdAt.getTime() - 1000;
     const sTurns = turns.filter((t) => t.clubSessionId === e.clubSessionId);
     const games = new Map<string, number>();
+    const mixed = new Map<string, number>();
     const lastEnd = new Map<string, number>();
+    const lastType = new Map<string, { at: number; type: string }>();
     const playingFor = new Map<string, number>();
+    const together = new Map<string, number>();
     for (const t of sTurns) {
       const st = t.startedAt!.getTime();
       const en = t.completedAt?.getTime() ?? null;
+      if (st < T) {
+        const ids = t.players.map((p) => p.userId);
+        const type = gameType(ids);
+        for (let i = 0; i < ids.length; i++) {
+          for (let j = i + 1; j < ids.length; j++) together.set(pairKey(ids[i], ids[j]), (together.get(pairKey(ids[i], ids[j])) ?? 0) + 1);
+          if (type.startsWith('혼복')) mixed.set(ids[i], (mixed.get(ids[i]) ?? 0) + 1);
+          if (st > (lastType.get(ids[i])?.at ?? 0)) lastType.set(ids[i], { at: st, type });
+        }
+      }
       for (const { userId } of t.players) {
         if (en != null && en <= T) {
           games.set(userId, (games.get(userId) ?? 0) + 1);
@@ -126,15 +150,55 @@ export async function listQuizQuestions(clubIdRaw: unknown, key: unknown) {
       const rest = (T - Math.max(lastEnd.get(id) ?? 0, cin.get(id) ?? T)) / 60000;
       return rest < 1 ? '방금 끝남' : `${Math.round(rest)}분 쉼`;
     };
-    const operator = { src: 'OPERATOR', players: e.finalPlayerIds.map((id) => label.get(id)!) };
-    const ai = { src: 'AI', players: e.aiPlayerIds.map((id) => label.get(id)!) };
+    const summarize = (ids: string[]) => {
+      const lv = (id: string) => base(id).slice(1);
+      const g = (id: string) => base(id)[0];
+      const spread = (xs: string[]) => {
+        if (xs.length < 2) return null;
+        const v = xs.map((id) => SPREAD_NUM[lv(id)] ?? 4);
+        const lo = xs[v.indexOf(Math.min(...v))];
+        const hi = xs[v.indexOf(Math.max(...v))];
+        return { text: g(xs[0]) + ' ' + lv(hi) + (lv(hi) === lv(lo) ? '' : '~' + lv(lo)), gap: Math.max(...v) - Math.min(...v) };
+      };
+      const men = ids.filter((id) => g(id) === '남');
+      const women = ids.filter((id) => g(id) === '여');
+      const power = (id: string) => (POWER_NUM[lv(id)] ?? 4) - (g(id) === '여' ? 2 : 0);
+      const [a, b, c, d] = ids;
+      let splits: [string[], string[]][] = [[[a, b], [c, d]], [[a, c], [b, d]], [[a, d], [b, c]]];
+      if (men.length === 2 && women.length === 2) splits = splits.filter(([x]) => g(x[0]) !== g(x[1]));
+      const best = splits
+        .map(([x, y]) => ({ x, y, diff: Math.abs(power(x[0]) + power(x[1]) - power(y[0]) - power(y[1])) }))
+        .sort((p, q) => p.diff - q.diff)[0];
+      const repeats: string[] = [];
+      for (let i = 0; i < 4; i++)
+        for (let j = i + 1; j < 4; j++) {
+          const n = together.get(pairKey(ids[i], ids[j])) ?? 0;
+          if (n > 0) repeats.push(label.get(ids[i]) + '·' + label.get(ids[j]) + ' ' + n + '번');
+        }
+      const spreads = [spread(men), spread(women)].filter((x): x is { text: string; gap: number } => !!x);
+      return {
+        type: gameType(ids),
+        spread: spreads.map((x) => x.text + (x.gap ? '(' + x.gap + '단계)' : '')).join(' · ') || '-',
+        teams: best ? best.x.map((id) => label.get(id)).join('·') + ' vs ' + best.y.map((id) => label.get(id)).join('·') + ' (힘 차이 ' + best.diff + ')' : '-',
+        repeats,
+        justOrPlaying: ids.filter((id) => playingFor.has(id) || stateOf(id) === '방금 끝남').length,
+      };
+    };
+    const operator = { src: 'OPERATOR', players: e.finalPlayerIds.map((id) => label.get(id)!), summary: summarize(e.finalPlayerIds) };
+    const ai = { src: 'AI', players: e.aiPlayerIds.map((id) => label.get(id)!), summary: summarize(e.aiPlayerIds) };
     const options = (operatorFirst(e.id) ? [operator, ai] : [ai, operator]).map((o, i) => ({ ...o, key: 'AB'[i] }));
     const start = startOf.get(e.clubSessionId) ?? T;
     return {
       id: e.id,
       when: `${kstDay(e.createdAt)} 정모 · 시작 ${Math.max(0, Math.round((T - start) / 60000))}분 뒤`,
       context: `출석 ${present.length}명 · 코트에서 치는 중 ${playingFor.size}명 · 판수 중앙값 ${med}판`,
-      people: shown.map((id) => ({ label: label.get(id)!, games: games.get(id) ?? 0, state: stateOf(id) })),
+      people: shown.map((id) => ({
+        label: label.get(id)!,
+        games: games.get(id) ?? 0,
+        mixed: mixed.get(id) ?? 0,
+        last: lastType.get(id)?.type ?? null,
+        state: stateOf(id),
+      })),
       options,
       answers: answers.filter((a) => a.editId === e.id).map((a) => ({ name: a.name, choice: a.choice })),
     };

@@ -62,6 +62,13 @@ tr.inA.inB td:first-child { box-shadow: inset 3px 0 0 var(--court), inset 6px 0 
 .p small { color: var(--muted); font-size: 12px }
 .p.just { border-color: var(--warn) }
 .reveal { font-size: 13px; color: var(--muted) }
+.only { outline: 2px solid var(--ink); outline-offset: -1px }
+.only small b { color: var(--ink); font-weight: 600 }
+.sum { display: grid; gap: 2px; font-size: 13px; color: var(--muted) }
+.sum b { color: var(--ink); font-weight: 600 }
+.sum .rep { color: var(--warn) }
+.type { font-size: 13px; font-weight: 600; margin-left: 6px }
+.mini { color: var(--muted); font-size: 12.5px }
 .reveal b { color: var(--ink) }
 .answer { display: grid; gap: 10px }
 .row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center }
@@ -88,9 +95,9 @@ textarea { min-height: 64px; resize: vertical }
 <div class="wrap">
   <header>
     <h1 id="title">콕고 편성 퀴즈</h1>
-    <p class="lead">실제 정모에서 운영진이 직접 짠 판과 AI 안이 갈렸던 순간이에요. 그때 상황을 보고 다음 판으로 더 나은 4명을 골라 주세요. 고른 답과 이유는 편성 AI 학습에 그대로 쓰여요.</p>
+    <p class="lead">실제 정모에서 운영진이 직접 짠 판과 AI 안이 갈렸던 순간이에요. 그때 상황을 보고 다음 판으로 더 나은 4명을 골라 주세요. 차이가 크지 않으면 '둘 다 괜찮아요'도 좋은 답이에요. 고른 답과 이유는 편성 AI 학습에 그대로 쓰여요.</p>
     <div class="bar" aria-hidden="true"><i id="barFill"></i></div>
-    <div class="progress"><span id="progText">문제를 불러오는 중이에요</span><span>초록 줄 = 보기 A에 든 사람 · 파랑 줄 = 보기 B</span></div>
+    <div class="progress"><span id="progText">문제를 불러오는 중이에요</span><span>초록 줄 = 보기 A · 파랑 줄 = 보기 B · 굵은 테두리 = 두 보기에서 갈린 사람</span></div>
     <div class="jump" id="jump" aria-label="문제 바로 가기"></div>
   </header>
   <main id="main"><div class="card empty">문제를 불러오는 중이에요.</div></main>
@@ -99,7 +106,7 @@ textarea { min-height: 64px; resize: vertical }
 </body></html>`;
 
 export const QUIZ_JS = String.raw`(function () {
-  var REASONS = ['막 끝난 사람은 쉬게', '오래 쉰 사람 먼저', '판수 공평', '급수 비슷하게', '팀 실력 균형', '남복·여복 구성', '혼복 구성', '오늘 같이 친 사람 겹침', '실력 섞어치기(빡겜/연습)'];
+  var REASONS = ['막 끝난 사람은 쉬게', '오래 쉰 사람 먼저', '판수 공평', '급수 비슷하게', '팀 실력 균형', '남복·여복 구성', '혼복도 하루 1~2판은', '혼복이 너무 많음', '오늘 같이 친 사람 겹침', '실력 섞어치기(빡겜/연습)', '차이가 별로 없음'];
   var qs = new URLSearchParams(location.search);
   var C = qs.get('c') || '', K = qs.get('k') || '';
   var me = '';
@@ -157,19 +164,31 @@ export const QUIZ_JS = String.raw`(function () {
     var info = {}; q.people.forEach(function (p) { info[p.label] = p; });
     var rows = q.people.map(function (p) {
       return el('tr', { class: (inOpt('A', p.label) ? 'inA ' : '') + (inOpt('B', p.label) ? 'inB' : '') },
-        el('td', { class: 'who' }, p.label), el('td', { class: 'num' }, p.games + '판'), el('td', {}, chip(p.state)));
+        el('td', { class: 'who' }, p.label),
+        el('td', { class: 'num' }, p.games + '판', el('span', { class: 'mini' }, p.mixed ? ' (혼복 ' + p.mixed + ')' : '')),
+        el('td', { class: 'mini' }, p.last || '-'),
+        el('td', {}, chip(p.state)));
     });
+    var other = function (o) { return q.options.filter(function (x) { return x.key !== o.key; })[0]; };
     var optCard = function (o) {
+      var sm = o.summary || {};
+      var only = function (l) { return other(o).players.indexOf(l) < 0; };
       return el('button', { class: 'opt' + (draft.choice === o.src ? ' chosen' : ''), 'data-k': o.key, type: 'button', 'aria-pressed': String(draft.choice === o.src), onclick: function () { draft.choice = o.src; render(); } },
-        el('span', { class: 'tag' }, '보기 ' + o.key),
+        el('span', {}, el('span', { class: 'tag' }, '보기 ' + o.key), el('span', { class: 'type' }, sm.type || '')),
         el('div', { class: 'four' }, o.players.map(function (l) {
           var p = info[l];
-          return el('span', { class: 'p' + (p && p.state === '방금 끝남' ? ' just' : '') }, l, el('small', {}, p ? p.games + '판 · ' + p.state : ''));
-        })));
+          return el('span', { class: 'p' + (p && p.state === '방금 끝남' ? ' just' : '') + (only(l) ? ' only' : '') }, l,
+            el('small', {}, p ? p.games + '판' + (p.mixed ? '(혼복 ' + p.mixed + ')' : '') + ' · ' + p.state : ''));
+        })),
+        el('div', { class: 'sum' },
+          el('span', {}, '급수 ', el('b', {}, sm.spread || '-')),
+          el('span', {}, '팀 ', el('b', {}, sm.teams || '-')),
+          sm.repeats && sm.repeats.length ? el('span', { class: 'rep' }, '오늘 이미 같이 친 쌍: ' + sm.repeats.join(', ')) : el('span', {}, '오늘 같이 친 쌍 없음'),
+          sm.justOrPlaying ? el('span', { class: 'rep' }, '막 끝났거나 치는 중 ' + sm.justOrPlaying + '명') : null));
     };
     var others = q.answers.filter(function (x) { return x.name !== me; });
     var reveal = a ? el('div', { class: 'reveal' }, '실제로는 ', el('b', {}, '운영진이 ' + srcKey(q, 'OPERATOR')), ', ', el('b', {}, 'AI가 ' + srcKey(q, 'AI')), '를 골랐어요.' +
-      (others.length ? ' 다른 사람 답: ' + others.map(function (x) { return x.name + ' ' + (x.choice === 'NEITHER' ? '둘 다 별로' : srcKey(q, x.choice)); }).join(', ') : '')) : null;
+      (others.length ? ' 다른 사람 답: ' + others.map(function (x) { return x.name + ' ' + (x.choice === 'NEITHER' ? '둘 다 별로' : x.choice === 'BOTH' ? '둘 다 괜찮음' : srcKey(q, x.choice)); }).join(', ') : '')) : null;
     var reasonBtns = REASONS.map(function (r) {
       var on = draft.reasons.indexOf(r) >= 0;
       return el('button', { type: 'button', class: 'btn reason' + (on ? ' on' : ''), 'aria-pressed': String(on), onclick: function () {
@@ -184,9 +203,11 @@ export const QUIZ_JS = String.raw`(function () {
       el('div', { class: 'ctx' }, q.context),
       el('p', { class: 'ask' }, '빈 코트에 다음으로 넣을 4명, 어느 쪽이 더 나을까요?'),
       el('div', { class: 'cols' },
-        el('div', { class: 'tablebox' }, el('table', {}, el('thead', {}, el('tr', {}, el('th', {}, '사람'), el('th', {}, '오늘 판수'), el('th', {}, '지금'))), el('tbody', {}, rows))),
+        el('div', { class: 'tablebox' }, el('table', {}, el('thead', {}, el('tr', {}, el('th', {}, '사람'), el('th', {}, '오늘 판수'), el('th', {}, '직전 판'), el('th', {}, '지금'))), el('tbody', {}, rows))),
         el('div', { class: 'opts' }, q.options.map(optCard),
-          el('button', { type: 'button', class: 'btn' + (draft.choice === 'NEITHER' ? ' on' : ''), 'aria-pressed': String(draft.choice === 'NEITHER'), onclick: function () { draft.choice = 'NEITHER'; render(); } }, '둘 다 별로예요 (아래에 어떻게 짤지 적어 주세요)'),
+          el('div', { class: 'row' },
+            el('button', { type: 'button', class: 'btn' + (draft.choice === 'BOTH' ? ' on' : ''), 'aria-pressed': String(draft.choice === 'BOTH'), onclick: function () { draft.choice = 'BOTH'; render(); } }, '둘 다 괜찮아요'),
+            el('button', { type: 'button', class: 'btn' + (draft.choice === 'NEITHER' ? ' on' : ''), 'aria-pressed': String(draft.choice === 'NEITHER'), onclick: function () { draft.choice = 'NEITHER'; render(); } }, '둘 다 별로예요')),
           reveal)),
       el('div', { class: 'answer' },
         el('span', { class: 'label' }, '왜 그렇게 골랐나요? (여러 개 가능)'),
