@@ -1693,6 +1693,11 @@ export async function suggestNextFoursome(
       }
       const sp = levelSpread(g, tune.genderOffsetFemale);
       if (sp > spreadCap) return `급수 폭 ${sp}단계`;
+      // 남복에 F급과 D급 이상이 같이 — F와 E도 2단계 차이로 보므로 사실상 3단계(터닝 11/01 남F+남D 남복 3판 모두 삭제).
+      if (m.length === 4) {
+        const rs = (p: ModePlayer) => realSkill.get(p.id) ?? p.skill;
+        if (m.some((p) => rs(p) <= 1) && m.some((p) => rs(p) >= 3)) return '남복 F급과 D급 이상';
+      }
       const gap = mixedGap(g);
       // 여자 쪽 상한은 보정 급수(여자 2단계 후함)로 1단계까지 = 실제 급수로 3단계(여 A + 남 C는 실력이 맞는 혼복).
       // 여자 F조가 든 혼복은 남자 급수가 높아도 괜찮다 — 센 남자가 받쳐주는 판(운영진 피드백 2026-10-27). 위쪽 상한 없음.
@@ -2087,6 +2092,13 @@ export async function suggestNextFoursome(
     let fallback: { pk: { playerIds: string[] }; m: Map<string, ModePlayer>; at: number; sev: number } | null = null;
     // 시점마다 먼저 '쉬던 사람 먼저'를 지킨 후보로, 안 되면 전체로(그 판은 크게 아쉬움 — 다른 시점이 낫다면 그쪽).
     const tries: { at: number; ids: string[] }[] = [];
+    // 한 사람은 아직 시작 안 한 대기 게임에 최대 2판까지 — 상위조(남A 3명 등)를 쉬지 않고 연달아 넣어도 되게 풀어 둔 탓에
+    // 같은 사람이 대기 4판을 도배했고 운영진이 한꺼번에 지웠다(터닝 10/30). 그 사람들로만 4명이 안 되면 그대로.
+    const QUEUE_CAP = 2;
+    for (const att of attempts) {
+      const capped = att.ids.filter((x) => (committedGames[x] ?? 0) + (extraGames[x] ?? 0) < QUEUE_CAP);
+      if (capped.length >= 4) att.ids = capped;
+    }
     for (const att of attempts) {
       const set = new Set(att.ids);
       const fair = att.ids.filter((x) => !restedBefore.get(x)?.some((y) => set.has(y)));
