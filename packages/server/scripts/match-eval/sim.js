@@ -25,7 +25,8 @@ function rng(seed) {
 /**
  * sc: { name, courts, minutes, pop: ['MS','FA',...] (도착 순서), arrivals: [[분, 명수], ...] (합 = pop 길이),
  *       events?: [{ t, type: 'leave'|'rest'|'back'|'lesson'|'unlesson'|'together'|'apart', who: [pop 인덱스] }],
- *       operatorEditEvery?: 분(AI 대기 게임 하나에서 한 명을 쉬는 사람으로 바꿈), longGames?: 비율 }
+ *       operatorEditEvery?: 분(AI 대기 게임 하나에서 한 명을 쉬는 사람으로 바꿈), longGames?: 비율,
+ *       settings?: 모임 AI 편성 설정(mixedRatio·levelMatch 등, 없으면 기본값) }
  */
 // where: { club, facility } — 여러 시나리오를 동시에 돌릴 때 모임을 나눠 쓴다(정모는 모임당 하나).
 async function runScenario(sc, seed = 1, where = {}) {
@@ -47,7 +48,7 @@ async function runScenario(sc, seed = 1, where = {}) {
   const act = await api('GET', `/clubs/${CLUB_ID}/sessions/active`);
   if (act?.id) await api('POST', `/club-sessions/${act.id}/end`);
   const sid = (await api('POST', `/clubs/${CLUB_ID}/sessions`, { facilityId: FACILITY_ID, courtCount: sc.courts })).id;
-  await api('PUT', `/club-sessions/${sid}/auto-settings`, {});
+  await api('PUT', `/club-sessions/${sid}/auto-settings`, sc.settings ?? {});
   const board = (await api('POST', `/club-sessions/${sid}/game-board`)).id;
   const cs = await api('GET', `/club-sessions/${sid}/courts`);
   const courts = (Array.isArray(cs) ? cs : cs.courts).map((c) => c.id);

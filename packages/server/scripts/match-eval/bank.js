@@ -33,7 +33,7 @@ const slot = (i) => ({
       try {
         const r = await runScenario(sc, seed, slot(w));
         const s = score(r);
-        results.push({ name: sc.name, courts: sc.courts, people: sc.pop.length, checks: Object.fromEntries(s.checks.map((c) => [c.k, c.v])), fails: s.checks.filter((c) => !c.ok).map((c) => c.k), info: s.info });
+        results.push({ name: sc.name, dims: sc.dims, courts: sc.courts, people: sc.pop.length, checks: Object.fromEntries(s.checks.map((c) => [c.k, c.v])), fails: s.checks.filter((c) => !c.ok).map((c) => c.k), info: s.info });
       } catch (e) {
         results.push({ name: sc.name, error: String(e?.message ?? e) });
       }
@@ -50,6 +50,18 @@ const slot = (i) => ({
     const failN = ok.filter((r) => r.fails.includes(k)).length;
     const avg = vs.reduce((a, b) => a + b, 0) / vs.length;
     console.log(`  ${k.padEnd(22)} 평균 ${avg.toFixed(2).padStart(7)} · 미달 ${String(failN).padStart(3)}개`);
+  }
+  // 조건별 약점 지도 — 차원 값마다 '그 기준을 못 넘은 시나리오 비율'(%).
+  const dimKeys = Array.from(new Set(ok.flatMap((r) => Object.keys(r.dims ?? {}))));
+  for (const d of dimKeys) {
+    console.log(`\n[${d}별 미달 비율 %]`);
+    const vals = Array.from(new Set(ok.map((r) => r.dims?.[d]))).sort();
+    for (const v of vals) {
+      const g = ok.filter((r) => r.dims?.[d] === v);
+      const cells = keys.map((k) => Math.round((100 * g.filter((r) => r.fails.includes(k)).length) / g.length));
+      const bad = keys.map((k, i) => [k, cells[i]]).filter(([, c]) => c >= 20).map(([k, c]) => `${k} ${c}%`);
+      console.log(`  ${String(v).padEnd(14)} n=${String(g.length).padStart(3)} · 전부 통과 ${Math.round((100 * g.filter((r) => !r.fails.length).length) / g.length)}%${bad.length ? ' · ' + bad.join(', ') : ''}`);
+    }
   }
   const worst = [...ok].sort((a, b) => b.fails.length - a.fails.length).slice(0, 10);
   console.log('가장 많이 어긴 시나리오:');
