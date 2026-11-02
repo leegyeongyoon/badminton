@@ -41,7 +41,12 @@ async function runScenario(sc, seed = 1, where = {}) {
   })).json();
   const T = login.tokens.accessToken;
   const api = async (m, p, b) => {
-    const r = await fetch(B + p, { method: m, headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${T}` }, body: b ? JSON.stringify(b) : undefined });
+    // 여러 시나리오를 동시에 돌리면 가끔 연결이 끊긴다(fetch failed) — 잠깐 쉬고 3번까지 다시.
+    let r;
+    for (let tries = 0; ; tries++) {
+      try { r = await fetch(B + p, { method: m, headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${T}` }, body: b ? JSON.stringify(b) : undefined }); break; }
+      catch (e) { if (tries >= 3) throw new Error(`${m} ${p}: ${e?.cause?.code ?? e?.message}`); await new Promise((res) => setTimeout(res, 500 * (tries + 1))); }
+    }
     const t = await r.text();
     try { return JSON.parse(t); } catch { return t; }
   };

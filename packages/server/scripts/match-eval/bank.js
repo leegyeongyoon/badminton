@@ -12,9 +12,17 @@ const opt = (k, d) => {
   const i = args.indexOf(`--${k}`);
   return i >= 0 ? args[i + 1] : d;
 };
-const bank = JSON.parse(fs.readFileSync(args[0], 'utf8'));
+// --from a.json,b.json: 나눠 돌린 결과 파일들을 합쳐 요약만 출력.
+const from = opt('from');
+const bank = from ? [] : JSON.parse(fs.readFileSync(args[0], 'utf8'));
 const only = opt('only');
-const list = bank.filter((s) => !only || new RegExp(only).test(s.name)).slice(0, Number(opt('limit', bank.length)));
+// --shard i/n: 여러 서버에 나눠 돌릴 때 i번째 몫만(0부터). --slot-base: 시뮬 모임 번호 시작(서로 겹치지 않게).
+const [shardI, shardN] = (opt('shard', '0/1')).split('/').map(Number);
+const list = bank
+  .filter((s) => !only || new RegExp(only).test(s.name))
+  .slice(0, Number(opt('limit', bank.length)))
+  .filter((_, i) => i % shardN === shardI);
+const slotBase = Number(opt('slot-base', 0));
 const par = Number(opt('par', 6));
 const seed = Number(opt('seed', 1));
 // 시뮬 모임 i(1~6): 모임·체육관 id 끝자리만 다르다.
@@ -31,16 +39,18 @@ const slot = (i) => ({
     while (next < list.length) {
       const sc = list[next++];
       try {
-        const r = await runScenario(sc, seed, slot(w));
+        const r = await runScenario(sc, seed, slot(slotBase + w));
         const s = score(r);
         results.push({ name: sc.name, dims: sc.dims, courts: sc.courts, people: sc.pop.length, checks: Object.fromEntries(s.checks.map((c) => [c.k, c.v])), fails: s.checks.filter((c) => !c.ok).map((c) => c.k), info: s.info });
       } catch (e) {
         results.push({ name: sc.name, error: String(e?.message ?? e) });
+        console.error(`\n[오류] ${sc.name}: ${String(e?.message ?? e).slice(0, 300)}`);
       }
       process.stdout.write(`\r${results.length}/${list.length} (${Math.round((Date.now() - t0) / 1000)}초)`);
     }
   };
-  await Promise.all(Array.from({ length: par }, (_, i) => worker(i + 1)));
+  if (from) for (const f of from.split(',')) results.push(...JSON.parse(fs.readFileSync(f, 'utf8')));
+  else await Promise.all(Array.from({ length: par }, (_, i) => worker(i + 1)));
   console.log('');
   const ok = results.filter((r) => !r.error);
   const keys = Object.keys(ok[0]?.checks ?? {});

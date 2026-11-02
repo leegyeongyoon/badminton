@@ -81,6 +81,21 @@ function score(r) {
     }
   }
   const sameFour = [...four.values()].reduce((a, v) => a + Math.max(0, v - 1), 0);
+  // 같은 짝 하루 3번+ — 비슷한 급수(같은 성별 ±1) 상대가 3명 이상인 사람끼리만 센다(상대가 적으면 겹칠 수밖에 없음).
+  const peers = (id) => ids.filter((o) => o !== id && info[o].g === info[id].g && Math.abs(info[o].s - info[id].s) <= 1).length;
+  const pairN = new Map();
+  for (const g of games) for (let i = 0; i < 4; i++) for (let j = i + 1; j < 4; j++) {
+    const [a, b] = [g.ids[i], g.ids[j]].sort(); const k = a + '|' + b; pairN.set(k, (pairN.get(k) || 0) + 1);
+  }
+  const pair3 = [...pairN.entries()].filter(([k, v]) => v >= 3 && k.split('|').every((id) => peers(id) >= 3)).length;
+  // 혼복 몰림 — 하루 혼복 3판 이상이면서 자기 판의 절반 넘게 혼복인 사람(여자 F, 같은 성별 상대 3명 미만은 제외).
+  const mixOf = {}; const gOf = {};
+  for (const g of games) {
+    const mixed = g.ids.some((id) => info[id].g === 'M') && g.ids.some((id) => info[id].g === 'F');
+    for (const id of g.ids) { gOf[id] = (gOf[id] || 0) + 1; if (mixed) mixOf[id] = (mixOf[id] || 0) + 1; }
+  }
+  const sameGenderPeers = (id) => ids.filter((o) => o !== id && info[o].g === info[id].g).length;
+  const mixHog = ids.filter((id) => (mixOf[id] || 0) >= 3 && mixOf[id] / gOf[id] > 0.5 && !(info[id].g === 'F' && info[id].s <= 1) && sameGenderPeers(id) >= 7).length;
   const rate = ids.filter((id) => (r.availMin[id] || 0) >= 30).map((id) => ((hist[id]?.length || 0) / r.availMin[id]) * 60);
   const zeroGame = ids.filter((id) => (r.availMin[id] || 0) >= 30 && !(hist[id]?.length)).length;
   const maxWait = Math.max(0, ...Object.values(r.maxWait));
@@ -101,6 +116,8 @@ function score(r) {
     ['같은 4명 다시', sameFour, (v) => v <= Math.max(2, Math.round(n * 0.05))],
     ['팀 힘 차이 2+ 판%', Math.round((unbal / (judged || 1)) * 100), (v) => v <= 6],
     ['같은 성별 3단계+ 판%', Math.round((wide / (judged || 1)) * 100), (v) => v <= 3],
+    ['같은 짝 하루 3번+(쌍)', pair3, (v) => v <= Math.max(2, Math.round(n * 0.04))],
+    ['혼복 몰린 사람', mixHog, (v) => v <= 1],
     ['편성 응답 p95(ms)', p95, (v) => v <= 1500],
   ];
   return {
