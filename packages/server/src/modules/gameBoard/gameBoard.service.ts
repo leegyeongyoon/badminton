@@ -846,8 +846,24 @@ export async function pushEntry(boardId: string, entryId: string, courtId: strin
   // 늦어지지 않게 1.5초 넘으면 건너뛴다.
   let shadowIds: string[] | null = null;
   if (entry.aiPlayerIds.length !== 4 && entry.playerIds.length === 4 && board.clubSessionId) {
+    // 비교를 공정하게 — 운영진이 이 판을 만들 때 코트에서 치던 사람은 AI 후보에서도 뺀다. 예전엔 코트에 거는
+    // 순간(대개 막 끝난 직후)에 AI를 돌려, 운영진은 고를 수 없던 '방금 나온 사람'을 AI만 고를 수 있었다.
+    const busyAtDecision = (
+      await prisma.turnPlayer.findMany({
+        where: {
+          turn: {
+            clubSessionId: board.clubSessionId,
+            startedAt: { lt: entry.createdAt },
+            OR: [{ completedAt: null }, { completedAt: { gt: entry.createdAt } }],
+          },
+        },
+        select: { userId: true },
+      })
+    )
+      .map((t) => t.userId)
+      .filter((id) => !entry.playerIds.includes(id));
     shadowIds = await Promise.race([
-      suggestNextFoursome(board.clubSessionId, { count: 1, shadowOf: entry.id }, userId)
+      suggestNextFoursome(board.clubSessionId, { count: 1, shadowOf: entry.id, exclude: busyAtDecision }, userId)
         .then((r: any) => (r?.suggestions?.[0]?.playerIds as string[] | undefined) ?? null)
         .catch(() => null),
       new Promise<null>((res) => setTimeout(() => res(null), 1500)),
@@ -1057,6 +1073,21 @@ export async function suggestNextFoursome(
   const nowMs = now.getTime();
   const count = opts.count ?? 1;
   const clubRatings = await getClubRatings(clubSession.clubId).catch(() => new Map<string, PlayerRating>());
+  // 개인 선호 — 최근 60일 '같은 사람과 또 쳤어요'를 2번 넘게 남긴 사람은 그 사람이 낀 짝 겹침·같은 4명을 더 무겁게(최대 2배).
+  const repeatSens = new Map<string, number>(
+    (
+      await prisma.gameFeedback
+        .groupBy({
+          by: ['userId'],
+          where: { clubId: clubSession.clubId, reason: 'REPEAT', createdAt: { gte: new Date(nowMs - 60 * 86400000) } },
+          _count: true,
+        })
+        .catch(() => [] as { userId: string; _count: number }[])
+    )
+      .filter((r) => r._count >= 2)
+      .map((r) => [r.userId, Math.min(2, 1 + 0.3 * r._count)] as const),
+  );
+  const sensOf = (ids: string[]) => Math.max(1, ...ids.map((id) => repeatSens.get(id) ?? 1));
 
   // ─────────────────────────────────────────────────────────────────────────
   // 후보: '쉬는 사람 우선, 모자라면 시간 기준'(혼합). 터닝 재생 평가(뒤 20% 정모 596편성):
@@ -1248,10 +1279,17 @@ export async function suggestNextFoursome(
   const virtualSkill = new Map<string, number>();
   const realSkill = new Map<string, number>();
   const sameScarce = new Set<string>(); // 같은 성별에서 1단계 안에 같이 칠 사람이 부족(여복·남복이 어려운 사람)
+  // 방금 코트에서 나온 사람(끝난 게임의 종료 시각) — 아래 오늘 게임을 읽을 때 채운다.
+  // 예전엔 '아직 치는 사람'만 예상 종료 + REST_GAP 뒤로 미뤘고, 이미 끝난 사람은 10초 전에 나왔어도 바로 후보였다.
+  // 코트가 끝나자마자 AI가 짜면 방금 나온 4명이 쉬던 사람보다 먼저 들어갔다(터닝 실데이터: 운영진이 직접 짠 판과
+  // AI 안이 다른 52판에서 AI가 넣었다 운영진이 뺀 사람 102명 중 44명이 '3분 안에 막 끝난 사람').
+  const finishedAt = new Map<string, number>();
+  const JUST_REST = process.env.MATCH_JUST_REST !== '0'; // 비교 실험·긴급 차단용 스위치
   const freeBy = (id: string, at: number) => {
     const av = availMs.get(id) ?? nowMs;
-    if (av <= nowMs) return true;
-    return av + (restWaived.has(id) ? 0 : REST_GAP_MS) <= at + SLACK_MS;
+    const gap = restWaived.has(id) ? 0 : REST_GAP_MS;
+    if (av <= nowMs) return !JUST_REST || (finishedAt.get(id) ?? 0) + gap <= at + SLACK_MS;
+    return av + gap <= at + SLACK_MS;
   };
   // 지금 쉬는 사람 = 진행·대기 게임(및 이번 호출에서 짠 판) 일정이 없는 사람.
   const isIdle = (id: string) => (availMs.get(id) ?? 0) <= nowMs;
@@ -1363,6 +1401,7 @@ export async function suggestNextFoursome(
       if (isMixed) mixedGamesCount[gp.userId] = (mixedGamesCount[gp.userId] ?? 0) + 1;
       else sameGamesCount[gp.userId] = (sameGamesCount[gp.userId] ?? 0) + 1;
       if (endMs > (lastEndMs[gp.userId] ?? 0)) lastEndMs[gp.userId] = endMs;
+      if (endMs > (finishedAt.get(gp.userId) ?? 0)) finishedAt.set(gp.userId, endMs);
     }
   }
   // 대기 게임에 이미 잡힌 판도 사람별 혼복/남복·여복 횟수에 넣는다(급수별 혼복 비율이 대기 게임을 무시하고
@@ -1463,7 +1502,7 @@ export async function suggestNextFoursome(
       return [p.id, Math.min(1, Math.max(0.3, peers / 10))] as const;
     }),
   );
-  const pairScale = (a: string, b: string) => ((peerScale.get(a) ?? 1) + (peerScale.get(b) ?? 1)) / 2;
+  const pairScale = (a: string, b: string) => (((peerScale.get(a) ?? 1) + (peerScale.get(b) ?? 1)) / 2) * sensOf([a, b]);
   const HL = SUGGEST_TUNABLES.PAIR_RECENCY_HALFLIFE_SECONDS;
   const decay = (whenMs: number): number => {
     if (!whenMs) return 0.25;
@@ -1501,7 +1540,7 @@ export async function suggestNextFoursome(
     if (ids.length !== 4) return 0;
     const last = fourLast.get(fourKey(ids));
     if (last == null) return 0;
-    return SAME_FOUR_COST * Math.max(0.4, decay(last));
+    return SAME_FOUR_COST * Math.max(0.4, decay(last)) * sensOf(ids);
   };
 
   let mode: SuggestMode = opts.mode ?? 'fair';
@@ -1633,6 +1672,8 @@ export async function suggestNextFoursome(
   const spread2Over = () => spread2SoFar + 1 > spread2Max * (gamesSoFar + 1) + 0.5;
   // 게임 수 맞추기(판수 차이 최대 N판) — 늦게 온 분은 온 시간만큼 친 걸로 보정. 슬롯 시각마다 기준 갱신.
   const GAP_COST = 15;
+  // 시험 세트 비교용으로만 환경변수로 바꿀 수 있다(0 = 품질 단계 끔).
+  const TEAM_GAP_COST = Number(process.env.MATCH_TEAM_GAP_COST ?? 12);
   const gameGap = settings.gameBalance === 'auto' || !useSettings ? null : Number(settings.gameBalance.slice(3));
   const sessionStartMs = clubSession.startedAt.getTime();
   let gapAt = nowMs;
@@ -1749,6 +1790,24 @@ export async function suggestNextFoursome(
         for (const p of group) c -= owedPull(p);
         if (group.length === 4 && !hasRequestPair(group, activeKeys)) {
           if (levelSpread(group, tune.genderOffsetFemale) === 2) c += spread2Over() && !planEval ? SPREAD2_OVER_COST : SPREAD2_COST;
+          // 판 품질 단계 — 어떻게 나눠도 팀 힘(실제 급수, 여자 −2)이 2 이상 벌어지는 판은 다양성(짝 겹침·같은 4명 최저치)보다
+          // 앞서게 큰 비용. 시험 세트에서 '팀 힘 차이 2+' 실패가 가장 많았다(16회 중 6회).
+          {
+            const ef = (p: ModePlayer) => (realSkill.get(p.id) ?? p.skill) + (p.gender === 'F' ? GENDER_SKILL_OFFSET_FEMALE : 0);
+            const [p1, p2, p3, p4] = group;
+            const twoTwo = group.filter((p) => p.gender === 'F').length === 2 && group.filter((p) => p.gender === 'M').length === 2;
+            let bestGap = Infinity;
+            for (const [x, y, z, w] of [[p1, p2, p3, p4], [p1, p3, p2, p4], [p1, p4, p2, p3]]) {
+              if (twoTwo && x.gender === y.gender) continue;
+              bestGap = Math.min(bestGap, Math.abs(ef(x) + ef(y) - ef(z) - ef(w)));
+            }
+            if (bestGap >= 2 && bestGap !== Infinity) c += TEAM_GAP_COST * (bestGap - 1);
+            // 팀을 맞추려고 같은 성별 급수 폭을 3단계+로 벌리지 않게(여자 F가 든 혼복은 규칙상 허용이라 제외).
+            const rs = (xs: ModePlayer[]) => (xs.length > 1 ? Math.max(...xs.map((x) => realSkill.get(x.id) ?? x.skill)) - Math.min(...xs.map((x) => realSkill.get(x.id) ?? x.skill)) : 0);
+            const fWomanMix = group.some((p) => p.gender === 'F' && (realSkill.get(p.id) ?? p.skill) <= 1) && group.some((p) => p.gender === 'M');
+            const wide = Math.max(rs(group.filter((p) => p.gender === 'M')), rs(group.filter((p) => p.gender === 'F')));
+            if (!fWomanMix && wide >= 3) c += TEAM_GAP_COST * (wide - 2);
+          }
           // 게임 수 맞추기 — 이 판에 들어가면 최소 판수와 N판 넘게 벌어지는 사람마다 큰 비용.
           if (!planEval) for (const p of group) if (gapOver(p)) c += GAP_COST;
           // 급수별 혼복 비율 — 이 사람의 오늘 혼복 비율이 설정보다 많아지거나 모자라면 비용.
@@ -2241,6 +2300,7 @@ export async function suggestNextFoursome(
       const av = availBase.get(id) ?? 0;
       const gap = restWaived.has(id) ? 0 : REST_GAP_MS;
       if (av > nowMs && av + gap > starts[i] + SLACK_MS) return false;
+      if (JUST_REST && av <= nowMs && (finishedAt.get(id) ?? 0) + gap > starts[i] + SLACK_MS) return false;
       for (let j = 0; j < K; j++) {
         if (j === i || j === except || !groups[j].includes(id)) continue;
         // 계획 안의 두 판 사이에도 한 판 쉬기(REST_GAP — SLACK만큼은 봐줌)
