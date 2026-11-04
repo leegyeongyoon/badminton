@@ -7,7 +7,7 @@ import { trainClubStyle, STYLE_FEATURES } from '../../src/modules/gameBoard/club
   const s = await trainClubStyle(process.argv[2]);
   console.log('걸린 시간(초)', Math.round((Date.now() - t0) / 1000));
   if (!s) { console.log('null (표본 부족)'); process.exit(0); }
-  console.log('결정', s.decisions, '· 검증 정확도', s.testAccuracy, '· 특성', s.traits.join(', '));
+  console.log('결정', s.decisions, '· 변수로 뺀 판', s.variableSkipped, '· 검증 정확도', s.testAccuracy, '· 특성', s.traits.join(', '));
   console.log(Object.fromEntries(STYLE_FEATURES.map((f, i) => [f, Math.round(s.stdWeights[i] * 100) / 100])));
   process.exit(0);
 })();

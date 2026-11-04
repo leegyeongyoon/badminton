@@ -65,6 +65,8 @@ export interface ClubStyle {
   shadowSamples: number;
   /** 학습에 들어간 AI 편성 퀴즈 답 수(운영진 판 vs AI 안 중 고른 쪽). */
   quizSamples: number;
+  /** '변수'라서 학습에서 뺀 판 수 — 같이 N게임 요청, 그날 고정 혼복 파트너, 규칙 밖 3:1(여자 C 이하). */
+  variableSkipped: { request: number; fixedPartner: number; threeOne: number };
   testAccuracy: number | null;
   traits: string[];
   /** 학습 기간의 '정모 간' 함께 친 횟수(pairKey → 판수). 스코어링 때 단골 짝 판정에 쓴다. */
@@ -193,6 +195,17 @@ export async function trainClubStyle(clubId: string): Promise<ClubStyle | null> 
   });
   if (sessions.length < 3) return null;
   const sids = sessions.map((s) => s.id);
+  // 운영진 요청(같이 N게임) — 요청으로 짠 판은 '평소 기준'이 아니라 변수. 학습에서 뺀다.
+  const togetherReqs = await prisma.sessionRequest.findMany({
+    where: { clubSessionId: { in: sids }, kind: 'TOGETHER' },
+    select: { clubSessionId: true, aId: true, bId: true, createdAt: true },
+  });
+  const reqBySession = new Map<string, { key: string; at: number }[]>();
+  for (const r of togetherReqs) {
+    const arr = reqBySession.get(r.clubSessionId) ?? [];
+    arr.push({ key: pk(r.aId, r.bId), at: r.createdAt.getTime() / 1000 });
+    reqBySession.set(r.clubSessionId, arr);
+  }
   const [turns, checkins] = await Promise.all([
     prisma.courtTurn.findMany({
       where: { clubSessionId: { in: sids }, startedAt: { not: null } },
@@ -286,6 +299,25 @@ export async function trainClubStyle(clubId: string): Promise<ClubStyle | null> 
   const history = new Map<string, number>();
   const rows: { si: number; diff: number[] }[] = [];
   let decisions = 0;
+  const variableSkipped = { request: 0, fixedPartner: 0, threeOne: 0 };
+  // 변수 판 판정 — 운영진이 '평소 기준'이 아니라 그 자리의 사정으로 짠 판. 학습에선 빼고, 엔진에선 요청 기능이 맡는다.
+  //  · 같이 N게임 요청이 걸린 두 사람이 든 판(요청 뒤)  · 그날 같은 남녀가 3판+ 함께(고정 혼복 파트너 연습)
+  //  · 여자 C 이하 3:1(규칙 밖 — 혼복 연습 등 사정) — 터닝 실데이터: 3:1 46판 중 35판이 같은 남자와 2~3번.
+  const isVariable = (t: T, sessionId: string, dayPairs: Map<string, number>): keyof typeof variableSkipped | null => {
+    const reqs = reqBySession.get(sessionId) ?? [];
+    for (let i = 0; i < t.ids.length; i++)
+      for (let j = i + 1; j < t.ids.length; j++) {
+        const key = pk(t.ids[i], t.ids[j]);
+        if (reqs.some((r) => r.key === key && r.at <= t.start)) return 'request';
+        const a = player(t.ids[i]);
+        const b = player(t.ids[j]);
+        if (a.gender && b.gender && a.gender !== b.gender && (dayPairs.get(key) ?? 0) >= 3) return 'fixedPartner';
+      }
+    const ps = t.ids.map(player);
+    const w = ps.filter((p) => p.gender === 'F');
+    if (w.length === 1 && ps.filter((p) => p.gender === 'M').length === 3 && w[0].skill <= 4) return 'threeOne';
+    return null;
+  };
 
   // 고친 판의 특성은 '그 정모 시작 때'의 짝 기록으로 계산(그 뒤 기록이 섞이면 미래 정보 누수).
   const editSessions = new Set([...edits.map((e) => e.clubSessionId), ...quizEdits.map((e) => e.clubSessionId)]);
@@ -294,8 +326,18 @@ export async function trainClubStyle(clubId: string): Promise<ClubStyle | null> 
     if (editSessions.has(s.id)) historyAt.set(s.id, new Map(history));
     const ts = (bySession.get(s.id) ?? []).sort((a, b) => a.dec - b.dec);
     const ck = ckBySession.get(s.id) ?? new Map();
+    // 그날 같은 둘이 함께 친 판수(고정 파트너 판정용).
+    const dayPairs = new Map<string, number>();
+    for (const u of ts)
+      for (let i = 0; i < u.ids.length; i++)
+        for (let j = i + 1; j < u.ids.length; j++) dayPairs.set(pk(u.ids[i], u.ids[j]), (dayPairs.get(pk(u.ids[i], u.ids[j])) ?? 0) + 1);
     for (const t of ts) {
       if (t.ids.length !== 4) continue;
+      const vk = isVariable(t, s.id, dayPairs);
+      if (vk) {
+        variableSkipped[vk]++;
+        continue;
+      }
       const T = t.dec;
       const pending = new Set<string>();
       const playing = new Set<string>();
@@ -324,7 +366,7 @@ export async function trainClubStyle(clubId: string): Promise<ClubStyle | null> 
       const fc = styleFeatures(chosen, history);
       // 운영진 방식 그대로: 같은 순간(5분 안)에 짠 다음 판과 합친 8명을 다른 34가지로 나눈 것이 대안.
       // '누구를 넣나'(차례)는 운영진과 같게 두고 '어떻게 묶나'만 배운다(운영진 판 vs 엔진 판 차이의 대부분).
-      const mate = ts.find((u) => u !== t && u.ids.length === 4 && u.start >= t.start && u.start - t.start <= 300 && !u.ids.some((id) => t.ids.includes(id)));
+      const mate = ts.find((u) => u !== t && u.ids.length === 4 && u.start >= t.start && u.start - t.start <= 300 && !u.ids.some((id) => t.ids.includes(id)) && !isVariable(u, s.id, dayPairs));
       if (mate) {
         const pool = [...t.ids, ...mate.ids];
         const fPlus = styleFeatures(mate.ids.map(player), history).map((v, j) => v + fc[j]);
@@ -451,6 +493,7 @@ export async function trainClubStyle(clubId: string): Promise<ClubStyle | null> 
     editSamples,
     shadowSamples,
     quizSamples,
+    variableSkipped,
     testAccuracy,
     traits: describe(model.stdWeights),
     history,
@@ -468,7 +511,7 @@ export async function getClubStyle(clubId: string): Promise<ClubStyle | null> {
   // 시험용: 미리 학습한 가중치 파일을 모임 스타일로 주입(MATCH_STYLE_JSON = {"weights":[…]}).
   if (process.env.MATCH_STYLE_JSON) {
     const j = JSON.parse(require('fs').readFileSync(process.env.MATCH_STYLE_JSON, 'utf8'));
-    return { clubId, weights: j.weights, stdWeights: j.stdWeights ?? j.weights, decisions: 0, editSamples: 0, shadowSamples: 0, quizSamples: 0, testAccuracy: null, traits: [], history: new Map(), spreadCap: DEFAULT_SPREAD_CAP, trainedAt: '' };
+    return { clubId, weights: j.weights, stdWeights: j.stdWeights ?? j.weights, decisions: 0, editSamples: 0, shadowSamples: 0, quizSamples: 0, variableSkipped: { request: 0, fixedPartner: 0, threeOne: 0 }, testAccuracy: null, traits: [], history: new Map(), spreadCap: DEFAULT_SPREAD_CAP, trainedAt: '' };
   }
   const hit = cache.get(clubId);
   if (hit && Date.now() - hit.at < TTL_MS) return hit.style;
@@ -478,7 +521,7 @@ export async function getClubStyle(clubId: string): Promise<ClubStyle | null> {
       .catch(() => null)
       .then((style) => {
         // 운영 로그로 학습이 실제로 도는지 확인(다음 정모 뒤 점검용).
-        if (style) logger.info('clubStyle trained', { clubId, decisions: style.decisions, editSamples: style.editSamples, testAccuracy: style.testAccuracy, traits: style.traits, std: Object.fromEntries(STYLE_FEATURES.map((f, i) => [f, Math.round(style.stdWeights[i] * 100) / 100])) });
+        if (style) logger.info('clubStyle trained', { clubId, decisions: style.decisions, variableSkipped: style.variableSkipped, editSamples: style.editSamples, testAccuracy: style.testAccuracy, traits: style.traits, std: Object.fromEntries(STYLE_FEATURES.map((f, i) => [f, Math.round(style.stdWeights[i] * 100) / 100])) });
         else logger.info('clubStyle skipped (표본 부족)', { clubId });
         cache.set(clubId, { at: Date.now(), style });
         inflight.delete(clubId);
@@ -487,4 +530,27 @@ export async function getClubStyle(clubId: string): Promise<ClubStyle | null> {
     inflight.set(clubId, p);
   }
   return p;
+}
+
+// 미리 학습 — 정모에서 AI 편성을 처음 누를 때 학습하면 그 순간 느리고 그 전까진 학습이 없다. 서버가 뜨면 최근 30일에
+// 정모가 있던 모임을 차례로 학습해 두고, 캐시(12시간)가 식기 전에 6시간마다 다시 돈다.
+const WARM_DELAY_MS = 20 * 1000;
+const WARM_INTERVAL_MS = 6 * 3600 * 1000;
+export function startClubStyleWarmup(): void {
+  if (process.env.MATCH_STYLE === '0' || process.env.MATCH_STYLE_JSON) return;
+  const run = async () => {
+    try {
+      const since = new Date(Date.now() - 30 * 24 * 3600 * 1000);
+      const clubs = await prisma.clubSession.findMany({ where: { startedAt: { gte: since } }, select: { clubId: true }, distinct: ['clubId'] });
+      for (const { clubId } of clubs) {
+        cache.delete(clubId);
+        await getClubStyle(clubId);
+      }
+      logger.info('clubStyle warmup done', { clubs: clubs.length });
+    } catch (err) {
+      logger.error('clubStyle warmup failed', { err });
+    }
+  };
+  setTimeout(run, WARM_DELAY_MS);
+  setInterval(run, WARM_INTERVAL_MS);
 }
