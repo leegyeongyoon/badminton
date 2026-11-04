@@ -116,7 +116,7 @@ const jaccard = (a, b) => {
           gameMin: durs.length ? durs[Math.floor(durs.length / 2)] : 12,
         };
         try {
-          const r = await runScenario(sc, 1, slot(slotBase + w + 1));
+          const r = await runScenario(sc, Number(opt('seed', 1)), slot(slotBase + w + 1));
           const engineGames = r.games.map((x) => ({ p: x.ids.map((id) => r.info[id].idx) }));
           await require('./db').dropSession(r.sid);
           results.push({ rp, engine: measure(rp.people, engineGames, rp.minutes), real: measure(rp.people, rp.games, rp.minutes), engineGames });
@@ -165,6 +165,8 @@ const jaccard = (a, b) => {
       detail.push(`| ${label(rp.people, i)} | ${p.in}~${p.out ?? rp.minutes}분(${stay}) | ${real.g[i]} / ${engine.g[i]} | ${real.mixed[i]} / ${engine.mixed[i]} | ${top(real.partners[i]) || '-'} | ${top(engine.partners[i]) || '-'} |`);
     });
   }
+  // --dump: 엔진이 짠 판(사람 번호)을 저장 — 시드끼리 비교(엔진 자기 자신과 겹침 = 이 지표의 상한)용.
+  if (opt('dump')) fs.writeFileSync(opt('dump'), JSON.stringify(Object.fromEntries(ok.map((x) => [x.rp.name, x.engineGames]))));
   if (opt('out')) fs.writeFileSync(opt('out'), '# 실제 정모 재현 — 운영진 vs 엔진\n\n(각 칸: 운영진 / 엔진)\n\n' + lines.join('\n') + '\n' + detail.join('\n') + '\n');
   await require('./db').prisma.$disconnect();
 })();

@@ -1577,7 +1577,8 @@ export async function suggestNextFoursome(
     mode = 'similar';
     prefTuning = {
       levelWeight: levelMatch === 'tight' ? 2.5 : spread2Max >= 0.3 ? 0 : style ? 0.5 : 1.5,
-      varietyWeight: avoidRepeat === 'strong' ? 3 : 1,
+      // 겹침 회피 강도. 시험용 스위치 MATCH_VARIETY_SCALE(기본 1).
+      varietyWeight: (avoidRepeat === 'strong' ? 3 : 1) * Number(process.env.MATCH_VARIETY_SCALE ?? 1),
       sameGenderWeight: gameType === 'same' ? 1.5 : gameType === 'even' ? 0.8 : 0,
       // 혼복 비율 모드는 아래 비율 조절 항이 남복·여복/혼복을 정하므로 동성 가중·순환은 끔.
       typeVarietyWeight: gameType === 'even' ? 0.6 : 0,
@@ -1676,7 +1677,7 @@ export async function suggestNextFoursome(
   }
   // 2단계 차이 판 — 운영진이 정한 최대 비율(spread2Max) 안이면 약한 비용(1단계 이하가 있으면 그쪽),
   // 넘으면 큰 비용 + 잠깐 기다려 더 나은 판을 찾는다(softIssue).
-  const SPREAD2_COST = spread2Max >= 0.3 ? 0.5 : 1.5;
+  const SPREAD2_COST = (spread2Max >= 0.3 ? 0.5 : 1.5) * Number(process.env.MATCH_SPREAD2_SCALE ?? 1);
   const SPREAD2_OVER_COST = 12;
   const spread2Over = () => spread2SoFar + 1 > spread2Max * (gamesSoFar + 1) + 0.5;
   // 게임 수 맞추기(판수 차이 최대 N판) — 늦게 온 분은 온 시간만큼 친 걸로 보정. 슬롯 시각마다 기준 갱신.
@@ -1710,7 +1711,8 @@ export async function suggestNextFoursome(
   const OWED_WEIGHT = 2;
   const owedPull = (p: ModePlayer) => OWED_WEIGHT * Math.max(0, fairRef - priorityCost(p, tune.gameCycleSeconds) - 0.5);
   const RULE_COST = 500;
-  const MIX_RATIO_COST = 8;
+  // 혼복 비율 목표에서 1판 벗어날 때마다. 시험용 스위치 MATCH_MIX_RATIO_COST.
+  const MIX_RATIO_COST = Number(process.env.MATCH_MIX_RATIO_COST ?? 8);
   const effOf = (p: ModePlayer) => p.skill + (p.gender === 'F' ? tune.genderOffsetFemale : 0);
   // 혼복 2:2의 남녀 급수 관계: 남자가 여자보다 최대 3단계 높아도 됨(남자가 받쳐주는 구조, 여자 F조가
   // 혼복으로 자주 들어가는 이유). 여자가 남자보다 높은 건 보정 급수로 1단계까지(실제 급수 3단계). (운영진 피드백 2026-10-24)
