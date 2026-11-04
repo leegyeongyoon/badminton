@@ -262,6 +262,8 @@ model CheckIn {
 
   @@index([userId, facilityId])
   @@index([clubSessionId, checkedOutAt])
+  // 체육관 기준 '지금 와 있는 사람'(체크아웃 안 한 출석) 조회.
+  @@index([facilityId, checkedOutAt])
 }
 
 model Club {
@@ -407,6 +409,8 @@ model TurnPlayer {
   user User      @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@unique([turnId, userId])
+  // '이 사람의 최근 게임' 조회(편성 엔진·리포트·파트너 통계) — 없으면 게임 기록이 쌓일수록 표 전체를 훑는다.
+  @@index([userId])
 }
 
 model Game {

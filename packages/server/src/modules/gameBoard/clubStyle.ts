@@ -418,6 +418,8 @@ const cache = new Map<string, { at: number; style: ClubStyle | null }>();
 const inflight = new Map<string, Promise<ClubStyle | null>>();
 
 export async function getClubStyle(clubId: string): Promise<ClubStyle | null> {
+  // 시험용 서버 스위치 — 시뮬레이션 모임엔 시험 정모가 수백 개 쌓여 서버마다 학습이 오래 걸리고, 규칙 시험엔 필요 없다.
+  if (process.env.MATCH_STYLE === '0') return null;
   const hit = cache.get(clubId);
   if (hit && Date.now() - hit.at < TTL_MS) return hit.style;
   let p = inflight.get(clubId);

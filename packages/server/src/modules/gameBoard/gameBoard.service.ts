@@ -1522,6 +1522,15 @@ export async function suggestNextFoursome(
     addPairWeight(g.players.map((p) => p.userId), t ? new Date(t).getTime() : 0);
   }
   for (const e of queued) addPairWeight((e.playerIds as string[]) ?? [], nowMs);
+  // 혼복 돌려 맡기 — 혼복을 적게 하는 모임에서도 여자 F조(급수별 기본 혼복 70%)의 짝이 될 남자는 늘 비슷한 급수의
+  // 몇 명이라, 같은 사람이 계속 혼복에 들어갔다(시나리오 300개: 터닝 구성 67%에서 '혼복 몰린 사람'). 상한(하루 몇 판까지)은
+  // 대기·급수 균형을 해쳐 보류됐다 → 같은 성별 평균보다 오늘 혼복을 더 친 만큼만 작게 비용(비슷한 후보 사이의 순서 정하기).
+  const MIX_ROTATE = Number(process.env.MATCH_MIX_ROTATE ?? 1.5);
+  const mixAvg: Record<string, number> = {};
+  for (const g of ['M', 'F'] as const) {
+    const ps = modePool.filter((p) => p.gender === g);
+    mixAvg[g] = ps.length ? ps.reduce((a, p) => a + p.mixedGames, 0) / ps.length : 0;
+  }
   // 같은 4명이 또 한 판 — 짝마다 겹침(최대 6)보다 훨씬 지루하다(3시간 시뮬레이션: 같은 4명 다시 10~12회,
   // 끝나자마자 같은 팀 그대로 다시 붙는 판 다수). 4명 묶음 단위로 따로 무겁게, 최근일수록 더.
   const fourKey = (ids: string[]) => [...ids].sort().join('|');
@@ -1718,7 +1727,9 @@ export async function suggestNextFoursome(
   const ruleBreak = (g: ModePlayer[], activeKeys: Set<string>): string | null => {
     const f = g.filter((p) => p.gender === 'F');
     const m = g.filter((p) => p.gender === 'M');
-    if (f.length === 1 && m.length === 3 && f[0].skill <= 4) return '여자 C급 이하는 혼복·여복으로';
+    // 실제 급수로 본다 — '오늘 편성용 급수'(같은 성별 상대가 부족하면 옮겨 봄)로 보면 여C가 'A조'로 옮겨져 3:1에 들어갔다
+    // (결정 단위 테스트 '여자 C 이하 3:1 금지' 18개).
+    if (f.length === 1 && m.length === 3 && (realSkill.get(f[0].id) ?? f[0].skill) <= 4) return '여자 C급 이하는 혼복·여복으로';
     // '같이 안 짜기' 요청은 금지(비용만이면 4명뿐인 시점·땜빵 차선 후보에서 깨질 수 있음).
     for (let i = 0; i < g.length; i++) for (let j = i + 1; j < g.length; j++) if (apartKeys.has(pkey(g[i].id, g[j].id))) return '같이 안 짜기 요청';
     if (g.length === 4 && !hasRequestPair(g, activeKeys)) {
@@ -1728,8 +1739,10 @@ export async function suggestNextFoursome(
         if (!ls || (ls.up == null && ls.down == null)) continue;
         for (const q of g) {
           if (q === p || q.gender !== p.gender) continue;
-          if (ls.up != null && q.skill - p.skill > ls.up) return '급수별 같이 칠 범위';
-          if (ls.down != null && p.skill - q.skill > ls.down) return '급수별 같이 칠 범위';
+          // 운영진이 정한 범위는 실제 급수 기준('오늘 편성용 급수'로 옮겨 본 사람도).
+          const [ps, qs] = [realSkill.get(p.id) ?? p.skill, realSkill.get(q.id) ?? q.skill];
+          if (ls.up != null && qs - ps > ls.up) return '급수별 같이 칠 범위';
+          if (ls.down != null && ps - qs > ls.down) return '급수별 같이 칠 범위';
         }
       }
       const sp = levelSpread(g, tune.genderOffsetFemale);
@@ -1818,7 +1831,10 @@ export async function suggestNextFoursome(
             const isMix = group.some((p) => p.gender === 'M') && group.some((p) => p.gender === 'F');
             for (const p of group) {
               const t = levelSetting(p)?.mixedPct;
-              if (t == null) continue;
+              if (t == null) {
+                if (isMix && p.gender && !sameScarce.has(p.id)) c += MIX_ROTATE * pref * Math.max(0, p.mixedGames - mixAvg[p.gender]);
+                continue;
+              }
               const want = (t / 100) * (p.mixedGames + p.sameGames + 1);
               if (isMix && p.mixedGames + 1 > want + 0.5) c += 3 * pref;
               if (!isMix && p.mixedGames < want - 0.5) c += 3 * pref;
@@ -2138,7 +2154,10 @@ export async function suggestNextFoursome(
     group.some((x) => restedBefore.get(x)?.some((y) => avail.has(y) && !group.includes(y)));
   for (let slot = 0; slot < horizon; slot++) {
     // 쉬는 사람이 4명 이상이면 그들 중에서(지금 기준), 아니면 시간 기준(이 판 시작 시각에 비는 사람).
-    const idleIds = poolIds.filter(isIdle);
+    // '지금 쉬는 사람'에도 한 판 쉬기를 똑같이 — 방금 코트에서 나온 사람은 빼고 본다(면제 대상은 그대로). 빠져 있으면
+    // '쉬던 사람 먼저' 거르기와 겹쳐, 150분 기다린 남C의 짝(5분 쉰 남D들)이 빠지고 방금 끝난 5판 친 여자 4명이 대신
+    // 들어갔다(결정 단위 테스트 '오래 기다린 사람 넣기'·방해꾼 16명).
+    const idleIds = poolIds.filter((id) => isIdle(id) && freeBy(id, nowMs));
     slotActive = activeTogether();
     // 후보 시점: 지금 쉬는 사람(4명+면) → 안 되면 코트가 비는 시각들(최대 3개)에 비는 사람.
     // 각 시점에서 규칙(급수 폭·여자 C 이하 3:1 금지) 안 4명이 나오면 그걸로, 끝까지 없으면 이 판은 기다림.
