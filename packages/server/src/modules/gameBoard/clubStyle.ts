@@ -12,6 +12,7 @@
  * 결과는 모임별 12시간 캐시. 표본이 적은 모임은 null(기본 규칙만 사용).
  */
 import { prisma } from '../../utils/prisma';
+import { logger } from '../../utils/logger';
 
 const SKILL: Record<string, number> = { S: 7, A: 6, B: 5, C: 4, D: 3, E: 2, F: 1 };
 const LOOKBACK_DAYS = 120;
@@ -476,6 +477,9 @@ export async function getClubStyle(clubId: string): Promise<ClubStyle | null> {
     p = trainClubStyle(clubId)
       .catch(() => null)
       .then((style) => {
+        // 운영 로그로 학습이 실제로 도는지 확인(다음 정모 뒤 점검용).
+        if (style) logger.info('clubStyle trained', { clubId, decisions: style.decisions, editSamples: style.editSamples, testAccuracy: style.testAccuracy, traits: style.traits, std: Object.fromEntries(STYLE_FEATURES.map((f, i) => [f, Math.round(style.stdWeights[i] * 100) / 100])) });
+        else logger.info('clubStyle skipped (표본 부족)', { clubId });
         cache.set(clubId, { at: Date.now(), style });
         inflight.delete(clubId);
         return style;
