@@ -1596,6 +1596,8 @@ export async function suggestNextFoursome(
     // 다른 코트가 끝날 때 두 코트 사람을 섞어 짤 수 있다. 순서(쉬던 사람 먼저)는 그대로 지킨다.
     if (rotatingCount - 4 * courts.length < 4) for (const p of modePool) restWaived.add(p.id);
   }
+  // 모임 스타일 반영 강도(계획 다듬기 쪽). 시험용 스위치 MATCH_STYLE_WEIGHT(suggest.algorithm 의 STYLE_WEIGHT 와 같은 값).
+  const STYLE_WEIGHT_PLAN = Number(process.env.MATCH_STYLE_WEIGHT ?? 2);
   let styleScorer: StyleScorer | undefined;
   // 학습 스타일은 운영진 평소 방식(남복·여복 위주)을 담고 있어, 운영자가 게임 종류를 바꿨으면 끈다.
   if (style && (gameType === 'same' || gameType === 'ratio')) {
@@ -1605,8 +1607,10 @@ export async function suggestNextFoursome(
     styleScorer = (group) =>
       styleUtility(
         style,
-        group.map((p) => ({ id: p.id, skill: p.skill, gender: p.gender, guest: guestIds.has(p.id) })),
-        { skipGender: gameType === 'ratio' },
+        group.map((p) => ({ id: p.id, skill: realSkill.get(p.id) ?? p.skill, gender: p.gender, guest: guestIds.has(p.id) })),
+        // 혼복 비율을 정한 모임에서도 학습된 남녀 구성 선호(3:1 회피·여복 선호)는 쓴다 — 비율은 하루 목표, 선호는 판 모양이라
+        // 겹치지 않는다(터닝 결정 재현: 포함하는 쪽이 운영진과 조금 더 같음). 시험용 MATCH_STYLE_SKIPGENDER=1 로 예전처럼 건너뜀.
+        { skipGender: gameType === 'ratio' && process.env.MATCH_STYLE_SKIPGENDER === '1' },
       );
   }
 
@@ -2295,7 +2299,7 @@ export async function suggestNextFoursome(
       let c = h?.score ? h.score(g) : 0;
       c += levelW * levelSpread(g, tune.genderOffsetFemale);
       for (const id of groups[i]) c += 1.5 * i * (urgency.get(id) ?? 0);
-      if (styleScorer) c -= 0.7 * styleScorer(g);
+      if (styleScorer) c -= STYLE_WEIGHT_PLAN * styleScorer(g);
       for (let a = 0; a < 4; a++) for (let b = a + 1; b < 4; b++) c += varW * (pairWeightBase[pkey(groups[i][a], groups[i][b])] ?? 0);
       return c;
     };

@@ -457,7 +457,8 @@ export function resolveTuning(t?: Partial<SuggestTuning>): SuggestTuning {
 // the mode (tight band / 2강2약 / even teams) and rotates partners.
 // 모임 학습 스타일(clubStyle) 반영 강도 — utility(로그 오즈) 1 ≈ 공평 비용 0.7게임.
 // 후보는 이미 '차례가 된 사람(owed band)'으로 좁혀져 있어, 스타일은 그 안에서 '어떻게 묶나'를 정한다.
-const STYLE_WEIGHT = 0.7;
+// v2(2026-11-04): 운영진 분할 기준을 학습한 스타일은 0.7로는 거의 영향이 없었다(묶기 일치 33→34%) → 2. 시험용 MATCH_STYLE_WEIGHT.
+const STYLE_WEIGHT = Number(process.env.MATCH_STYLE_WEIGHT ?? 2);
 export type StyleScorer = (group: ModePlayer[]) => number;
 
 /**

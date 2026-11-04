@@ -1,10 +1,9 @@
 /**
  * 모임 편성 스타일 학습 — "이 모임 총무는 4명을 어떻게 묶나"를 모임의 실제 기록에서 배운다.
  *
- * 방식(조건부 로짓): 과거 편성 시점마다 [실제로 짠 4명] vs [그중 1~2명을 그때 대기하던 다른
- * 사람으로 바꾼 가상 조합]을 비교해, 실제 조합을 고르게 만든 특징의 가중치를 로지스틱 회귀로 학습.
- * 터닝포인트 실측(2026-10, 2,794편성): 테스트 정확도 79.7% — 남복/여복 선호, 급수 폭 좁게,
- * 혼복은 2:2, 팀 균형, 자주 치던 사람끼리.
+ * 방식(조건부 로짓): 운영진이 같은 순간(5분 안)에 짠 두 판 8명을 [실제 4·4] vs [다른 34가지 4·4]로 비교해,
+ * 실제 분할을 고르게 만든 특징의 가중치를 로지스틱 회귀로 학습(v2, 2026-11-04). 같은 순간 짝 판이 없으면
+ * [실제 4명] vs [1~2명을 그때 대기하던 사람으로 바꾼 조합]. 터닝 12정모 결정 520개: 운영진 분할 교차검증 42%(우연 3%).
  *
  * 의도적으로 학습에서 뺀 것: '오늘 이미 같이 친 짝'. 사람 총무는 무작위보다 더 겹치게 짜지만
  * (+0.42) 그게 회원 불만(중복 게임)의 원인이라, 그 부분은 사람을 따라 하지 않고 기존 variety
@@ -27,15 +26,23 @@ const SHADOW_WEIGHT = 2;
 // AI 편성 퀴즈 답 1건 — 운영진이 차분히 보고 고른 판단이라 운영진 수정과 같은 무게.
 const QUIZ_WEIGHT = 5;
 
+// v2(2026-11-04): 운영진이 8명을 4·4로 나누는 선택을 가장 잘 설명한 특징들(터닝 12정모 결정 520개, 교차검증 42% —
+// 우연 3%). 겹침(오늘 같이 친 짝)은 의도적으로 뺀다 — 운영진은 겹침을 피하지 않지만(+0.33) 그건 variety 항이 맡는 정책.
 export const STYLE_FEATURES = [
-  'skillSpread', // 급수 폭(최고−최저)
-  'teamDiff', // 최선 2:2 팀 실력 차(여자 −1 보정)
-  'sameGender', // 남복/여복
+  'spreadM', // 남자끼리 급수 폭(F–E는 2단계)
+  'spreadF', // 여자끼리 급수 폭(F–E는 2단계)
+  'teamDiff', // 가장 고른 2:2 팀 힘 차이(여자 −2 보정, 혼복 2:2는 남녀 한 명씩)
   'mixed22', // 혼복 2:2
+  'mixed31', // 3:1
+  'women4', // 여복
+  'womenWithF', // 여F가 든 여복
+  'tight', // 보정 급수 폭 1 이하(같은 급수 판)
+  'mixDown', // 섞어치기: 보정 폭 2+ 인데 팀 차 1 이하
   'historyLog', // 과거(이전 정모) 함께 친 판수 합 log1p
   'regulars', // 과거 3판+ 함께 친 단골 짝 쌍 수
   'guests', // 게스트 수
 ] as const;
+const GENDER_FEATURE_IDX = [3, 4, 5, 6];
 
 export interface StylePlayer {
   id: string;
@@ -73,11 +80,20 @@ export const FEMALE_OFFSET = 2;
 export const DEFAULT_SPREAD_CAP = 2;
 
 export function styleFeatures(group: StylePlayer[], history: Map<string, number>): number[] {
-  const sk = group.map((p) => p.skill);
-  const eff = group.map((p) => p.skill - (p.gender === 'F' ? FEMALE_OFFSET : 0));
-  const [a, b, c, d] = eff;
-  const teamDiff = group.length === 4 ? Math.min(Math.abs(a + b - c - d), Math.abs(a + c - b - d), Math.abs(a + d - b - c)) : 0;
-  const f = group.filter((p) => p.gender === 'F').length;
+  // 급수 폭용 숫자: F는 E보다 2단계 아래로 본다(운영진 규칙). skill 은 실제 급수(오늘 편성용 급수 아님).
+  const lv = (p: StylePlayer) => (p.skill <= 1 ? 0 : p.skill);
+  const pow = (p: StylePlayer) => p.skill - (p.gender === 'F' ? FEMALE_OFFSET : 0);
+  const men = group.filter((p) => p.gender === 'M');
+  const women = group.filter((p) => p.gender === 'F');
+  const spread = (xs: StylePlayer[]) => (xs.length > 1 ? Math.max(...xs.map(lv)) - Math.min(...xs.map(lv)) : 0);
+  let teamDiff = 0;
+  if (group.length === 4) {
+    const [a, b, c, d] = group;
+    let splits: [StylePlayer[], StylePlayer[]][] = [[[a, b], [c, d]], [[a, c], [b, d]], [[a, d], [b, c]]];
+    if (men.length === 2 && women.length === 2) splits = splits.filter(([x]) => x[0].gender !== x[1].gender);
+    teamDiff = Math.min(...splits.map(([x, y]) => Math.abs(pow(x[0]) + pow(x[1]) - pow(y[0]) - pow(y[1]))));
+  }
+  const effSpread = group.length ? Math.max(...group.map(pow)) - Math.min(...group.map(pow)) : 0;
   let hsum = 0;
   let regulars = 0;
   for (let i = 0; i < group.length; i++)
@@ -87,21 +103,26 @@ export function styleFeatures(group: StylePlayer[], history: Map<string, number>
       if (h >= 3) regulars++;
     }
   return [
-    Math.max(...sk) - Math.min(...sk),
+    spread(men),
+    spread(women),
     teamDiff,
-    f === 0 || f === group.length ? 1 : 0,
-    f === 2 && group.length === 4 ? 1 : 0,
+    men.length === 2 && women.length === 2 ? 1 : 0,
+    men.length === 1 || men.length === 3 ? 1 : 0,
+    women.length === 4 ? 1 : 0,
+    women.length === 4 && women.some((p) => p.skill <= 1) ? 1 : 0,
+    effSpread <= 1 ? 1 : 0,
+    effSpread >= 2 && teamDiff <= 1 ? 1 : 0,
     Math.log1p(hsum),
     regulars,
     group.filter((p) => p.guest).length,
   ];
 }
 
-// skipGender: 운영자가 혼복 비율을 직접 정했으면 학습된 남복·여복/혼복 선호(특성 2·3)는 빼고 본다.
+// skipGender: 운영자가 혼복 비율을 직접 정했으면 학습된 남녀 구성 선호(혼복·3:1·여복)는 빼고 본다.
 export function styleUtility(style: ClubStyle, group: StylePlayer[], opts?: { skipGender?: boolean }): number {
   const x = styleFeatures(group, style.history);
   let u = 0;
-  for (let j = 0; j < x.length; j++) if (!(opts?.skipGender && (j === 2 || j === 3))) u += style.weights[j] * x[j];
+  for (let j = 0; j < x.length; j++) if (!(opts?.skipGender && GENDER_FEATURE_IDX.includes(j))) u += (style.weights[j] ?? 0) * x[j];
   return u;
 }
 
@@ -150,11 +171,13 @@ function fitPairwise(X: number[][], y: number[], rand: () => number, epochs = 12
 
 function describe(std: number[]): string[] {
   const out: { t: string; s: number }[] = [];
-  const at = (name: (typeof STYLE_FEATURES)[number]) => std[STYLE_FEATURES.indexOf(name)];
-  if (at('sameGender') > 0.2) out.push({ t: '남복·여복 위주', s: at('sameGender') });
-  if (at('skillSpread') < -0.2) out.push({ t: '급수 비슷한 사람끼리', s: -at('skillSpread') });
+  const at = (name: (typeof STYLE_FEATURES)[number]) => std[STYLE_FEATURES.indexOf(name)] ?? 0;
+  if (at('mixed22') < -0.2 && at('mixed31') < -0.2) out.push({ t: '남복·여복 위주', s: -at('mixed22') });
+  if (at('spreadM') + at('spreadF') < -0.4) out.push({ t: '급수 비슷한 사람끼리', s: -(at('spreadM') + at('spreadF')) });
   if (at('mixed22') > 0.2) out.push({ t: '혼복은 남녀 2:2로', s: at('mixed22') });
+  if (at('mixed31') < -0.3) out.push({ t: '3:1 혼복은 피함', s: -at('mixed31') });
   if (at('teamDiff') < -0.2) out.push({ t: '팀 실력 균형', s: -at('teamDiff') });
+  if (at('mixDown') > 0.2) out.push({ t: '섞어치기(위아래 급수를 한 팀에)', s: at('mixDown') });
   if (at('historyLog') + at('regulars') > 0.3) out.push({ t: '평소 같이 치던 사람끼리', s: at('historyLog') + at('regulars') });
   if (at('guests') < -0.3) out.push({ t: '게스트는 나눠서', s: -at('guests') });
   return out.sort((a, b) => b.s - a.s).map((o) => o.t);
@@ -298,6 +321,27 @@ export async function trainClubStyle(clubId: string): Promise<ClubStyle | null> 
       decisions++;
       const chosen = t.ids.map(player);
       const fc = styleFeatures(chosen, history);
+      // 운영진 방식 그대로: 같은 순간(5분 안)에 짠 다음 판과 합친 8명을 다른 34가지로 나눈 것이 대안.
+      // '누구를 넣나'(차례)는 운영진과 같게 두고 '어떻게 묶나'만 배운다(운영진 판 vs 엔진 판 차이의 대부분).
+      const mate = ts.find((u) => u !== t && u.ids.length === 4 && u.start >= t.start && u.start - t.start <= 300 && !u.ids.some((id) => t.ids.includes(id)));
+      if (mate) {
+        const pool = [...t.ids, ...mate.ids];
+        const fPlus = styleFeatures(mate.ids.map(player), history).map((v, j) => v + fc[j]);
+        const anchor = pool[0];
+        const rest = pool.slice(1);
+        for (let m = 0; m < 1 << 7; m++) {
+          const a = [anchor];
+          const b: string[] = [];
+          for (let i = 0; i < 7; i++) (m & (1 << i) ? a : b).push(rest[i]);
+          if (a.length !== 4) continue;
+          const same = a.every((id) => t.ids.includes(id)) || a.every((id) => mate.ids.includes(id));
+          if (same) continue;
+          const fa = styleFeatures(a.map(player), history);
+          const fb = styleFeatures(b.map(player), history);
+          rows.push({ si, diff: fPlus.map((v, j) => v - fa[j] - fb[j]) });
+        }
+        continue;
+      }
       for (let n = 0; n < NEG_PER_DECISION; n++) {
         const g = [...t.ids];
         const k = rand() < 0.6 ? 1 : 2;
@@ -420,6 +464,11 @@ const inflight = new Map<string, Promise<ClubStyle | null>>();
 export async function getClubStyle(clubId: string): Promise<ClubStyle | null> {
   // 시험용 서버 스위치 — 시뮬레이션 모임엔 시험 정모가 수백 개 쌓여 서버마다 학습이 오래 걸리고, 규칙 시험엔 필요 없다.
   if (process.env.MATCH_STYLE === '0') return null;
+  // 시험용: 미리 학습한 가중치 파일을 모임 스타일로 주입(MATCH_STYLE_JSON = {"weights":[…]}).
+  if (process.env.MATCH_STYLE_JSON) {
+    const j = JSON.parse(require('fs').readFileSync(process.env.MATCH_STYLE_JSON, 'utf8'));
+    return { clubId, weights: j.weights, stdWeights: j.stdWeights ?? j.weights, decisions: 0, editSamples: 0, shadowSamples: 0, quizSamples: 0, testAccuracy: null, traits: [], history: new Map(), spreadCap: DEFAULT_SPREAD_CAP, trainedAt: '' };
+  }
   const hit = cache.get(clubId);
   if (hit && Date.now() - hit.at < TTL_MS) return hit.style;
   let p = inflight.get(clubId);
