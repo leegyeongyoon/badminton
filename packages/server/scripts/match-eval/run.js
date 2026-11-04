@@ -151,6 +151,7 @@ if (require.main === module) (async () => {
   if (process.env.OUT) require('fs').writeFileSync(process.env.OUT, JSON.stringify(raw));
   console.log(`\n${fails ? `❌ 기준 미달 ${fails}개` : '✅ 전 시나리오 통과'}`);
   process.exitCode = fails ? 1 : 0;
+  await require('./db').prisma.$disconnect();
 })();
 
 module.exports = { SCENARIOS, LV, score };

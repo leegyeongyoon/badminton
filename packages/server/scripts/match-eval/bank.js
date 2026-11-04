@@ -41,6 +41,7 @@ const slot = (i) => ({
       try {
         const r = await runScenario(sc, seed, slot(slotBase + w));
         const s = score(r);
+        await require('./db').dropSession(r.sid); // 시험 정모는 채점 뒤 바로 지운다(DB가 불면 엔진이 느려짐)
         results.push({ name: sc.name, dims: sc.dims, courts: sc.courts, people: sc.pop.length, checks: Object.fromEntries(s.checks.map((c) => [c.k, c.v])), fails: s.checks.filter((c) => !c.ok).map((c) => c.k), info: s.info });
       } catch (e) {
         results.push({ name: sc.name, error: String(e?.message ?? e) });
@@ -77,4 +78,5 @@ const slot = (i) => ({
   console.log('가장 많이 어긴 시나리오:');
   for (const r of worst) console.log(`  ${r.name} (${r.courts}코트·${r.people}명) ${r.fails.join(', ') || '-'}`);
   if (opt('out')) fs.writeFileSync(opt('out'), JSON.stringify(results));
+  await require('./db').prisma.$disconnect();
 })();

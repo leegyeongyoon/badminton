@@ -2,7 +2,6 @@
 // DB 시각을 1분씩 뒤로 밀어 시간 흐름을 만든다. 운영판 자동 편성(대기 게임 목표 수, 4명 모두 쉬는 맨 위 판 투입,
 // 투입 직전 다시 짜기)을 흉내 내고, 시나리오의 사건(도착·퇴장·휴식·레슨·요청·운영진 수정)을 넣는다.
 // 필요: 로컬 DB(docker badminton-db) + 로컬 서버(localhost:3100) + 시드 데이터(김대표 계정·모임·시설).
-const { execSync } = require('child_process');
 
 const B = process.env.API || 'http://localhost:3100/api/v1';
 const CLUB = 'cc2112ad-3e60-45e3-9b3d-a2307359d7c6';
@@ -10,8 +9,7 @@ const FACILITY = 'cf36ec5f-d6a8-4cbd-aa19-7d52e1bd79d1';
 const SK = { S: 7, A: 6, B: 5, C: 4, D: 3, E: 2, F: 1 };
 const LV = ['', 'F', 'E', 'D', 'C', 'B', 'A', 'S'];
 
-const sql = (q) =>
-  execSync(`docker exec badminton-db psql -U badminton -d badminton -At -c "${q.replace(/"/g, '\\"')}"`).toString().trim();
+const { sql } = require('./db');
 
 function rng(seed) {
   let s = seed % 2147483647;
@@ -26,7 +24,7 @@ function rng(seed) {
  * sc: { name, courts, minutes, pop: ['MS','FA',...] (도착 순서), arrivals: [[분, 명수], ...] (합 = pop 길이),
  *       events?: [{ t, type: 'leave'|'rest'|'back'|'lesson'|'unlesson'|'together'|'apart', who: [pop 인덱스] }],
  *       operatorEditEvery?: 분(AI 대기 게임 하나에서 한 명을 쉬는 사람으로 바꿈), longGames?: 비율,
- *       settings?: 모임 AI 편성 설정(mixedRatio·levelMatch 등, 없으면 기본값) }
+ *       settings?: 모임 AI 편성 설정(mixedRatio·levelMatch 등, 없으면 기본값), gameMin?: 판 평균 분(기본 12) }
  */
 // where: { club, facility } — 여러 시나리오를 동시에 돌릴 때 모임을 나눠 쓴다(정모는 모임당 하나).
 async function runScenario(sc, seed = 1, where = {}) {
@@ -76,7 +74,7 @@ async function runScenario(sc, seed = 1, where = {}) {
     const fresh = (await players()).map((p) => p.userId).filter((id) => arrive[id] == null).sort();
     for (const id of fresh) {
       const v = sc.pop[popIdx];
-      sql(`update "PlayerProfile" set gender='${v[0]}', "skillLevel"='${v[1]}' where "userId"='${id}'`);
+      await sql(`update "PlayerProfile" set gender='${v[0]}', "skillLevel"='${v[1]}' where "userId"='${id}'`);
       roster[popIdx] = id;
       info[id] = { g: v[0], s: SK[v[1]], idx: popIdx };
       arrive[id] = t;
@@ -113,8 +111,8 @@ async function runScenario(sc, seed = 1, where = {}) {
     if (ids.some((id) => busy.has(id))) return false; // 치는 중에는 판이 끝난 뒤
     for (const id of ids) {
       if (ev.type === 'leave') { await api('POST', `/club-sessions/${sid}/checkout/${id}`); left[id] = t; }
-      if (ev.type === 'rest') { sql(`update "CheckIn" set "restingAt"=now() where "clubSessionId"='${sid}' and "userId"='${id}' and "checkedOutAt" is null`); state[id] = 'rest'; }
-      if (ev.type === 'back') { sql(`update "CheckIn" set "restingAt"=null where "clubSessionId"='${sid}' and "userId"='${id}' and "checkedOutAt" is null`); delete state[id]; }
+      if (ev.type === 'rest') { await sql(`update "CheckIn" set "restingAt"=now() where "clubSessionId"='${sid}' and "userId"='${id}' and "checkedOutAt" is null`); state[id] = 'rest'; }
+      if (ev.type === 'back') { await sql(`update "CheckIn" set "restingAt"=null where "clubSessionId"='${sid}' and "userId"='${id}' and "checkedOutAt" is null`); delete state[id]; }
       if (ev.type === 'lesson') { await api('PATCH', `/club-sessions/${sid}/players/${id}/lesson`, { inLesson: true }); state[id] = 'lesson'; }
       if (ev.type === 'unlesson') { await api('PATCH', `/club-sessions/${sid}/players/${id}/lesson`, { inLesson: false }); delete state[id]; }
     }
@@ -207,7 +205,7 @@ async function runScenario(sc, seed = 1, where = {}) {
           unfairLog.push({ t, id, rester, edited: edited.has(e.id), entryPos: qpos, made: madeAt[e.id], restQ: qi < 0 ? '판 없음' : `${qi + 1}번째${blocked ? '(막힘)' : ''}`, restRested: t - Math.max(arrive[rester], lastEnd[rester] ?? -99) });
         }
       }
-      const dur = Math.max(7, Math.round(12 + 2.5 * gauss() + (drnd() < (sc.longGames ?? 0.2) ? 5 : 0)));
+      const dur = Math.max(7, Math.round((sc.gameMin ?? 12) + 2.5 * gauss() + (drnd() < (sc.longGames ?? 0.2) ? 5 : 0)));
       onCourt.set(c, { ids: e.playerIds, start: t, dur, teamSplit: !!e.teamSplit });
       games.push({ t, ids: e.playerIds, teamSplit: !!e.teamSplit, edited: edited.has(e.id) });
       for (const id of e.playerIds) (hist[id] ||= []).push({ s: t, e: null });
@@ -220,10 +218,10 @@ async function runScenario(sc, seed = 1, where = {}) {
       waitRun[id] = (waitRun[id] || 0) + 1;
       maxWait[id] = Math.max(maxWait[id] || 0, waitRun[id]);
     }
-    shift();
+    await shift();
   }
   await api('POST', `/club-sessions/${sid}/end`);
-  return { sc: sc.name, seed, minutes: sc.minutes, courts: sc.courts, info, arrive, left, hist, games, requests, violations, unfairB2b, unfairLog, maxWait, availMin, emptyCourtMin, replanned, swapped, opEdits, suggestMs };
+  return { sid, sc: sc.name, seed, minutes: sc.minutes, courts: sc.courts, info, arrive, left, hist, games, requests, violations, unfairB2b, unfairLog, maxWait, availMin, emptyCourtMin, replanned, swapped, opEdits, suggestMs };
 }
 
 module.exports = { runScenario, LV, SK };

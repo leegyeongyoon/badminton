@@ -4,7 +4,7 @@
 //
 // 사용(로컬 DB·서버 + 시뮬 모임 1~40):
 //   node scripts/match-eval/cases.js [--par 8] [--only 쉬던] [--slot-base 0] [--list]
-const { execSync } = require('child_process');
+const { sql: psqlAsync, prisma, dropSession } = require('./db');
 
 const B = process.env.API || 'http://localhost:3100/api/v1';
 const SK = { S: 7, A: 6, B: 5, C: 4, D: 3, E: 2, F: 1 };
@@ -14,8 +14,6 @@ const opt = (k, d) => {
   const i = args.indexOf(`--${k}`);
   return i >= 0 ? args[i + 1] : d;
 };
-const psql = (q) =>
-  execSync('docker exec -i badminton-db psql -U badminton -d badminton -At -v ON_ERROR_STOP=1 -f -', { input: q }).toString().trim();
 const slot = (i) => ({
   club: `cc2112ad-3e60-45e3-9b3d-${String(i).padStart(12, '0')}`,
   facility: `cf36ec5f-d6a8-4cbd-aa19-${String(i).padStart(12, '0')}`,
@@ -128,7 +126,9 @@ for (const l of 'ABCE')
     people: [P('M' + l, { rest: 35 }), ...many(7, 'MD', { rest: 5, g: 2 })],
     allowEmpty: true,
     // 같이 칠 비슷한 급수가 아예 없는 사람 — 오래 기다리면 '오늘 편성용 급수'로 옮겨 결국 넣는다(굶기지 않기).
-    expect: (ch) => (ch.includes(0) ? null : '35분 기다린 사람을 또 뺌'),
+    // 단, 같은 성별 1단계 안 사람이 (방금 끝나 잠깐 쉬는 중이라도) 있으면 3단계 아래와 섞는 대신 몇 분 기다리는 게 맞다.
+    expect: (ch, ps) =>
+      ch.includes(0) || ps.slice(8).some((p) => gOf(p) === gOf(ps[0]) && Math.abs(lvOf(p) - lvOf(ps[0])) <= 1) ? null : '35분 기다린 사람을 또 뺌',
   });
 
 // 11) 떼기 요청 — 같은 급수 6명, 0·1번은 '같이 안 짜기'(둘이 가장 오래 쉼).
@@ -259,11 +259,18 @@ async function runCase(c, where, T) {
   });
   // 오늘 같이 친 판(판수 계산엔 영향 없게 유령처럼 짧게 — 같이 든 사람 쌍만 남긴다)
   c.together.forEach((grp, k) => q.push(turn(grp.map((i) => ids[i]), 140 - k * 14, 128 - k * 14, 'COMPLETED')));
-  psql(q.join('\n'));
+  await psqlAsync(q.join('\n'));
   for (const [a, b] of c.apart ?? []) await api('POST', `/club-sessions/${sid}/requests`, { kind: 'APART', aId: ids[a], bId: ids[b] });
   const r = await api('POST', `/club-sessions/${sid}/suggest`, { count: 1, ...(c.suggest ?? {}) });
   await api('POST', `/club-sessions/${sid}/end`);
+  await dropSession(sid); // 시험 정모는 바로 지운다(안 지우면 수천 번에 DB가 불어 엔진이 느려짐)
   const sg = r?.suggestions?.[0];
+  if (args.includes('--debug')) {
+    const lab = (id) => (ids.indexOf(id) >= 0 ? c.people[ids.indexOf(id)].code + ids.indexOf(id) : '?');
+    const r2 = await api('POST', `/club-sessions/${sid}/suggest`, { count: 3 });
+    console.log(`\n[${c.name}]\n  1판: ${(sg?.playerIds ?? []).map(lab).join(' ')} · ${sg?.reason ?? r?.note ?? ''}`);
+    for (const x of r2?.suggestions ?? []) console.log(`  3판 계획: ${x.playerIds.map(lab).join(' ')} · ${x.reason ?? ''}`);
+  }
   if (!sg?.playerIds?.length) return c.allowEmpty ? { ok: true, note: '제안 없음(허용)' } : { ok: false, why: `제안 없음 — ${r?.note ?? r?.error ?? ''}`.slice(0, 120) };
   const chosen = sg.playerIds.map((id) => ids.indexOf(id)).filter((i) => i >= 0);
   const why = c.expect(chosen, c.people);
@@ -272,11 +279,29 @@ async function runCase(c, where, T) {
 
 (async () => {
   const only = opt('only');
-  const list = cases.filter((c) => !only || c.name.includes(only));
+  // --shard i/n: 서버 여러 개로 나눠 돌릴 때 i번째 몫(0부터). 결과는 --out 파일로 모아 --from 으로 합친다.
+  const [shI, shN] = opt('shard', '0/1').split('/').map(Number);
+  const list = cases.filter((c, i) => (!only || c.name.includes(only)) && i % shN === shI);
   if (args.includes('--list')) {
     const by = {};
     for (const c of list) by[c.rule] = (by[c.rule] ?? 0) + 1;
     console.log(`케이스 ${list.length}개`, by);
+    return;
+  }
+  const from = opt('from');
+  if (from) {
+    const res = from.split(',').flatMap((f) => JSON.parse(require('fs').readFileSync(f, 'utf8')));
+    const rules = Array.from(new Set(res.map((x) => x.rule)));
+    for (const rule of rules) {
+      const g = res.filter((x) => x.rule === rule);
+      const bad = g.filter((x) => !x.ok);
+      console.log(`${bad.length ? '❌' : '✅'} ${rule} ${g.length - bad.length}/${g.length}`);
+      for (const x of bad.slice(0, 6)) console.log(`     · ${x.name}: ${x.why}${x.chosen ? ` (${x.chosen})` : ''}`);
+      if (bad.length > 6) console.log(`     · …외 ${bad.length - 6}개`);
+    }
+    const fail = res.filter((x) => !x.ok).length;
+    console.log(`\n${fail ? `❌ ${fail}개 실패` : '✅ 전부 통과'} / ${res.length}개`);
+    await prisma.$disconnect();
     return;
   }
   const par = Number(opt('par', 8));
@@ -309,5 +334,7 @@ async function runCase(c, where, T) {
   }
   const fail = res.filter((x) => !x.ok).length;
   console.log(`\n${fail ? `❌ ${fail}개 실패` : '✅ 전부 통과'} / ${res.length}개`);
+  if (opt('out')) require('fs').writeFileSync(opt('out'), JSON.stringify(res.map((x) => ({ rule: x.c.rule, name: x.c.name, ok: x.ok, why: x.why, chosen: x.chosen }))));
   process.exitCode = fail ? 1 : 0;
+  await prisma.$disconnect();
 })();
