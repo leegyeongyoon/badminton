@@ -459,6 +459,10 @@ export function resolveTuning(t?: Partial<SuggestTuning>): SuggestTuning {
 // 후보는 이미 '차례가 된 사람(owed band)'으로 좁혀져 있어, 스타일은 그 안에서 '어떻게 묶나'를 정한다.
 // v2(2026-11-04): 운영진 분할 기준을 학습한 스타일은 0.7로는 거의 영향이 없었다(묶기 일치 33→34%) → 2. 시험용 MATCH_STYLE_WEIGHT.
 const STYLE_WEIGHT = Number(process.env.MATCH_STYLE_WEIGHT ?? 2);
+// 스타일 항 상한 — 공정(판수·대기, 한 사람 1판 ≈ 1)을 넘지 못하게 tanh 로 눌러 둔다(한 판 전체 ±STYLE_CAP).
+// 강도 5·10을 그냥 곱하면 '남녀 섞여도 판수 먼저' 결정 테스트 130개가 깨졌다(혼복 기피 −9 > 판수 2판 차 8) (2026-11-06).
+export const STYLE_CAP = Number(process.env.MATCH_STYLE_CAP ?? 3);
+export const styleCost = (u: number) => -STYLE_CAP * Math.tanh((STYLE_WEIGHT * u) / STYLE_CAP);
 export type StyleScorer = (group: ModePlayer[]) => number;
 
 /**
@@ -482,7 +486,7 @@ function scoreGroup(
   const w = MODE_WEIGHTS[mode];
   const requestTerm = requests?.score ? requests.score(group) : 0;
   // '빡센 게임(2강 2약)'은 일부러 급수를 벌리는 모드라 모임 스타일(급수 비슷하게)과 충돌 → 제외.
-  const styleTerm = style && mode !== 'competitive' ? -STYLE_WEIGHT * style(group) : 0;
+  const styleTerm = style && mode !== 'competitive' ? styleCost(style(group)) : 0;
   return (
     requestTerm +
     styleTerm +

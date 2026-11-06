@@ -18,6 +18,7 @@ import {
   type SuggestTuning,
   type StyleScorer,
   type RequestHooks,
+  styleCost,
 } from './suggest.algorithm';
 import { getClubStyle, styleUtility, type ClubStyle, DEFAULT_SPREAD_CAP } from './clubStyle';
 import { activeRequestsForEngine } from './sessionRequest.service';
@@ -1555,7 +1556,7 @@ export async function suggestNextFoursome(
   // 혼복 돌려 맡기 — 혼복을 적게 하는 모임에서도 여자 F조(급수별 기본 혼복 70%)의 짝이 될 남자는 늘 비슷한 급수의
   // 몇 명이라, 같은 사람이 계속 혼복에 들어갔다(시나리오 300개: 터닝 구성 67%에서 '혼복 몰린 사람'). 상한(하루 몇 판까지)은
   // 대기·급수 균형을 해쳐 보류됐다 → 같은 성별 평균보다 오늘 혼복을 더 친 만큼만 작게 비용(비슷한 후보 사이의 순서 정하기).
-  const MIX_ROTATE = Number(process.env.MATCH_MIX_ROTATE ?? 1.5);
+  const MIX_ROTATE = Number(process.env.MATCH_MIX_ROTATE ?? 2);
   const mixAvg: Record<string, number> = {};
   for (const g of ['M', 'F'] as const) {
     const ps = modePool.filter((p) => p.gender === g);
@@ -1626,8 +1627,7 @@ export async function suggestNextFoursome(
     // 다른 코트가 끝날 때 두 코트 사람을 섞어 짤 수 있다. 순서(쉬던 사람 먼저)는 그대로 지킨다.
     if (rotatingCount - 4 * courts.length < 4) for (const p of modePool) restWaived.add(p.id);
   }
-  // 모임 스타일 반영 강도(계획 다듬기 쪽). 시험용 스위치 MATCH_STYLE_WEIGHT(suggest.algorithm 의 STYLE_WEIGHT 와 같은 값).
-  const STYLE_WEIGHT_PLAN = Number(process.env.MATCH_STYLE_WEIGHT ?? 2);
+  // 모임 스타일 반영(계획 다듬기 쪽)은 suggest.algorithm 의 styleCost(강도·상한)를 그대로 쓴다.
   let styleScorer: StyleScorer | undefined;
   // 학습 스타일은 운영진 평소 방식(남복·여복 위주)을 담고 있어, 운영자가 게임 종류를 바꿨으면 끈다.
   if (style && (gameType === 'same' || gameType === 'ratio')) {
@@ -2329,7 +2329,7 @@ export async function suggestNextFoursome(
       let c = h?.score ? h.score(g) : 0;
       c += levelW * levelSpread(g, tune.genderOffsetFemale);
       for (const id of groups[i]) c += 1.5 * i * (urgency.get(id) ?? 0);
-      if (styleScorer) c -= STYLE_WEIGHT_PLAN * styleScorer(g);
+      if (styleScorer) c += styleCost(styleScorer(g));
       for (let a = 0; a < 4; a++) for (let b = a + 1; b < 4; b++) c += varW * (pairWeightBase[pkey(groups[i][a], groups[i][b])] ?? 0);
       return c;
     };

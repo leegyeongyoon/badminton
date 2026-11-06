@@ -42,8 +42,14 @@ export const STYLE_FEATURES = [
   'historyLog', // 과거(이전 정모) 함께 친 판수 합 log1p
   'regulars', // 과거 3판+ 함께 친 단골 짝 쌍 수
   'guests', // 게스트 수
+  'effSpread', // 보정 급수 폭(연속값) — v3(2026-11-06): 검증 1등 맞힘 49→54%
+  'lowLevel', // 초급(E·F)이 든 판 — 음수면 초급은 한 판에 모으는 편
 ] as const;
 const GENDER_FEATURE_IDX = [3, 4, 5, 6];
+// 과거 기록 특징(historyLog·regulars)은 학습·설명엔 쓰되 편성 점수에선 뺀다 — 터닝 66정모 검증(2026-11-06): 이 두 특징은
+// 우도는 높이지만(운영진이 평균적으로는 단골을 같이 두는 편) 1등 맞힘은 떨어뜨림(검증 54.5% → 60.4%, 조정 교차검증 54.8% → 63.5%).
+// 엔진은 최선 한 판을 고르므로 1등 맞힘이 기준.
+const HISTORY_FEATURE_IDX = [9, 10];
 
 export interface StylePlayer {
   id: string;
@@ -118,6 +124,8 @@ export function styleFeatures(group: StylePlayer[], history: Map<string, number>
     Math.log1p(hsum),
     regulars,
     group.filter((p) => p.guest).length,
+    effSpread,
+    group.some((p) => p.skill <= 2) ? 1 : 0,
   ];
 }
 
@@ -125,7 +133,11 @@ export function styleFeatures(group: StylePlayer[], history: Map<string, number>
 export function styleUtility(style: ClubStyle, group: StylePlayer[], opts?: { skipGender?: boolean }): number {
   const x = styleFeatures(group, style.history);
   let u = 0;
-  for (let j = 0; j < x.length; j++) if (!(opts?.skipGender && GENDER_FEATURE_IDX.includes(j))) u += (style.weights[j] ?? 0) * x[j];
+  for (let j = 0; j < x.length; j++) {
+    if (HISTORY_FEATURE_IDX.includes(j)) continue;
+    if (opts?.skipGender && GENDER_FEATURE_IDX.includes(j)) continue;
+    u += (style.weights[j] ?? 0) * x[j];
+  }
   return u;
 }
 
@@ -183,6 +195,7 @@ function describe(std: number[]): string[] {
   if (at('mixDown') > 0.2) out.push({ t: '섞어치기(위아래 급수를 한 팀에)', s: at('mixDown') });
   if (at('historyLog') + at('regulars') > 0.3) out.push({ t: '평소 같이 치던 사람끼리', s: at('historyLog') + at('regulars') });
   if (at('guests') < -0.3) out.push({ t: '게스트는 나눠서', s: -at('guests') });
+  if (at('lowLevel') < -0.3) out.push({ t: '초급(E·F)은 한 판에 모아서', s: -at('lowLevel') });
   return out.sort((a, b) => b.s - a.s).map((o) => o.t);
 }
 
