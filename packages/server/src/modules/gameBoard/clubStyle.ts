@@ -209,14 +209,18 @@ export async function trainClubStyle(clubId: string): Promise<ClubStyle | null> 
   if (sessions.length < 3) return null;
   const sids = sessions.map((s) => s.id);
   // 운영진 요청(같이 N게임) — 요청으로 짠 판은 '평소 기준'이 아니라 변수. 학습에서 뺀다.
+  // GAME(4명 지정 '같이 한 판')도 변수 — 네 명의 여섯 쌍을 요청 쌍으로 넣는다.
   const togetherReqs = await prisma.sessionRequest.findMany({
-    where: { clubSessionId: { in: sids }, kind: 'TOGETHER' },
-    select: { clubSessionId: true, aId: true, bId: true, createdAt: true },
+    where: { clubSessionId: { in: sids }, kind: { in: ['TOGETHER', 'GAME'] } },
+    select: { clubSessionId: true, kind: true, aId: true, bId: true, memberIds: true, createdAt: true },
   });
   const reqBySession = new Map<string, { key: string; at: number }[]>();
   for (const r of togetherReqs) {
     const arr = reqBySession.get(r.clubSessionId) ?? [];
-    arr.push({ key: pk(r.aId, r.bId), at: r.createdAt.getTime() / 1000 });
+    const at = r.createdAt.getTime() / 1000;
+    if (r.kind === 'GAME' && r.memberIds.length === 4) {
+      for (let i = 0; i < 4; i++) for (let j = i + 1; j < 4; j++) arr.push({ key: pk(r.memberIds[i], r.memberIds[j]), at });
+    } else arr.push({ key: pk(r.aId, r.bId), at });
     reqBySession.set(r.clubSessionId, arr);
   }
   const [turns, checkins] = await Promise.all([
@@ -316,7 +320,8 @@ export async function trainClubStyle(clubId: string): Promise<ClubStyle | null> 
   // 변수 판 판정 — 운영진이 '평소 기준'이 아니라 그 자리의 사정으로 짠 판. 학습에선 빼고, 엔진에선 요청 기능이 맡는다.
   //  · 같이 N게임 요청이 걸린 두 사람이 든 판(요청 뒤)  · 그날 같은 남녀가 3판+ 함께(고정 혼복 파트너 연습)
   //  · 여자 C 이하 3:1(규칙 밖 — 혼복 연습 등 사정) — 터닝 실데이터: 3:1 46판 중 35판이 같은 남자와 2~3번.
-  const isVariable = (t: T, sessionId: string, dayPairs: Map<string, number>): keyof typeof variableSkipped | null => {
+  //  · 같은 여자가 그날 3:1을 2판 이상(한 사람의 "상위 남자와 빡세게" 구두 요청 — 터닝 규칙 밖 3:1 124판 중 63판이 한 명, 2026-11-06 사용자 확인)
+  const isVariable = (t: T, sessionId: string, dayPairs: Map<string, number>, dayThreeOne: Map<string, number>): keyof typeof variableSkipped | null => {
     const reqs = reqBySession.get(sessionId) ?? [];
     for (let i = 0; i < t.ids.length; i++)
       for (let j = i + 1; j < t.ids.length; j++) {
@@ -328,7 +333,10 @@ export async function trainClubStyle(clubId: string): Promise<ClubStyle | null> 
       }
     const ps = t.ids.map(player);
     const w = ps.filter((p) => p.gender === 'F');
-    if (w.length === 1 && ps.filter((p) => p.gender === 'M').length === 3 && w[0].skill <= 4) return 'threeOne';
+    if (w.length === 1 && ps.filter((p) => p.gender === 'M').length === 3) {
+      if (w[0].skill <= 4) return 'threeOne';
+      if ((dayThreeOne.get(w[0].id) ?? 0) >= 2) return 'threeOne';
+    }
     return null;
   };
 
@@ -344,9 +352,17 @@ export async function trainClubStyle(clubId: string): Promise<ClubStyle | null> 
     for (const u of ts)
       for (let i = 0; i < u.ids.length; i++)
         for (let j = i + 1; j < u.ids.length; j++) dayPairs.set(pk(u.ids[i], u.ids[j]), (dayPairs.get(pk(u.ids[i], u.ids[j])) ?? 0) + 1);
+    // 그날 여자별 3:1 판수(반복 3:1 = 개인 요청 변수).
+    const dayThreeOne = new Map<string, number>();
+    for (const u of ts) {
+      if (u.ids.length !== 4) continue;
+      const ps = u.ids.map(player);
+      const w = ps.filter((p) => p.gender === 'F');
+      if (w.length === 1 && ps.filter((p) => p.gender === 'M').length === 3) dayThreeOne.set(w[0].id, (dayThreeOne.get(w[0].id) ?? 0) + 1);
+    }
     for (const t of ts) {
       if (t.ids.length !== 4) continue;
-      const vk = isVariable(t, s.id, dayPairs);
+      const vk = isVariable(t, s.id, dayPairs, dayThreeOne);
       if (vk) {
         variableSkipped[vk]++;
         continue;
@@ -379,7 +395,7 @@ export async function trainClubStyle(clubId: string): Promise<ClubStyle | null> 
       const fc = styleFeatures(chosen, history);
       // 운영진 방식 그대로: 같은 순간(5분 안)에 짠 다음 판과 합친 8명을 다른 34가지로 나눈 것이 대안.
       // '누구를 넣나'(차례)는 운영진과 같게 두고 '어떻게 묶나'만 배운다(운영진 판 vs 엔진 판 차이의 대부분).
-      const mate = ts.find((u) => u !== t && u.ids.length === 4 && u.start >= t.start && u.start - t.start <= 300 && !u.ids.some((id) => t.ids.includes(id)) && !isVariable(u, s.id, dayPairs));
+      const mate = ts.find((u) => u !== t && u.ids.length === 4 && u.start >= t.start && u.start - t.start <= 300 && !u.ids.some((id) => t.ids.includes(id)) && !isVariable(u, s.id, dayPairs, dayThreeOne));
       if (mate) {
         const pool = [...t.ids, ...mate.ids];
         const fPlus = styleFeatures(mate.ids.map(player), history).map((v, j) => v + fc[j]);

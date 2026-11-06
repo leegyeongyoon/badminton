@@ -175,7 +175,7 @@ export interface ModeResult {
 // Reference window used to normalize wait time into ~[0,1] "game-equivalent"
 // units so it can trade off against gamesPlayed in the priority cost. 15 min of
 // waiting ≈ the worth of having played one fewer game.
-const WAIT_REF_SECONDS = 15 * 60;
+const WAIT_REF_SECONDS = Number(process.env.MATCH_WAIT_REF_MIN ?? 15) * 60; // 시험용 스위치
 // Recency-decay half-life for pair history (older shared games count less).
 const PAIR_RECENCY_HALFLIFE_SECONDS = 45 * 60;
 
@@ -193,7 +193,7 @@ const GAME_CYCLE_SECONDS = 13 * 60;
 // 결손이 무한정 커지지 않게 상한(아주 오래 있었는데 못 친 경우도 이 이상은 안 튐).
 const FAIRSHARE_CAP = 8;
 // 마지막 게임 이후 유휴 시간 보너스 상한(결손이 주 신호, 유휴는 동급 결손자 사이 tie-breaker).
-const WAIT_BONUS_CAP = 1;
+const WAIT_BONUS_CAP = Number(process.env.MATCH_WAIT_CAP ?? 1); // 시험용 스위치
 
 // ── Aging(굶음 방지) — "점점 땡겨주는" 유동 편성 ──────────────────────────────
 // 문제: 모두가 비슷하게 대기 중이면 상대적 결손 차가 작아 급수(skill) 매칭이 결정권을 쥐고,

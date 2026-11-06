@@ -1666,12 +1666,27 @@ export async function suggestNextFoursome(
         if (k in togetherSoFar) togetherSoFar[k] += 1;
       }
   }
-  const activeTogether = () =>
-    new Set(
+  // 4명 지정 '같이 한 판'(GAME) — 운영진 예외 요청("빡세게 넣어 달라" 같은 구두 요청을 기록으로). 4명이 모두 든 판수
+  // (실제 + 대기 + 이번 호출)가 목표에 닿을 때까지 여섯 쌍을 파트너 요청처럼 다룬다(가산·갈라놓지 않기·급수 규칙 예외).
+  const gameReqs = requests.filter((r) => r.kind === 'GAME' && r.memberIds.length === 4);
+  const gameSoFar = gameReqs.map((r) => r.played);
+  for (const e of queued) {
+    const ids = new Set((e.playerIds as string[]) ?? []);
+    gameReqs.forEach((r, i) => {
+      if (r.memberIds.every((id) => ids.has(id))) gameSoFar[i] += 1;
+    });
+  }
+  const activeGameSets = () => gameReqs.filter((r, i) => r.games == null || gameSoFar[i] < r.games).map((r) => r.memberIds);
+  const activeTogether = () => {
+    const keys = new Set(
       togetherReqs
         .filter((r) => r.games == null || togetherSoFar[pkey(r.aId, r.bId)] < r.games)
         .map((r) => pkey(r.aId, r.bId)),
     );
+    for (const ids of activeGameSets())
+      for (let i = 0; i < ids.length; i++) for (let j = i + 1; j < ids.length; j++) keys.add(pkey(ids[i], ids[j]));
+    return keys;
+  };
   // ── 운영진 급수·성별 규칙(하드) — 터닝 운영진 확인(2026-10-23) ──
   //  · 한 판 급수 폭(여자 2단계 보정)은 모임 기록 95% 상한(기본 2) 이하. 파트너 요청 판은 예외.
   //  · 여자 C급 이하는 혼복(남2·여2)·여복으로만 — 남자 3명 사이 여자 1명(3:1)은 여자 B급 이상만.
@@ -1968,11 +1983,14 @@ export async function suggestNextFoursome(
   // 왜 이 4명인지 — 운영자가 바로 납득할 수 있게 1줄(최대 100자).
   const buildReason = (ordered: ModePlayer[], at: number): string => {
     const parts: string[] = [];
-    // 운영진 요청을 반영한 판이면 맨 앞에 표시.
-    for (let i = 0; i < ordered.length; i++)
-      for (let j = i + 1; j < ordered.length; j++)
-        if (slotActive.has(pkey(ordered[i].id, ordered[j].id)))
-          parts.push(`요청: ${poolNames.get(ordered[i].id) ?? ''}·${poolNames.get(ordered[j].id) ?? ''} 파트너`);
+    // 운영진 요청을 반영한 판이면 맨 앞에 표시. 4명 지정 판은 한 줄로.
+    const isGameReq = activeGameSets().some((ids) => ids.every((id) => ordered.some((p) => p.id === id)));
+    if (isGameReq) parts.push('요청: 4명 지정 같이 한 판');
+    else
+      for (let i = 0; i < ordered.length; i++)
+        for (let j = i + 1; j < ordered.length; j++)
+          if (slotActive.has(pkey(ordered[i].id, ordered[j].id)))
+            parts.push(`요청: ${poolNames.get(ordered[i].id) ?? ''}·${poolNames.get(ordered[j].id) ?? ''} 파트너`);
     const startsIn = Math.round((at - nowMs) / 60000);
     if (startsIn >= 2) parts.push(`약 ${startsIn}분 뒤 시작`);
     // 운영진 방식(시간 기준) 표시: 코트에서 곧 끝나는 사람 / 앞 판에 이어서 치는 사람.
@@ -2276,6 +2294,9 @@ export async function suggestNextFoursome(
         const k = pkey(picked.playerIds[i], picked.playerIds[j]);
         if (k in togetherSoFar) togetherSoFar[k] += 1;
       }
+    gameReqs.forEach((r, i) => {
+      if (r.memberIds.every((id) => picked!.playerIds.includes(id))) gameSoFar[i] += 1;
+    });
 
     // 다음 슬롯을 위해 시뮬레이션 갱신: 이 판이 코트를 차지 → 끝나면 이 4명이 비고, 판수 +1.
     const startAt = Math.max(popEarliest(), slotStart);

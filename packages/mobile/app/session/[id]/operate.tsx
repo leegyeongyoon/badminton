@@ -1542,14 +1542,15 @@ export default function OperateScreen() {
     if (!p || p.clubSessionId === clubSessionId) loadRequests();
   }, [clubSessionId, loadRequests]);
   useSocketEvent('clubSession:requestsUpdated', handleRequestsUpdated);
-  const addRequest = useCallback(async (kind: RequestKind, aId: string, bId: string, games: number | null) => {
+  const addRequest = useCallback(async (kind: RequestKind, aId: string, bId: string, games: number | null, memberIds?: string[]) => {
     if (!clubSessionId) return false;
     try {
-      const { data } = await gameBoardApi.createRequest(clubSessionId, { kind, aId, bId, games });
+      const { data } = await gameBoardApi.createRequest(clubSessionId, { kind, aId, bId, games, ...(kind === 'GAME' ? { memberIds } : {}) });
       setRequests(data ?? []);
       const an = getPlayer(aId)?.userName || '선수';
       const bn = getPlayer(bId)?.userName || '선수';
-      showSuccess(kind === 'APART' ? `${an}·${bn} 같이 안 짜기` : `${an}·${bn} 파트너${games ? ` ${games}게임` : ' (계속)'}`);
+      if (kind === 'GAME') showSuccess(`${(memberIds ?? []).map((id) => getPlayer(id)?.userName || '선수').join('·')} 같이 ${games ?? 1}판`);
+      else showSuccess(kind === 'APART' ? `${an}·${bn} 같이 안 짜기` : `${an}·${bn} 파트너${games ? ` ${games}게임` : ' (계속)'}`);
       return true;
     } catch (err: any) {
       showAlert('요청', err?.response?.data?.error || '요청 저장에 실패했어요');
@@ -1563,6 +1564,7 @@ export default function OperateScreen() {
     const nm = (id: string) => getPlayer(id)?.userName || '선수';
     const team = (e: GameBoardEntry, id: string) => (e.teamSplit ? (e.playerIds.indexOf(id) < 2 ? 'A' : 'B') : null);
     for (const r of requests) {
+      if (r.kind === 'GAME') continue; // 4명 지정 판은 엔진이 통째로 넣는다(어긋남 표시는 생략)
       const withA = queuedEntries.find((e) => e.playerIds.includes(r.aId));
       const withB = queuedEntries.find((e) => e.playerIds.includes(r.bId));
       if (r.kind === 'APART') {
@@ -1669,7 +1671,7 @@ export default function OperateScreen() {
     catch { loadRequests(); }
   }, [clubSessionId, loadRequests]);
   // 요청 고르기 창(두 사람 + 종류 + 판수) / 패널 모달(모드1 등) / 말로 부탁하기 입력.
-  const [reqModal, setReqModal] = useState<{ kind: RequestKind; aId: string | null; bId: string | null; games: number | null; q: string } | null>(null);
+  const [reqModal, setReqModal] = useState<{ kind: RequestKind; aId: string | null; bId: string | null; ids: string[]; games: number | null; q: string } | null>(null);
   const [requestsOpen, setRequestsOpen] = useState(false);
   const [reqDockOpen, setReqDockOpen] = useState(false);
   const [askText, setAskText] = useState('');
@@ -4698,6 +4700,7 @@ export default function OperateScreen() {
   };
   const reqDesc = (r: SessionRequest) => {
     if (r.kind === 'APART') return '같이 안 짜기';
+    if (r.kind === 'GAME') return r.remaining === 0 ? `같이 한 판 ${r.games}판 완료` : `4명 같이 한 판 · ${r.remaining ?? '?'}판 남음`;
     if (r.games == null) return `파트너 · 계속${r.playedTogether ? ` (${r.playedTogether}판 함께)` : ''}`;
     return r.remaining === 0 ? `파트너 ${r.games}판 완료` : `파트너 · ${r.remaining}판 남음`;
   };
@@ -4708,7 +4711,7 @@ export default function OperateScreen() {
         <Text style={[styles.reqSub, { color: colors.textLight }]} numberOfLines={1}>자동 편성이 지켜요</Text>
         <View style={{ flex: 1 }} />
         <TouchableOpacity
-          onPress={() => setReqModal({ kind: 'TOGETHER', aId: null, bId: null, games: 1, q: '' })}
+          onPress={() => setReqModal({ kind: 'TOGETHER', aId: null, bId: null, ids: [], games: 1, q: '' })}
           style={[styles.reqAddBtn, { backgroundColor: colors.primary }]}
           accessibilityLabel="요청 추가"
         >
@@ -4719,12 +4722,12 @@ export default function OperateScreen() {
         <Text style={[styles.reqEmpty, { color: colors.textLight }]}>예) 철수 영희 대회 파트너 2게임 · 민수 지훈 같이 안 짜줘</Text>
       )}
       {requests.map((r) => {
-        const finished = r.kind === 'TOGETHER' && r.remaining === 0;
+        const finished = r.kind !== 'APART' && r.remaining === 0;
         return (
           <View key={r.id} style={[styles.reqItem, { backgroundColor: r.kind === 'APART' ? colors.dangerBg : colors.primaryBg, opacity: finished ? 0.55 : 1 }]}>
-            <Text style={styles.reqIcon}>{r.kind === 'APART' ? '🚫' : '🤝'}</Text>
+            <Text style={styles.reqIcon}>{r.kind === 'APART' ? '🚫' : r.kind === 'GAME' ? '🎯' : '🤝'}</Text>
             <View style={{ flex: 1, minWidth: 0 }}>
-              <Text style={[styles.reqItemT, { color: colors.text }]} numberOfLines={1}>{r.aName} · {r.bName}</Text>
+              <Text style={[styles.reqItemT, { color: colors.text }]} numberOfLines={1}>{r.kind === 'GAME' ? r.memberNames.join(' · ') : `${r.aName} · ${r.bName}`}</Text>
               <Text style={[styles.reqItemS, { color: r.kind === 'APART' ? colors.danger : colors.primary }]} numberOfLines={1}>{reqDesc(r)}</Text>
             </View>
             <TouchableOpacity onPress={() => removeRequest(r.id)} hitSlop={8} accessibilityLabel={`요청 삭제: ${r.aName} ${r.bName}`}>
@@ -4790,7 +4793,7 @@ export default function OperateScreen() {
             <Text style={[styles.rdTitle, { color: colors.text }]}>요청·메모</Text>
             <Text style={[styles.rdSub, { color: colors.textLight }]} numberOfLines={1}>자동 편성이 지켜요</Text>
             <View style={{ flex: 1 }} />
-            <TouchableOpacity onPress={() => setReqModal({ kind: 'TOGETHER', aId: null, bId: null, games: 1, q: '' })} hitSlop={6} accessibilityLabel="요청 추가">
+            <TouchableOpacity onPress={() => setReqModal({ kind: 'TOGETHER', aId: null, bId: null, ids: [], games: 1, q: '' })} hitSlop={6} accessibilityLabel="요청 추가">
               <Text style={[styles.rdLink, { color: colors.primary }]}>+ 요청</Text>
             </TouchableOpacity>
           </View>
@@ -4804,10 +4807,10 @@ export default function OperateScreen() {
           <ScrollView style={{ maxHeight: 220 }} keyboardShouldPersistTaps="handled">
             {reqCount === 0 && <Text style={[styles.rdEmpty, { color: colors.textLight }]}>예) 철수 영희 파트너 2게임 · 코트3 셔틀 교체</Text>}
             {requests.map((r) => (
-              <View key={r.id} style={[styles.rdRow, { borderBottomColor: colors.divider, opacity: r.kind === 'TOGETHER' && r.remaining === 0 ? 0.5 : 1 }]}>
-                <Text style={styles.rdIcon}>{r.kind === 'APART' ? '🚫' : '🤝'}</Text>
+              <View key={r.id} style={[styles.rdRow, { borderBottomColor: colors.divider, opacity: r.kind !== 'APART' && r.remaining === 0 ? 0.5 : 1 }]}>
+                <Text style={styles.rdIcon}>{r.kind === 'APART' ? '🚫' : r.kind === 'GAME' ? '🎯' : '🤝'}</Text>
                 <Text style={[styles.rdRowT, { color: colors.text, flex: 1 }]} numberOfLines={1}>
-                  {r.aName}·{r.bName} <Text style={{ color: r.kind === 'APART' ? colors.danger : colors.primary }}>{reqDesc(r)}</Text>
+                  {r.kind === 'GAME' ? r.memberNames.join('·') : `${r.aName}·${r.bName}`} <Text style={{ color: r.kind === 'APART' ? colors.danger : colors.primary }}>{reqDesc(r)}</Text>
                 </Text>
                 <TouchableOpacity onPress={() => removeRequest(r.id)} hitSlop={8} accessibilityLabel={`요청 삭제: ${r.aName} ${r.bName}`}>
                   <Text style={[styles.rdDel, { color: colors.textLight }]}>✕</Text>
@@ -4874,7 +4877,7 @@ export default function OperateScreen() {
         <View style={[styles.reqSheet, { backgroundColor: colors.surface }]}>
           <Text style={[styles.reqTitle, { color: colors.text, marginBottom: 8 }]}>편성 요청</Text>
           <View style={styles.reqSeg}>
-            {([['TOGETHER', '🤝 파트너로 같이'], ['APART', '🚫 같이 안 짜기']] as const).map(([k, label]) => {
+            {([['TOGETHER', '🤝 파트너로 같이'], ['APART', '🚫 같이 안 짜기'], ['GAME', '🎯 4명 같이 한 판']] as const).map(([k, label]) => {
               const on = reqModal.kind === k;
               return (
                 <TouchableOpacity key={k} onPress={() => setReqModal({ ...reqModal, kind: k })} style={[styles.reqSegItem, { borderColor: on ? colors.primary : colors.border, backgroundColor: on ? colors.primary : 'transparent' }]}>
@@ -4883,9 +4886,9 @@ export default function OperateScreen() {
               );
             })}
           </View>
-          {reqModal.kind === 'TOGETHER' && (
+          {reqModal.kind !== 'APART' && (
             <View style={[styles.reqSeg, { marginTop: 8 }]}>
-              {([[1, '1게임'], [2, '2게임'], [3, '3게임'], [null, '계속']] as const).map(([g, label]) => {
+              {([[1, '1게임'], [2, '2게임'], [3, '3게임'], [null, '계속']] as const).filter(([g]) => reqModal.kind !== 'GAME' || g != null).map(([g, label]) => {
                 const on = reqModal.games === g;
                 return (
                   <TouchableOpacity key={label} onPress={() => setReqModal({ ...reqModal, games: g })} style={[styles.reqSegItem, { borderColor: on ? colors.secondary : colors.border, backgroundColor: on ? colors.secondary : 'transparent' }]}>
@@ -4896,7 +4899,9 @@ export default function OperateScreen() {
             </View>
           )}
           <Text style={[styles.reqPickInfo, { color: colors.textSecondary }]}>
-            {reqModal.aId ? getPlayer(reqModal.aId)?.userName : '첫 번째 사람'} · {reqModal.bId ? getPlayer(reqModal.bId)?.userName : '두 번째 사람'} — 이름을 탭해서 고르세요
+            {reqModal.kind === 'GAME'
+              ? `${reqModal.ids.map((id) => getPlayer(id)?.userName || '?').join(' · ') || '네 사람'} — 이름을 탭해서 4명 고르세요 (급수 규칙 예외 · 학습에 안 들어가요)`
+              : `${reqModal.aId ? getPlayer(reqModal.aId)?.userName : '첫 번째 사람'} · ${reqModal.bId ? getPlayer(reqModal.bId)?.userName : '두 번째 사람'} — 이름을 탭해서 고르세요`}
           </Text>
           <TextInput
             value={reqModal.q}
@@ -4907,11 +4912,16 @@ export default function OperateScreen() {
           />
           <ScrollView style={{ maxHeight: 260 }} contentContainerStyle={styles.reqNameWrap} keyboardShouldPersistTaps="handled">
             {reqCandidates.map((m) => {
-              const sel = m.userId === reqModal.aId || m.userId === reqModal.bId;
+              const sel = reqModal.kind === 'GAME' ? reqModal.ids.includes(m.userId) : m.userId === reqModal.aId || m.userId === reqModal.bId;
               return (
                 <TouchableOpacity
                   key={m.userId}
                   onPress={() => {
+                    if (reqModal.kind === 'GAME') {
+                      const ids = reqModal.ids.includes(m.userId) ? reqModal.ids.filter((x) => x !== m.userId) : reqModal.ids.length < 4 ? [...reqModal.ids, m.userId] : reqModal.ids;
+                      setReqModal({ ...reqModal, ids });
+                      return;
+                    }
                     if (m.userId === reqModal.aId) setReqModal({ ...reqModal, aId: reqModal.bId, bId: null });
                     else if (m.userId === reqModal.bId) setReqModal({ ...reqModal, bId: null });
                     else if (!reqModal.aId) setReqModal({ ...reqModal, aId: m.userId });
@@ -4929,8 +4939,14 @@ export default function OperateScreen() {
               <Text style={[styles.reqBtnT, { color: colors.text }]}>취소</Text>
             </TouchableOpacity>
             <TouchableOpacity
-              disabled={!reqModal.aId || !reqModal.bId}
+              disabled={reqModal.kind === 'GAME' ? reqModal.ids.length !== 4 : !reqModal.aId || !reqModal.bId}
               onPress={async () => {
+                if (reqModal.kind === 'GAME') {
+                  if (reqModal.ids.length !== 4) return;
+                  const ok = await addRequest('GAME', reqModal.ids[0], reqModal.ids[1], reqModal.games ?? 1, reqModal.ids);
+                  if (ok) setReqModal(null);
+                  return;
+                }
                 if (!reqModal.aId || !reqModal.bId) return;
                 const ok = await addRequest(reqModal.kind, reqModal.aId, reqModal.bId, reqModal.kind === 'TOGETHER' ? reqModal.games : null);
                 if (ok && reqModal.kind === 'APART') {
@@ -4939,9 +4955,9 @@ export default function OperateScreen() {
                 }
                 if (ok) setReqModal(null);
               }}
-              style={[styles.reqBtn, { backgroundColor: reqModal.aId && reqModal.bId ? colors.primary : colors.surfaceSecondary }]}
+              style={[styles.reqBtn, { backgroundColor: (reqModal.kind === 'GAME' ? reqModal.ids.length === 4 : reqModal.aId && reqModal.bId) ? colors.primary : colors.surfaceSecondary }]}
             >
-              <Text style={[styles.reqBtnT, { color: reqModal.aId && reqModal.bId ? '#fff' : colors.textLight }]}>저장</Text>
+              <Text style={[styles.reqBtnT, { color: (reqModal.kind === 'GAME' ? reqModal.ids.length === 4 : reqModal.aId && reqModal.bId) ? '#fff' : colors.textLight }]}>저장</Text>
             </TouchableOpacity>
           </View>
         </View>

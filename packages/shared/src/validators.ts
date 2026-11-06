@@ -507,10 +507,12 @@ export const suggestFoursomeSchema = z.object({
 // playerIds: 1~4 — the operator can draft a partial group (2~3) and add more
 // while editing; not forced to a fixed 4.
 // 운영진 편성 요청 — TOGETHER(파트너로 같이, games=지금부터 N판 / 비우면 계속) · APART(같이 안 짜기)
+// GAME: 4명을 지정해 '같이 한 판'(games 판) — 운영진 예외 요청. 급수 규칙 예외, 학습에서도 제외. memberIds 4명(aId·bId는 앞 두 명).
 export const createSessionRequestSchema = z.object({
-  kind: z.enum(['TOGETHER', 'APART']),
+  kind: z.enum(['TOGETHER', 'APART', 'GAME']),
   aId: z.string().uuid(),
   bId: z.string().uuid(),
+  memberIds: z.array(z.string().uuid()).length(4).optional(),
   games: z.number().int().min(1).max(20).nullable().optional(),
   note: z.string().max(100).nullable().optional(),
 });

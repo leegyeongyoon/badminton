@@ -592,9 +592,11 @@ model ClubSession {
 model SessionRequest {
   id            String   @id @default(uuid())
   clubSessionId String
-  kind          String
+  kind          String // TOGETHER | APART | GAME(4명 지정 '같이 한 판')
   aId           String
   bId           String
+  // GAME: 지정한 4명(aId·bId 포함). 다른 종류는 비어 있음.
+  memberIds     String[] @default([])
   games         Int?
   note          String?
   createdById   String

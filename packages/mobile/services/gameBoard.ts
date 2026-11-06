@@ -68,8 +68,9 @@ export type ClubStyleSummary = {
   trainedAt: string;
 };
 
-// 운영진 편성 요청 — 자동 편성이 지킨다. TOGETHER=파트너로 같이(games 판, null=계속), APART=같이 안 짜기.
-export type RequestKind = 'TOGETHER' | 'APART';
+// 운영진 편성 요청 — 자동 편성이 지킨다. TOGETHER=파트너로 같이(games 판, null=계속), APART=같이 안 짜기,
+// GAME=4명 지정 '같이 한 판'(운영진 예외 요청 — 급수 규칙 예외, 학습 제외).
+export type RequestKind = 'TOGETHER' | 'APART' | 'GAME';
 export type SessionRequest = {
   id: string;
   kind: RequestKind;
@@ -77,6 +78,8 @@ export type SessionRequest = {
   bId: string;
   aName: string;
   bName: string;
+  memberIds: string[];         // GAME: 지정한 4명
+  memberNames: string[];
   games: number | null;        // 목표 누적 판수(서버가 '지금부터 N판'을 누적치로 저장)
   playedTogether: number;      // 이번 정모에서 실제 같이 친 판수
   remaining: number | null;    // 남은 판수(0=완료), APART·계속은 null
@@ -168,7 +171,7 @@ export const gameBoardApi = {
   requests: (clubSessionId: string) => api.get<SessionRequest[]>(`/club-sessions/${clubSessionId}/requests`),
   createRequest: (
     clubSessionId: string,
-    body: { kind: RequestKind; aId: string; bId: string; games?: number | null; note?: string | null },
+    body: { kind: RequestKind; aId: string; bId: string; memberIds?: string[]; games?: number | null; note?: string | null },
   ) => api.post<SessionRequest[]>(`/club-sessions/${clubSessionId}/requests`, body),
   deleteRequest: (clubSessionId: string, requestId: string) =>
     api.delete<SessionRequest[]>(`/club-sessions/${clubSessionId}/requests/${requestId}`),
