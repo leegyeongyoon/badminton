@@ -1,4 +1,5 @@
 import { prisma } from '../../utils/prisma';
+import { logger } from '../../utils/logger';
 import { NotFoundError, BadRequestError, ForbiddenError } from '../../utils/errors';
 import { getIO } from '../../socket';
 import { registerTurn } from '../turn/turn.service';
@@ -391,6 +392,27 @@ export async function addEntry(
 
   const io = getIO();
   io.to(`facility:${board.facilityId}`).emit('gameBoard:entryAdded', formatted);
+
+  // 운영진이 직접 4명을 짠 판이면 '등록한 이 순간 AI라면 누구'를 그림자(SHADOW)로 남긴다 — 코트에 넣는 순간이 아니라
+  // 등록 순간이어야 공정하다. 터닝 운영진은 판을 투입 12~25분 전에 미리 등록하는데, 코트에 넣을 때 재면 그 사이
+  // 상황이 바뀌고(코트에서 치던 사람 제외 등) 어긋난 판 90개 중 75개가 그 차이였다(2026-11-06 분석). 응답을
+  // 늦추지 않게 뒤에서 돌리고, 최종 4명은 코트에 넣을 때(pushEntry) 갱신한다.
+  if (playerIds.length === 4 && !teamSplit && board.clubSessionId) {
+    const clubSessionId = board.clubSessionId;
+    void (async () => {
+      const r = await suggestNextFoursome(clubSessionId, { count: 1, shadowOf: entry.id }, userId).catch((e) => {
+        logger.warn('shadow suggest failed', { entryId: entry.id, error: String(e?.message ?? e) });
+        return null;
+      });
+      const shadowIds = (r?.suggestions?.[0]?.playerIds as string[] | undefined) ?? null;
+      if (shadowIds?.length !== 4) return;
+      const cs = await prisma.clubSession.findUnique({ where: { id: clubSessionId }, select: { clubId: true } });
+      if (!cs) return;
+      await prisma.autoMatchEdit.create({
+        data: { clubId: cs.clubId, clubSessionId, entryId: entry.id, aiPlayerIds: shadowIds, finalPlayerIds: playerIds, action: 'SHADOW' },
+      });
+    })().catch((e) => logger.warn('shadow record failed', { entryId: entry.id, error: String(e?.message ?? e) }));
+  }
 
   // Notify assigned players
   for (const playerId of playerIds) {
@@ -845,7 +867,15 @@ export async function pushEntry(boardId: string, entryId: string, courtId: strin
   // 맞히나'를 실데이터로 재는 용도, 학습엔 안 씀). 자동 편성을 안 켜는 모임에서도 쌓인다. 코트 투입이
   // 늦어지지 않게 1.5초 넘으면 건너뛴다.
   let shadowIds: string[] | null = null;
-  if (entry.aiPlayerIds.length !== 4 && entry.playerIds.length === 4 && board.clubSessionId) {
+  // 등록 순간에 남긴 그림자가 있으면(addEntry) 그걸 최종 4명으로 갱신하고 여기선 다시 재지 않는다.
+  const registered =
+    entry.aiPlayerIds.length !== 4 && entry.playerIds.length === 4
+      ? await prisma.autoMatchEdit.findFirst({ where: { entryId: entry.id, action: 'SHADOW' }, select: { id: true, finalPlayerIds: true } })
+      : null;
+  if (registered) {
+    const same = registered.finalPlayerIds.length === 4 && registered.finalPlayerIds.every((id) => entry.playerIds.includes(id));
+    if (!same) await prisma.autoMatchEdit.update({ where: { id: registered.id }, data: { finalPlayerIds: entry.playerIds } }).catch(() => {});
+  } else if (entry.aiPlayerIds.length !== 4 && entry.playerIds.length === 4 && board.clubSessionId) {
     // 비교를 공정하게 — 운영진이 이 판을 만들 때 코트에서 치던 사람은 AI 후보에서도 뺀다. 예전엔 코트에 거는
     // 순간(대개 막 끝난 직후)에 AI를 돌려, 운영진은 고를 수 없던 '방금 나온 사람'을 AI만 고를 수 있었다.
     const busyAtDecision = (

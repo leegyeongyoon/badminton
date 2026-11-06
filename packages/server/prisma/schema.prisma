@@ -1132,9 +1132,12 @@ model AutoMatchEdit {
   aiPlayerIds    String[]
   finalPlayerIds String[]
   action         String // KEPT | EDITED | DELETED | SHADOW(운영진이 직접 짠 판 — aiPlayerIds = 그 순간 AI라면)
+  // SHADOW: 운영진이 등록한 대기 게임 id — 등록 순간에 남기고 코트에 넣을 때 finalPlayerIds 를 최종 4명으로 갱신.
+  entryId        String?
   createdAt      DateTime @default(now())
 
   @@index([clubId, createdAt])
+  @@index([entryId])
 }
 
 // AI 편성 퀴즈 답 — 운영진 판 vs 그 순간 AI 안(SHADOW, editId) 중 사람이 고른 쪽. clubStyle 학습의 정답 쌍.
